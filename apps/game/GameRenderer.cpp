@@ -106,6 +106,25 @@ void GameRenderer::render(const runtime::WorldRect& view, int framebuffer_w,
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+  draw_quads(quads);
+}
+
+void GameRenderer::render_screen(int framebuffer_w, int framebuffer_h,
+                                 const std::vector<runtime::DrawQuad>& quads) {
+  glViewport(0, 0, framebuffer_w, framebuffer_h);
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  glOrtho(0.0, framebuffer_w, framebuffer_h, 0.0, -1.0, 1.0);
+  glMatrixMode(GL_MODELVIEW);
+  glLoadIdentity();
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_CULL_FACE);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  draw_quads(quads);
+}
+
+void GameRenderer::draw_quads(const std::vector<runtime::DrawQuad>& quads) {
   for (const runtime::DrawQuad& q : quads) {
     const std::uint64_t handle = q.image ? texture(*q.image).handle : 0;
     glColor4f(q.rgba[0], q.rgba[1], q.rgba[2], q.rgba[3]);

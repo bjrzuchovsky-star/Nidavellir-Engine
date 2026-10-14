@@ -31,12 +31,18 @@ class GameRenderer {
   // with a cross (shaded while somebody is inside).
   void render_overlay(const std::vector<runtime::OverlayBox>& boxes);
 
+  // Screen-space quads (framebuffer pixels, y down) over whatever is on the
+  // framebuffer: the in-game UI. Images may be "mem:" keys (UI atlas).
+  void render_screen(int framebuffer_w, int framebuffer_h,
+                     const std::vector<runtime::DrawQuad>& quads);
+
   // Re-decode images changed on disk (throttled by the cache).
   void poll_changes(double now) { textures_.poll_changes(now); }
   void clear() { textures_.clear(); }
 
  private:
   const gfx::TextureInfo& texture(const std::string& rel_path);
+  void draw_quads(const std::vector<runtime::DrawQuad>& quads);
 
   std::string project_dir_;
   gfx::TextureCache textures_;

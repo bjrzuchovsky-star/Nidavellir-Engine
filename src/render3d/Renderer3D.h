@@ -81,6 +81,11 @@ class Renderer3D {
   virtual void draw_line(const Vec3& /*a*/, const Vec3& /*b*/,
                          const float* /*rgba*/, bool /*depth_test*/ = true) {}
   virtual FrameStats end_frame() = 0;
+  // Screen-space overlay (the in-game UI raster): RGBA8, top row first,
+  // straight alpha, stretched over the whole frame after the scene. Kept
+  // until replaced; re-uploaded only when `version` changes. nullptr clears.
+  virtual void set_overlay(const unsigned char* /*rgba*/, int /*width*/, int /*height*/,
+                           std::uint64_t /*version*/) {}
 
   // Offscreen color texture (GL name; 0 when none) and its pixels, RGBA8
   // bottom row first. False when there is nothing to read.

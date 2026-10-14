@@ -156,6 +156,22 @@ void main() {
 }
 )glsl";
 
+const char* kOverlayVS = R"glsl(#version 330 core
+out vec2 v_uv;
+void main() {
+  vec2 p = vec2((gl_VertexID == 1) ? 3.0 : -1.0, (gl_VertexID == 2) ? 3.0 : -1.0);
+  v_uv = vec2(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5);
+  gl_Position = vec4(p, 0.0, 1.0);
+}
+)glsl";
+
+const char* kOverlayFS = R"glsl(#version 330 core
+in vec2 v_uv;
+out vec4 o_color;
+uniform sampler2D u_tex;
+void main() { o_color = texture(u_tex, v_uv); }
+)glsl";
+
 const char* kSkyFS = R"glsl(#version 330 core
 in vec2 v_ndc;
 out vec4 o_color;
@@ -304,6 +320,7 @@ class GlRenderer3D final : public Renderer3D {
       shutdown_programs();
       return false;
     }
+    overlay_prog_ = link(kOverlayVS, kOverlayFS, &err);  // optional (UI)
     const unsigned char white[4] = {255, 255, 255, 255};
     const unsigned char flat[4] = {128, 128, 255, 255};
     white_tex_ = make_texture(white, 1, 1, false);
@@ -357,6 +374,9 @@ class GlRenderer3D final : public Renderer3D {
       for (auto& [id, m] : materials_) free_material(m);
       materials_.clear();
       if (white_tex_) glDeleteTextures(1, &white_tex_);
+      if (overlay_tex_) glDeleteTextures(1, &overlay_tex_);
+      overlay_tex_ = 0;
+      overlay_version_ = 0;
       if (flat_tex_) glDeleteTextures(1, &flat_tex_);
       if (shadow_tex_) glDeleteTextures(1, &shadow_tex_);
       if (shadow_fbo_) g.DeleteFramebuffers(1, &shadow_fbo_);
@@ -652,6 +672,16 @@ class GlRenderer3D final : public Renderer3D {
     glDisable(GL_DEPTH_TEST);
     draw_lines(lines_top_);
 
+    // UI overlay over everything.
+    if (overlay_on_ && overlay_tex_ && overlay_prog_) {
+      g.UseProgram(overlay_prog_);
+      g.Uniform1i(g.GetUniformLocation(overlay_prog_, "u_tex"), 0);
+      g.ActiveTexture(GL_TEXTURE0);
+      glBindTexture(GL_TEXTURE_2D, overlay_tex_);
+      g.BindVertexArray(empty_vao_);
+      glDrawArrays(GL_TRIANGLES, 0, 3);
+    }
+
     // Restore.
     glDepthMask(prev_depth_mask);
     g.BindVertexArray(static_cast<GLuint>(prev_vao));
@@ -670,6 +700,23 @@ class GlRenderer3D final : public Renderer3D {
   }
 
   std::uint64_t color_texture() const override { return target_color_; }
+
+  void set_overlay(const unsigned char* rgba, int w, int h, std::uint64_t version) override {
+    overlay_on_ = rgba != nullptr && w > 0 && h > 0;
+    if (!overlay_on_ || !ready_ || version == overlay_version_) return;
+    overlay_version_ = version;
+    GLint prev = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev);
+    if (!overlay_tex_) glGenTextures(1, &overlay_tex_);
+    glBindTexture(GL_TEXTURE_2D, overlay_tex_);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prev));
+  }
 
   bool read_pixels(std::vector<unsigned char>* rgba, int* w, int* h) const override {
     if (!ready_ || !target_fbo_) return false;
@@ -702,7 +749,7 @@ class GlRenderer3D final : public Renderer3D {
   }
   void shutdown_programs() {
     const Gl33& g = gl33();
-    for (GLuint* p : {&mesh_prog_, &depth_prog_, &sky_prog_, &line_prog_}) {
+    for (GLuint* p : {&mesh_prog_, &depth_prog_, &sky_prog_, &line_prog_, &overlay_prog_}) {
       if (*p && g.DeleteProgram) g.DeleteProgram(*p);
       *p = 0;
     }
@@ -740,6 +787,9 @@ class GlRenderer3D final : public Renderer3D {
   bool ready_ = false;
   bool offscreen_ = false;
   GLuint mesh_prog_ = 0, depth_prog_ = 0, sky_prog_ = 0, line_prog_ = 0;
+  GLuint overlay_prog_ = 0, overlay_tex_ = 0;
+  std::uint64_t overlay_version_ = 0;
+  bool overlay_on_ = false;
   GLuint white_tex_ = 0, flat_tex_ = 0;
   GLuint shadow_tex_ = 0, shadow_fbo_ = 0;
   GLuint line_vao_ = 0, line_vbo_ = 0, empty_vao_ = 0;
