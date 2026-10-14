@@ -168,6 +168,10 @@ class World3D final : public runtime::ScriptWorld {
   void script_log(runtime::LogEntry entry) override;
   void script_open_extensions(lua_State* L, int sandbox) override;
   void script_sound(runtime::SoundEvent event) override;
+  void script_ui(runtime::UiCommand command) override;
+  // In-game UI: Lua ui.* requests for the host, widget events back.
+  std::vector<runtime::UiCommand> take_ui_commands();
+  void ui_event(const std::string& widget, bool change, double value, const std::string& text);
 
   // Sound (see runtime/Sound.h): queued for the host, metres. A positional
   // event naming an entity plays from its position.
@@ -280,6 +284,7 @@ class World3D final : public runtime::ScriptWorld {
   std::deque<runtime::LogEntry> log_;
   std::vector<Toast3D> toasts_;
   std::vector<runtime::SoundEvent> sounds_;
+  std::vector<runtime::UiCommand> ui_commands_;
   render3d::Camera3D camera_;
   std::uint64_t player_ = 0;
   Vec3 spawn_;

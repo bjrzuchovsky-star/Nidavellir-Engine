@@ -165,6 +165,7 @@ void World3D::stop() {
   state_.clear();
   toasts_.clear();
   sounds_.clear();
+  ui_commands_.clear();
   bodies_.clear();
   grab_home_.clear();
   haptics_.clear();
@@ -594,6 +595,22 @@ void World3D::script_toast(int /*slot*/, const std::string& text, double seconds
 }
 
 void World3D::script_sound(runtime::SoundEvent event) { play_sound(std::move(event)); }
+
+void World3D::script_ui(runtime::UiCommand command) {
+  if (ui_commands_.size() >= 256) ui_commands_.erase(ui_commands_.begin());
+  ui_commands_.push_back(std::move(command));
+}
+
+std::vector<runtime::UiCommand> World3D::take_ui_commands() {
+  std::vector<runtime::UiCommand> out;
+  out.swap(ui_commands_);
+  return out;
+}
+
+void World3D::ui_event(const std::string& widget, bool change, double value,
+                       const std::string& text) {
+  if (host_) host_->ui_event(widget, change, value, text);
+}
 
 void World3D::play_sound(runtime::SoundEvent event) {
   event.three_d = true;

@@ -2,7 +2,9 @@
 
 #include "core/MemImages.h"
 #include "ui/Font.h"
+#include "runtime/World.h"
 #include "ui/Ui.h"
+#include "ui/UiScript.h"
 
 #include <cmath>
 #include <iostream>
@@ -13,6 +15,8 @@ namespace {
 
 namespace ui = ts::tombstone::ui;
 namespace mem = ts::tombstone::mem_images;
+namespace rt = ts::tombstone::runtime;
+namespace tsb = ts::tombstone;
 
 int g_fail = 0;
 
@@ -249,9 +253,67 @@ int run_ui_smoke() {
   mem::remove("mem:smoke/x");
   check(mem::get("mem:smoke/x") == nullptr, "mem image removed");
 
+  // Lua ui.*: commands reach the host's UiSystem, events reach handlers.
+  {
+    rt::World w;
+    w.script_library().put("scripts/menu.lua",
+                           "function on_start()\n"
+                           "  ui.show('menu')\n"
+                           "  ui.set_text('menu.title', 'Dry Gulch')\n"
+                           "  ui.set_value('hp', 0.75)\n"
+                           "  ui.set_visible('g3', false)\n"
+                           "  ui.hide('nope')\n"
+                           "  ui.on_click('play', function(id) self:set('clicked', id) end)\n"
+                           "  ui.on_change('vol', function(id, v) self:set('vol', v) end)\n"
+                           "  ui.on_click('name', function(id, v, t) self:set('name', t) end)\n"
+                           "  local ok = pcall(ui.on_click, 'x', 5)\n"
+                           "  self:set('bad_refused', not ok)\n"
+                           "end\n");
+    tsb::Entity2D e;
+    e.id = 7;
+    e.name = "Menu";
+    e.w = e.h = 16;
+    e.script = tsb::ScriptData{};
+    e.script->path = "scripts/menu.lua";
+    std::string berr;
+    check(w.build({e}, "", &berr), "lua ui world builds: " + berr);
+    w.step(rt::InputFrame{});
+    std::vector<rt::UiCommand> cmds = w.take_ui_commands();
+    check(cmds.size() == 5, "lua queued 5 ui commands, got " + std::to_string(cmds.size()));
+    ui::UiSystem host;
+    ui::Document d2;
+    ui::parse_document(kDoc, &d2, &err);
+    d2.visible = false;
+    host.add(d2);
+    ui::apply_ui_commands(host, cmds);
+    check(host.visible("menu") && host.find("title")->text == "Dry Gulch" &&
+              near(host.find("hp")->value, 0.75f) && !host.find("g3")->visible,
+          "ui commands applied");
+    ui::UiEvent c1;
+    c1.kind = ui::UiEventKind::Click;
+    c1.widget = "play";
+    ui::UiEvent c2;
+    c2.kind = ui::UiEventKind::Change;
+    c2.widget = "vol";
+    c2.value = 0.3f;
+    ui::UiEvent c3;
+    c3.kind = ui::UiEventKind::Submit;
+    c3.widget = "name";
+    c3.text = "Jane";
+    ui::forward_ui_events(w, {c1, c2, c3});
+    const tsb::ScriptValue* clicked = w.script_get(7, "clicked");
+    const tsb::ScriptValue* vol = w.script_get(7, "vol");
+    const tsb::ScriptValue* name = w.script_get(7, "name");
+    const tsb::ScriptValue* bad = w.script_get(7, "bad_refused");
+    check(clicked && clicked->text == "play", "ui.on_click handler ran");
+    check(vol && near(static_cast<float>(vol->number), 0.3f), "ui.on_change gets the value");
+    check(name && name->text == "Jane", "submit reaches on_click with the text");
+    check(bad && bad->flag, "ui.on_click needs a function");
+  }
+
   if (g_fail == 0) {
     std::cout << "[smoke] ui OK (atlas " << atlas.width() << "x" << atlas.height()
-              << ", measure, layout, nav, round trip, pause menu, raster)\n";
+              << ", measure, layout, nav, round trip, pause menu, raster, lua ui.*)\n";
   }
   return g_fail == 0 ? 0 : 1;
 }
