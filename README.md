@@ -198,6 +198,90 @@ New hooks: `on_grab(hand)`, `on_release(hand, speed)`, `on_point(hand)`, `on_unp
 - Combat: bites, knife, bow, death and respawn, food.
 - Posse replication of tile edits, inventory, craft requests and client mining over ENet loopback with plugins on both sides, plus a late joiner receiving the edited chunks.
 
+## Airship Works (2D ship builder plugin)
+
+`ts.shipyard` is a Cosmoteer-style ship builder for 2D projects. It lives in `src/plugins/shipyard` as a built-in of `ts_plugins_builtin`, is **off by default**, and you hitch it in the Outfitter's Wagon (Gameplay). Like Frontier Survival, it adds no scene format: ships are `.ship.json` files under `shipyard/designs/`.
+
+**Parts** (`<project>/shipyard/parts.json`, written with defaults; edit freely). Each part has `id`, `name`, `kind`, a footprint `w` × `h` in 16 px cells, `mass`, `hp`, `power` (+ makes steam, − burns it), `crew` (+ bunks, − hands needed) and, by kind, `thrust`, `range` / `damage` / `fire_rate` / `shot_speed`, `shield` / `shield_regen`, `capacity` and `color`. The stock bin holds:
+
+| Kind | Stock parts |
+|---|---|
+| hull / armor / corridor | Plank hull, riveted iron plate, gangway |
+| engine | Steam paddle engine (1×2), trim jet |
+| reactor | Coal boiler (2×2, 12 steam) |
+| quarters | Bunkhouse (6 berths) |
+| gun | Gatling turret, Long Tom cannon (2×2) |
+| shield | Tesla shield vane |
+| storage | Cargo hold |
+
+Parts turn in quarter steps. An engine pushes toward its front (rotation 0 = the bow) from the nozzle at its back.
+
+**Designer.** View → **Airship Works (Shipyard)** opens the designer, in the Dusk theme. It works while editing and while riding; saved plans fly from the next launch.
+- **Parts bin:** pick a part. Tooltips show its numbers.
+- **Slipway:** a 40×40 grid. LMB places (drag to paint), RMB erases, **R** turns the part in hand, Ctrl+LMB turns a placed part, the wheel zooms, and Ctrl+Z / Ctrl+Y undo and redo. A ghost shows green or red for fits. Loose parts get a red rim, and the centre of mass is marked.
+- **Checks:** a design is AIRWORTHY or GROUNDED.
+  - Errors: parts not bolted to the rest, burning more steam than the boilers make, no forward thrust, overlaps, off-grid parts, unknown part ids.
+  - Warnings: no astern thrust, no strafe one way, no turning push both ways, too few bunks, no guns.
+- **Stats:** parts, mass, hull hp, steam made and burned, hands and bunks, thrust per direction, acceleration, top speed, turn acceleration, guns, damage per second, shield and cargo.
+- **Files:** Save plans, Save as… (`shipyard/designs/<name>.ship.json`), Fresh keel, and **Fly this one**, which sets `player_design` in `sky.json`.
+
+**Flying.** Every rider takes the helm of the flagship (`player_design`). The rider entity is hidden and pinned to the ship's centre of mass, so the follow camera tracks the ship.
+
+| Key | Does |
+|---|---|
+| W / S | Ahead / astern |
+| A / D | Strafe port / starboard |
+| Q / E | Turn anticlockwise / clockwise (E is the action button, so Space also turns) |
+| F / C / left mouse | Fire (guns lead the nearest pirate in range, otherwise fire along the bow) |
+
+- **Physics:** each ship is a 2D rigid body. Mass, centre of mass and inertia come from the parts.
+  - Thrust allocation: every powered engine fires when its push lines up with the helm, or when its torque matches the turn asked for.
+  - Linear damping is 0.55/s and angular damping 1.1/s, at a fixed 60 Hz tick.
+- **Steam and crew:** boilers feed engines first, then guns, then shields, in part order. Parts that miss out go offline (dimmed). With `"crew": true` (the default), parts that need hands also need bunks.
+- **Combat:**
+  - Turrets aim with lead and fire shot.
+  - The shield bubble soaks damage first and recharges from powered vanes.
+  - Each part has its own hp, and destroyed parts come off. The ship then re-checks connectivity: it keeps the largest piece, and every other piece becomes a captainless derelict wreck. Wrecks keep the velocity their parts had (v + ω×r) and drift.
+  - A ship with no parts left is gone. A rider gets a fresh flagship after `respawn_seconds`.
+- **Pirates:** each pirate captain picks the nearest hostile ship. It closes to about 0.7× its gun range, orbits there, keeps its bow on the target and fires when in range. Once the pirates are cleared, a fresh wave from `enemies` arrives after `reinforce_seconds`.
+
+**`shipyard/sky.json`:** `player_design`, `crew`, `respawn_seconds`, `reinforce_seconds`, and `enemies` (`[{design, x, y}]`). Designs `stock:sloop` and `stock:marauder` are always available.
+
+**Lua (`ships` table).** Slots are 1-based:
+- `of(slot)` returns the slot's ship id.
+- `list([team])` returns ids; team is `"posse"`, `"pirates"` or `"derelict"`.
+- `info(id)` returns name, team, x, y, vx, vy, angle in degrees, parts, hp, max_hp, mass, shield, ai and slot.
+- `spawn(design, x, y, team)` returns the id, or nil and the reason.
+- `damage(id, part, n)` returns whether the part was destroyed.
+- `remove(id)`, `set_ai(id, on)`, `helm(id, strafe, throttle, turn, fire)` (for captainless ships).
+- `stats()` returns parts_destroyed, splits and shots_fired.
+
+**Multiplayer.** The server is authoritative: it simulates every ship, and riders pilot theirs through normal input. On the `shipyard` channel:
+- The server sends each new rider its slot (`W`).
+- It sends a ship's layout (`F`: parts by id, hp, pose) on spawn, break-up and join, and every 5 s.
+- Every 2nd tick (30 Hz) it sends a state message (`S`: pose, per-part hp, powered / firing flags, turret aim, shot).
+- Clients mirror this state and never simulate. Part damage and break-ups replicate as they happen.
+
+**Sample.** `sky-pirates` is seeded with the other samples. Existing project folders get it once, with a `.sky-pirates.seeded` marker. It is a 2D claim with `"plugins": "ts.shipyard"` and contains:
+- a captain (speed 0, so posse prediction leaves him to the server) and a follow camera;
+- the Dust Devil sloop (`shipyard/designs/sloop.ship.json`);
+- two Black Kettle marauders;
+- a Lua bounty board (`scripts/bounty_board.lua`) that pays $50 for every pirate ship that leaves the sky.
+
+**Tests.** `ts_admin --smoke` (or just `ts_admin --smoke-shipyard`) covers:
+- **Designs:** stock parts cover every kind; the sloop and marauder are airworthy; a cut hull gives 5 loose parts; steam budget and missing thrust ground a design; overlap and off-grid placement are refused; rotate and erase; `.ship.json` round trip, with newer versions refused; `parts.json` fallback and edits.
+- **Mass and thrust:** mass, centre and inertia of a hand-checked 3-part row; one tick at full ahead equals F/m·dt; turning both ways, strafe, astern and damping; losing the boiler cools the engines; the crew rule.
+- **Damage and break-up:** the hull plus 3 derelict wrecks; mass conserved; parts stay put at the break and wrecks drift; an AI duel with shields soaking shot and parts destroyed.
+- **Determinism:** a 2v2 AI battle hashed twice over 1800 ticks, plus a 0.5 px nudge that must change the hash. The hash is `27b13a5f46eb6ca5` on both GCC and MSVC Release builds, but the sim uses `std::sin` / `cos`, so other toolchains may differ.
+- **Sample ride:** W / E / F, the pinned captain, the Lua bounty board, respawn.
+- **Posse replication** over ENet loopback: layouts and state, the client's W flown by the server, pose mirrored, part damage and a break-up replicated, and clients unable to deal damage.
+
+**Caveats.**
+- Ships don't collide with each other or with tiles; only shot hits ships.
+- Crew is an abstraction: there is no walking crew and no corridor pathing, and gangways are just structure.
+- Clients draw the last state they received, without interpolation (30 Hz).
+- The designer is an editor panel. Inside `ts_game` you fly saved designs but can't edit them.
+
 ## Project Goals
 
 - Deliver a fast, stable, and fully custom C++ engine  
@@ -307,7 +391,7 @@ Mouse-first editing in both editors. Every tool is one undo step, autosaves `sce
 | Rotate | Drag the round knob above the box (Shift or snap: 15° steps) | Rotate gizmo (E) |
 | Duplicate while dragging | Alt+drag an entity: the copies move and the originals stay (Esc takes the copies back) | Alt+drag a gizmo handle |
 | Snapping | Grid plus other entities' edges and centres, with red guide lines (View > Snap to Objects) | Grid steps; hold Ctrl while moving to stick to the surface under the mouse; End = drop to ground (lands on the entity below or y = 0) |
-| Context menu | Right-click in the viewport or Hierarchy: rename, duplicate, delete, copy/cut/paste, group/ungroup, unparent, lock, hide, focus, align/distribute, add component, new entity | Same, plus Create |
+| Context menu | Right-click in the viewport or Hierarchy: rename, duplicate, delete, copy/cut/paste, group/ungroup, unparent, lock, hide, focus, align/distribute, add component, and (always last) New Entity / New Child Entity | Same, plus Create |
 | Frame selection | F (Bucket fill moved to U) | F |
 | Copy / cut / paste | Ctrl+C / Ctrl+X / Ctrl+V. The clip is scene.json text on the system clipboard, so it pastes into another scene or project (ids remapped, parent links inside the clip kept) | Same |
 | Group / ungroup | Ctrl+G (a transparent "Group" around the selection) / Ctrl+Shift+G | Ctrl+G (empty "Group" at the selection centre) / Ctrl+Shift+G |
