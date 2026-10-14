@@ -175,8 +175,49 @@ bool ProjectStore::load_project_json(const std::string& project_dir,
   info.kind = project_kind_from_dimension(dimension);
   info.created = json_mini::get_string(*parsed, "created");
   info.last_opened = json_mini::get_string(*parsed, "last_opened");
+  // "plugins" arrived with the plugin system; absent = defaults.
+  if (parsed->count("plugins") != 0) {
+    info.plugins_set = true;
+    info.plugins = split_plugin_ids(json_mini::get_string(*parsed, "plugins"));
+  }
   *out = std::move(info);
   return true;
+}
+
+std::vector<std::string> ProjectStore::split_plugin_ids(
+    const std::string& text) {
+  std::vector<std::string> out;
+  std::string cur;
+  auto flush = [&]() {
+    std::size_t a = 0;
+    std::size_t b = cur.size();
+    while (a < b && (cur[a] == ' ' || cur[a] == '\t')) ++a;
+    while (b > a && (cur[b - 1] == ' ' || cur[b - 1] == '\t')) --b;
+    std::string id = cur.substr(a, b - a);
+    if (!id.empty() && std::find(out.begin(), out.end(), id) == out.end()) {
+      out.push_back(std::move(id));
+    }
+    cur.clear();
+  };
+  for (char c : text) {
+    if (c == ',') {
+      flush();
+    } else {
+      cur += c;
+    }
+  }
+  flush();
+  return out;
+}
+
+std::string ProjectStore::join_plugin_ids(const std::vector<std::string>& ids) {
+  std::string out;
+  for (const std::string& id : ids) {
+    if (id.empty()) continue;
+    if (!out.empty()) out += ",";
+    out += id;
+  }
+  return out;
 }
 
 bool ProjectStore::write_project_json(const ProjectInfo& project,
@@ -214,6 +255,9 @@ bool ProjectStore::write_project_json(const ProjectInfo& project,
   };
   if (!project.last_opened.empty()) {
     fields.emplace_back("last_opened", project.last_opened);
+  }
+  if (project.plugins_set) {
+    fields.emplace_back("plugins", join_plugin_ids(project.plugins));
   }
 
   out << json_mini::write_object(fields);
@@ -301,6 +345,12 @@ bool ProjectStore::refresh() {
 
 bool ProjectStore::create_project_2d(const std::string& name,
                                      ProjectInfo* out) {
+  return create_project(name, ProjectKind::TwoD, nullptr, out);
+}
+
+bool ProjectStore::create_project(const std::string& name, ProjectKind kind,
+                                  const std::vector<std::string>* plugins,
+                                  ProjectInfo* out) {
   last_error_.clear();
 
   std::string trimmed = trim_copy(name);
@@ -337,9 +387,13 @@ bool ProjectStore::create_project_2d(const std::string& name,
   ProjectInfo info;
   info.id = dir.filename().string();
   info.name = trimmed;
-  info.kind = ProjectKind::TwoD;
+  info.kind = kind;
   info.path = dir.string();
   info.created = now_timestamp();
+  if (plugins) {
+    info.plugins = *plugins;
+    info.plugins_set = true;
+  }
 
   if (!write_project_json(info, &last_error_)) {
     return false;

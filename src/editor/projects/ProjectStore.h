@@ -10,7 +10,7 @@ namespace tombstone {
 namespace editor {
 
 // Scans projects_root for project folders (each containing project.json).
-// Creates new 2D projects on disk and seeds a sample when the root is empty.
+// Creates new projects (2D / 3D / VR) on disk and seeds a sample when the root is empty.
 class ProjectStore {
  public:
   explicit ProjectStore(std::string projects_root);
@@ -35,6 +35,11 @@ class ProjectStore {
   // Creates <root>/<slug>/project.json for a new 2D project. Refreshes list.
   // Fails on invalid name or if the slug folder already exists (no auto-rename).
   bool create_project_2d(const std::string& name, ProjectInfo* out = nullptr);
+  // Same for any kind. plugins (when given) is written as the enabled
+  // list; null leaves "plugins" out (= defaults for the kind).
+  bool create_project(const std::string& name, ProjectKind kind,
+                      const std::vector<std::string>* plugins,
+                      ProjectInfo* out = nullptr);
 
   // Marks last_opened on disk and in the in-memory list.
   bool touch_last_opened(const std::string& project_path);
@@ -52,6 +57,10 @@ class ProjectStore {
                                  std::string* error_out = nullptr);
 
   static std::string make_slug(const std::string& name);
+
+  // "plugins" field codec: "a, b,c" <-> {"a","b","c"} (trimmed, deduped).
+  static std::vector<std::string> split_plugin_ids(const std::string& text);
+  static std::string join_plugin_ids(const std::vector<std::string>& ids);
 
  private:
   static std::string now_timestamp();

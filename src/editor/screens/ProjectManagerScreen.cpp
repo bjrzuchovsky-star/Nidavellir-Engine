@@ -93,7 +93,7 @@ void ProjectManagerScreen::draw_project_card(std::size_t i) {
   ImGui::EndGroup();
 
   if (highlight) {
-    const char* hint = p.kind == ProjectKind::ThreeD
+    const char* hint = p.kind != ProjectKind::TwoD
                            ? "3D: not open for business yet"
                            : "Double-click or Open to ride in";
     const ImVec2 hs = ImGui::CalcTextSize(hint);
@@ -271,7 +271,7 @@ bool ProjectManagerScreen::select_project(std::size_t index) {
   }
 
   const ProjectInfo& project = projects_[index];
-  if (project.kind == ProjectKind::ThreeD) {
+  if (project.kind != ProjectKind::TwoD) {
     error_message_ = "Cannot open \"" + project.name +
                      "\": 3D isn't open for business yet. "
                      "Pick a 2D claim.";
