@@ -532,6 +532,17 @@ bool parse(const std::string& text, SceneDoc* doc, std::string* error_out,
           }
         }
       }
+    } else if (*key == "dimension") {
+      // v7+ 3D scenes carry "dimension": "3d" (render3d/Scene3D.h); this
+      // reader only knows the 2D formats.
+      auto dim = parse_string(text, i);
+      if (!dim) {
+        return fail("dimension");
+      }
+      if (*dim != "2d") {
+        return fail("a " + std::string(*dim == "3d" ? "3D" : *dim) +
+                    " scene; open it in a 3D claim");
+      }
     } else if (*key == "tile_solidity") {
       if (!parse_tile_solidity(text, i, &out.tile_solidity)) {
         return fail("tile_solidity");

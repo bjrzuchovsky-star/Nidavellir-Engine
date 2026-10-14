@@ -486,7 +486,8 @@ bool write_tga(const fs::path& p, const render3d::Image& img, std::string* error
 
 constexpr const char* kWindmillLua = R"lua(-- Windmill: turns its sails on the 60 Hz tick. 3D entities have the
 -- usual handle methods (name, get / set, show / hide, toast...) plus
--- pos3 / set_pos3 / yaw / set_yaw / spin / scale3 / set_scale3.
+-- pos3 / set_pos3 / move3 / yaw / set_yaw / spin(deg, axis) / scale3 /
+-- set_scale3.
 props = {
   speed = 45,  -- degrees per second
 }
@@ -496,7 +497,7 @@ function on_start()
 end
 
 function on_tick(dt)
-  self:spin(props.speed * dt)
+  self:spin(props.speed * dt, "z")
 end
 )lua";
 
