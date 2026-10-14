@@ -35,6 +35,7 @@ target_link_libraries(ts_client
     ts_plugin
     ts_plugins_builtin
     ts_gfx
+    ts_audio
     glfw
     OpenGL::GL
 )

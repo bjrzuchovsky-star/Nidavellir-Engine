@@ -6,6 +6,7 @@
 //   ts_client --connect host:port --name Ike [--project <dir>]
 //   ts_client --smoke                          headless loopback check
 
+#include "audio/GameAudio.h"
 #include "GameRenderer.h"
 #include "HudText.h"
 
@@ -279,6 +280,7 @@ int run_window(const Options& opt) {
     double title_at = 0.0;
     long frames = 0;
     mp::ClientState shown = mp::ClientState::Idle;
+    ts::audio::GameAudio sound(opt.project, false, "ts_client");
     bool digit_down[10] = {};
     while (!glfwWindowShouldClose(win)) {
       glfwPollEvents();
@@ -294,6 +296,13 @@ int run_window(const Options& opt) {
         digit_down[k] = down;
       }
       client.update(dt, poll_input(win));
+      if (client.has_snapshot()) {
+        // Server-sent sounds (script events) + the scene's audio sources,
+        // heard from this rider's camera.
+        const runtime::CameraView cam = follow_camera(client);
+        sound.stage().update_2d(client.world(), cam.x, cam.y);
+      }
+      sound.tick(dt);
       for (const std::string& e : client.take_events()) std::cout << "[posse] " << e << '\n';
       if (client.state() != shown) {
         shown = client.state();

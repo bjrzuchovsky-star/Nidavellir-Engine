@@ -32,6 +32,8 @@ target_link_libraries(ts_game
     ts_gfx
     ts_render3d
     ts_world3d
+    ts_audio
+    ts_audio3d
     ts_xr
     glfw
     OpenGL::GL

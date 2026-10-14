@@ -1,3 +1,5 @@
+#include "audio/GameAudio.h"
+#include "audio/SoundStage3D.h"
 #include "Game3D.h"
 
 #include "render3d/GlRenderer3D.h"
@@ -164,6 +166,8 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
       view.set_project_dir(dir);
       std::cout << "[ts_game] riding \"" << name << "\" in 3D: " << world.entities().size()
                 << " entities\n";
+      audio::GameAudio sound(dir, true, "ts_game");
+      audio::SoundStage3D sound3d(sound.stage());
       std::size_t seen = 0;
       double last = glfwGetTime(), scripts_at = last;
       bool prev_action = false, prev_pause = false;
@@ -199,11 +203,15 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
           if (scene3d::load_file(scene3d::scene_path(dir), &fresh, &err) &&
               world.start(fresh, dir, &err)) {
             view.clear();
+            sound.restart(dir, true);
+            sound3d.reset();
             std::cout << "[ts_game] reloaded scene.json\n";
           }
         }
         const double now = glfwGetTime();
         world.update(now - last, in);
+        sound3d.update(world, now - last);
+        sound.tick(now - last);
         last = now;
         if (now - scripts_at >= 0.5) {
           scripts_at = now;

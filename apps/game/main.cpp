@@ -10,6 +10,7 @@
 // simulator (GameVR.cpp).
 //   ts_game --xr-probe                 OpenXR runtime / headset / session check
 
+#include "audio/GameAudio.h"
 #include "Game3D.h"
 #include "GameRenderer.h"
 #include "HudText.h"
@@ -572,6 +573,7 @@ int run_window(const Options& opt, Telegraph& telegraph) {
 
       std::vector<runtime::DrawQuad> quads;
       std::vector<runtime::OverlayBox> boxes;
+      ts::audio::GameAudio sound(opt.project, false, "ts_game");
       double last = glfwGetTime();
       double title_at = last;
       double scripts_at = last;
@@ -585,6 +587,7 @@ int run_window(const Options& opt, Telegraph& telegraph) {
           g.plugins.end();
           if (g.session.start_project(opt.project, &err)) {
             g.plugins.begin(g.session.world());
+            sound.restart(opt.project, false);
             std::cout << "[ts_game] reloaded scene.json\n";
           } else {
             std::cerr << "[ts_game] reload failed: " << err << '\n';
@@ -593,6 +596,13 @@ int run_window(const Options& opt, Telegraph& telegraph) {
         }
         const double now = glfwGetTime();
         g.session.update(now - last, poll_input(win));
+        {
+          // Ears on the camera centre.
+          runtime::World& world = g.session.world();
+          const runtime::CameraView cam = world.camera(g.session.alpha());
+          sound.stage().update_2d(world, cam.x, cam.y);
+          sound.tick(now - last);
+        }
         last = now;
         renderer.poll_changes(now);
         // Saved scripts ride back in without a restart (a broken save keeps
