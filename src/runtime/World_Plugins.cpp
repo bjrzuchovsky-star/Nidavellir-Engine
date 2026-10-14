@@ -106,6 +106,22 @@ std::vector<SoundEvent> World::take_sounds() {
 
 void World::script_sound(SoundEvent event) { play_sound(std::move(event)); }
 
+void World::script_ui(UiCommand command) {
+  if (ui_commands_.size() >= kMaxUiCommands) ui_commands_.erase(ui_commands_.begin());
+  ui_commands_.push_back(std::move(command));
+}
+
+std::vector<UiCommand> World::take_ui_commands() {
+  std::vector<UiCommand> out;
+  out.swap(ui_commands_);
+  return out;
+}
+
+void World::ui_event(const std::string& widget, bool change, double value,
+                     const std::string& text) {
+  if (scripts_) scripts_->ui_event(widget, change, value, text);
+}
+
 bool World::net_deliver(const std::string& channel, int from_slot,
                         const std::vector<std::uint8_t>& bytes) {
   if (channel == kSoundChannel) {

@@ -18,6 +18,9 @@ std::string resolve_asset(const std::string& project_dir,
   if (rel_path.empty()) {
     return {};
   }
+  if (rel_path.rfind("mem:", 0) == 0) {
+    return rel_path;  // core/MemImages key (UI atlas, rasters)
+  }
   const fs::path p = fs::path(rel_path);
   if (p.is_absolute() || project_dir.empty()) {
     return p.string();
@@ -94,6 +97,7 @@ void World::clear() {
   logs_.clear();
   toasts_.clear();
   sounds_.clear();
+  ui_commands_.clear();
   next_id_ = 1;
   prev_buttons_ = {};
   in_step_ = false;

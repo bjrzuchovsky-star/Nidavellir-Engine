@@ -310,6 +310,15 @@ class World final : public ScriptWorld {
   void script_log(LogEntry entry) override;
   void script_open_extensions(lua_State* L, int sandbox) override;
   void script_sound(SoundEvent event) override;
+  void script_ui(UiCommand command) override;
+
+  // --- In-game UI (World_Plugins.cpp) ------------------------------------------
+  // Lua ui.* requests for the host's ui::UiSystem (newest kMaxUiCommands
+  // kept when nobody drains them), and widget events back to the scripts.
+  static constexpr std::size_t kMaxUiCommands = 256;
+  std::vector<UiCommand> take_ui_commands();
+  void ui_event(const std::string& widget, bool change, double value,
+                const std::string& text);
 
   // --- Sound (World_Plugins.cpp) -----------------------------------------------
   // Queue a sound for the host to play (see runtime/Sound.h). On a server
@@ -472,6 +481,7 @@ class World final : public ScriptWorld {
   NetRole net_role_ = NetRole::Local;
   std::vector<NetPost> net_posts_;
   std::vector<SoundEvent> sounds_;
+  std::vector<UiCommand> ui_commands_;
   std::uint64_t sound_total_ = 0;
   // Plugin blockers' boxes near the body being moved (reused buffer).
   std::vector<Aabb> blocker_boxes_;
