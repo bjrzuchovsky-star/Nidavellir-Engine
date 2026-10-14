@@ -18,7 +18,8 @@ bool operator==(const Entity2D& a, const Entity2D& b) {
          a.player == b.player && a.camera == b.camera && a.spawn == b.spawn &&
          a.collider == b.collider && a.animator == b.animator &&
          a.script == b.script && a.rotation == b.rotation &&
-         a.parent == b.parent && a.locked == b.locked && a.hidden == b.hidden;
+         a.parent == b.parent && a.locked == b.locked && a.hidden == b.hidden &&
+         a.audio == b.audio;
 }
 
 ScriptValue ScriptValue::of_bool(bool v) {
@@ -159,7 +160,24 @@ ColliderData default_collider(const Entity2D& e) {
   return c;
 }
 
+void normalize_audio(AudioSourceData& a) {
+  static const char* const kBuses[] = {"master", "music", "sfx", "ui", "voice"};
+  bool known = false;
+  for (const char* b : kBuses) known = known || a.bus == b;
+  if (!known) a.bus = "sfx";
+  if (a.clip.size() > 512) a.clip.resize(512);
+  auto fix = [](float v, float lo, float hi, float dflt) {
+    return v >= lo && v <= hi ? v : (v > hi ? hi : (v >= lo ? v : dflt));
+  };
+  a.volume = fix(a.volume, 0.0f, AudioSourceData::kMaxVolume, 1.0f);
+  a.pitch = fix(a.pitch, 0.1f, 4.0f, 1.0f);
+  a.min_distance = fix(a.min_distance, 0.0f, 1.0e6f, 160.0f);
+  a.max_distance = fix(a.max_distance, 0.0f, 1.0e6f, 900.0f);
+  if (a.max_distance < a.min_distance) a.max_distance = a.min_distance;
+}
+
 void normalize_components(Entity2D& e) {
+  if (e.audio) normalize_audio(*e.audio);
   if (e.player) {
     e.player->slot = std::clamp(e.player->slot, 0, kMaxPlayers - 1);
     if (!(e.player->speed >= PlayerControllerData::kMinSpeed)) {

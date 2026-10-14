@@ -315,7 +315,7 @@ int check_2d_format_runtime() {
     return fail("2D v7 round trip: " + err);
   }
   if (text.find("\"version\": " + std::to_string(sj::kSceneVersion)) == std::string::npos ||
-      sj::kSceneVersion != 7) {
+      sj::kSceneVersion < 7) {
     return fail("2D writes v7");
   }
   // A v6 file: same entities without the new keys.
@@ -329,7 +329,10 @@ int check_2d_format_runtime() {
   if (v6.find("\"rotation\"") != std::string::npos || v6.find("\"parent\"") != std::string::npos) {
     return fail("2D defaults are not written");
   }
-  v6.replace(v6.find("\"version\": 7"), 12, "\"version\": 6");
+  {
+    const std::string cur = "\"version\": " + std::to_string(sj::kSceneVersion);
+    v6.replace(v6.find(cur), cur.size(), "\"version\": 6");
+  }
   sj::SceneDoc old;
   if (!sj::parse(v6, &old, &err) || old.entities.size() != 2 || old.entities[0].rotation != 0.0f ||
       old.entities[1].parent != 0 || old.entities[0].locked || old.entities[1].hidden) {
@@ -585,11 +588,15 @@ int check_3d_format() {
   s3::Scene3D back;
   std::string err;
   if (!s3::parse(text, &back, &err) || !(back == s) || s3::write(back) != text ||
-      s3::kScene3DVersion != 9 || text.find("\"version\": 9") == std::string::npos) {
+      s3::kScene3DVersion < 9 ||
+      text.find("\"version\": " + std::to_string(s3::kScene3DVersion)) == std::string::npos) {
     return fail("3D v9 round trip: " + err);
   }
   std::string v8 = s3::write(s3::make_starter_scene());
-  v8.replace(v8.find("\"version\": 9"), 12, "\"version\": 8");
+  {
+    const std::string cur = "\"version\": " + std::to_string(s3::kScene3DVersion);
+    v8.replace(v8.find(cur), cur.size(), "\"version\": 8");
+  }
   s3::Scene3D old;
   if (!s3::parse(v8, &old, &err) || old.entities[1].parent != 0 || old.entities[1].locked) {
     return fail("3D v8 loads: " + err);

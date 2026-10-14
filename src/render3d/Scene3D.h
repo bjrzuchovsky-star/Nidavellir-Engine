@@ -23,8 +23,9 @@ using render3d::Transform;
 using render3d::Vec3;
 
 // v8 added the VR components (vr_rig, grabbable); v9 parenting (parent)
-// and the editor-only locked / editor_hidden flags. v7 / v8 files still load.
-inline constexpr int kScene3DVersion = 9;
+// and the editor-only locked / editor_hidden flags; v10 the sound source
+// (audio, distances in metres). v7 / v8 / v9 files still load.
+inline constexpr int kScene3DVersion = 10;
 
 // What to draw: "primitive:cube|plane|sphere|capsule" or a project-relative
 // .gltf / .glb path.
@@ -119,8 +120,13 @@ struct Entity3D {
   std::uint64_t parent = 0;
   bool locked = false;         // v9, editor only: not pickable / movable
   bool editor_hidden = false;  // v9, editor only: not drawn in the editor
+  std::optional<AudioSourceData> audio;  // v10, 3D defaults: audio_3d()
   bool operator==(const Entity3D& o) const = default;
 };
+
+// An audio source with 3D (metre) distances: full volume within 2 m,
+// silent past 40 m.
+AudioSourceData audio_3d();
 
 struct EditorCamera3D {
   Vec3 target{0.0f, 0.5f, 0.0f};

@@ -131,6 +131,21 @@ Value entity_json(const Entity3D& e) {
     }
     o.set("script", std::move(s));
   }
+  if (e.audio) {
+    const AudioSourceData& a = *e.audio;
+    Value v = Value::object();
+    v.set("clip", Value::string(a.clip));
+    v.set("bus", Value::string(a.bus));
+    v.set("volume", Value::number(a.volume));
+    v.set("pitch", Value::number(a.pitch));
+    v.set("loop", Value::boolean(a.loop));
+    v.set("autoplay", Value::boolean(a.autoplay));
+    v.set("spatial", Value::boolean(a.spatial));
+    v.set("min_distance", Value::number(a.min_distance));
+    v.set("max_distance", Value::number(a.max_distance));
+    v.set("doppler", Value::boolean(a.doppler));
+    o.set("audio", std::move(v));
+  }
   return o;
 }
 
@@ -240,11 +255,34 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     normalize_script(s);
     e.script = s;
   }
+  if (o["audio"].is_object()) {
+    const Value& v = o["audio"];
+    AudioSourceData a = audio_3d();
+    a.clip = v.str("clip");
+    a.bus = v.str("bus", "sfx");
+    a.volume = v.flt("volume", a.volume);
+    a.pitch = v.flt("pitch", a.pitch);
+    a.loop = v.flag("loop", a.loop);
+    a.autoplay = v.flag("autoplay", a.autoplay);
+    a.spatial = v.flag("spatial", a.spatial);
+    a.min_distance = v.flt("min_distance", a.min_distance);
+    a.max_distance = v.flt("max_distance", a.max_distance);
+    a.doppler = v.flag("doppler", a.doppler);
+    normalize_audio(a);
+    e.audio = a;
+  }
   *out = std::move(e);
   return true;
 }
 
 }  // namespace
+
+AudioSourceData audio_3d() {
+  AudioSourceData a;
+  a.min_distance = 2.0f;
+  a.max_distance = 40.0f;
+  return a;
+}
 
 Entity3D* Scene3D::find(std::uint64_t id) {
   for (Entity3D& e : entities) {

@@ -87,6 +87,31 @@ struct AnimatorData {
   bool operator==(const AnimatorData& o) const = default;
 };
 
+// Plays a sound from the entity (scene.json v8 2D "audio", v10 3D). clip is
+// a project-relative wav / ogg / mp3 / flac or "builtin:<name>"; bus is
+// master/music/sfx/ui/voice. spatial sources pan and fade by distance from
+// the listener (camera / HMD), within min..max_distance (pixels in 2D,
+// metres in 3D). autoplay starts it when the ride starts (loop keeps it
+// going until the entity is destroyed or hidden).
+struct AudioSourceData {
+  static constexpr float kMaxVolume = 2.0f;
+
+  std::string clip;
+  std::string bus = "sfx";
+  float volume = 1.0f;
+  float pitch = 1.0f;
+  bool loop = true;
+  bool autoplay = true;
+  bool spatial = true;
+  float min_distance = 160.0f;
+  float max_distance = 900.0f;
+  bool doppler = false;
+
+  bool operator==(const AudioSourceData& o) const = default;
+};
+// Clamp volume / pitch / distances; unknown bus -> "sfx".
+void normalize_audio(AudioSourceData& a);
+
 // A value scripts read and write: per-entity script properties (scene.json
 // v6) and the runtime's per-entity key/value state. Only the field that
 // matches `type` is meaningful (the others stay at their defaults).
@@ -170,6 +195,8 @@ struct Entity2D {
   std::uint64_t parent = 0;    // 0 = scene root
   bool locked = false;
   bool hidden = false;
+  // Sound source (scene.json v8).
+  std::optional<AudioSourceData> audio;
 
   float center_x() const { return x + w * 0.5f; }
   float center_y() const { return y + h * 0.5f; }

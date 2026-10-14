@@ -20,7 +20,7 @@ namespace scene_json {
 // 5 = optional "animator"; 6 = optional "script"; 7 = optional editor
 // "rotation" / "parent" / "locked" / "hidden". Older files still load
 // (see upgrade notes in SceneJson.cpp).
-inline constexpr int kSceneVersion = 7;
+inline constexpr int kSceneVersion = 8;
 
 // Whole file: entities plus the editor's view state. The runtime only
 // reads `entities`; the rest round-trips untouched.

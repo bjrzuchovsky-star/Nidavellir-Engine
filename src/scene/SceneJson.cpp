@@ -265,6 +265,22 @@ bool apply_components(Entity2D& e, const FlatMap& nested, std::string* why) {
     }
     e.script = std::move(data);
   }
+  if (auto au = parse_nested(nested, "audio")) {
+    AudioSourceData a;
+    a.clip = map_string(*au, "clip", "");
+    a.bus = map_string(*au, "bus", "sfx");
+    a.volume = map_float(*au, "volume", 1.0f);
+    a.pitch = map_float(*au, "pitch", 1.0f);
+    a.loop = map_bool(*au, "loop", true);
+    a.autoplay = map_bool(*au, "autoplay", true);
+    a.spatial = map_bool(*au, "spatial", true);
+    a.min_distance = map_float(*au, "min_distance", a.min_distance);
+    a.max_distance = map_float(*au, "max_distance", a.max_distance);
+    a.doppler = map_bool(*au, "doppler", false);
+    e.audio = std::move(a);
+  } else if (nested.count("audio")) {
+    return bad("bad audio object");
+  }
   normalize_components(e);
   return true;
 }
@@ -418,6 +434,19 @@ void write_entity(std::ostringstream& out, const Entity2D& e) {
       out << "}";
     }
     out << "]}";
+  }
+  if (e.audio) {
+    const AudioSourceData& a = *e.audio;
+    out << ",\n      \"audio\": {\"clip\": \"" << escape_string(a.clip)
+        << "\", \"bus\": \"" << escape_string(a.bus)
+        << "\", \"volume\": " << format_float(a.volume)
+        << ", \"pitch\": " << format_float(a.pitch)
+        << ", \"loop\": " << (a.loop ? "true" : "false")
+        << ", \"autoplay\": " << (a.autoplay ? "true" : "false")
+        << ", \"spatial\": " << (a.spatial ? "true" : "false")
+        << ", \"min_distance\": " << format_float(a.min_distance)
+        << ", \"max_distance\": " << format_float(a.max_distance)
+        << ", \"doppler\": " << (a.doppler ? "true" : "false") << "}";
   }
   out << "\n";
   out << "    }";
@@ -649,6 +678,7 @@ bool parse(const std::string& text, SceneDoc* doc, std::string* error_out,
 std::string write(const SceneDoc& doc) {
   std::ostringstream out;
   out << "{\n";
+  // v8: optional per-entity "audio" (sound source); v7 files load as-is.
   // v7: optional per-entity "rotation" / "parent" / "locked" / "hidden".
   // v6: optional per-entity "script"; v5 added "animator", v4 "collider"
   // plus the scene-level tile_solidity table, v3 "player" / "camera" /
