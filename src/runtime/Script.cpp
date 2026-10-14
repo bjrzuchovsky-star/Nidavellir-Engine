@@ -680,6 +680,20 @@ void ScriptHost::interact(std::uint64_t target, std::uint64_t rider) {
   });
 }
 
+void ScriptHost::hand_event(std::uint64_t target, const char* hook, const std::string& text,
+                            double number) {
+  guarded(*s_, [&] {
+    State& s = *s_;
+    ScriptInstance* in = s.find(target);
+    if (in && in->started && s.push_hook(*in, hook)) {
+      lua_pushlstring(s.L, text.data(), text.size());
+      lua_pushnumber(s.L, number);
+      s.call(in, 2);
+    }
+    s.sweep();
+  });
+}
+
 void ScriptHost::run_timers(std::uint64_t tick) {
   guarded(*s_, [&] {
     State& s = *s_;

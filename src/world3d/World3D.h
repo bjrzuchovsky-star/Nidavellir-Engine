@@ -14,11 +14,22 @@
 //     Handle methods keep their ground-plane meaning (pos / set_pos /
 //     move_by work on x and z); 3D extras: pos3, set_pos3, move3, yaw,
 //     set_yaw, spin, scale3, set_scale3.
+//   * VR mode (set_vr(true) before start; World3D_VR.cpp): the entity with
+//     a vr_rig component is the player rig (tracking-space floor origin).
+//     Head + hands come from set_vr_input every frame (ts_xr: OpenXR or
+//     the desktop simulator). Left stick smooth locomotion, right stick
+//     snap / smooth turn and teleport arc (push forward, release to go),
+//     grip grabs `grabbable` entities (throw on release), laser + trigger
+//     reach scripts (on_point / on_unpoint / on_vr_trigger, else
+//     on_interact), menu button opens the comfort menu. Lua: the `vr`
+//     table (vr.active, vr.head, vr.hand, vr.held, vr.rig, vr.teleport,
+//     vr.haptic) and on_grab(hand) / on_release(hand, speed).
 
 #include "render3d/Camera3D.h"
 #include "render3d/Scene3D.h"
 #include "runtime/Log.h"
 #include "runtime/Script.h"
+#include "world3d/VrTypes.h"
 
 #include <cstdint>
 #include <deque>
@@ -43,6 +54,37 @@ struct Input3D {
   float turn = 0.0f;          // camera yaw, degrees this tick (+ = left)
   bool jump = false;
   bool action = false;
+};
+
+// One hand in the world (VR mode).
+struct VrHandState {
+  VrPose grip, aim;           // world space
+  float trigger = 0.0f, squeeze = 0.0f;
+  bool trigger_down = false, squeeze_down = false;
+  std::uint64_t held = 0;     // grabbed entity
+  Vec3 hold_offset;           // in hand space
+  render3d::Quat hold_rotation;
+  std::uint64_t pointed = 0;  // entity under the laser
+  int menu_button = -1;       // comfort-menu button under the laser
+  bool laser_hit = false;
+  Vec3 laser_end;
+  std::deque<Vec3> trail;     // recent grip positions (throw velocity)
+};
+
+struct VrTeleport {
+  bool aiming = false;
+  bool valid = false;
+  Vec3 target;
+  std::vector<Vec3> arc;
+};
+
+// The comfort menu: a row of boxes floating in front of the player.
+struct VrMenuButton {
+  enum class Kind : std::uint8_t { Vignette, SnapTurn, Locomotion, Seated };
+  Kind kind;
+  Aabb box;            // world space
+  bool on = false;     // lit state (vignette on, seated...)
+  std::string label;   // for 2D mirrors / logs
 };
 
 struct Toast3D {
@@ -128,6 +170,44 @@ class World3D final : public runtime::ScriptWorld {
   // Used by the Lua 3D methods.
   Entity3D* live(std::uint64_t id);
 
+  // ---- VR mode (World3D_VR.cpp) -------------------------------------------
+  static constexpr float kGrabReach = 0.12f;     // m from the grip to a box
+  static constexpr float kLaserReach = 15.0f;    // m
+  static constexpr float kForceGrabReach = 4.0f; // m, laser + grip pulls it in
+  void set_vr(bool on) { vr_ = on; }
+  bool vr() const { return vr_; }
+  // Latest tracking-space input; used by every tick until the next call.
+  // Button edges seen here are kept for the next tick.
+  void set_vr_input(const VrInput& in);
+  const VrInput& vr_input() const { return vr_in_; }
+  std::uint64_t vr_rig_id() const { return rig_id_; }
+  const scene3d::VrRig3D& vr_settings() const { return rig_cfg_; }
+  void set_vr_settings(const scene3d::VrRig3D& cfg) { rig_cfg_ = cfg; }
+  Vec3 rig_position() const { return rig_pos_; }
+  float rig_yaw() const { return rig_yaw_; }  // degrees
+  // Tracking space to world (rig position + yaw, seated lift).
+  render3d::Mat4 rig_matrix() const;
+  VrPose to_world(const VrPose& tracked) const;
+  VrPose head() const { return head_; }  // world
+  const VrHandState& hand(int h) const { return hands_[h & 1]; }
+  const VrTeleport& teleport() const { return tele_; }
+  bool comfort_menu_open() const { return menu_open_; }
+  const std::vector<VrMenuButton>& comfort_menu() const { return menu_; }
+  void set_comfort_menu(bool open);
+  float vignette() const { return vignette_; }  // 0..1 now
+  std::vector<VrHaptic> take_haptics();
+  void vr_haptic(int hand, float amplitude, float seconds);
+  // Move the rig so the head stands over `p` (feet at p.y).
+  void vr_teleport_to(const Vec3& p);
+  struct VrStats {
+    std::uint64_t grabs = 0, releases = 0, throws = 0, teleports = 0, snap_turns = 0,
+                  laser_triggers = 0, menu_presses = 0, landings = 0;
+    float smooth_moved = 0.0f;
+  };
+  const VrStats& vr_stats() const { return vr_stats_; }
+  // Entities in flight after a throw / drop.
+  std::size_t vr_bodies() const { return bodies_.size(); }
+
  private:
   struct Static {
     std::uint64_t id;
@@ -142,6 +222,32 @@ class World3D final : public runtime::ScriptWorld {
   void interact();
   void follow_camera(bool snap);
   std::uint64_t spawn_copy(const Entity3D& src, float x, float z, bool keep_y, float y);
+  // VR (World3D_VR.cpp).
+  struct Body {
+    Vec3 vel;
+    std::set<std::uint64_t> inside;  // triggers it overlaps
+  };
+  void vr_start();
+  void vr_step();
+  void vr_locomotion(float dt);
+  void vr_hands();
+  void vr_grab(int h);
+  void vr_release(int h);
+  void vr_laser(int h);
+  void vr_bodies_step(float dt);
+  void vr_update_triggers();
+  void vr_layout_menu();
+  void vr_press_menu(int button);
+  void vr_update_poses();
+  float vr_floor_at(const Vec3& p, float max_step) const;
+  void vr_event(std::uint64_t target, const char* hook, int hand, double num);
+  void vr_follow_held();
+ public:
+  // World bounds used by the laser and grabbing: the collider box, else
+  // the unit primitive under the transform.
+  Aabb vr_bounds(const Entity3D& e) const;
+
+ private:
 
   scene3d::Scene3D authored_;
   std::vector<Entity3D> ents_;
@@ -172,6 +278,29 @@ class World3D final : public runtime::ScriptWorld {
   bool running_ = false;
   bool paused_ = false;
   double accumulator_ = 0.0;
+  // VR.
+  bool vr_ = false;
+  VrInput vr_in_;
+  bool vr_menu_latched_ = false;
+  std::uint64_t rig_id_ = 0;
+  scene3d::VrRig3D rig_cfg_;
+  Vec3 rig_pos_;
+  float rig_yaw_ = 0.0f;
+  VrPose head_;
+  VrHandState hands_[2];
+  VrTeleport tele_;
+  bool snap_latched_ = false;
+  bool menu_held_ = false;
+  bool menu_open_ = false;
+  Vec3 menu_anchor_;
+  float menu_yaw_ = 0.0f;
+  std::vector<VrMenuButton> menu_;
+  float vignette_ = 0.0f;
+  float turn_activity_ = 0.0f;
+  std::map<std::uint64_t, Body> bodies_;
+  std::map<std::uint64_t, render3d::Transform> grab_home_;
+  std::vector<VrHaptic> haptics_;
+  VrStats vr_stats_;
 };
 
 // Capsule (segment a-b, radius r) against a box: push-out vector that

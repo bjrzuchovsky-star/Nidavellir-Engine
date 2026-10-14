@@ -140,6 +140,11 @@ class ScriptHost {
   void start_pending();
   void trigger(bool enter, std::uint64_t trigger, std::uint64_t other);
   void interact(std::uint64_t target, std::uint64_t rider);
+  // A hook called with (text, number): the VR hand events on_grab(hand),
+  // on_release(hand, speed), on_point(hand), on_unpoint(hand),
+  // on_vr_trigger(hand). Missing hooks are skipped.
+  void hand_event(std::uint64_t target, const char* hook, const std::string& text,
+                  double number);
   void run_timers(std::uint64_t tick);
   void tick(double dt);
 
