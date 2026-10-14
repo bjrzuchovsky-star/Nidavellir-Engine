@@ -1,6 +1,10 @@
 // The one translation unit compiling miniaudio and stb_vorbis (both fetched
 // by hash, see cmake/FetchMiniaudio.cmake). Third-party warnings are muted
-// for this file only (src/audio/CMakeLists.txt).
+// for this file only (src/audio/CMakeLists.txt; MSVC via the pragma).
+
+#if defined(_MSC_VER)
+#pragma warning(push, 0)
+#endif
 
 #define STB_VORBIS_HEADER_ONLY
 #include "stb_vorbis.c"
@@ -15,6 +19,10 @@
 
 #undef STB_VORBIS_HEADER_ONLY
 #include "stb_vorbis.c"
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 #include "audio/Audio.h"
 #include "audio/Backend.h"

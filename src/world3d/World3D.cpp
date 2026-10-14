@@ -164,6 +164,7 @@ void World3D::stop() {
   dead_.clear();
   state_.clear();
   toasts_.clear();
+  sounds_.clear();
   bodies_.clear();
   grab_home_.clear();
   haptics_.clear();
@@ -590,6 +591,39 @@ void World3D::script_toast(int /*slot*/, const std::string& text, double seconds
                            std::uint64_t from) {
   toasts_.push_back({text, seconds, from});
   post(LogLevel::Info, "toast", text, from);
+}
+
+void World3D::script_sound(runtime::SoundEvent event) { play_sound(std::move(event)); }
+
+void World3D::play_sound(runtime::SoundEvent event) {
+  event.three_d = true;
+  if (event.positional && event.entity != 0) {
+    if (const Entity3D* e = find(event.entity)) {
+      event.x = e->transform.position.x;
+      event.y = e->transform.position.y;
+      event.z = e->transform.position.z;
+    }
+  }
+  if (sounds_.size() >= kMaxSounds) sounds_.erase(sounds_.begin());
+  sounds_.push_back(std::move(event));
+}
+
+std::vector<runtime::SoundEvent> World3D::take_sounds() {
+  std::vector<runtime::SoundEvent> out;
+  out.swap(sounds_);
+  return out;
+}
+
+void World3D::listener_pose(Vec3* position, Vec3* forward, Vec3* up) const {
+  if (vr_ && head_.valid) {
+    *position = head_.position;
+    *forward = head_.forward();
+    *up = head_.orientation.rotate({0.0f, 1.0f, 0.0f});
+    return;
+  }
+  *position = camera_.position;
+  *forward = camera_.forward();
+  *up = camera_.up;
 }
 
 }  // namespace world3d

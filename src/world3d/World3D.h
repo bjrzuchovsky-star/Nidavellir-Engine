@@ -167,6 +167,15 @@ class World3D final : public runtime::ScriptWorld {
                     std::uint64_t from) override;
   void script_log(runtime::LogEntry entry) override;
   void script_open_extensions(lua_State* L, int sandbox) override;
+  void script_sound(runtime::SoundEvent event) override;
+
+  // Sound (see runtime/Sound.h): queued for the host, metres. A positional
+  // event naming an entity plays from its position.
+  static constexpr std::size_t kMaxSounds = 256;
+  void play_sound(runtime::SoundEvent event);
+  std::vector<runtime::SoundEvent> take_sounds();
+  // Where the ears are: the VR head in VR, else the play camera.
+  void listener_pose(Vec3* position, Vec3* forward, Vec3* up) const;
 
   // Used by the Lua 3D methods.
   Entity3D* live(std::uint64_t id);
@@ -268,6 +277,7 @@ class World3D final : public runtime::ScriptWorld {
   LogSink sink_;
   std::deque<runtime::LogEntry> log_;
   std::vector<Toast3D> toasts_;
+  std::vector<runtime::SoundEvent> sounds_;
   render3d::Camera3D camera_;
   std::uint64_t player_ = 0;
   Vec3 spawn_;

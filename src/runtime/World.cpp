@@ -93,6 +93,7 @@ void World::clear() {
   authored_.clear();
   logs_.clear();
   toasts_.clear();
+  sounds_.clear();
   next_id_ = 1;
   prev_buttons_ = {};
   in_step_ = false;
