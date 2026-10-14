@@ -109,6 +109,12 @@ Entity2D entity_from_map(const FlatMap& map) {
   e.color[2] = map_float(map, "b", map_float(map, "color_b", 0.95f));
   e.color[3] = map_float(map, "a", map_float(map, "color_a", 1.0f));
   e.layer = map_int(map, "layer", 0);
+  // v7 editor keys; absent = defaults.
+  e.rotation = map_float(map, "rotation", 0.0f);
+  if (!std::isfinite(e.rotation)) e.rotation = 0.0f;
+  e.parent = map_u64(map, "parent", 0);
+  e.locked = map_bool(map, "locked", false);
+  e.hidden = map_bool(map, "hidden", false);
   return e;
 }
 
@@ -330,6 +336,13 @@ void write_entity(std::ostringstream& out, const Entity2D& e) {
   out << "      \"b\": " << format_float(e.color[2]) << ",\n";
   out << "      \"a\": " << format_float(e.color[3]) << ",\n";
   out << "      \"layer\": " << e.layer;
+  // v7: only written when set, so untouched entities read like v6.
+  if (e.rotation != 0.0f) out << ",\n      \"rotation\": " << format_float(e.rotation);
+  if (e.parent != 0) {
+    out << ",\n      \"parent\": " << static_cast<unsigned long long>(e.parent);
+  }
+  if (e.locked) out << ",\n      \"locked\": true";
+  if (e.hidden) out << ",\n      \"hidden\": true";
   if (e.tilemap) {
     const TileMapData& tm = *e.tilemap;
     out << ",\n      \"tilemap\": {\"cols\": " << tm.cols
@@ -420,6 +433,31 @@ std::string scene_path_for_project(const std::string& project_dir) {
     return project_dir + "scene.json";
   }
   return project_dir + "/scene.json";
+}
+
+void repair_parents(std::vector<Entity2D>& entities) {
+  auto find_parent = [&](std::uint64_t id) -> const Entity2D* {
+    for (const Entity2D& e : entities) {
+      if (e.id == id) return &e;
+    }
+    return nullptr;
+  };
+  for (Entity2D& e : entities) {
+    if (e.parent == 0) continue;
+    // Walk up; a chain longer than the scene is a loop.
+    std::uint64_t at = e.parent;
+    std::size_t steps = 0;
+    bool ok = true;
+    while (at != 0) {
+      const Entity2D* p = find_parent(at);
+      if (!p || at == e.id || ++steps > entities.size()) {
+        ok = false;
+        break;
+      }
+      at = p->parent;
+    }
+    if (!ok) e.parent = 0;
+  }
 }
 
 bool parse(const std::string& text, SceneDoc* doc, std::string* error_out,
@@ -601,6 +639,9 @@ bool parse(const std::string& text, SceneDoc* doc, std::string* error_out,
   if (out.version < 4) {
     upgrade_v3_colliders(out.entities);
   }
+  // v7: a parent that is missing, itself, or part of a loop goes back to
+  // the root (hand-edited files).
+  repair_parents(out.entities);
   *doc = std::move(out);
   return true;
 }
@@ -608,6 +649,7 @@ bool parse(const std::string& text, SceneDoc* doc, std::string* error_out,
 std::string write(const SceneDoc& doc) {
   std::ostringstream out;
   out << "{\n";
+  // v7: optional per-entity "rotation" / "parent" / "locked" / "hidden".
   // v6: optional per-entity "script"; v5 added "animator", v4 "collider"
   // plus the scene-level tile_solidity table, v3 "player" / "camera" /
   // "spawn" and v2 "tilemap" / "sprite". Older files still load; see

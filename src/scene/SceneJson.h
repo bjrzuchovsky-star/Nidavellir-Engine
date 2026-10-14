@@ -17,9 +17,10 @@ namespace scene_json {
 // Format version written by write(). 1 = entities only; 2 = optional
 // "tilemap" / "sprite" objects; 3 = optional "player" / "camera" / "spawn";
 // 4 = optional "collider" plus the scene-level "tile_solidity" table;
-// 5 = optional "animator"; 6 = optional "script". Older files still load
+// 5 = optional "animator"; 6 = optional "script"; 7 = optional editor
+// "rotation" / "parent" / "locked" / "hidden". Older files still load
 // (see upgrade notes in SceneJson.cpp).
-inline constexpr int kSceneVersion = 6;
+inline constexpr int kSceneVersion = 7;
 
 // Whole file: entities plus the editor's view state. The runtime only
 // reads `entities`; the rest round-trips untouched.
@@ -45,6 +46,8 @@ std::string scene_path_for_project(const std::string& project_dir);
 // v3 -> v4 player collider upgrades. `source` only labels error messages.
 bool parse(const std::string& text, SceneDoc* doc, std::string* error_out,
            const std::string& source = "scene.json");
+// Parents that are missing or loop go back to the root (parse() does it).
+void repair_parents(std::vector<Entity2D>& entities);
 // Serialise (always the current version). Deterministic: same doc, same
 // bytes.
 std::string write(const SceneDoc& doc);

@@ -17,7 +17,8 @@ bool operator==(const Entity2D& a, const Entity2D& b) {
          a.tilemap == b.tilemap && a.sprite == b.sprite &&
          a.player == b.player && a.camera == b.camera && a.spawn == b.spawn &&
          a.collider == b.collider && a.animator == b.animator &&
-         a.script == b.script;
+         a.script == b.script && a.rotation == b.rotation &&
+         a.parent == b.parent && a.locked == b.locked && a.hidden == b.hidden;
 }
 
 ScriptValue ScriptValue::of_bool(bool v) {

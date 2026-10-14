@@ -161,6 +161,15 @@ struct Entity2D {
   std::optional<AnimatorData> animator;
   // Gameplay script (scene.json v6).
   std::optional<ScriptData> script;
+  // Editor tools (scene.json v7). rotation turns the drawn quad about its
+  // centre (colliders stay axis-aligned). parent: the entity this one hangs
+  // under in the Hierarchy; positions stay in world space and follow the
+  // parent's moves (editor drags, and the runtime each tick). locked /
+  // hidden only affect the edit viewport (no picking / not drawn).
+  float rotation = 0.0f;       // degrees, clockwise on screen
+  std::uint64_t parent = 0;    // 0 = scene root
+  bool locked = false;
+  bool hidden = false;
 
   float center_x() const { return x + w * 0.5f; }
   float center_y() const { return y + h * 0.5f; }
