@@ -1,8 +1,11 @@
 #include "editor/projects/ProjectStore.h"
 
+#include "render3d/Scene3D.h"
+
 #include "editor/settings/JsonMini.h"
 
 #include <algorithm>
+#include <iostream>
 #include <cctype>
 #include <chrono>
 #include <filesystem>
@@ -286,6 +289,18 @@ bool ProjectStore::seed_sample_2d_if_empty() {
     return false;
   }
   projects_.push_back(std::move(sample));
+
+  // And a 3D claim to ride: the ghost town (primitives, a glTF lantern,
+  // textures, Lua). A failure here is reported but keeps the 2D sample.
+  const std::string ghost_dir = (fs::path(projects_root_) / "ghost-town-3d").string();
+  std::string ghost_err;
+  ProjectInfo ghost;
+  if (scene3d::write_ghost_town_sample(ghost_dir, "Ghost Town 3D", &ghost_err) &&
+      load_project_json(ghost_dir, &ghost, &ghost_err)) {
+    projects_.push_back(std::move(ghost));
+  } else {
+    std::cerr << "[ProjectStore] ghost-town-3d sample: " << ghost_err << '\n';
+  }
   return true;
 }
 
