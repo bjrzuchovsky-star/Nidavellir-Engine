@@ -173,7 +173,7 @@ int world_runtime(const fs::path& dir) {
   });
   if (!w.start(scene, dir.string(), &err)) return fail("World3D start: " + err);
   const std::uint64_t rider = w.player_id();
-  if (!rider || w.static_colliders() < 8 || w.script_count() != 2) {
+  if (!rider || w.static_colliders() < 8 || w.script_count() != 3) {
     return fail("World3D setup (rider / statics / scripts)");
   }
   w3::Input3D idle;

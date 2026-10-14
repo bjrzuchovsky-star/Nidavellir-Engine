@@ -322,6 +322,39 @@ mixes, so smokes, servers and CI run headless.
   persistence, editor preview, and a World3D ride. The survival, Shipyard
   and VR smokes check their gameplay sounds.
 
+## In-game UI (ts_ui)
+
+A retained UI layer shared by `ts_game` (2D and 3D), `ts_client`, the VR
+runtime and the editor's Play view.
+
+- **Fonts:** TTF via stb_truetype (fetched by hash) baked into one 1024x1024
+  atlas: **Rye** (display) and **Arvo** (body), both SIL Open Font License
+  1.1. The license texts ship in `assets/fonts/OFL-*.txt`.
+- **Widgets:** label, button, image, panel, progress, slider, text input, list.
+  Anchors, pivots and offsets on a 1280x720 reference that scales with the
+  window height. Panels lay out children as a `stack` or a `grid`. The theme is
+  the Dusk palette (`style`: accent / muted / title / clear).
+- **Navigation:** mouse, keyboard (arrows/Tab/Enter/Esc) and gamepad (d-pad, A, B).
+  Modal documents and focused text inputs take the keys. Otherwise the game keeps them.
+- **Data:** `<project>/ui/*.ui.json`. Each file is one document
+  (`name`, `visible`, `modal`, `layer`, `focus`, `root`). The writer saves only
+  non-default fields, so round trips are byte-stable.
+- **Lua:** `ui.show(doc)`, `ui.hide(doc)`, `ui.set_text(id, s)`,
+  `ui.set_value(id, v)`, `ui.set_visible(id, on)`, `ui.on_click(id, fn)` and
+  `ui.on_change(id, fn)`. Handlers are called as `fn(id, value, text)`.
+- **Built in:** Esc or pad Start opens a pause menu (Resume / Settings with
+  Master / Music / Effects volume sliders, saved / Quit). In-game toasts are
+  drawn as text cards in 3D. The Frontier hotbar shows real item counts and
+  the selected item's name.
+- **VR:** the UI is drawn on a world-space panel (0.64 x 0.36 m) in front of the
+  rider. You click it with the laser and trigger.
+- **Samples:** `ghost-town-3d` ships a main menu template
+  (`ui/main_menu.ui.json`, wired by `scripts/town.lua`).
+- **Editor:** Play shows the project UI over the viewport. **View > UI Preview**
+  renders any document live without entering Play.
+- **Smoke:** `ts_admin --smoke-ui` covers the atlas, text measure, layout math,
+  navigation, data round trips, the pause menu, the software raster and Lua `ui.*`.
+
 ## Project Goals
 
 - Deliver a fast, stable, and fully custom C++ engine  

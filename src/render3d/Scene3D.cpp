@@ -712,6 +712,42 @@ function on_tick(dt)
 end
 )lua";
 
+// Main menu template: shown (modal) when the claim starts; the town
+// script hides it on Ride. Copy ui/main_menu.ui.json to start your own.
+constexpr const char* kMainMenuUi = R"JSON({
+  "name": "main_menu", "visible": true, "modal": true, "layer": 50, "focus": "menu_ride",
+  "root": {
+    "type": "panel", "id": "menu_root", "anchor": [0.5, 0.5], "pivot": [0.5, 0.5],
+    "size": [480, 0], "layout": "stack", "padding": 28, "gap": 12,
+    "children": [
+      {"type": "label", "text": "Ghost Town", "font": "display", "font_size": 80,
+       "style": "title", "anchor": [0.5, 0]},
+      {"type": "label", "text": "a TombStone sample", "style": "muted", "font_size": 18,
+       "anchor": [0.5, 0]},
+      {"type": "button", "id": "menu_ride", "text": "Ride", "font_size": 28,
+       "stretch": [true, false], "style": "accent"},
+      {"type": "button", "id": "menu_credits", "text": "Credits", "font_size": 24,
+       "stretch": [true, false]},
+      {"type": "label", "id": "menu_note", "text": "Fonts: Rye and Arvo (SIL OFL)",
+       "style": "muted", "font_size": 14, "visible": false, "anchor": [0.5, 0]}
+    ]
+  }
+})JSON";
+
+constexpr const char* kTownLua = R"lua(-- Town: wires the main menu (ui/main_menu.ui.json). ui.* works on any
+-- script: show / hide / set_text / set_value / set_visible / on_click /
+-- on_change.
+function on_start()
+  ui.on_click("menu_ride", function()
+    ui.hide("main_menu")
+    toast("Welcome to Ghost Town", 3)
+  end)
+  ui.on_click("menu_credits", function()
+    ui.set_visible("menu_note", true)
+  end)
+end
+)lua";
+
 constexpr const char* kBellLua = R"lua(-- Church bell: rings when a rider walks under it (trigger collider).
 function on_trigger_enter(other)
   toast(other:name() .. " rang the bell", 2)
@@ -817,6 +853,9 @@ bool write_ghost_town_sample(const std::string& project_dir,
   }
   if (!write_text(dir / "scripts" / "windmill.lua", kWindmillLua, error)) return false;
   if (!write_text(dir / "scripts" / "bell.lua", kBellLua, error)) return false;
+  if (!write_text(dir / "scripts" / "town.lua", kTownLua, error)) return false;
+  fs::create_directories(dir / "ui", ec);
+  if (!write_text(dir / "ui" / "main_menu.ui.json", kMainMenuUi, error)) return false;
 
   Scene3D s;
   s.environment.sky_top[0] = 0.13f;
@@ -856,7 +895,10 @@ bool write_ghost_town_sample(const std::string& project_dir,
   sails.transform.rotation = Quat::axis_angle({0, 0, 1}, 0.0f);
   s.entities.push_back(sails);
   // Tumbleweed-ish boulders.
-  s.entities.push_back(prim(id++, "Boulder", "sphere", {3.5f, 0.6f, 9.0f}, {1.2f, 1.2f, 1.2f}, grey, 0.95f));
+  Entity3D boulder = prim(id++, "Boulder", "sphere", {3.5f, 0.6f, 9.0f}, {1.2f, 1.2f, 1.2f}, grey, 0.95f);
+  boulder.script = ScriptData{};
+  boulder.script->path = "scripts/town.lua";  // main menu wiring
+  s.entities.push_back(boulder);
   // Bell (trigger) under the church arch.
   Entity3D bell = prim(id++, "Bell", "sphere", {0.0f, 3.2f, -10.0f}, {0.8f, 0.8f, 0.8f}, iron, 0.3f, 0.9f);
   bell.collider->trigger = true;
