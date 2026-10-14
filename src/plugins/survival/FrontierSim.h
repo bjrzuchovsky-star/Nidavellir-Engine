@@ -59,6 +59,8 @@ class FrontierSim {
     bool inv_dirty = true;
     int deaths = 0;
     int target_tx = 0, target_ty = 0;  // tile in front of the rider
+    float step_x = 0.0f, step_y = 0.0f;  // where the last footstep fell
+    bool stepped = false;
     std::set<std::pair<int, int>> sent;  // edited chunks this client has
   };
 
@@ -150,6 +152,10 @@ class FrontierSim {
  private:
   void toast(runtime::World& w, int slot, const std::string& text, double seconds = 2.5);
   void hint(runtime::World& w, int slot, const std::string& text);
+  // A positional sound at (x, y) world px (servers replicate it).
+  void sound(runtime::World& w, const char* clip, float x, float y, float volume = 1.0f,
+             float pitch = 1.0f, float variation = 0.1f);
+  void footsteps(runtime::World& w, int slot);
   bool rider_box(const runtime::World& w, int slot, runtime::Aabb* box) const;
   void place_safe(runtime::World& w, int slot);
   void act(runtime::World& w, int slot, std::uint32_t buttons);

@@ -307,6 +307,46 @@ void FrontierSim::hint(World& w, int slot, const std::string& text) {
   toast(w, slot, text, 1.8);
 }
 
+void FrontierSim::sound(World& w, const char* clip, float x, float y, float volume,
+                        float pitch, float variation) {
+  runtime::SoundEvent ev;
+  ev.clip = clip;
+  ev.volume = volume;
+  ev.pitch = pitch;
+  ev.variation = variation;
+  ev.positional = true;
+  ev.x = x;
+  ev.y = y;
+  w.play_sound(std::move(ev));
+}
+
+// One footfall every ~26 px walked (a rider standing still is quiet).
+void FrontierSim::footsteps(World& w, int slot) {
+  Player& p = players_[static_cast<std::size_t>(slot)];
+  Aabb b;
+  if (!rider_box(w, slot, &b)) return;
+  const float x = (b.x0 + b.x1) * 0.5f;
+  const float y = b.y1;
+  if (!p.stepped) {
+    p.step_x = x;
+    p.step_y = y;
+    p.stepped = true;
+    return;
+  }
+  const float dx = x - p.step_x;
+  const float dy = y - p.step_y;
+  const float d2 = dx * dx + dy * dy;
+  if (d2 > 200.0f * 200.0f) {  // teleported / respawned
+    p.step_x = x;
+    p.step_y = y;
+    return;
+  }
+  if (d2 < 26.0f * 26.0f) return;
+  p.step_x = x;
+  p.step_y = y;
+  sound(w, "builtin:step", x, y, 0.45f, 1.0f, 0.15f);
+}
+
 bool FrontierSim::rider_box(const World& w, int slot, Aabb* box) const {
   const runtime::Actor* a = w.player(slot);
   if (!a || a->hidden) return false;
@@ -403,6 +443,7 @@ void FrontierSim::step(World& w) {
     p.hurt = std::max(0.0, p.hurt - kDt);
     p.toast_cd = std::max(0.0, p.toast_cd - kDt);
     act(w, s, in.slot(s).buttons);
+    footsteps(w, s);
   }
   step_mobs(w);
   step_shots(w);
@@ -499,6 +540,7 @@ bool FrontierSim::melee(World& w, int slot, const ItemDef* item) {
   }
   if (!any) return false;
   p.cooldown = armed ? item->cooldown : 0.35;
+  sound(w, "builtin:mine", cx, cy, 0.8f, 1.35f);
   for (std::size_t i = mobs_.size(); i-- > 0;) {
     if (mobs_[i].hp <= 0) kill(w, i, slot);
   }
@@ -512,6 +554,8 @@ void FrontierSim::mine(World& w, int slot, const ItemDef* item) {
   const int power = tool ? std::max(1, item->mine_power) : 1;
   const int tier = tool ? item->tier : 0;
   p.cooldown = tool ? item->cooldown : 0.35;
+  const float tx = (static_cast<float>(p.target_tx) + 0.5f) * kTile;
+  const float ty = (static_cast<float>(p.target_ty) + 0.5f) * kTile;
   if (t.object != kObjNone) {
     const ObjectDef& od = object_def(t.object);
     if (tier < od.min_tier) {
@@ -523,8 +567,11 @@ void FrontierSim::mine(World& w, int slot, const ItemDef* item) {
     if (dmg < od.hardness) {
       t.damage = static_cast<std::uint8_t>(std::min(dmg, 255));
       chunks_.set(p.target_tx, p.target_ty, t);
+      sound(w, "builtin:mine", tx, ty, 0.8f);
       return;
     }
+    // Broke it: a lower, heavier knock.
+    sound(w, "builtin:mine", tx, ty, 1.0f, 0.7f);
     const std::uint8_t broken = t.object;
     t.object = kObjNone;
     t.damage = 0;
@@ -547,6 +594,7 @@ void FrontierSim::mine(World& w, int slot, const ItemDef* item) {
     return;
   }
   if (t.ground == kPlanks) {
+    sound(w, "builtin:mine", tx, ty, 0.8f, 0.85f);
     t.ground = kDirt;
     chunks_.set(p.target_tx, p.target_ty, t);
     const int drop = data_.item("planks");
@@ -604,6 +652,7 @@ void FrontierSim::fire(World& w, int slot, const ItemDef* item) {
   s.owner = slot;
   shots_.push_back(s);
   p.cooldown = item->cooldown;
+  sound(w, "builtin:gunshot", s.x, s.y, 0.9f, 1.0f, 0.08f);
 }
 
 void FrontierSim::step_shots(World& w) {
