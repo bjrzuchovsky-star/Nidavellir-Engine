@@ -273,8 +273,10 @@ void Editor2DScreen::draw_posse_viewport() {
                 c.slot() + 1, c.name().c_str(), c.stats().rtt_ms, posse_sim_.latency_ms,
                 posse_sim_.jitter_ms, static_cast<double>(posse_sim_.loss) * 100.0);
   draw->AddRectFilled(canvas_pos, ImVec2(canvas_end.x, canvas_pos.y + 24.0f),
-                      theme::U32(theme::Charcoal(), 0.75f));
-  draw->AddText(ImVec2(canvas_pos.x + 10.0f, canvas_pos.y + 4.0f), theme::U32(theme::Accent()),
+                      theme::U32(theme::PanelBg(), 0.92f));
+  draw->AddLine(ImVec2(canvas_pos.x, canvas_pos.y + 24.0f),
+                ImVec2(canvas_end.x, canvas_pos.y + 24.0f), theme::U32(theme::Copper()));
+  draw->AddText(ImVec2(canvas_pos.x + 10.0f, canvas_pos.y + 4.0f), theme::U32(theme::Text()),
                 banner);
   draw->PopClipRect();
 }
