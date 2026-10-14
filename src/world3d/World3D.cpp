@@ -108,6 +108,7 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
       break;
     }
   }
+  if (vr_) vr_start();
   if (player_ == 0) {
     post(LogLevel::Warn, "play",
          "No rider in this scene (give an entity a Player component); the camera stays put");
@@ -119,7 +120,9 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
   camera_.position = {0, 3, 8};
   camera_.target = {0, 1, 0};
   follow_camera(true);
-  if (!player_) {
+  if (vr_) {
+    vr_update_poses();
+  } else if (!player_) {
     const float yaw = render3d::radians(scene.editor_camera.yaw);
     const float pitch = render3d::radians(scene.editor_camera.pitch);
     const float d = scene.editor_camera.distance;
@@ -159,6 +162,14 @@ void World3D::stop() {
   dead_.clear();
   state_.clear();
   toasts_.clear();
+  bodies_.clear();
+  grab_home_.clear();
+  haptics_.clear();
+  for (VrHandState& h : hands_) h = VrHandState{};
+  tele_ = VrTeleport{};
+  menu_open_ = false;
+  menu_.clear();
+  rig_id_ = 0;
 }
 
 std::size_t World3D::script_count() const { return host_ ? host_->instance_count() : 0; }
@@ -195,7 +206,8 @@ Aabb World3D::collider_box(const Entity3D& e) const {
 void World3D::rebuild_statics() {
   statics_.clear();
   for (const Entity3D& e : ents_) {
-    if (!e.collider || e.collider->trigger || e.player || dead_.count(e.id) ||
+    if (!e.collider || e.collider->trigger || e.player || e.grabbable || e.vr_rig ||
+        dead_.count(e.id) ||
         collider_off_.count(e.id)) {
       continue;
     }
@@ -354,8 +366,12 @@ void World3D::step(const Input3D& input0) {
   input.action = input.action || action_latched_;
   jump_latched_ = action_latched_ = false;
   in_step_ = true;
-  move_player(input);
-  update_triggers();
+  if (vr_) {
+    vr_step();
+  } else {
+    move_player(input);
+    update_triggers();
+  }
   if (host_) {
     host_->start_pending();
     if (input.action && !jump_held_) interact();
@@ -367,7 +383,7 @@ void World3D::step(const Input3D& input0) {
   in_step_ = false;
   // Scripts may have moved or switched colliders.
   rebuild_statics();
-  follow_camera(false);
+  if (!vr_) follow_camera(false);
 }
 
 int World3D::update(double real_seconds, const Input3D& input) {

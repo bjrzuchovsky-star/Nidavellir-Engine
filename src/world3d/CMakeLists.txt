@@ -1,9 +1,12 @@
 # ts_world3d: the 3D play runtime (rider controller, capsule-vs-box
 # collision, triggers, follow camera) with Lua scripts through the shared
-# ScriptHost. No GL; drawn by ts_render3d's SceneView.
+# ScriptHost, and the VR mode (rig, locomotion, hands, grab / throw,
+# comfort menu) fed by ts_xr. No GL; drawn by ts_render3d's SceneView.
 add_library(ts_world3d
   World3D.cpp
   World3D_Lua.cpp
+  World3D_VR.cpp
+  VrOverlay.cpp
 )
 target_include_directories(ts_world3d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(ts_world3d
