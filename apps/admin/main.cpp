@@ -13,6 +13,7 @@
 
 #include "Smoke3D.h"
 #include "SmokePlugins.h"
+#include "SmokeSurvival.h"
 #include "SmokeRuntime.h"
 
 #include <imgui.h>
@@ -1170,6 +1171,10 @@ int run_console_smoke() {
   if (run_3d_smoke() != 0) {
     return 1;
   }
+  // Frontier Survival plugin (see SmokeSurvival.cpp).
+  if (run_survival_smoke() != 0) {
+    return 1;
+  }
 
   std::cout << "TombStone Admin smoke complete\n";
   return flow.current_state() == AppState::Quit ? 0 : 1;
@@ -1295,6 +1300,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-3d") == 0) {
       // Just the 3D checks (quick loop while working on the 3D side).
       return run_3d_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-survival") == 0) {
+      // Just the Frontier Survival checks.
+      return run_survival_smoke();
     }
     if (std::strcmp(argv[i], "--smoke") == 0) {
       smoke = true;

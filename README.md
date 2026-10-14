@@ -57,9 +57,9 @@ Every system is built with performance as the primary goal:
 
 - **Static:** `TS_PLUGIN_STATIC(sym, Class)` in the plugin, plus `TS_PLUGIN_DECLARE(sym)` / `TS_PLUGIN_LINK(sym, catalog, err)` in the host. The explicit link call works on MSVC because there are no global constructors for the linker to strip.
 - **Dynamic:** build a shared module and put `TS_DYNAMIC_PLUGIN(Class)` in it. It exports the C entry `ts_plugin_entry`, which is loaded with `LoadLibrary` on Windows and `dlopen` elsewhere. ABI, API and C++ runtime tags are checked, so a module must be built with the same compiler and runtime as the host. Search path: `$TS_PLUGIN_PATH`, `<project>/plugins`, then the build's `plugins/` directory. `sample.lantern` (`src/plugins/lantern`) is the sample.
-- **Built-ins:** `ts.posse` (multiplayer: Network panel, Play-menu entries, toolbar button; on by default) and `ts.tumbleweed` (sample gameplay plugin: system, `tumbleweed` Lua table, `.tumble.json` asset type; off by default).
+- **Built-ins:** `ts.posse` (multiplayer: Network panel, Play-menu entries, toolbar button; on by default), `ts.tumbleweed` (sample gameplay plugin: system, `tumbleweed` Lua table, `.tumble.json` asset type; off by default) and `ts.frontier` (Frontier Survival, below; off by default).
 
-**Per-project enablement.** The Outfitter's Wagon panel (Plugins tab) hitches and unhitches plugins. Hitching a plugin brings its dependencies along, and unhitching one also unhitches its dependents. The list is saved right away to `project.json` as `"plugins"`. Changes take effect when the editor is idle, or after Play or the posse stops (restart-of-play). Old projects without the key get the default built-ins. `ts_game` loads the project's plugins too.
+**Per-project enablement.** The Outfitter's Wagon panel (Plugins tab) hitches and unhitches plugins. Hitching a plugin brings its dependencies along, and unhitching one also unhitches its dependents. The list is saved right away to `project.json` as `"plugins"`. Changes take effect when the editor is idle, or after Play or the posse stops (restart-of-play). Old projects without the key get the default built-ins. `ts_game`, `ts_server` and `ts_client` load the project's plugins too.
 
 **Tests.** `ts_admin --smoke` covers load order, dependencies, the missing-dependency error, versions and loops, enable/disable persistence, the 2D/3D/VR round trip, an old `project.json`, and the dynamic sample.
 
@@ -93,6 +93,59 @@ Every system is built with performance as the primary goal:
 **Sample.** `ghost-town-3d` is seeded next to the 2D sample when the projects folder is empty. It has a main street of primitive buildings, a textured boardwalk, glTF lanterns with point lights, a Lua windmill and a bell trigger that rings.
 
 **Tests.** `ts_admin --smoke` runs the 3D checks: math and primitives, the scene v7 round trip (byte-stable), glTF loading and the sample, the play runtime, a GL render with pixel checks, and the editor (gizmos with snap, undo / redo, picking, glTF drop, save / reload, play / stop). For the 3D checks alone, run `ts_admin --smoke-3d`. The GL render check is skipped when there is no display, unless `TS_SMOKE_REQUIRE_GL=1` is set; on Linux CI, run it under `xvfb-run`.
+
+## Frontier Survival (2D gameplay plugin)
+
+`ts.frontier` is a Necesse-style survival layer for 2D projects. It lives in `src/plugins/survival` as a built-in of `ts_plugins_builtin`, is **off by default**, and you hitch it in the Outfitter's Wagon (Gameplay). The plugin adds no new scene format: the frontier is generated around the riders, and only the edits are saved.
+
+**World.**
+- An endless top-down tile world in 32×32-tile chunks (32 px tiles), streamed around every rider: chunks within 2 load and chunks beyond 3 are written back and dropped.
+- Seeded and fully deterministic: integer-only noise, so every machine builds the same tiles.
+- Biomes: prairie (trees, bushes, boulders), desert (cacti, copper), badlands (mesa rock, iron, gold) and caves (cave rock walls, rich ore). Spawn sits in a clearing on the prairie.
+- Edited chunks are saved to `<project>/saves/<world>/c_<cx>_<cy>.chunk` (binary RLE, tagged with the seed and generator version). `world.json` beside them holds the seed, the clock, every rider's saddlebags and grit, and the settled beds.
+- It autosaves every 60 s and when the ride stops. A save made with another seed keeps its own seed, with a warning.
+
+**Riding.**
+
+| Key | Does |
+|---|---|
+| F / left mouse | Mine or chop the tile in front, swing the held weapon, eat food |
+| G / right mouse | Place the held block or station (never on top of anyone) |
+| C | Fire (bow: arrows; six-shooter: cartridges) |
+| Q / X, 1-0 | Pick a hotbar slot |
+
+- Mining wears a tile down by the pick's power. Ores need a pick of the right tier, and drops go straight into the saddlebags.
+- Saddlebags have 30 slots, the first 10 being the hotbar (drawn in-world with a grit bar).
+- Crafting stations (workbench, forge, campfire) must be within reach.
+- Combat: melee arc plus projectiles, with knockback and a short hurt flash. Dying puts you back at camp at full grit.
+- Creatures wander, chase and attack: coyotes, rattlesnakes, scorpions, cave bats, and night riders (bandits) after dark. They spawn by biome in a ring 10-16 tiles out (4 hostile by day, 8 by night) and drift off beyond 48 tiles.
+- Day / night: a full day lasts `day_minutes` (8 by default). Dusk washes the screen, and torches and campfires glow.
+- Settlers: lay a bedroll in an enclosed room (4-64 floor tiles, at least one door) and a settler moves in and stays home. Jobs are a stub for now.
+
+**Data files** (`<project>/survival/`, written with defaults; edit freely): `items.json` (kind, stack, damage, tier, mine power, ammo, heal, what it places), `recipes.json` (needs, count, station), `creatures.json` (hp, speed, damage, aggro, biomes, night-only, friendly, weight, drop) and `world.json` (seed, world name, day length).
+
+**Editor.**
+- **Saddlebags** panel: grit, the time of day, the inventory with drag-to-swap and click-to-select, and a "Make do" list with reasons when a recipe can't be made.
+- **Prospector** panel: seed field, Reroll, a live map preview, biome percentages and the spawn-chunk hash. "Burn the claim / regenerate" stakes the new seed and burns `saves/<world>/` after asking.
+
+**Lua (`frontier` table).** All slots are 1-based, like `other:slot()`:
+- Inventory: `give(slot, id, n)` returns the leftover; `take(slot, id, n)`; `count(slot, id)`; `selected(slot)`; `craft(slot, recipe)` returns ok, why.
+- Health: `health(slot)` returns hp, max; `hurt(slot, n, by)`; `heal(slot, n)`.
+- World: `tile(tx, ty)` returns ground, object; `set_tile(tx, ty, ground, object)`; `spawn(creature, x, y)`; `time()` returns phase, is_night; `seed()`.
+
+**Multiplayer.** `ts_server` and `ts_client` now load the project's plugins (`ts_client` needs `--project` to read `project.json`), so the earlier "server ignores plugins" caveat is gone. The server is authoritative for tiles, saddlebags and combat:
+- Clients generate chunks from the seed in the server's Welcome. Each client gets the edited chunks near it once, plus every tile edit as it happens. Creature and shot state goes out at 10 Hz, and each rider gets their own saddlebags.
+- Clients only send hotbar, craft and swap requests; F / G / C ride in the normal input.
+- Plugin messages travel on a new `Plugin` protocol message (protocol v2) through `World::net_post` / `net_deliver`. Plugins can register draw layers, movement blockers and net channels (plugin API v2).
+
+**Sample.** `frontier-survival` is seeded with the other samples when the projects folder is empty. It is a 2D claim with `"plugins": "ts.frontier"`, a rider, a follow camera, and a Lua supply crate (`scripts/supply_crate.lua`) that hands out a starter kit through `frontier.give`.
+
+**Tests.** `ts_admin --smoke` (or just `ts_admin --smoke-survival`) covers:
+- Worldgen determinism, printing a region hash to compare machines (seed 1849: `2c74981b44e2ee81`).
+- Chunk save / load, including negative coordinates and seed mismatch.
+- The Lua crate, crafting by hand and at a placed workbench, mining tiers, stacks, and the housing check.
+- Combat: bites, knife, bow, death and respawn, food.
+- Posse replication of tile edits, inventory, craft requests and client mining over ENet loopback with plugins on both sides, plus a late joiner receiving the edited chunks.
 
 ## Project Goals
 
