@@ -14,6 +14,9 @@ add_subdirectory(src/render)
 add_subdirectory(src/input)
 add_subdirectory(src/physics)
 add_subdirectory(src/scene)
+# 3D / VR sketches (no heavy deps): renderer + OpenXR-shaped session stubs.
+add_subdirectory(src/render3d)
+add_subdirectory(src/xr)
 
 # Windowed apps: GLFW + OpenGL + stb_image for ts_admin, ts_game and
 # ts_client (ts_gfx: texture cache + GL helpers). Dear ImGui is fetched only
