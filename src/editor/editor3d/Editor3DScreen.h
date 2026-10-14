@@ -32,6 +32,7 @@
 #include "editor/plugins/EditorPlugins.h"
 #include "editor/plugins/PluginsPanel.h"
 #include "editor/screens/IScreen.h"
+#include "editor/ui/PlayUi.h"
 #include "render3d/Renderer3D.h"
 #include "render3d/Scene3D.h"
 #include "render3d/SceneView.h"
@@ -268,6 +269,9 @@ class Editor3DScreen final : public IScreen {
   void end_sound();
   std::deque<runtime::LogEntry> log_;
   std::deque<std::pair<std::string, double>> toasts_;
+  PlayUi play_ui_;
+  UiPreview ui_preview_;
+  bool show_ui_preview_ = false;  // the project's ui/ documents over the Play view
   render3d::FrameStats last_stats_;
   bool dock_initialized_ = false;
   bool viewport_hovered_ = false;

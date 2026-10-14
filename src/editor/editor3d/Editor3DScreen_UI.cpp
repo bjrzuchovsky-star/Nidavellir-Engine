@@ -1,5 +1,6 @@
 #include "editor/editor3d/Editor3DScreen.h"
 
+#include "ui/UiScript.h"
 #include "editor/audio/EditorAudio.h"
 #include "editor/ui/Theme.h"
 
@@ -125,6 +126,7 @@ void Editor3DScreen::draw_ui() {
     if (ImGui::Begin("Saloon Band (Mixer)", &show_mixer_)) draw_mixer_panel();
     ImGui::End();
   }
+  ui_preview_.draw(&show_ui_preview_, project_.path);
   draw_vr_mirror();
 }
 
@@ -197,6 +199,7 @@ void Editor3DScreen::draw_menu_bar() {
     ImGui::MenuItem("Grid", "G", &scene_.show_grid);
     ImGui::MenuItem("Colliders", nullptr, &show_colliders_);
     ImGui::MenuItem("Saloon Band (Mixer)", nullptr, &show_mixer_);
+    ImGui::MenuItem("UI Preview", nullptr, &show_ui_preview_);
     if (ImGui::MenuItem("Frame selection", "F")) frame_selection();
     ImGui::EndMenu();
   }
@@ -481,8 +484,14 @@ void Editor3DScreen::draw_viewport() {
     draw_gizmo_overlay(origin.x, origin.y, vw, vh);
   }
 
-  // Toasts.
+  // In-game UI (ui/*.ui.json, Lua ui.*) over the Play view.
   ImDrawList* dl = ImGui::GetWindowDrawList();
+  if (playing() && !vr_previewing()) {
+    ui::forward_ui_events(world_, play_ui_.update(origin, ImVec2(vw, vh), viewport_hovered_,
+                                                  viewport_focused_, io.DeltaTime));
+    play_ui_.draw(dl, origin);
+  }
+  // Toasts.
   float ty = origin.y + 12.0f;
   for (const auto& t : toasts_) {
     const ImVec2 sz = ImGui::CalcTextSize(t.first.c_str());

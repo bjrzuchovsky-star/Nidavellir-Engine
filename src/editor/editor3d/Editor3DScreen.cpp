@@ -1,5 +1,6 @@
 #include "editor/editor3d/Editor3DScreen.h"
 
+#include "ui/UiScript.h"
 #include "editor/assets/AssetLibrary.h"
 #include "editor/audio/EditorAudio.h"
 #include "world3d/VrOverlay.h"
@@ -133,8 +134,10 @@ AppState Editor3DScreen::on_update(float delta_seconds) {
     vr_preview_frame(delta_seconds);
     for (const world3d::Toast3D& t : world_.take_toasts()) toasts_.push_back({t.text, t.seconds});
   } else if (playing()) {
-    world_.update(delta_seconds, ImGui::GetCurrentContext() ? poll_play_input()
-                                                            : world3d::Input3D{});
+    world_.update(delta_seconds, ImGui::GetCurrentContext() && !play_ui_.wants_input()
+                                     ? poll_play_input()
+                                     : world3d::Input3D{});
+    ui::apply_ui_commands(play_ui_.system(), world_.take_ui_commands());
     for (const world3d::Toast3D& t : world_.take_toasts()) toasts_.push_back({t.text, t.seconds});
   }
   update_sound(delta_seconds);
@@ -610,6 +613,7 @@ bool Editor3DScreen::play_start() {
     note("Play failed: " + err, LogLevel::Error);
     return false;
   }
+  play_ui_.load(project_.path);
   note("Riding \"" + project_.name + "\" (Stop puts everything back)");
   return true;
 }
@@ -625,6 +629,7 @@ void Editor3DScreen::play_stop() {
   if (!playing()) return;
   world_.stop();
   toasts_.clear();
+  play_ui_.clear();
   note("Reined in; the scene is as you left it");
   if (plugins_.pending()) plugins_.apply();
 }
