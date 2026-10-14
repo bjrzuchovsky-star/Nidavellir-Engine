@@ -5,6 +5,7 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <iostream>
@@ -341,10 +342,16 @@ void ProjectManagerScreen::draw_kind_picker() {
   };
   static const Choice kChoices[] = {
       {ProjectKind::TwoD, "2D", "Frontier town", "Ready to ride today"},
-      {ProjectKind::ThreeD, "3D", "Open range", "Unsurveyed: placeholder camp"},
+      {ProjectKind::ThreeD, "3D", "Open range", "Unsurveyed: placeholder"},
       {ProjectKind::VR, "VR", "Through the goggles", "Unsurveyed: OpenXR stub"},
   };
-  const float w = 188.0f;
+  // Wide enough for the longest line of copy at the current font.
+  float w = 200.0f;
+  for (const Choice& c : kChoices) {
+    w = std::max(w, 64.0f + 16.0f +
+                        std::max(ImGui::CalcTextSize(c.line1).x,
+                                 ImGui::CalcTextSize(c.line2).x));
+  }
   const float h = 58.0f;
   for (int i = 0; i < 3; ++i) {
     const Choice& c = kChoices[i];
