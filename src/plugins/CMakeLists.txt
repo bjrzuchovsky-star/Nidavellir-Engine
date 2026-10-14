@@ -11,6 +11,8 @@ add_library(ts_plugins_builtin
   survival/FrontierSim.cpp
   survival/SurvivalPlugin.cpp
   survival/Sample.cpp
+  shipyard/Parts.cpp
+  shipyard/Design.cpp
 )
 
 target_include_directories(ts_plugins_builtin
