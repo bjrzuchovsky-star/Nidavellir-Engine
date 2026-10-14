@@ -128,6 +128,7 @@ class GameClient {
   void on_snapshot(SnapshotMsg&& s);
   void reconcile(const Snap& s, std::uint32_t ack);
   void send_input();
+  void send_plugin_posts();
   void measure(double real_seconds);
   std::uint32_t now_ms() const;
   const runtime::NetActor* row(const Snap& s, std::uint64_t id) const;

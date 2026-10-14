@@ -61,6 +61,7 @@ bool GameClient::connect(ClientConfig config, std::string* error_out) {
   disconnect();
   config_ = std::move(config);
   config_.name = clean_name(config_.name);
+  world_.set_net_role(runtime::NetRole::Client);
   config_.interp_ms = std::clamp(config_.interp_ms, 0.0, 1000.0);
   std::unique_ptr<net::Transport> inner =
       config_.transport ? std::move(config_.transport) : net::make_enet_transport();
@@ -248,6 +249,13 @@ void GameClient::handle(const TransportEvent& ev) {
           if (decode(ev.data, &r)) roster_ = std::move(r);
           break;
         }
+        case MsgType::Plugin: {
+          PluginMsg m;
+          if (joined() && world_ready_ && decode(ev.data, &m)) {
+            world_.net_deliver(m.channel, -1, m.bytes);
+          }
+          break;
+        }
         default:
           break;
       }
@@ -363,8 +371,19 @@ void GameClient::send_input() {
   transport_->send(server_, Delivery::Unreliable, encode(m));
 }
 
+void GameClient::send_plugin_posts() {
+  if (!transport_ || !joined()) return;
+  for (runtime::NetPost& post : world_.take_net_posts()) {
+    PluginMsg m;
+    m.channel = std::move(post.channel);
+    m.bytes = std::move(post.bytes);
+    transport_->send(server_, net::Delivery::Reliable, encode(m));
+  }
+}
+
 void GameClient::tick(const runtime::PlayerInput& input) {
   poll();
+  send_plugin_posts();
   if (!transport_ || !joined() || !world_ready_ || !have_pred_) {
     if (transport_) transport_->flush();
     return;
