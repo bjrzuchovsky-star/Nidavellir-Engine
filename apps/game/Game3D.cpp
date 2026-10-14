@@ -1,0 +1,239 @@
+#include "Game3D.h"
+
+#include "render3d/GlRenderer3D.h"
+#include "render3d/HiddenGl.h"
+#include "render3d/Scene3D.h"
+#include "render3d/SceneView.h"
+#include "runtime/Log.h"
+#include "world3d/World3D.h"
+
+#include <GLFW/glfw3.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <vector>
+
+namespace ts {
+namespace tombstone {
+namespace game {
+
+namespace fs = std::filesystem;
+
+namespace {
+
+std::string slurp(const fs::path& p) {
+  std::ifstream in(p, std::ios::binary);
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+void print_log(world3d::World3D& w, std::size_t* seen) {
+  const auto& log = w.log();
+  if (*seen > log.size()) *seen = 0;
+  for (std::size_t i = *seen; i < log.size(); ++i) {
+    std::cout << runtime::format_log(log[i]) << '\n';
+  }
+  *seen = log.size();
+}
+
+int fail(const std::string& what) {
+  std::cerr << "[smoke] ts_game 3D FAILED: " << what << '\n';
+  return 1;
+}
+
+}  // namespace
+
+bool is_3d_project(const std::string& dir) {
+  const fs::path scene = scene3d::scene_path(dir);
+  std::error_code ec;
+  if (fs::exists(scene, ec)) return scene3d::is_3d_scene_text(slurp(scene));
+  const std::string pj = slurp(fs::path(dir) / "project.json");
+  return pj.find("\"3d\"") != std::string::npos;
+}
+
+int run_smoke_3d(const std::string& dir, const std::string& name) {
+  const std::string path = scene3d::scene_path(dir);
+  const std::string before = slurp(path);
+  scene3d::Scene3D scene;
+  std::string err;
+  if (!scene3d::load_file(path, &scene, &err)) return fail(err);
+  world3d::World3D world;
+  if (!world.start(scene, dir, &err)) return fail("start: " + err);
+  if (world.player_id() == 0) return fail("no rider (Player component) in the scene");
+  const world3d::Entity3D* rider = world.find(world.player_id());
+  const render3d::Vec3 start = rider->transform.position;
+  world.run_ticks(60, {});
+  world3d::Input3D in;
+  in.move_forward = 1.0f;
+  world.run_ticks(60, in);
+  rider = world.find(world.player_id());
+  const render3d::Vec3 end = rider->transform.position;
+  const float moved = render3d::length(render3d::Vec3{end.x - start.x, 0.0f, end.z - start.z});
+  if (moved < 0.5f) return fail("the rider did not move (" + std::to_string(moved) + " m)");
+  if (!world.grounded()) return fail("the rider is not on the ground after a ride");
+  std::size_t errors = 0;
+  for (const auto& e : world.log()) errors += e.level == runtime::LogLevel::Error ? 1 : 0;
+  if (errors) return fail(std::to_string(errors) + " script error(s) on the Telegraph");
+  if (slurp(path) != before) return fail("scene.json changed by a ride");
+
+  // One GL frame through the follow camera.
+  std::string gl_note = "GL skipped (no display)";
+  render3d::HiddenGl ctx;
+  std::string why;
+  if (ctx.open(&why)) {
+    auto r = render3d::make_gl_renderer3d();
+    if (!r->init(&why)) return fail("GL renderer: " + why);
+    r->set_offscreen(true);
+    const int W = 256, H = 144;
+    render3d::FrameStats st;
+    {
+      render3d::SceneView view(r.get());
+      view.set_project_dir(dir);
+      view.begin(world.authored().environment, world.entities(), world.camera(), W, H);
+      st = view.end();
+      for (const std::string& p : view.take_problems()) return fail("render: " + p);
+    }
+    std::vector<unsigned char> px;
+    int w = 0, h = 0;
+    if (!r->read_pixels(&px, &w, &h) || w != W || h != H) return fail("read_pixels");
+    // The rider sits mid-screen in front of the sky: the frame must not be
+    // one flat colour, and the middle must differ from the top row.
+    int lo = 255, hi = 0;
+    for (std::size_t i = 0; i + 3 < px.size(); i += 4) {
+      const int l = (px[i] * 3 + px[i + 1] * 6 + px[i + 2]) / 10;
+      lo = std::min(lo, l);
+      hi = std::max(hi, l);
+    }
+    if (st.draws == 0 || hi - lo < 40) {
+      return fail("GL frame looks empty (" + std::to_string(st.draws) + " draws, lum " +
+                  std::to_string(lo) + ".." + std::to_string(hi) + ")");
+    }
+    char buf[200];
+    std::snprintf(buf, sizeof(buf), "GL %zu draws %zu tris %zu lights, lum %d..%d", st.draws,
+                  st.triangles, st.lights, lo, hi);
+    gl_note = buf;
+    r->shutdown();
+  } else if (std::getenv("TS_SMOKE_REQUIRE_GL")) {
+    return fail("GL context: " + why);
+  }
+  std::cout << "[smoke] ts_game 3D OK (\"" << name << "\": " << world.entities().size()
+            << " entities, " << world.static_colliders() << " static colliders, "
+            << world.script_count() << " scripts, rode " << moved << " m, grounded, "
+            << gl_note << ", scene.json untouched)\n";
+  return 0;
+}
+
+int run_window_3d(const std::string& dir, const std::string& name, long frames) {
+  scene3d::Scene3D scene;
+  std::string err;
+  if (!scene3d::load_file(scene3d::scene_path(dir), &scene, &err)) {
+    std::cerr << "[ts_game] " << err << '\n';
+    return 1;
+  }
+  if (!glfwInit()) {
+    std::cerr << "[ts_game] could not start GLFW\n";
+    return 1;
+  }
+  render3d::hint_gl33_core();
+  GLFWwindow* win = glfwCreateWindow(1280, 720, (name + " | TombStone 3D").c_str(), nullptr,
+                                     nullptr);
+  if (!win) {
+    std::cerr << "[ts_game] could not open a GL 3.3 core window\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(win);
+  glfwSwapInterval(1);
+  int code = 0;
+  {
+    auto renderer = render3d::make_gl_renderer3d();
+    world3d::World3D world;
+    if (!renderer->init(&err) || !world.start(scene, dir, &err)) {
+      std::cerr << "[ts_game] " << err << '\n';
+      code = 1;
+    } else {
+      renderer->set_offscreen(false);
+      render3d::SceneView view(renderer.get());
+      view.set_project_dir(dir);
+      std::cout << "[ts_game] riding \"" << name << "\" in 3D: " << world.entities().size()
+                << " entities\n";
+      std::size_t seen = 0;
+      double last = glfwGetTime(), scripts_at = last;
+      bool prev_action = false, prev_pause = false;
+      long n = 0;
+      double mx0 = 0, my0 = 0;
+      glfwGetCursorPos(win, &mx0, &my0);
+      while (!glfwWindowShouldClose(win)) {
+        glfwPollEvents();
+        if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) break;
+        auto key = [&](int k) { return glfwGetKey(win, k) == GLFW_PRESS; };
+        world3d::Input3D in;
+        in.move_right = (key(GLFW_KEY_D) || key(GLFW_KEY_RIGHT) ? 1.0f : 0.0f) -
+                        (key(GLFW_KEY_A) || key(GLFW_KEY_LEFT) ? 1.0f : 0.0f);
+        in.move_forward = (key(GLFW_KEY_W) || key(GLFW_KEY_UP) ? 1.0f : 0.0f) -
+                          (key(GLFW_KEY_S) || key(GLFW_KEY_DOWN) ? 1.0f : 0.0f);
+        in.turn = (key(GLFW_KEY_Q) ? 2.0f : 0.0f) - (key(GLFW_KEY_Z) ? 2.0f : 0.0f);
+        double mx = 0, my = 0;
+        glfwGetCursorPos(win, &mx, &my);
+        if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+          in.turn -= static_cast<float>(mx - mx0) * 0.3f;
+        }
+        mx0 = mx;
+        my0 = my;
+        in.jump = key(GLFW_KEY_SPACE);
+        const bool action = key(GLFW_KEY_E);
+        in.action = action && !prev_action;
+        prev_action = action;
+        const bool pause = key(GLFW_KEY_P);
+        if (pause && !prev_pause) world.set_paused(!world.paused());
+        prev_pause = pause;
+        if (key(GLFW_KEY_F5)) {
+          scene3d::Scene3D fresh;
+          if (scene3d::load_file(scene3d::scene_path(dir), &fresh, &err) &&
+              world.start(fresh, dir, &err)) {
+            view.clear();
+            std::cout << "[ts_game] reloaded scene.json\n";
+          }
+        }
+        const double now = glfwGetTime();
+        world.update(now - last, in);
+        last = now;
+        if (now - scripts_at >= 0.5) {
+          scripts_at = now;
+          world.reload_scripts();
+        }
+        for (const world3d::Toast3D& t : world.take_toasts()) {
+          std::cout << "[toast] " << t.text << '\n';
+          glfwSetWindowTitle(win, (name + " | TombStone 3D | " + t.text).c_str());
+        }
+        print_log(world, &seen);
+        int fw = 0, fh = 0;
+        glfwGetFramebufferSize(win, &fw, &fh);
+        if (fw > 0 && fh > 0) {
+          view.begin(world.authored().environment, world.entities(), world.camera(), fw, fh);
+          view.end();
+          for (const std::string& p : view.take_problems()) std::cerr << "[ts_game] " << p << '\n';
+          glfwSwapBuffers(win);
+        }
+        if (frames >= 0 && ++n >= frames) break;
+      }
+      std::cout << "[ts_game] rode " << world.tick() << " ticks. So long.\n";
+      world.stop();
+    }
+    renderer->shutdown();
+  }
+  glfwDestroyWindow(win);
+  glfwTerminate();
+  return code;
+}
+
+}  // namespace game
+}  // namespace tombstone
+}  // namespace ts

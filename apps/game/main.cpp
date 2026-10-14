@@ -5,7 +5,9 @@
 //   ts_game --project <dir>            ride the project
 //   ts_game --smoke --project <dir>    headless check (no window)
 //   ts_game --project <dir> --log <f>  also keep the Telegraph in <f>
+// "dimension": "3d" projects ride in a GL 3.3 core window (Game3D.cpp).
 
+#include "Game3D.h"
 #include "GameRenderer.h"
 #include "HudText.h"
 
@@ -666,6 +668,11 @@ int main(int argc, char** argv) {
     return 2;
   }
   std::cout << "TombStone Game\n";
+  if (game::is_3d_project(opt.project)) {
+    const std::string name = project_name(opt.project);
+    return opt.smoke ? game::run_smoke_3d(opt.project, name)
+                     : game::run_window_3d(opt.project, name, opt.frames);
+  }
   return opt.smoke ? run_smoke(opt.project, telegraph)
                    : run_window(opt, telegraph);
 }
