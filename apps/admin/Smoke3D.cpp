@@ -87,14 +87,20 @@ int scene_roundtrip(const fs::path& root) {
   s.entities[1].script->set("label", ts::tombstone::ScriptValue::of_text("Crate \"A\""));
   s.entities[1].material->albedo_texture = "assets/boards.tga";
   s.selection = {2};
+  // v8: VR components ride along.
+  s.entities[1].grabbable = s3::Grabbable3D{};
+  s.entities[1].grabbable->throw_scale = 1.5f;
+  s.entities[3].vr_rig = s3::VrRig3D{};
+  s.entities[3].vr_rig->locomotion = s3::VrRig3D::Locomotion::Teleport;
+  s.entities[3].vr_rig->snap_turn_deg = 30.0f;
   const std::string text = s3::write(s);
   s3::Scene3D back;
   std::string err;
   if (!s3::parse(text, &back, &err)) return fail("parse own output: " + err);
-  if (!(back == s)) return fail("scene.json v7 round trip changed the scene");
-  if (s3::write(back) != text) return fail("scene.json v7 not byte-stable");
-  if (text.find("\"version\": 7") == std::string::npos || !s3::is_3d_scene_text(text)) {
-    return fail("v7 header");
+  if (!(back == s)) return fail("scene.json v8 round trip changed the scene");
+  if (s3::write(back) != text) return fail("scene.json v8 not byte-stable");
+  if (text.find("\"version\": 8") == std::string::npos || !s3::is_3d_scene_text(text)) {
+    return fail("v8 header");
   }
   // 2D and 3D refuse each other's files with a clear reason.
   ts::tombstone::scene_json::SceneDoc doc2d;
@@ -109,9 +115,9 @@ int scene_roundtrip(const fs::path& root) {
   const fs::path file = root / "_scene3d_roundtrip" / "scene.json";
   if (!s3::save_file(file.string(), s, &err) || !s3::load_file(file.string(), &back, &err) ||
       !(back == s)) {
-    return fail("scene.json v7 file round trip: " + err);
+    return fail("scene.json v8 file round trip: " + err);
   }
-  std::cout << "[smoke] 3D scene.json v7 round trip OK (" << s.entities.size()
+  std::cout << "[smoke] 3D scene.json v8 round trip OK (" << s.entities.size()
             << " entities, byte-stable; 2D/3D readers refuse each other)\n";
   return 0;
 }

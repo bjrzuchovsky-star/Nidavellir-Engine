@@ -22,7 +22,8 @@ using render3d::Quat;
 using render3d::Transform;
 using render3d::Vec3;
 
-inline constexpr int kScene3DVersion = 7;
+// v8 added the VR components (vr_rig, grabbable); v7 files still load.
+inline constexpr int kScene3DVersion = 8;
 
 // What to draw: "primitive:cube|plane|sphere|capsule" or a project-relative
 // .gltf / .glb path.
@@ -74,6 +75,31 @@ struct Player3D {
   bool operator==(const Player3D& o) const = default;
 };
 
+// VR player rig ("dimension": "vr"): the headset's floor origin starts at
+// the entity (yaw included) and moves with it. Comfort options live here
+// and can be changed in the headset from the comfort menu.
+struct VrRig3D {
+  enum class Locomotion : std::uint8_t { Teleport, Smooth, Both };
+  Locomotion locomotion = Locomotion::Both;
+  float move_speed = 2.0f;        // m/s, left stick
+  float snap_turn_deg = 45.0f;    // right stick; 0 = smooth turn
+  float smooth_turn_speed = 120.0f;  // deg/s when snap_turn_deg is 0
+  float teleport_range = 9.0f;    // m, arc reach
+  bool vignette = true;           // darken the edges while moving / turning
+  bool seated = false;            // lift the head by seated_offset
+  float seated_offset = 0.45f;    // m
+  bool operator==(const VrRig3D& o) const = default;
+};
+
+// Can be picked up with the grip (squeeze) and thrown. Falls with gravity
+// until it lands on a static collider or the ground plane.
+struct Grabbable3D {
+  bool throwable = true;    // keep the hand's velocity on release
+  bool snap_to_hand = false;  // centre on the hand instead of keeping the offset
+  float throw_scale = 1.0f;   // release velocity multiplier
+  bool operator==(const Grabbable3D& o) const = default;
+};
+
 struct Entity3D {
   std::uint64_t id = 0;
   std::string name;
@@ -85,6 +111,8 @@ struct Entity3D {
   std::optional<Collider3D> collider;
   std::optional<Player3D> player;
   std::optional<ScriptData> script;
+  std::optional<VrRig3D> vr_rig;           // v8
+  std::optional<Grabbable3D> grabbable;    // v8
   bool operator==(const Entity3D& o) const = default;
 };
 
@@ -130,6 +158,19 @@ bool is_3d_scene_text(const std::string& text);
 
 // A fresh 3D claim: ground, sun-lit crate, a lamp post, a rider.
 Scene3D make_starter_scene();
+
+// A fresh VR claim: ground, crate, lamp, a table with things to grab and
+// the player rig.
+Scene3D make_vr_starter_scene();
+
+// The "haunted-saloon-vr" sample: a saloon interior of primitives (bar,
+// tables, piano, swinging doors), bottles and a hat to grab and throw, a
+// spittoon that counts what lands in it, a ghost that answers the laser,
+// a piano that plays when pointed at and triggered, and the VR rig. Writes
+// project.json ("dimension": "vr") too.
+bool write_haunted_saloon_sample(const std::string& project_dir,
+                                 const std::string& display_name,
+                                 std::string* error);
 
 // The "ghost-town-3d" sample: main street of primitives, a glTF lantern
 // (assets/lantern.gltf, written alongside), a checker-boarded ground

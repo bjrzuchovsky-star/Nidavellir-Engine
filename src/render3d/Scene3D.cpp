@@ -95,6 +95,28 @@ Value entity_json(const Entity3D& e) {
     p.set("camera_height", Value::number(e.player->camera_height));
     o.set("player", std::move(p));
   }
+  if (e.vr_rig) {
+    const VrRig3D& r = *e.vr_rig;
+    Value v = Value::object();
+    v.set("locomotion", Value::string(r.locomotion == VrRig3D::Locomotion::Teleport ? "teleport"
+                                      : r.locomotion == VrRig3D::Locomotion::Smooth ? "smooth"
+                                                                                    : "both"));
+    v.set("move_speed", Value::number(r.move_speed));
+    v.set("snap_turn_deg", Value::number(r.snap_turn_deg));
+    v.set("smooth_turn_speed", Value::number(r.smooth_turn_speed));
+    v.set("teleport_range", Value::number(r.teleport_range));
+    v.set("vignette", Value::boolean(r.vignette));
+    v.set("seated", Value::boolean(r.seated));
+    v.set("seated_offset", Value::number(r.seated_offset));
+    o.set("vr_rig", std::move(v));
+  }
+  if (e.grabbable) {
+    Value g = Value::object();
+    g.set("throwable", Value::boolean(e.grabbable->throwable));
+    g.set("snap_to_hand", Value::boolean(e.grabbable->snap_to_hand));
+    g.set("throw_scale", Value::number(e.grabbable->throw_scale));
+    o.set("grabbable", std::move(g));
+  }
   if (e.script) {
     Value s = Value::object();
     s.set("path", Value::string(e.script->path));
@@ -173,6 +195,30 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     p.camera_distance = std::clamp(v.flt("camera_distance", p.camera_distance), 1.0f, 100.0f);
     p.camera_height = std::clamp(v.flt("camera_height", p.camera_height), -20.0f, 50.0f);
     e.player = p;
+  }
+  if (o["vr_rig"].is_object()) {
+    const Value& v = o["vr_rig"];
+    VrRig3D r;
+    const std::string loco = v.str("locomotion");
+    r.locomotion = loco == "teleport" ? VrRig3D::Locomotion::Teleport
+                   : loco == "smooth" ? VrRig3D::Locomotion::Smooth
+                                      : VrRig3D::Locomotion::Both;
+    r.move_speed = std::clamp(v.flt("move_speed", r.move_speed), 0.1f, 20.0f);
+    r.snap_turn_deg = std::clamp(v.flt("snap_turn_deg", r.snap_turn_deg), 0.0f, 180.0f);
+    r.smooth_turn_speed = std::clamp(v.flt("smooth_turn_speed", r.smooth_turn_speed), 10.0f, 720.0f);
+    r.teleport_range = std::clamp(v.flt("teleport_range", r.teleport_range), 1.0f, 50.0f);
+    r.vignette = v.flag("vignette", r.vignette);
+    r.seated = v.flag("seated", r.seated);
+    r.seated_offset = std::clamp(v.flt("seated_offset", r.seated_offset), 0.0f, 1.5f);
+    e.vr_rig = r;
+  }
+  if (o["grabbable"].is_object()) {
+    const Value& v = o["grabbable"];
+    Grabbable3D g;
+    g.throwable = v.flag("throwable", g.throwable);
+    g.snap_to_hand = v.flag("snap_to_hand", g.snap_to_hand);
+    g.throw_scale = std::clamp(v.flt("throw_scale", g.throw_scale), 0.0f, 5.0f);
+    e.grabbable = g;
   }
   if (o["script"].is_object()) {
     const Value& v = o["script"];
@@ -453,6 +499,49 @@ Scene3D make_starter_scene() {
 
 namespace {
 
+Entity3D vr_rig_entity(std::uint64_t id, Vec3 pos, float yaw_deg) {
+  Entity3D r;
+  r.id = id;
+  r.name = "VR Rig";
+  r.transform.position = pos;
+  r.transform.rotation = Quat::from_euler_deg({0.0f, yaw_deg, 0.0f});
+  r.vr_rig = VrRig3D{};
+  return r;
+}
+
+Entity3D grab_prop(std::uint64_t id, const std::string& name, const std::string& shape, Vec3 pos,
+                   Vec3 scale, const float rgb[3], float rough = 0.5f, float metal = 0.0f) {
+  Entity3D e = prim(id, name, shape, pos, scale, rgb, rough, metal);
+  e.grabbable = Grabbable3D{};
+  return e;
+}
+
+}  // namespace
+
+Scene3D make_vr_starter_scene() {
+  Scene3D s;
+  s.entities.push_back(ground(1, 30.0f, ""));
+  const float wood[3] = {0.55f, 0.36f, 0.2f};
+  const float red[3] = {0.75f, 0.2f, 0.15f};
+  const float blue[3] = {0.2f, 0.35f, 0.75f};
+  s.entities.push_back(prim(2, "Crate", "cube", {2.0f, 0.5f, -1.0f}, {1, 1, 1}, wood, 0.7f));
+  Entity3D lamp;
+  lamp.id = 3;
+  lamp.name = "Lamp";
+  lamp.transform.position = {-2.0f, 2.5f, 1.0f};
+  lamp.light = Light3D{};
+  s.entities.push_back(lamp);
+  s.entities.push_back(prim(4, "Table", "cube", {0.0f, 0.4f, 1.6f}, {1.2f, 0.8f, 0.7f}, wood, 0.8f));
+  s.entities.push_back(grab_prop(5, "Red Block", "cube", {-0.25f, 0.9f, 1.6f}, {0.18f, 0.18f, 0.18f}, red));
+  s.entities.push_back(grab_prop(6, "Blue Ball", "sphere", {0.25f, 0.9f, 1.6f}, {0.2f, 0.2f, 0.2f}, blue));
+  s.entities.push_back(vr_rig_entity(7, {0.0f, 0.0f, 2.6f}, 0.0f));
+  s.editor_camera.target = {0, 0.8f, 1.6f};
+  s.editor_camera.distance = 8.0f;
+  return s;
+}
+
+namespace {
+
 bool write_text(const fs::path& p, const std::string& text, std::string* error) {
   std::error_code ec;
   fs::create_directories(p.parent_path(), ec);
@@ -505,6 +594,73 @@ constexpr const char* kBellLua = R"lua(-- Church bell: rings when a rider walks 
 function on_trigger_enter(other)
   toast(other:name() .. " rang the bell", 2)
   self:set("rings", self:get("rings", 0) + 1)
+end
+)lua";
+
+
+constexpr const char* kGhostLua = R"lua(-- The saloon ghost: bobs over the piano. Point the laser at it
+-- (on_point / on_unpoint) and pull the trigger (on_vr_trigger) to spook
+-- it; vr.haptic buzzes the hand that did it.
+props = {
+  bob = 0.15,   -- metres
+}
+
+local t = 0
+local base_y = nil
+
+function on_start()
+  local _, y, _ = self:pos3()
+  base_y = y
+end
+
+function on_tick(dt)
+  t = t + dt
+  local x, _, z = self:pos3()
+  self:set_pos3(x, base_y + math.sin(t * 2) * props.bob, z)
+  self:spin(30 * dt)
+end
+
+function on_point(hand)
+  self:set("pointed", self:get("pointed", 0) + 1)
+end
+
+function on_vr_trigger(hand)
+  local n = self:get("spooks", 0) + 1
+  self:set("spooks", n)
+  toast("Boo! (" .. n .. ")", 2)
+  vr.haptic(hand, 0.8, 0.15)
+end
+)lua";
+
+constexpr const char* kPianoLua = R"lua(-- Player piano: laser + trigger (or the desktop action key) plays a tune.
+function on_vr_trigger(hand)
+  self:set("tunes", self:get("tunes", 0) + 1)
+  toast("The piano plinks out Camptown Races", 2)
+end
+
+function on_interact(rider)
+  on_vr_trigger("right")
+end
+)lua";
+
+constexpr const char* kSpittoonLua = R"lua(-- Spittoon: counts what gets thrown in (grabbables entering the trigger).
+function on_trigger_enter(other)
+  local n = self:get("dings", 0) + 1
+  self:set("dings", n)
+  toast("Ding! " .. other:name() .. " in the spittoon (" .. n .. ")", 2)
+end
+)lua";
+
+constexpr const char* kBottleLua = R"lua(-- Whiskey bottle: reacts to hands. on_grab(hand) / on_release(hand, speed).
+function on_grab(hand)
+  self:set("grabs", self:get("grabs", 0) + 1)
+  vr.haptic(hand, 0.3, 0.05)
+end
+
+function on_release(hand, speed)
+  if speed > 3 then
+    toast("Yeehaw! " .. string.format("%.1f", speed) .. " m/s", 1.5)
+  end
 end
 )lua";
 
@@ -612,6 +768,107 @@ bool write_ghost_town_sample(const std::string& project_dir,
 
   const std::string pj = json_mini::write_object({{"name", display_name},
                                                   {"dimension", "3d"},
+                                                  {"created", "sample"}});
+  return write_text(dir / "project.json", pj, error);
+}
+
+bool write_haunted_saloon_sample(const std::string& project_dir,
+                                 const std::string& display_name, std::string* error) {
+  const fs::path dir(project_dir);
+  std::error_code ec;
+  fs::create_directories(dir / "scripts", ec);
+  if (!write_text(dir / "scripts" / "ghost.lua", kGhostLua, error) ||
+      !write_text(dir / "scripts" / "piano.lua", kPianoLua, error) ||
+      !write_text(dir / "scripts" / "spittoon.lua", kSpittoonLua, error) ||
+      !write_text(dir / "scripts" / "bottle.lua", kBottleLua, error)) {
+    return false;
+  }
+  Scene3D s;
+  s.environment.sky_top[0] = 0.05f;
+  s.environment.sky_top[1] = 0.06f;
+  s.environment.sky_top[2] = 0.14f;
+  s.environment.sky_horizon[0] = 0.30f;
+  s.environment.sky_horizon[1] = 0.20f;
+  s.environment.sky_horizon[2] = 0.28f;
+  s.environment.sun_intensity = 0.8f;
+  s.environment.ambient = 0.3f;
+  const float plank[3] = {0.42f, 0.27f, 0.16f};
+  const float dark[3] = {0.22f, 0.14f, 0.09f};
+  const float brass[3] = {0.78f, 0.62f, 0.30f};
+  const float glass[3] = {0.30f, 0.55f, 0.32f};
+  const float amber[3] = {0.70f, 0.42f, 0.12f};
+  const float felt[3] = {0.16f, 0.38f, 0.20f};
+  const float hat[3] = {0.30f, 0.22f, 0.15f};
+  const float ghost_c[3] = {0.80f, 0.88f, 0.95f};
+  std::uint64_t id = 1;
+  s.entities.push_back(ground(id++, 30.0f, ""));
+  // Floor boards, walls (back, sides) and the swinging doors at the front.
+  Entity3D floor = prim(id++, "Floor Boards", "cube", {0, 0.02f, 0}, {12.0f, 0.04f, 12.0f}, plank, 0.9f);
+  floor.collider.reset();
+  s.entities.push_back(floor);
+  s.entities.push_back(prim(id++, "Back Wall", "cube", {0, 2.0f, -6.0f}, {12.0f, 4.0f, 0.3f}, dark));
+  s.entities.push_back(prim(id++, "Left Wall", "cube", {-6.0f, 2.0f, 0}, {0.3f, 4.0f, 12.0f}, dark));
+  s.entities.push_back(prim(id++, "Right Wall", "cube", {6.0f, 2.0f, 0}, {0.3f, 4.0f, 12.0f}, dark));
+  s.entities.push_back(prim(id++, "Front Wall L", "cube", {-3.6f, 2.0f, 6.0f}, {4.8f, 4.0f, 0.3f}, dark));
+  s.entities.push_back(prim(id++, "Front Wall R", "cube", {3.6f, 2.0f, 6.0f}, {4.8f, 4.0f, 0.3f}, dark));
+  s.entities.push_back(prim(id++, "Swinging Door L", "cube", {-0.6f, 1.3f, 6.0f}, {1.1f, 1.2f, 0.06f}, plank));
+  s.entities.push_back(prim(id++, "Swinging Door R", "cube", {0.6f, 1.3f, 6.0f}, {1.1f, 1.2f, 0.06f}, plank));
+  // The bar along the back with bottles to grab.
+  s.entities.push_back(prim(id++, "Bar", "cube", {0, 0.55f, -4.0f}, {6.0f, 1.1f, 0.8f}, plank, 0.6f));
+  s.entities.push_back(prim(id++, "Brass Rail", "cube", {0, 0.15f, -3.55f}, {6.0f, 0.06f, 0.06f}, brass, 0.3f, 0.9f));
+  for (int i = 0; i < 4; ++i) {
+    Entity3D b = grab_prop(id++, "Bottle " + std::to_string(i + 1), "capsule",
+                           {-1.5f + static_cast<float>(i), 1.175f, -4.0f}, {0.08f, 0.15f, 0.08f},
+                           i % 2 ? amber : glass, 0.2f);
+    b.collider->shape = Collider3D::Shape::Box;
+    b.script = ScriptData{};
+    b.script->path = "scripts/bottle.lua";
+    s.entities.push_back(b);
+  }
+  // Card table with a hat on it.
+  s.entities.push_back(prim(id++, "Card Table", "cube", {2.5f, 0.4f, 0.5f}, {1.4f, 0.8f, 1.4f}, felt, 0.9f));
+  s.entities.push_back(grab_prop(id++, "Stetson", "sphere", {2.5f, 0.88f, 0.5f}, {0.36f, 0.16f, 0.36f}, hat, 0.9f));
+  s.entities.push_back(grab_prop(id++, "Poker Chip Stack", "cube", {2.2f, 0.84f, 0.8f}, {0.08f, 0.08f, 0.08f}, brass));
+  // Spittoon (trigger) by the bar.
+  Entity3D spit = prim(id++, "Spittoon", "sphere", {-2.0f, 0.2f, -2.0f}, {0.4f, 0.4f, 0.4f}, brass, 0.3f, 0.9f);
+  spit.collider->trigger = true;
+  spit.collider->size = {1.6f, 1.6f, 1.6f};
+  spit.script = ScriptData{};
+  spit.script->path = "scripts/spittoon.lua";
+  s.entities.push_back(spit);
+  // Piano against the left wall, the ghost above it.
+  Entity3D piano = prim(id++, "Piano", "cube", {-5.0f, 0.7f, -1.0f}, {1.2f, 1.4f, 2.2f}, dark, 0.5f);
+  piano.script = ScriptData{};
+  piano.script->path = "scripts/piano.lua";
+  s.entities.push_back(piano);
+  Entity3D ghost = prim(id++, "Ghost", "capsule", {-4.4f, 1.9f, -1.0f}, {0.5f, 0.9f, 0.5f}, ghost_c, 0.3f);
+  ghost.material->emissive[0] = 0.35f;
+  ghost.material->emissive[1] = 0.40f;
+  ghost.material->emissive[2] = 0.45f;
+  ghost.collider->trigger = true;
+  ghost.script = ScriptData{};
+  ghost.script->path = "scripts/ghost.lua";
+  ghost.script->set("bob", ScriptValue::of_number(0.2));
+  s.entities.push_back(ghost);
+  // Lamps.
+  const Vec3 lamp_pos[3] = {{-3.0f, 3.2f, -3.0f}, {3.0f, 3.2f, -3.0f}, {0.0f, 3.2f, 2.5f}};
+  for (int i = 0; i < 3; ++i) {
+    Entity3D l;
+    l.id = id++;
+    l.name = "Oil Lamp " + std::to_string(i + 1);
+    l.transform.position = lamp_pos[i];
+    Light3D light;
+    light.intensity = 7.0f;
+    light.range = 9.0f;
+    l.light = light;
+    s.entities.push_back(l);
+  }
+  s.entities.push_back(vr_rig_entity(id++, {0.0f, 0.0f, 3.5f}, 0.0f));
+  s.editor_camera.target = {0, 1, 0};
+  s.editor_camera.distance = 16.0f;
+  if (!save_file(scene_path(project_dir), s, error)) return false;
+  const std::string pj = json_mini::write_object({{"name", display_name},
+                                                  {"dimension", "vr"},
                                                   {"created", "sample"}});
   return write_text(dir / "project.json", pj, error);
 }
