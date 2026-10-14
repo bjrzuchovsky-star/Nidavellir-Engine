@@ -14,6 +14,7 @@ add_library(ts_editor
   ui/FolderBrowser.cpp
   ui/Theme.cpp
   ui/PlayUi.cpp
+  ui/QuadBlend.cpp
   screens/LoadingScreen.cpp
   screens/LoginScreen.cpp
   screens/ProjectManagerScreen.cpp

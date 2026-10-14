@@ -125,7 +125,20 @@ void GameRenderer::render_screen(int framebuffer_w, int framebuffer_h,
 }
 
 void GameRenderer::draw_quads(const std::vector<runtime::DrawQuad>& quads) {
+  std::uint8_t blend = 0;
+  auto set_blend = [&](std::uint8_t mode) {
+    if (mode == blend) return;
+    blend = mode;
+    if (mode == 1) {
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE);            // glowing particles
+    } else if (mode == 2) {
+      glBlendFunc(GL_DST_COLOR, GL_SRC_COLOR);      // lightmap: dst * src * 2
+    } else {
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    }
+  };
   for (const runtime::DrawQuad& q : quads) {
+    set_blend(q.blend);
     const std::uint64_t handle = q.image ? texture(*q.image).handle : 0;
     glColor4f(q.rgba[0], q.rgba[1], q.rgba[2], q.rgba[3]);
     const bool turned = q.rotation != 0.0f;
@@ -141,6 +154,11 @@ void GameRenderer::draw_quads(const std::vector<runtime::DrawQuad>& quads) {
     if (handle != 0) {
       glEnable(GL_TEXTURE_2D);
       glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(handle));
+      if (q.image->rfind("mem:fx/", 0) == 0) {
+        // Lightmap and soft particles: smooth, not pixel-art crisp.
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      }
       glBegin(GL_QUADS);
       glTexCoord2f(q.u0, q.v0);
       glVertex2f(q.x0, q.y0);
@@ -161,6 +179,7 @@ void GameRenderer::draw_quads(const std::vector<runtime::DrawQuad>& quads) {
     }
     if (turned) glPopMatrix();
   }
+  set_blend(0);
 }
 
 void GameRenderer::render_overlay(
