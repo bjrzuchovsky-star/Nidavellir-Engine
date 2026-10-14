@@ -1,0 +1,19 @@
+# ts_world3d: the 3D play runtime (rider controller, capsule-vs-box
+# collision, triggers, follow camera) with Lua scripts through the shared
+# ScriptHost. No GL; drawn by ts_render3d's SceneView.
+add_library(ts_world3d
+  World3D.cpp
+  World3D_Lua.cpp
+)
+target_include_directories(ts_world3d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(ts_world3d
+  PUBLIC
+    ts_render3d
+    ts_runtime
+  PRIVATE
+    ts_lua
+)
+target_compile_features(ts_world3d PUBLIC cxx_std_20)
+if(MSVC)
+  target_compile_definitions(ts_world3d PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
