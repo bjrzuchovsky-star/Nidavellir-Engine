@@ -5,6 +5,7 @@
 #include "editor/screens/Editor2DScreen.h"
 
 #include "editor/launch/GameLauncher.h"
+#include "editor/ui/QuadDraw.h"
 #include "editor/ui/Theme.h"
 #include "editor/workspace/SceneIO.h"
 
@@ -238,10 +239,10 @@ void Editor2DScreen::draw_posse_viewport() {
     const ImVec2 p1 = to_screen(q.x1, q.y1);
     const std::uint64_t handle = q.image ? texture(*q.image).handle : 0;
     if (handle != 0) {
-      draw->AddImage(posse_tex_id(handle), p0, p1, ImVec2(q.u0, q.v0), ImVec2(q.u1, q.v1),
+      quad_draw::image(draw, posse_tex_id(handle), p0, p1, q.rotation, ImVec2(q.u0, q.v0), ImVec2(q.u1, q.v1),
                      quad_color(q.rgba));
     } else {
-      draw->AddRectFilled(p0, p1, quad_color(q.rgba));
+      quad_draw::filled(draw, p0, p1, q.rotation, quad_color(q.rgba));
     }
   }
   // Rider tags, plus a ghost box where the server has them right now.
