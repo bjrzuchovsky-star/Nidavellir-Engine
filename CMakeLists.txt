@@ -31,6 +31,7 @@ if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
   add_subdirectory(src/runtime)
   # Plugins: interface, catalog, manager (ts_plugin) and the built-ins.
   add_subdirectory(src/plugin)
+  add_subdirectory(src/plugins)
 endif()
 
 # Networking (ts_net: Transport interface + ENet backend). ENet is fetched by
