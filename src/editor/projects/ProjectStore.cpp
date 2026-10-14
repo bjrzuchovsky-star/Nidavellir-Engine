@@ -1,5 +1,6 @@
 #include "editor/projects/ProjectStore.h"
 
+#include "plugins/shipyard/Sample.h"
 #include "plugins/survival/Sample.h"
 #include "render3d/Scene3D.h"
 
@@ -296,6 +297,28 @@ void ProjectStore::seed_vr_sample(bool force) {
   std::ofstream(marker) << "seeded\n";
 }
 
+void ProjectStore::seed_shipyard_sample(bool force) {
+  // Roots seeded before Airship Works landed get Sky Pirates once (a marker
+  // keeps a deleted sample deleted).
+  const fs::path root(projects_root_);
+  const fs::path marker = root / ".sky-pirates.seeded";
+  std::error_code ec;
+  if (!force && fs::exists(marker, ec)) return;
+  const fs::path dir = root / shipyard::kSampleId;
+  if (!fs::exists(dir, ec)) {
+    std::string err;
+    ProjectInfo sky;
+    if (shipyard::write_sky_pirates_sample(dir.string(), shipyard::kSampleName, &err) &&
+        load_project_json(dir.string(), &sky, &err)) {
+      projects_.push_back(std::move(sky));
+    } else {
+      std::cerr << "[ProjectStore] sky-pirates sample: " << err << '\n';
+      return;
+    }
+  }
+  std::ofstream(marker) << "seeded\n";
+}
+
 bool ProjectStore::seed_sample_2d_if_empty() {
   if (!projects_.empty()) {
     return true;
@@ -338,6 +361,9 @@ bool ProjectStore::seed_sample_2d_if_empty() {
   } else {
     std::cerr << "[ProjectStore] frontier-survival sample: " << frontier_err << '\n';
   }
+
+  // And the Airship Works claim (2D with the ts.shipyard plugin on).
+  seed_shipyard_sample(true);
   return true;
 }
 
@@ -395,6 +421,7 @@ bool ProjectStore::refresh() {
   if (!projects_.empty()) {
     const std::size_t before = projects_.size();
     seed_vr_sample(false);
+    seed_shipyard_sample(false);
     if (projects_.size() != before) {
       std::sort(projects_.begin(), projects_.end(),
                 [](const ProjectInfo& a, const ProjectInfo& b) { return a.name < b.name; });

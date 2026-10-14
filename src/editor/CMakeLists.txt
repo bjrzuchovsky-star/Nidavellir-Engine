@@ -40,6 +40,7 @@ add_library(ts_editor
   plugins/EditorPlugins.cpp
   plugins/EditorBuiltinPlugins.cpp
   plugins/FrontierPanels.cpp
+  plugins/ShipyardPanels.cpp
   plugins/PluginsPanel.cpp
   screens/Editor2DScreen_Posse.cpp
   console/TelegraphLog.cpp

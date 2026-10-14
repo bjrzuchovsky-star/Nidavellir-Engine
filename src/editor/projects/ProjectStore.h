@@ -68,6 +68,7 @@ class ProjectStore {
   bool seed_sample_2d_if_empty();
   // haunted-saloon-vr: always with the other samples, once for older roots.
   void seed_vr_sample(bool force);
+  void seed_shipyard_sample(bool force);
 
   std::string projects_root_;
   std::vector<ProjectInfo> projects_;

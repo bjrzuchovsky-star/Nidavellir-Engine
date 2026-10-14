@@ -6,6 +6,7 @@
 
 #include "editor/plugins/EditorPlugins.h"
 #include "editor/plugins/FrontierPanels.h"
+#include "editor/plugins/ShipyardPanels.h"
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/ui/Theme.h"
 
@@ -98,6 +99,7 @@ namespace editor {
 void register_editor_builtin_plugins(plugin::Catalog& catalog,
                                      std::vector<std::string>* errors) {
   install_frontier_panels();
+  install_shipyard_panels();
   std::string err;
   if (!TS_PLUGIN_LINK(posse, catalog, &err) && errors) {
     errors->push_back(err);
