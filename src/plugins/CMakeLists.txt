@@ -3,6 +3,14 @@ add_library(ts_plugins_builtin
   Builtins.cpp
   TumbleweedPlugin.cpp
   RuntimePlugins.cpp
+  survival/Tiles.cpp
+  survival/WorldGen.cpp
+  survival/ChunkMap.cpp
+  survival/Data.cpp
+  survival/Inventory.cpp
+  survival/FrontierSim.cpp
+  survival/SurvivalPlugin.cpp
+  survival/Sample.cpp
 )
 
 target_include_directories(ts_plugins_builtin
@@ -16,6 +24,8 @@ target_link_libraries(ts_plugins_builtin
   PRIVATE
     ts_core
     ts_lua
+    ts_runtime
+    ts_scene
 )
 
 target_compile_features(ts_plugins_builtin PUBLIC cxx_std_20)
