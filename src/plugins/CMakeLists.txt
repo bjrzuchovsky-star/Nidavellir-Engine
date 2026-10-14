@@ -2,6 +2,7 @@
 add_library(ts_plugins_builtin
   Builtins.cpp
   TumbleweedPlugin.cpp
+  RuntimePlugins.cpp
 )
 
 target_include_directories(ts_plugins_builtin
@@ -13,6 +14,7 @@ target_link_libraries(ts_plugins_builtin
   PUBLIC
     ts_plugin
   PRIVATE
+    ts_core
     ts_lua
 )
 
