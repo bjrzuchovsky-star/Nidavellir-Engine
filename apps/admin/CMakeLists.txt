@@ -17,6 +17,7 @@ add_executable(ts_admin
   SmokeVR.cpp
   SmokeTools.cpp
   SmokeUi.cpp
+  SmokeFx.cpp
 )
 
 target_link_libraries(ts_admin
@@ -41,6 +42,7 @@ target_link_libraries(ts_admin
     ts_audio
     ts_audio3d
     ts_ui
+    ts_fx
 )
 
 target_compile_features(ts_admin PRIVATE cxx_std_20)
