@@ -23,7 +23,7 @@
 
 #define TS_PLUGIN_ABI_VERSION 1u
 // Bump when Plugin.h / WorldExtensions change in a way old binaries break.
-#define TS_PLUGIN_API_TAG "tombstone-plugin-api/1"
+#define TS_PLUGIN_API_TAG "tombstone-plugin-api/2"
 #define TS_PLUGIN_ENTRY_NAME "ts_plugin_entry"
 
 #if defined(_MSC_VER)

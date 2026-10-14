@@ -19,6 +19,12 @@ enum Button : std::uint32_t {
   kButtonAction = 1u << 0,  // E / Space / gamepad A
   kButtonAlt = 1u << 1,     // Shift / gamepad B
   kButtonStart = 1u << 2,   // Enter / gamepad Start
+  // Gameplay plugins (Frontier Survival): the network carries 8 bits.
+  kButtonUse = 1u << 3,      // F / gamepad X: mine, swing, eat
+  kButtonPlace = 1u << 4,    // G / gamepad Y: place the held block
+  kButtonFire = 1u << 5,     // R / right trigger: ranged weapon
+  kButtonNext = 1u << 6,     // X / right shoulder: next hotbar slot
+  kButtonPrev = 1u << 7,     // Z / left shoulder: previous hotbar slot
 };
 
 struct PlayerInput {
