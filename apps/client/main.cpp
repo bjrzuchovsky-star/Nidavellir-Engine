@@ -8,6 +8,7 @@
 
 #include "audio/GameAudio.h"
 #include "GameRenderer.h"
+#include "GameUi.h"
 #include "HudText.h"
 
 #include "gfx/GlTextureUploader.h"
@@ -20,6 +21,7 @@
 #include "runtime/Log.h"
 #include "runtime/Input.h"
 #include "runtime/World.h"
+#include "ui/UiScript.h"
 
 #if defined(__APPLE__)
 #define GL_SILENCE_DEPRECATION
@@ -57,7 +59,7 @@ constexpr const char* kUsage =
     "  --frames N           quit after N frames (testing)\n"
     "  --smoke              headless check: in-process server + 2 clients over\n"
     "                       loopback under lag, convergence, draw list\n"
-    "Keys: WASD / arrows ride | E / Space action | gamepad 1 too | Esc quit\n";
+    "Keys: WASD / arrows ride | E / Space action | gamepad 1 too | Esc menu\n";
 
 struct Options {
   std::string connect;
@@ -282,20 +284,29 @@ int run_window(const Options& opt) {
     mp::ClientState shown = mp::ClientState::Idle;
     ts::audio::GameAudio sound(opt.project, false, "ts_client");
     bool digit_down[10] = {};
+    // In-game UI: the project's ui/ documents and the pause menu (Esc / pad
+    // Start). The posse keeps riding while it is open; it only takes the keys.
+    game::GameUi gui;
+    gui.load(opt.project);
+    gui.attach(win);
     while (!glfwWindowShouldClose(win)) {
       glfwPollEvents();
-      if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) break;
       const auto now = std::chrono::steady_clock::now();
       const double dt = std::chrono::duration<double>(now - last).count();
       last = now;
-      for (int k = 0; k < 10; ++k) {
+      const game::GameUi::Frame uf = gui.update(win, dt, &sound.engine());
+      if (uf.quit) break;
+      ui::forward_ui_events(client.world(), uf.events);
+      ui::apply_ui_commands(gui.system(), client.world().take_ui_commands());
+      const bool keys_free = !gui.wants_input();
+      for (int k = 0; k < 10 && keys_free; ++k) {
         const bool down = glfwGetKey(win, GLFW_KEY_0 + k) == GLFW_PRESS;
         if (down && !digit_down[k]) {
           plugins::select_hotbar(client.world(), client.slot(), k == 0 ? 9 : k - 1);
         }
         digit_down[k] = down;
       }
-      client.update(dt, poll_input(win));
+      client.update(dt, keys_free ? poll_input(win) : runtime::PlayerInput{});
       if (client.has_snapshot()) {
         // Server-sent sounds (script events) + the scene's audio sources,
         // heard from this rider's camera.
@@ -332,6 +343,7 @@ int run_window(const Options& opt) {
         }
         renderer.render(view, fw, fh, quads);
         game::render_toasts(client_toasts(client), fw, fh);
+        gui.render_gl(renderer, fw, fh);
         glfwSwapBuffers(win);
       }
       if (client.clock() - title_at >= 0.5) {

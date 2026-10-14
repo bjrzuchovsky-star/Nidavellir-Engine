@@ -18,6 +18,7 @@ add_executable(ts_client
   main.cpp
   ${TS_GAME_APP_DIR}/GameRenderer.cpp
   ${TS_GAME_APP_DIR}/HudText.cpp
+  ${TS_GAME_APP_DIR}/GameUi.cpp
 )
 
 target_include_directories(ts_client PRIVATE
@@ -36,6 +37,7 @@ target_link_libraries(ts_client
     ts_plugins_builtin
     ts_gfx
     ts_audio
+    ts_ui
     glfw
     OpenGL::GL
 )

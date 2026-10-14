@@ -1,12 +1,14 @@
 #include "audio/GameAudio.h"
 #include "audio/SoundStage3D.h"
 #include "Game3D.h"
+#include "GameUi.h"
 
 #include "render3d/GlRenderer3D.h"
 #include "render3d/HiddenGl.h"
 #include "render3d/Scene3D.h"
 #include "render3d/SceneView.h"
 #include "runtime/Log.h"
+#include "ui/UiScript.h"
 #include "world3d/World3D.h"
 
 #include <GLFW/glfw3.h>
@@ -174,10 +176,30 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
       long n = 0;
       double mx0 = 0, my0 = 0;
       glfwGetCursorPos(win, &mx0, &my0);
+      GameUi gui;
+      gui.load(dir);
+      gui.attach(win);
+      bool menu_paused = false;
+      double ui_last = glfwGetTime();
       while (!glfwWindowShouldClose(win)) {
         glfwPollEvents();
-        if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) break;
-        auto key = [&](int k) { return glfwGetKey(win, k) == GLFW_PRESS; };
+        {
+          // In-game UI: Esc / pad Start pause menu, Lua ui.* both ways.
+          const double t = glfwGetTime();
+          const GameUi::Frame uf = gui.update(win, t - ui_last, &sound.engine());
+          ui_last = t;
+          if (uf.quit) break;
+          if (gui.pause_open() && !world.paused()) {
+            world.set_paused(true);
+            menu_paused = true;
+          } else if (!gui.pause_open() && menu_paused) {
+            world.set_paused(false);
+            menu_paused = false;
+          }
+          ui::forward_ui_events(world, uf.events);
+        }
+        const bool keys_free = !gui.wants_input();
+        auto key = [&](int k) { return keys_free && glfwGetKey(win, k) == GLFW_PRESS; };
         world3d::Input3D in;
         in.move_right = (key(GLFW_KEY_D) || key(GLFW_KEY_RIGHT) ? 1.0f : 0.0f) -
                         (key(GLFW_KEY_A) || key(GLFW_KEY_LEFT) ? 1.0f : 0.0f);
@@ -205,6 +227,7 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
             view.clear();
             sound.restart(dir, true);
             sound3d.reset();
+            gui.load(dir);
             std::cout << "[ts_game] reloaded scene.json\n";
           }
         }
@@ -219,12 +242,16 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
         }
         for (const world3d::Toast3D& t : world.take_toasts()) {
           std::cout << "[toast] " << t.text << '\n';
-          glfwSetWindowTitle(win, (name + " | TombStone 3D | " + t.text).c_str());
+          gui.toast(t.text, t.seconds);
         }
+        ui::apply_ui_commands(gui.system(), world.take_ui_commands());
         print_log(world, &seen);
         int fw = 0, fh = 0;
         glfwGetFramebufferSize(win, &fw, &fh);
         if (fw > 0 && fh > 0) {
+          std::uint64_t version = 0;
+          const std::vector<unsigned char>& overlay = gui.raster(fw, fh, &version);
+          renderer->set_overlay(overlay.empty() ? nullptr : overlay.data(), fw, fh, version);
           view.begin(world.authored().environment, world.entities(), world.camera(), fw, fh);
           view.end();
           for (const std::string& p : view.take_problems()) std::cerr << "[ts_game] " << p << '\n';
@@ -232,6 +259,7 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
         }
         if (frames >= 0 && ++n >= frames) break;
       }
+      gui.detach(win);
       std::cout << "[ts_game] rode " << world.tick() << " ticks. So long.\n";
       world.stop();
     }
