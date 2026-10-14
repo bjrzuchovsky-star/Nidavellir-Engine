@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "ui/UiScript.h"
 #include "editor/audio/EditorAudio.h"
 
 #include "editor/launch/GameLauncher.h"
@@ -98,6 +99,7 @@ bool Editor2DScreen::start_play() {
   }
   plugins_.manager().play_begin(play_.world());
   begin_sound_ride();
+  play_ui_.load(project_.path);
   // The edit scene waits here, untouched, until Stop.
   play_backup_ = workspace_;
   play_free_cam_ = false;
@@ -126,6 +128,7 @@ void Editor2DScreen::stop_play() {
   pump_play_logs();  // the last words of the ride
   plugins_.manager().play_end();
   end_sound_ride();
+  play_ui_.clear();
   play_.stop();
   play_.world().set_extensions(nullptr);
   if (play_backup_) {
@@ -176,7 +179,8 @@ bool Editor2DScreen::step_play() {
 
 int Editor2DScreen::update_play(double real_seconds,
                                 const runtime::InputFrame& input) {
-  const int ticks = play_.update(real_seconds, input);
+  const int ticks = play_.update(real_seconds, play_ui_.wants_input() ? runtime::InputFrame{} : input);
+  ui::apply_ui_commands(play_ui_.system(), play_.world().take_ui_commands());
   if (sound_stage_ && is_playing()) {
     // Ears ride with the camera the viewport shows.
     runtime::CameraView cam = play_.world().camera(play_.alpha());
@@ -601,6 +605,10 @@ void Editor2DScreen::draw_play_viewport() {
                   theme::U32(theme::Accent()), tag);
   }
   draw_play_toasts(draw, canvas_pos, canvas_size);
+  // In-game UI (ui/*.ui.json, Lua ui.*) over the view.
+  ui::forward_ui_events(world, play_ui_.update(canvas_pos, canvas_size, hovered,
+                                               viewport_focused_, io.DeltaTime));
+  play_ui_.draw(draw, canvas_pos);
   if (is_paused()) {
     draw->AddRectFilled(canvas_pos, canvas_end,
                         theme::U32(theme::Charcoal(), 0.35f));

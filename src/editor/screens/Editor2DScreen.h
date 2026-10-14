@@ -8,6 +8,7 @@
 #include "editor/plugins/PluginsPanel.h"
 #include "editor/screens/IScreen.h"
 #include "editor/ui/FolderBrowser.h"
+#include "editor/ui/PlayUi.h"
 #include "editor/workspace/Workspace2D.h"
 #include "mp/LocalPosse.h"
 #include "net/SimTransport.h"
@@ -468,6 +469,8 @@ class Editor2DScreen final : public IScreen {
   bool show_tile_palette_ = true;
   bool show_supply_wagon_ = true;
   bool show_stable_ = true;
+  bool show_ui_preview_ = false;
+  UiPreview ui_preview_;
   bool show_scripts_ = true;
   bool show_console_ = true;
   bool show_mixer_ = false;
@@ -569,6 +572,7 @@ class Editor2DScreen final : public IScreen {
   float play_cam_y_ = 0.0f;
   float play_cam_zoom_ = 1.0f;
   std::vector<runtime::DrawQuad> play_quads_;
+  PlayUi play_ui_;  // the project's ui/ documents over the Play view
 
   // Animation: sets for previews / the Stable, and the Stable's open set.
   AnimLibrary anim_lib_;
