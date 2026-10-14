@@ -52,6 +52,18 @@
 #ifndef GL_FRAMEBUFFER
 #define GL_FRAMEBUFFER 0x8D40
 #endif
+#ifndef GL_READ_FRAMEBUFFER
+#define GL_READ_FRAMEBUFFER 0x8CA8
+#endif
+#ifndef GL_DRAW_FRAMEBUFFER
+#define GL_DRAW_FRAMEBUFFER 0x8CA9
+#endif
+#ifndef GL_READ_FRAMEBUFFER_BINDING
+#define GL_READ_FRAMEBUFFER_BINDING 0x8CAA
+#endif
+#ifndef GL_SRGB8_ALPHA8
+#define GL_SRGB8_ALPHA8 0x8C43
+#endif
 #ifndef GL_RENDERBUFFER
 #define GL_RENDERBUFFER 0x8D41
 #endif
@@ -154,6 +166,8 @@ struct Gl33 {
   void(TS_GLAPI* DeleteRenderbuffers)(GLsizei, const GLuint*);
   void(TS_GLAPI* ActiveTexture)(GLenum);
   void(TS_GLAPI* GenerateMipmap)(GLenum);
+  void(TS_GLAPI* BlitFramebuffer)(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint,
+                                  GLbitfield, GLenum);
 };
 
 // Load once per process (needs a current GL 3.3 context). False with the
