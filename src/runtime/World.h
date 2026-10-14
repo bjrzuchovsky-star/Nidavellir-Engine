@@ -309,6 +309,18 @@ class World final : public ScriptWorld {
                     std::uint64_t from) override;
   void script_log(LogEntry entry) override;
   void script_open_extensions(lua_State* L, int sandbox) override;
+  void script_sound(SoundEvent event) override;
+
+  // --- Sound (World_Plugins.cpp) -----------------------------------------------
+  // Queue a sound for the host to play (see runtime/Sound.h). On a server
+  // the event also goes out on the "ts.audio" channel (to event.slot, -1 =
+  // every rider); a client queues what arrives on it. Keeps the newest
+  // kMaxSounds when nobody drains the queue (a headless server).
+  static constexpr std::size_t kMaxSounds = 256;
+  void play_sound(SoundEvent event);
+  std::vector<SoundEvent> take_sounds();
+  const std::vector<SoundEvent>& pending_sounds() const { return sounds_; }
+  std::uint64_t sound_total() const { return sound_total_; }
 
   // --- Plugins (WorldExtensions.h) -------------------------------------------
   // Systems / Lua tables / components plugins add. Outlives build() like the
@@ -459,6 +471,8 @@ class World final : public ScriptWorld {
   InputFrame input_{};
   NetRole net_role_ = NetRole::Local;
   std::vector<NetPost> net_posts_;
+  std::vector<SoundEvent> sounds_;
+  std::uint64_t sound_total_ = 0;
   // Plugin blockers' boxes near the body being moved (reused buffer).
   std::vector<Aabb> blocker_boxes_;
   bool in_step_ = false;  // script_tick() = the tick being simulated

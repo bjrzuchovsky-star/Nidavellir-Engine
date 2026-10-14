@@ -16,6 +16,7 @@
 // world keeps riding.
 
 #include "runtime/Log.h"
+#include "runtime/Sound.h"
 #include "scene/SceneData.h"
 
 #include <cstddef>
@@ -107,6 +108,8 @@ class ScriptWorld {
   virtual void script_log(LogEntry entry) = 0;
   // Plugins: add Lua globals to the sandbox table at stack index `sandbox`
   // (absolute). Default: nothing.
+  // audio.play / audio.music / ... (queued for the host, see Sound.h).
+  virtual void script_sound(SoundEvent /*event*/) {}
   virtual void script_open_extensions(lua_State* /*L*/, int /*sandbox*/) {}
 };
 

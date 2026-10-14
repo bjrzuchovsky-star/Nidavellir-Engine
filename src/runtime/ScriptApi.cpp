@@ -436,6 +436,138 @@ int m_randomseed(lua_State* L) {
   return 0;
 }
 
+// ---- audio.* ---------------------------------------------------------------
+// audio.play(clip [, {volume, pitch, variation, bus, loop, at = entity,
+//   x, y}]) / audio.music(clip [, fade]) / audio.playlist({...} [, fade])
+// / audio.stop_music([fade]) / audio.set_volume(bus, v) / audio.stop([fade]).
+// Queued for the host (and sent to every rider in multiplayer).
+
+float opt_field(lua_State* L, int t, const char* key, float fallback) {
+  if (t == 0) return fallback;
+  lua_getfield(L, t, key);
+  const float v = lua_isnumber(L, -1) ? static_cast<float>(lua_tonumber(L, -1)) : fallback;
+  lua_pop(L, 1);
+  return v == v ? v : fallback;
+}
+
+std::string clip_arg(lua_State* L, int idx) {
+  std::size_t n = 0;
+  const char* c = luaL_checklstring(L, idx, &n);
+  if (n == 0 || n > 512) luaL_argerror(L, idx, "clip name must be 1..512 characters");
+  return std::string(c, n);
+}
+
+bool known_bus(const std::string& b) {
+  return b == "master" || b == "music" || b == "sfx" || b == "ui" || b == "voice";
+}
+
+int send_sound(lua_State* L, SoundEvent ev) {
+  State& s = host(L);
+  if (!s.world) {
+    return luaL_error(L, "audio can only be used while the world runs (not at load)");
+  }
+  if (ev.entity == 0 && s.current) ev.entity = s.current->entity;
+  s.world->script_sound(std::move(ev));
+  return 0;
+}
+
+int a_play(lua_State* L) {
+  SoundEvent ev;
+  ev.clip = clip_arg(L, 1);
+  const int t = lua_istable(L, 2) ? 2 : 0;
+  ev.volume = std::clamp(opt_field(L, t, "volume", 1.0f), 0.0f, 2.0f);
+  ev.pitch = std::clamp(opt_field(L, t, "pitch", 1.0f), 0.1f, 4.0f);
+  ev.variation = std::clamp(opt_field(L, t, "variation", 0.0f), 0.0f, 0.9f);
+  if (t) {
+    lua_getfield(L, t, "bus");
+    if (lua_isstring(L, -1)) ev.bus = lua_tostring(L, -1);
+    lua_pop(L, 1);
+    lua_getfield(L, t, "loop");
+    ev.loop = lua_toboolean(L, -1) != 0;
+    lua_pop(L, 1);
+    lua_getfield(L, t, "at");
+    if (!lua_isnil(L, -1)) {
+      const std::uint64_t id = check_entity(L, lua_gettop(L));
+      if (const Entity2D* e = live(L, id)) {
+        ev.positional = true;
+        ev.entity = id;
+        ev.x = e->center_x();
+        ev.y = e->center_y();
+      }
+    }
+    lua_pop(L, 1);
+    lua_getfield(L, t, "x");
+    const bool has_x = lua_isnumber(L, -1) != 0;
+    lua_pop(L, 1);
+    if (has_x) {
+      ev.positional = true;
+      ev.x = opt_field(L, t, "x", 0.0f);
+      ev.y = opt_field(L, t, "y", 0.0f);
+      ev.z = opt_field(L, t, "z", 0.0f);
+    }
+  }
+  if (!known_bus(ev.bus)) {
+    return luaL_error(L, "unknown bus '%s' (master, music, sfx, ui, voice)", ev.bus.c_str());
+  }
+  return send_sound(L, std::move(ev));
+}
+
+float fade_arg(lua_State* L, int idx, double fallback) {
+  return std::clamp(static_cast<float>(luaL_optnumber(L, idx, fallback)), 0.0f, 30.0f);
+}
+
+int a_music(lua_State* L) {
+  SoundEvent ev;
+  ev.kind = SoundEvent::Kind::Music;
+  ev.clip = clip_arg(L, 1);
+  ev.bus = "music";
+  ev.fade = fade_arg(L, 2, 1.0);
+  ev.loop = true;
+  return send_sound(L, std::move(ev));
+}
+
+int a_playlist(lua_State* L) {
+  luaL_checktype(L, 1, LUA_TTABLE);
+  SoundEvent ev;
+  ev.kind = SoundEvent::Kind::Playlist;
+  ev.bus = "music";
+  ev.fade = fade_arg(L, 2, 1.0);
+  const lua_Integer n = luaL_len(L, 1);
+  if (n > 64) return luaL_error(L, "a playlist holds at most 64 tracks");
+  for (lua_Integer i = 1; i <= n; ++i) {
+    lua_geti(L, 1, i);
+    ev.list.push_back(clip_arg(L, lua_gettop(L)));
+    lua_pop(L, 1);
+  }
+  return send_sound(L, std::move(ev));
+}
+
+int a_stop_music(lua_State* L) {
+  SoundEvent ev;
+  ev.kind = SoundEvent::Kind::StopMusic;
+  ev.bus = "music";
+  ev.fade = fade_arg(L, 1, 1.0);
+  return send_sound(L, std::move(ev));
+}
+
+int a_set_volume(lua_State* L) {
+  SoundEvent ev;
+  ev.kind = SoundEvent::Kind::Volume;
+  ev.bus = luaL_checkstring(L, 1);
+  ev.volume = std::clamp(static_cast<float>(luaL_checknumber(L, 2)), 0.0f, 2.0f);
+  if (!known_bus(ev.bus)) {
+    return luaL_error(L, "unknown bus '%s' (master, music, sfx, ui, voice)", ev.bus.c_str());
+  }
+  return send_sound(L, std::move(ev));
+}
+
+int a_stop(lua_State* L) {
+  SoundEvent ev;
+  ev.kind = SoundEvent::Kind::Stop;
+  ev.fade = fade_arg(L, 1, 0.1);
+  return send_sound(L, std::move(ev));
+}
+
 }  // namespace
 
 void push_entity(lua_State* L, std::uint64_t id) {
@@ -531,6 +663,14 @@ void open_script_api(lua_State* L) {
       {"spawn", g_spawn},   {"duplicate", g_duplicate},
       {"tick", g_tick},     {"time", g_time},         {nullptr, nullptr}};
   luaL_setfuncs(L, globals, 0);
+
+  const luaL_Reg audio_fns[] = {
+      {"play", a_play},           {"music", a_music},
+      {"playlist", a_playlist},   {"stop_music", a_stop_music},
+      {"set_volume", a_set_volume}, {"stop", a_stop},
+      {nullptr, nullptr}};
+  luaL_newlib(L, audio_fns);
+  lua_setfield(L, -2, "audio");
 
   lua_getfield(L, -1, LUA_MATHLIBNAME);
   lua_pushcfunction(L, m_random);

@@ -88,8 +88,37 @@ std::vector<NetPost> World::take_net_posts() {
   return out;
 }
 
+void World::play_sound(SoundEvent event) {
+  ++sound_total_;
+  if (net_role_ == NetRole::Server) {
+    const int to = event.slot;
+    net_post(kSoundChannel, to, encode_sound(event));
+  }
+  if (sounds_.size() >= kMaxSounds) sounds_.erase(sounds_.begin());
+  sounds_.push_back(std::move(event));
+}
+
+std::vector<SoundEvent> World::take_sounds() {
+  std::vector<SoundEvent> out;
+  out.swap(sounds_);
+  return out;
+}
+
+void World::script_sound(SoundEvent event) { play_sound(std::move(event)); }
+
 bool World::net_deliver(const std::string& channel, int from_slot,
                         const std::vector<std::uint8_t>& bytes) {
+  if (channel == kSoundChannel) {
+    // Only the server speaks on it; a rider's client cannot make others
+    // hear things.
+    SoundEvent ev;
+    if (net_role_ != NetRole::Client || !decode_sound(bytes, &ev)) return false;
+    ev.slot = -1;
+    if (sounds_.size() >= kMaxSounds) sounds_.erase(sounds_.begin());
+    sounds_.push_back(std::move(ev));
+    ++sound_total_;
+    return true;
+  }
   if (!ext_) return false;
   for (const WorldExtensions::NetChannel& ch : ext_->channels) {
     if (ch.name != channel || !ch.receive) continue;

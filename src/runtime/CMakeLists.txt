@@ -12,6 +12,7 @@ add_library(ts_runtime
   PlaySession.cpp
   Script.cpp
   ScriptApi.cpp
+  Sound.cpp
 )
 
 target_include_directories(ts_runtime
