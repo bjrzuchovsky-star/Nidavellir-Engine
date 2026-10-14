@@ -15,6 +15,13 @@ add_subdirectory(src/input)
 add_subdirectory(src/physics)
 add_subdirectory(src/scene)
 
+# Sound (ts_audio): miniaudio + stb_vorbis fetched by hash, null backend
+# when no device opens (headless smokes and tools run it that way).
+if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
+  include(FetchMiniaudio)
+  add_subdirectory(src/audio)
+endif()
+
 # Windowed apps: GLFW + OpenGL + stb_image for ts_admin, ts_game and
 # ts_client (ts_gfx: texture cache + GL helpers). Dear ImGui is fetched only
 # for the Admin (see FetchImGuiDeps). ts_server needs none of it.
