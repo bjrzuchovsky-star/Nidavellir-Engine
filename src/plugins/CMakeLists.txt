@@ -14,6 +14,8 @@ add_library(ts_plugins_builtin
   shipyard/Parts.cpp
   shipyard/Design.cpp
   shipyard/ShipSim.cpp
+  shipyard/ShipyardPlugin.cpp
+  shipyard/Sample.cpp
 )
 
 target_include_directories(ts_plugins_builtin

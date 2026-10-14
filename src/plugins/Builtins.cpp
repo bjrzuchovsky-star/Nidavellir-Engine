@@ -9,6 +9,7 @@
 // Static plugin links (TS_PLUGIN_STATIC in each plugin's .cpp).
 TS_PLUGIN_DECLARE(tumbleweed);
 TS_PLUGIN_DECLARE(frontier);
+TS_PLUGIN_DECLARE(shipyard);
 
 namespace ts {
 namespace tombstone {
@@ -22,6 +23,10 @@ void register_builtin_plugins(plugin::Catalog& catalog,
   }
   err.clear();
   if (!TS_PLUGIN_LINK(frontier, catalog, &err) && errors) {
+    errors->push_back(err);
+  }
+  err.clear();
+  if (!TS_PLUGIN_LINK(shipyard, catalog, &err) && errors) {
     errors->push_back(err);
   }
 }
