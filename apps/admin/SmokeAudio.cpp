@@ -3,6 +3,11 @@
 #include "SmokeAudioClips.h"
 
 #include "audio/Audio.h"
+#include "audio/SoundStage.h"
+#include "render3d/Scene3D.h"
+#include "runtime/Sound.h"
+#include "runtime/World.h"
+#include "scene/SceneJson.h"
 
 #include <chrono>
 #include <cmath>
@@ -17,6 +22,10 @@ namespace {
 
 using namespace ts::audio;
 namespace fs = std::filesystem;
+namespace tsb = ts::tombstone;
+namespace rt = ts::tombstone::runtime;
+namespace sj = ts::tombstone::scene_json;
+namespace s3 = ts::tombstone::scene3d;
 
 int g_fail = 0;
 
@@ -294,6 +303,226 @@ void music_checks() {
   e.shutdown();
 }
 
+
+tsb::Entity2D ent(std::uint64_t id, const std::string& name, float x, float y) {
+  tsb::Entity2D e;
+  e.id = id;
+  e.name = name;
+  e.x = x;
+  e.y = y;
+  e.w = 32.0f;
+  e.h = 32.0f;
+  return e;
+}
+
+// Scene format: 2D v8 / 3D v10 carry the audio source; older files load.
+void scene_checks() {
+  sj::SceneDoc doc;
+  tsb::Entity2D a = ent(1, "Jukebox", 100.0f, 50.0f);
+  a.audio = tsb::AudioSourceData{};
+  a.audio->clip = "assets/sfx/piano.ogg";
+  a.audio->bus = "music";
+  a.audio->volume = 0.75f;
+  a.audio->pitch = 1.25f;
+  a.audio->loop = false;
+  a.audio->autoplay = false;
+  a.audio->spatial = true;
+  a.audio->min_distance = 64.0f;
+  a.audio->max_distance = 512.0f;
+  a.audio->doppler = true;
+  doc.entities = {a, ent(2, "Quiet", 0.0f, 0.0f)};
+  const std::string text = sj::write(doc);
+  sj::SceneDoc back;
+  std::string err;
+  check(sj::parse(text, &back, &err) && back.entities == doc.entities && sj::write(back) == text,
+        "2D audio round trip: " + err);
+  check(sj::kSceneVersion == 8 && text.find("\"version\": 8") != std::string::npos,
+        "2D writes v8");
+  check(text.find("\"audio\"") != std::string::npos &&
+            sj::write([&] {
+              sj::SceneDoc q = doc;
+              q.entities[0].audio.reset();
+              return q;
+            }()).find("\"audio\"") == std::string::npos,
+        "audio only written when present");
+  // A v7 file (no audio anywhere) loads unchanged.
+  sj::SceneDoc plain = doc;
+  plain.entities[0].audio.reset();
+  std::string v7 = sj::write(plain);
+  v7.replace(v7.find("\"version\": 8"), 12, "\"version\": 7");
+  sj::SceneDoc old;
+  check(sj::parse(v7, &old, &err) && old.entities == plain.entities, "2D v7 loads: " + err);
+  // Bad values clamp, unknown bus falls back to sfx; a non-object rejects.
+  std::string wild = text;
+  wild.replace(wild.find("\"music\""), 7, "\"banjo\"");
+  wild.replace(wild.find("\"volume\": 0.75"), 14, "\"volume\": 9");
+  sj::SceneDoc fixed;
+  check(sj::parse(wild, &fixed, &err) && fixed.entities[0].audio->bus == "sfx" &&
+            fixed.entities[0].audio->volume == tsb::AudioSourceData::kMaxVolume,
+        "2D audio normalised");
+
+  // 3D v10.
+  s3::Scene3D s = s3::make_starter_scene();
+  s.entities[0].audio = s3::audio_3d();
+  s.entities[0].audio->clip = "builtin:tune";
+  s.entities[0].audio->bus = "music";
+  s.entities[0].audio->doppler = true;
+  const std::string t3 = s3::write(s);
+  s3::Scene3D b3;
+  check(s3::parse(t3, &b3, &err) && b3 == s && s3::write(b3) == t3, "3D audio round trip: " + err);
+  check(s3::kScene3DVersion == 10 && t3.find("\"version\": 10") != std::string::npos,
+        "3D writes v10");
+  check(b3.entities[0].audio->min_distance == 2.0f && b3.entities[0].audio->max_distance == 40.0f,
+        "3D metre defaults");
+  std::string v9 = s3::write(s3::make_starter_scene());
+  v9.replace(v9.find("\"version\": 10"), 13, "\"version\": 9");
+  s3::Scene3D o3;
+  check(s3::parse(v9, &o3, &err) && !o3.entities[0].audio, "3D v9 loads: " + err);
+}
+
+// Sound events: wire format, server -> client, Lua, SoundStage.
+void event_checks() {
+  rt::SoundEvent ev;
+  ev.kind = rt::SoundEvent::Kind::Play;
+  ev.clip = "builtin:gunshot";
+  ev.bus = "sfx";
+  ev.volume = 0.8f;
+  ev.pitch = 1.1f;
+  ev.variation = 0.1f;
+  ev.positional = true;
+  ev.x = 10.0f;
+  ev.y = -4.0f;
+  ev.loop = true;
+  ev.entity = 42;
+  rt::SoundEvent pl;
+  pl.kind = rt::SoundEvent::Kind::Playlist;
+  pl.list = {"a.ogg", "b.mp3"};
+  pl.fade = 2.0f;
+  for (const rt::SoundEvent& e : {ev, pl}) {
+    rt::SoundEvent back;
+    check(rt::decode_sound(rt::encode_sound(e), &back) && back == e, "sound wire round trip");
+  }
+  std::vector<std::uint8_t> bytes = rt::encode_sound(ev);
+  bytes.pop_back();
+  rt::SoundEvent junk;
+  check(!rt::decode_sound(bytes, &junk), "truncated sound rejected");
+  bytes = rt::encode_sound(ev);
+  bytes[1] = 99;
+  check(!rt::decode_sound(bytes, &junk), "bad kind rejected");
+
+  // Server world posts on ts.audio; a client world queues what arrives; a
+  // local world posts nothing; a client cannot make others hear things.
+  rt::World server;
+  server.set_net_role(rt::NetRole::Server);
+  server.play_sound(ev);
+  std::vector<rt::NetPost> posts = server.take_net_posts();
+  check(posts.size() == 1 && posts[0].channel == rt::kSoundChannel && posts[0].to_slot == -1,
+        "server posts the sound");
+  rt::World client;
+  client.set_net_role(rt::NetRole::Client);
+  check(!posts.empty() && client.net_deliver(posts[0].channel, -1, posts[0].bytes),
+        "client takes ts.audio");
+  std::vector<rt::SoundEvent> heard = client.take_sounds();
+  check(heard.size() == 1 && heard[0].clip == ev.clip && heard[0].x == ev.x, "client hears it");
+  rt::World local;
+  local.play_sound(ev);
+  check(local.take_net_posts().empty() && local.take_sounds().size() == 1, "local queues only");
+  check(!server.net_deliver(rt::kSoundChannel, 1, posts.empty() ? bytes : posts[0].bytes),
+        "server ignores ts.audio from riders");
+  for (int i = 0; i < 300; ++i) local.play_sound(ev);
+  check(local.pending_sounds().size() == rt::World::kMaxSounds, "queue capped");
+
+  // Lua: audio.* reaches the queue with the right fields.
+  rt::World w;
+  w.script_library().put("scripts/band.lua",
+                         "function on_start()\n"
+                         "  audio.play('builtin:click', {bus = 'ui', volume = 0.5})\n"
+                         "  audio.play('builtin:step', {at = self, variation = 0.2})\n"
+                         "  audio.music('builtin:tune', 2)\n"
+                         "  audio.playlist({'builtin:tune', 'builtin:chime'})\n"
+                         "  audio.set_volume('music', 0.4)\n"
+                         "  audio.stop_music(0.5)\n"
+                         "  audio.stop()\n"
+                         "  local ok = pcall(audio.play, 'x', {bus = 'banjo'})\n"
+                         "  log('bad bus refused', not ok)\n"
+                         "end\n");
+  tsb::Entity2D band = ent(5, "Band", 200.0f, 100.0f);
+  band.script = tsb::ScriptData{};
+  band.script->path = "scripts/band.lua";
+  std::string err;
+  check(w.build({band}, "", &err), "lua world builds: " + err);
+  w.step(rt::InputFrame{});
+  std::vector<rt::SoundEvent> got = w.take_sounds();
+  using K = rt::SoundEvent::Kind;
+  check(got.size() == 7, "lua queued 7 sounds, got " + std::to_string(got.size()));
+  if (got.size() == 7) {
+    check(got[0].bus == "ui" && got[0].volume == 0.5f && !got[0].positional, "audio.play ui");
+    check(got[1].positional && got[1].x == 216.0f && got[1].y == 116.0f && got[1].entity == 5 &&
+              got[1].variation == 0.2f,
+          "audio.play at entity");
+    check(got[2].kind == K::Music && got[2].fade == 2.0f, "audio.music");
+    check(got[3].kind == K::Playlist && got[3].list.size() == 2, "audio.playlist");
+    check(got[4].kind == K::Volume && got[4].bus == "music" && got[4].volume == 0.4f,
+          "audio.set_volume");
+    check(got[5].kind == K::StopMusic && got[6].kind == K::Stop && got[6].entity == 5,
+          "audio.stop_music / stop");
+  }
+  bool refused = false;
+  for (const rt::LogEntry& l : w.take_logs()) refused |= l.text.find("bad bus refused true") != std::string::npos;
+  check(refused, "unknown bus refused");
+
+  // SoundStage on the null backend: events play, sources autoplay, follow
+  // and stop with their entity; the ride's volume changes are undone.
+  Engine e;
+  e.start({false, 48000, ""});
+  e.set_bus_volume(Bus::Music, 0.9f);
+  SoundStage stage(e);
+  stage.begin_ride("", false);
+  rt::World sw;
+  tsb::Entity2D loop = ent(7, "Campfire", 300.0f, 0.0f);
+  loop.audio = tsb::AudioSourceData{};
+  loop.audio->clip = "builtin:chime";
+  tsb::Entity2D once = ent(8, "Bell", 0.0f, 0.0f);
+  once.audio = tsb::AudioSourceData{};
+  once.audio->clip = "builtin:click";
+  once.audio->loop = false;
+  tsb::Entity2D off = ent(9, "Silent", 0.0f, 0.0f);
+  off.audio = tsb::AudioSourceData{};
+  off.audio->clip = "builtin:click";
+  off.audio->autoplay = false;
+  check(sw.build({loop, once, off}, "", &err), "stage world builds: " + err);
+  stage.update_2d(sw, 0.0f, 0.0f);
+  check(stage.sources_playing() == 2, "two autoplay sources");
+  e.update(0.1);
+  stage.update_2d(sw, 0.0f, 0.0f);
+  check(stage.sources_playing() == 1, "one-shot autoplay done, loop goes on");
+  e.update(0.1);
+  stage.update_2d(sw, 0.0f, 0.0f);
+  check(stage.sources_playing() == 1, "one-shot does not restart");
+  sw.script_set_visible(7, false);
+  stage.update_2d(sw, 0.0f, 0.0f);
+  check(stage.sources_playing() == 0, "hidden source stops");
+  sw.play_sound(ev);  // positional loop from entity 42
+  rt::SoundEvent vol;
+  vol.kind = rt::SoundEvent::Kind::Volume;
+  vol.bus = "music";
+  vol.volume = 0.1f;
+  sw.play_sound(vol);
+  stage.update_2d(sw, 0.0f, 0.0f);
+  check(stage.owned_voices(42) == 1 && near(e.bus_volume(Bus::Music), 0.1f), "events applied");
+  rt::SoundEvent stop;
+  stop.kind = rt::SoundEvent::Kind::Stop;
+  stop.entity = 42;
+  stop.fade = 0.0f;
+  stage.handle(stop);
+  check(stage.owned_voices(42) == 0, "stop by entity");
+  stage.end_ride(0.0f);
+  check(near(e.bus_volume(Bus::Music), 0.9f), "ride volume restored");
+  e.update(0.1);
+  check(e.voice_count() == 0, "ride end stops its voices");
+  e.shutdown();
+}
+
 }  // namespace
 
 int run_audio_smoke() {
@@ -307,12 +536,15 @@ int run_audio_smoke() {
   spatial_checks();
   mixing_checks();
   music_checks();
+  scene_checks();
+  event_checks();
   fs::remove_all(dir, ec);
   if (g_fail != 0) {
     std::cerr << "audio smoke: " << g_fail << " check(s) failed\n";
     return 1;
   }
   std::cout << "audio smoke OK (decode wav/ogg/mp3/flac, " << builtin_names().size()
-            << " builtins, bus levels, pan/attenuation/doppler, crossfade, playlist)\n";
+            << " builtins, bus levels, pan/attenuation/doppler, crossfade, playlist, scene v8/v10, "
+               "sound events + Lua + server->client, SoundStage)\n";
   return 0;
 }

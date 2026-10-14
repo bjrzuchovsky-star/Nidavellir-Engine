@@ -2,11 +2,13 @@
 # built-in synthesized placeholder sounds. miniaudio opens the playback
 # device and decodes wav / mp3 / flac, stb_vorbis decodes ogg (both fetched
 # by hash). Without a device it runs on the null backend, so headless smokes
-# and servers can link it.
+# and servers can link it. SoundStage plays a runtime World's sound events
+# and audio-source components (hosts drive it).
 add_library(ts_audio
   Engine.cpp
   MiniaudioImpl.cpp
   Synth.cpp
+  SoundStage.cpp
 )
 
 target_include_directories(ts_audio
@@ -17,6 +19,7 @@ target_include_directories(ts_audio
 target_link_libraries(ts_audio
   PUBLIC
     ts_core
+    ts_runtime
   PRIVATE
     ts_miniaudio
     ${CMAKE_DL_LIBS}
@@ -28,10 +31,9 @@ if(UNIX AND NOT APPLE)
   target_link_libraries(ts_audio PRIVATE m)
 endif()
 
-# Third-party single-file libraries: their warnings are not ours.
-if(MSVC)
-  set_source_files_properties(MiniaudioImpl.cpp PROPERTIES COMPILE_OPTIONS "/w")
-else()
+# Third-party single-file libraries: their warnings are not ours (MSVC:
+# #pragma warning(push, 0) in the file; a /w flag would clash with /W1).
+if(NOT MSVC)
   set_source_files_properties(MiniaudioImpl.cpp PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 
