@@ -20,7 +20,7 @@ namespace scene_json {
 // 5 = optional "animator"; 6 = optional "script"; 7 = optional editor
 // "rotation" / "parent" / "locked" / "hidden". Older files still load
 // (see upgrade notes in SceneJson.cpp).
-inline constexpr int kSceneVersion = 8;
+inline constexpr int kSceneVersion = 9;
 
 // Whole file: entities plus the editor's view state. The runtime only
 // reads `entities`; the rest round-trips untouched.
@@ -29,6 +29,8 @@ struct SceneDoc {
   std::vector<Entity2D> entities;
   // Which tile ids block movement, per tileset (v4; defaults when absent).
   TileSolidity tile_solidity;
+  // Ambient / day-night / lightmap settings (v9 "lighting").
+  fx::Lighting2D lighting;
   float pan_x = 0.0f;
   float pan_y = 0.0f;
   float zoom = 1.0f;

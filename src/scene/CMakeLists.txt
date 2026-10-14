@@ -21,6 +21,7 @@ target_include_directories(ts_scene
 target_link_libraries(ts_scene
   PUBLIC
     ts_core
+    ts_fx
 )
 
 target_compile_features(ts_scene PUBLIC cxx_std_20)

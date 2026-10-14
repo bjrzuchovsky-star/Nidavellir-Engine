@@ -4,6 +4,8 @@
 // (Workspace2D) and the runtime (runtime::World) start from. Plain structs,
 // no UI and no graphics API.
 
+#include "fx/Light2D.h"
+#include "fx/Particles.h"
 #include "scene/TileMap.h"
 
 #include <cstddef>
@@ -197,6 +199,9 @@ struct Entity2D {
   bool hidden = false;
   // Sound source (scene.json v8).
   std::optional<AudioSourceData> audio;
+  // Particle emitter and 2D light (scene.json v9).
+  std::optional<fx::EmitterDesc> particles;
+  std::optional<fx::Light2DData> light;
 
   float center_x() const { return x + w * 0.5f; }
   float center_y() const { return y + h * 0.5f; }

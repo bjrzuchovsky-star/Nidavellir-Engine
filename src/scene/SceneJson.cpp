@@ -281,6 +281,34 @@ bool apply_components(Entity2D& e, const FlatMap& nested, std::string* why) {
   } else if (nested.count("audio")) {
     return bad("bad audio object");
   }
+  if (auto pa = parse_nested(nested, "particles")) {
+    e.particles = fx::from_fields([&](const std::string& k) -> std::optional<std::string> {
+      auto it = pa->find(k);
+      if (it == pa->end()) return std::nullopt;
+      return it->second;
+    });
+  } else if (nested.count("particles")) {
+    return bad("bad particles object");
+  }
+  if (auto li = parse_nested(nested, "light")) {
+    fx::Light2DData l;
+    l.kind = map_string(*li, "kind", "point") == "spot" ? fx::Light2DData::Kind::Spot
+                                                         : fx::Light2DData::Kind::Point;
+    l.color[0] = map_float(*li, "r", l.color[0]);
+    l.color[1] = map_float(*li, "g", l.color[1]);
+    l.color[2] = map_float(*li, "b", l.color[2]);
+    l.intensity = map_float(*li, "intensity", l.intensity);
+    l.radius = map_float(*li, "radius", l.radius);
+    l.angle = map_float(*li, "angle", l.angle);
+    l.cone = map_float(*li, "cone", l.cone);
+    l.softness = map_float(*li, "softness", l.softness);
+    l.shadows = map_bool(*li, "shadows", l.shadows);
+    l.flicker = map_float(*li, "flicker", l.flicker);
+    fx::normalize(l);
+    e.light = l;
+  } else if (nested.count("light")) {
+    return bad("bad light object");
+  }
   normalize_components(e);
   return true;
 }
@@ -448,6 +476,27 @@ void write_entity(std::ostringstream& out, const Entity2D& e) {
         << ", \"max_distance\": " << format_float(a.max_distance)
         << ", \"doppler\": " << (a.doppler ? "true" : "false") << "}";
   }
+  if (e.particles) {
+    out << ",\n      \"particles\": {";
+    const std::vector<fx::Field> fields = fx::to_fields(*e.particles);
+    for (std::size_t k = 0; k < fields.size(); ++k) {
+      out << (k ? ", " : "") << "\"" << fields[k].key << "\": " << fields[k].json;
+    }
+    out << "}";
+  }
+  if (e.light) {
+    const fx::Light2DData& l = *e.light;
+    out << ",\n      \"light\": {\"kind\": \""
+        << (l.kind == fx::Light2DData::Kind::Spot ? "spot" : "point")
+        << "\", \"r\": " << format_float(l.color[0]) << ", \"g\": " << format_float(l.color[1])
+        << ", \"b\": " << format_float(l.color[2])
+        << ", \"intensity\": " << format_float(l.intensity)
+        << ", \"radius\": " << format_float(l.radius) << ", \"angle\": " << format_float(l.angle)
+        << ", \"cone\": " << format_float(l.cone)
+        << ", \"softness\": " << format_float(l.softness)
+        << ", \"shadows\": " << (l.shadows ? "true" : "false")
+        << ", \"flicker\": " << format_float(l.flicker) << "}";
+  }
   out << "\n";
   out << "    }";
 }
@@ -610,6 +659,24 @@ bool parse(const std::string& text, SceneDoc* doc, std::string* error_out,
         return fail("a " + std::string(*dim == "3d" ? "3D" : *dim) +
                     " scene; open it in a 3D claim");
       }
+    } else if (*key == "lighting") {
+      auto li = parse_flat_object(text, i);
+      if (!li) {
+        return fail("lighting");
+      }
+      fx::Lighting2D& L = out.lighting;
+      L.enabled = map_bool(*li, "enabled", L.enabled);
+      L.ambient[0] = map_float(*li, "ambient_r", L.ambient[0]);
+      L.ambient[1] = map_float(*li, "ambient_g", L.ambient[1]);
+      L.ambient[2] = map_float(*li, "ambient_b", L.ambient[2]);
+      L.day_night = map_bool(*li, "day_night", L.day_night);
+      L.night_ambient[0] = map_float(*li, "night_r", L.night_ambient[0]);
+      L.night_ambient[1] = map_float(*li, "night_g", L.night_ambient[1]);
+      L.night_ambient[2] = map_float(*li, "night_b", L.night_ambient[2]);
+      L.day_length = map_float(*li, "day_length", L.day_length);
+      L.start_time = map_float(*li, "start_time", L.start_time);
+      L.resolution = map_int(*li, "resolution", L.resolution);
+      fx::normalize(L);
     } else if (*key == "tile_solidity") {
       if (!parse_tile_solidity(text, i, &out.tile_solidity)) {
         return fail("tile_solidity");
@@ -678,6 +745,8 @@ bool parse(const std::string& text, SceneDoc* doc, std::string* error_out,
 std::string write(const SceneDoc& doc) {
   std::ostringstream out;
   out << "{\n";
+  // v9: optional per-entity "particles" / "light" and the scene
+  // "lighting" block; v8 files load as-is.
   // v8: optional per-entity "audio" (sound source); v7 files load as-is.
   // v7: optional per-entity "rotation" / "parent" / "locked" / "hidden".
   // v6: optional per-entity "script"; v5 added "animator", v4 "collider"
@@ -724,6 +793,20 @@ std::string write(const SceneDoc& doc) {
       out << "]}" << (++n < solidity.overrides.size() ? "," : "") << "\n";
     }
     out << "  ],\n";
+  }
+  if (!(doc.lighting == fx::Lighting2D{})) {
+    const fx::Lighting2D& L = doc.lighting;
+    out << "  \"lighting\": {\"enabled\": " << (L.enabled ? "true" : "false")
+        << ", \"ambient_r\": " << format_float(L.ambient[0])
+        << ", \"ambient_g\": " << format_float(L.ambient[1])
+        << ", \"ambient_b\": " << format_float(L.ambient[2])
+        << ", \"day_night\": " << (L.day_night ? "true" : "false")
+        << ", \"night_r\": " << format_float(L.night_ambient[0])
+        << ", \"night_g\": " << format_float(L.night_ambient[1])
+        << ", \"night_b\": " << format_float(L.night_ambient[2])
+        << ", \"day_length\": " << format_float(L.day_length)
+        << ", \"start_time\": " << format_float(L.start_time)
+        << ", \"resolution\": " << L.resolution << "},\n";
   }
   out << "  \"entities\": [\n";
   for (std::size_t idx = 0; idx < doc.entities.size(); ++idx) {
