@@ -50,7 +50,8 @@ class TextureCache {
   TextureCache(const TextureCache&) = delete;
   TextureCache& operator=(const TextureCache&) = delete;
 
-  // Load on first use; later calls return the cached entry.
+  // Load on first use; later calls return the cached entry. "mem:" keys
+  // come from core/MemImages and re-upload when their version changes.
   const TextureInfo& get(const std::string& path);
   // Re-decode files whose mtime changed (or that appeared / vanished).
   // Throttled to once per `interval` seconds of `now`. Returns reloads.
@@ -70,6 +71,7 @@ class TextureCache {
     std::filesystem::file_time_type mtime{};
     bool had_file = false;
     TextureUploader* owner = nullptr;
+    std::uint64_t mem_version = 0;  // "mem:" keys (core/MemImages)
   };
   void load_into(const std::string& path, Entry& entry);
   void release(Entry& entry);

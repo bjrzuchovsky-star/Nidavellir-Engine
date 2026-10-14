@@ -1,5 +1,6 @@
 add_library(ts_core
   Engine.cpp
+  MemImages.cpp
 )
 
 target_include_directories(ts_core

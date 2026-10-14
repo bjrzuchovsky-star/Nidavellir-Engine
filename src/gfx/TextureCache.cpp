@@ -1,5 +1,7 @@
 #include "gfx/TextureCache.h"
 
+#include "core/MemImages.h"
+
 #include <stb_image.h>
 
 #include <fstream>
@@ -70,6 +72,23 @@ void TextureCache::release(Entry& entry) {
 void TextureCache::load_into(const std::string& path, Entry& entry) {
   release(entry);
   entry.info = TextureInfo{};
+  if (mem_images::is_key(path)) {
+    const mem_images::MemImage* m = mem_images::get(path);
+    entry.had_file = m != nullptr;
+    entry.mem_version = m ? m->version : 0;
+    if (!m || m->width <= 0 || m->height <= 0) {
+      entry.info.error = "missing memory image";
+      return;
+    }
+    entry.info.width = m->width;
+    entry.info.height = m->height;
+    entry.info.ok = true;
+    if (g_uploader) {
+      entry.info.handle = g_uploader->upload_rgba(m->rgba.data(), m->width, m->height);
+      entry.owner = entry.info.handle != 0 ? g_uploader : nullptr;
+    }
+    return;
+  }
   std::error_code ec;
   const fs::path p = fs::path(path);
   entry.had_file = fs::is_regular_file(p, ec);
@@ -95,6 +114,12 @@ void TextureCache::load_into(const std::string& path, Entry& entry) {
 const TextureInfo& TextureCache::get(const std::string& path) {
   auto it = entries_.find(path);
   if (it != entries_.end()) {
+    if (mem_images::is_key(path)) {
+      const mem_images::MemImage* m = mem_images::get(path);
+      if ((m ? m->version : 0) != it->second.mem_version) {
+        load_into(path, it->second);
+      }
+    }
     return it->second.info;
   }
   Entry& entry = entries_[path];
@@ -109,6 +134,7 @@ std::size_t TextureCache::poll_changes(double now, double interval) {
   last_poll_ = now;
   std::size_t reloaded = 0;
   for (auto& [path, entry] : entries_) {
+    if (mem_images::is_key(path)) continue;  // checked on every get()
     std::error_code ec;
     const fs::path p = fs::path(path);
     const bool has = fs::is_regular_file(p, ec);
