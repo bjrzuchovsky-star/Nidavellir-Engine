@@ -47,6 +47,7 @@ namespace world3d {
 using render3d::Aabb;
 using render3d::Vec3;
 using scene3d::Entity3D;
+using render3d::Transform;
 
 struct Input3D {
   float move_right = 0.0f;    // -1 .. 1
@@ -216,6 +217,10 @@ class World3D final : public runtime::ScriptWorld {
   void post(runtime::LogLevel level, const std::string& channel, const std::string& text,
             std::uint64_t entity = 0);
   void rebuild_statics();
+  // Children ride with their parents (scene.json v9 "parent"): each moved
+  // entity carries its direct children by its own delta this tick, parents
+  // first, so whole chains follow.
+  void follow_parents(const std::vector<std::pair<std::uint64_t, Transform>>& before);
   Aabb collider_box(const Entity3D& e) const;
   void move_player(const Input3D& in);
   void update_triggers();
@@ -251,6 +256,7 @@ class World3D final : public runtime::ScriptWorld {
 
   scene3d::Scene3D authored_;
   std::vector<Entity3D> ents_;
+  bool has_parents_ = false;  // any entity has a parent (skip the work if not)
   std::set<std::uint64_t> spawned_, collider_off_, dead_;
   std::map<std::uint64_t, std::map<std::string, ScriptValue>> state_;
   mutable std::map<std::uint64_t, Entity2D> proxies_;

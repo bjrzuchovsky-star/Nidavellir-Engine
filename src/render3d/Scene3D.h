@@ -22,8 +22,9 @@ using render3d::Quat;
 using render3d::Transform;
 using render3d::Vec3;
 
-// v8 added the VR components (vr_rig, grabbable); v7 files still load.
-inline constexpr int kScene3DVersion = 8;
+// v8 added the VR components (vr_rig, grabbable); v9 parenting (parent)
+// and the editor-only locked / editor_hidden flags. v7 / v8 files still load.
+inline constexpr int kScene3DVersion = 9;
 
 // What to draw: "primitive:cube|plane|sphere|capsule" or a project-relative
 // .gltf / .glb path.
@@ -113,6 +114,11 @@ struct Entity3D {
   std::optional<ScriptData> script;
   std::optional<VrRig3D> vr_rig;           // v8
   std::optional<Grabbable3D> grabbable;    // v8
+  // v9: parent entity id (0 = scene root). Transforms stay world-space;
+  // children follow their parent's moves in the editor and at runtime.
+  std::uint64_t parent = 0;
+  bool locked = false;         // v9, editor only: not pickable / movable
+  bool editor_hidden = false;  // v9, editor only: not drawn in the editor
   bool operator==(const Entity3D& o) const = default;
 };
 
@@ -149,6 +155,16 @@ std::string scene_path(const std::string& project_dir);
 // Text in, text out. parse() refuses 2D scenes with a clear message.
 bool parse(const std::string& text, Scene3D* out, std::string* error);
 std::string write(const Scene3D& scene);
+// Parents that are missing, the entity itself or part of a loop become 0.
+void repair_parents(std::vector<Entity3D>* entities);
+// Entity ids under `id` (children, grandchildren, ...), depth-first.
+std::vector<std::uint64_t> descendants_of(const std::vector<Entity3D>& entities,
+                                          std::uint64_t id);
+// Move `child` the way its parent went from `prev` to `now` (rigidly,
+// with the parent's scale change). Children keep world-space transforms.
+void carry_child(Entity3D* child, const Transform& prev, const Transform& now);
+// Depth of an entity in the parent chain (0 = root).
+int depth_of(const std::vector<Entity3D>& entities, std::uint64_t id);
 bool load_file(const std::string& path, Scene3D* out, std::string* error);
 bool save_file(const std::string& path, const Scene3D& scene,
                std::string* error);

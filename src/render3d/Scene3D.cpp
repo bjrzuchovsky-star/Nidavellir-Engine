@@ -5,6 +5,7 @@
 #include "render3d/Json.h"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -48,6 +49,9 @@ Value entity_json(const Entity3D& e) {
   o.set("rotation", quat(e.transform.rotation));
   o.set("scale", vec3(e.transform.scale));
   if (!e.visible) o.set("visible", Value::boolean(false));
+  if (e.parent != 0) o.set("parent", Value::number(static_cast<double>(e.parent)));
+  if (e.locked) o.set("locked", Value::boolean(true));
+  if (e.editor_hidden) o.set("editor_hidden", Value::boolean(true));
   if (e.mesh) {
     Value m = Value::object();
     m.set("source", Value::string(e.mesh->source));
@@ -150,6 +154,10 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
   }
   read_vec3(o, "scale", &e.transform.scale);
   e.visible = o.flag("visible", true);
+  const double par = o.num("parent", 0);
+  e.parent = par > 0 ? static_cast<std::uint64_t>(par + 0.5) : 0;
+  e.locked = o.flag("locked", false);
+  e.editor_hidden = o.flag("editor_hidden", false);
   if (o["mesh"].is_object()) {
     MeshRef m;
     m.source = o["mesh"].str("source", m.source);
@@ -272,6 +280,81 @@ bool is_3d_scene_text(const std::string& text) {
   return v.str("dimension") == "3d";
 }
 
+void repair_parents(std::vector<Entity3D>* entities) {
+  auto find_in = [&](std::uint64_t id) -> const Entity3D* {
+    for (const Entity3D& e : *entities) {
+      if (e.id == id) return &e;
+    }
+    return nullptr;
+  };
+  for (Entity3D& e : *entities) {
+    if (e.parent == e.id || (e.parent != 0 && !find_in(e.parent))) e.parent = 0;
+  }
+  // Break loops: walk up; a chain longer than the list means a cycle.
+  for (Entity3D& e : *entities) {
+    std::uint64_t cur = e.parent;
+    std::size_t steps = 0;
+    while (cur != 0 && steps <= entities->size()) {
+      const Entity3D* p = find_in(cur);
+      cur = p ? p->parent : 0;
+      ++steps;
+      if (cur == e.id) {
+        e.parent = 0;
+        break;
+      }
+    }
+    if (steps > entities->size()) e.parent = 0;
+  }
+}
+
+std::vector<std::uint64_t> descendants_of(const std::vector<Entity3D>& entities,
+                                          std::uint64_t id) {
+  std::vector<std::uint64_t> out;
+  std::vector<std::uint64_t> stack{id};
+  while (!stack.empty() && out.size() <= entities.size()) {
+    const std::uint64_t cur = stack.back();
+    stack.pop_back();
+    // Push children in reverse list order so the walk stays in list order.
+    for (auto it = entities.rbegin(); it != entities.rend(); ++it) {
+      if (it->parent == cur && it->id != id) {
+        out.push_back(it->id);
+        stack.push_back(it->id);
+      }
+    }
+  }
+  return out;
+}
+
+void carry_child(Entity3D* child, const Transform& prev, const Transform& now) {
+  if (prev == now) return;
+  const render3d::Mat4 m = now.matrix() * prev.matrix().inverse();
+  child->transform.position = m.transform_point(child->transform.position);
+  const Quat dq = now.rotation * prev.rotation.conjugate();
+  child->transform.rotation = render3d::normalize(dq * child->transform.rotation);
+  auto ratio = [](float a, float b) { return std::abs(b) > 1e-6f ? a / b : 1.0f; };
+  child->transform.scale.x *= ratio(now.scale.x, prev.scale.x);
+  child->transform.scale.y *= ratio(now.scale.y, prev.scale.y);
+  child->transform.scale.z *= ratio(now.scale.z, prev.scale.z);
+}
+
+int depth_of(const std::vector<Entity3D>& entities, std::uint64_t id) {
+  int d = 0;
+  std::uint64_t cur = id;
+  while (d <= static_cast<int>(entities.size())) {
+    std::uint64_t up = 0;
+    for (const Entity3D& e : entities) {
+      if (e.id == cur) {
+        up = e.parent;
+        break;
+      }
+    }
+    if (up == 0) break;
+    cur = up;
+    ++d;
+  }
+  return d;
+}
+
 std::string write(const Scene3D& s) {
   Value root = Value::object();
   root.set("version", Value::number(kScene3DVersion));
@@ -361,6 +444,7 @@ bool parse(const std::string& text, Scene3D* out, std::string* error) {
     }
     s.entities.push_back(std::move(en));
   }
+  repair_parents(&s.entities);
   const Value& ed = root["editor"];
   if (ed.is_object()) {
     read_vec3(ed, "camera_target", &s.editor_camera.target);

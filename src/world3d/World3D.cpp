@@ -94,6 +94,8 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
   stop();
   authored_ = scene;
   ents_ = scene.entities;
+  has_parents_ = std::any_of(ents_.begin(), ents_.end(),
+                             [](const Entity3D& e) { return e.parent != 0; });
   project_dir_ = project_dir;
   tick_ = 0;
   accumulator_ = 0.0;
@@ -359,6 +361,33 @@ void World3D::interact() {
   if (best) host_->interact(best, player_);
 }
 
+void World3D::follow_parents(const std::vector<std::pair<std::uint64_t, Transform>>& before) {
+  std::vector<std::size_t> order(ents_.size());
+  std::vector<int> depth(ents_.size());
+  for (std::size_t i = 0; i < ents_.size(); ++i) {
+    order[i] = i;
+    depth[i] = scene3d::depth_of(ents_, ents_[i].id);
+  }
+  std::stable_sort(order.begin(), order.end(),
+                   [&](std::size_t a, std::size_t b) { return depth[a] < depth[b]; });
+  auto prev_of = [&](std::uint64_t id) -> const Transform* {
+    for (const auto& p : before) {
+      if (p.first == id) return &p.second;
+    }
+    return nullptr;
+  };
+  for (std::size_t i : order) {
+    const Entity3D& par = ents_[i];
+    const Transform* prev = prev_of(par.id);
+    if (!prev || *prev == par.transform) continue;
+    const Transform now = par.transform;
+    const Transform was = *prev;
+    for (Entity3D& c : ents_) {
+      if (c.parent == par.id) scene3d::carry_child(&c, was, now);
+    }
+  }
+}
+
 void World3D::step(const Input3D& input0) {
   if (!running_) return;
   Input3D input = input0;
@@ -366,6 +395,11 @@ void World3D::step(const Input3D& input0) {
   input.action = input.action || action_latched_;
   jump_latched_ = action_latched_ = false;
   in_step_ = true;
+  std::vector<std::pair<std::uint64_t, Transform>> before;
+  if (has_parents_) {
+    before.reserve(ents_.size());
+    for (const Entity3D& e : ents_) before.emplace_back(e.id, e.transform);
+  }
   if (vr_) {
     vr_step();
   } else {
@@ -381,6 +415,7 @@ void World3D::step(const Input3D& input0) {
   jump_held_ = input.action;
   ++tick_;
   in_step_ = false;
+  if (has_parents_) follow_parents(before);
   // Scripts may have moved or switched colliders.
   rebuild_statics();
   if (!vr_) follow_camera(false);
