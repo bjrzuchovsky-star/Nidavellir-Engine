@@ -3,6 +3,7 @@
 #include "editor/plugins/EditorPlugins.h"
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/screens/FrontierScreen.h"
+#include "editor/editor3d/Editor3DScreen.h"
 #include "editor/screens/LoadingScreen.h"
 #include "editor/screens/LoginScreen.h"
 #include "editor/screens/ProjectManagerScreen.h"
@@ -138,7 +139,8 @@ void AppFlow::tick(float delta_seconds) {
         settings_return_state_ = AppState::ProjectManager;
       }
       if (auto* pm = dynamic_cast<ProjectManagerScreen*>(screen_.get())) {
-        if (next == AppState::Editor2D || next == AppState::EditorFrontier) {
+        if (next == AppState::Editor2D || next == AppState::EditorFrontier ||
+            next == AppState::Editor3D) {
           if (const ProjectInfo* selected = pm->selected_project()) {
             active_project_ = std::make_unique<ProjectInfo>(*selected);
             project_store_.touch_last_opened(selected->path);
@@ -158,7 +160,8 @@ void AppFlow::tick(float delta_seconds) {
         }
       }
     } else if ((state_ == AppState::Editor2D ||
-                state_ == AppState::EditorFrontier) &&
+                state_ == AppState::EditorFrontier ||
+                state_ == AppState::Editor3D) &&
                next == AppState::ProjectManager) {
       active_project_.reset();
       status_message_.clear();
@@ -232,7 +235,8 @@ bool AppFlow::select_project(std::size_t index) {
   }
   tick(0.0f);
   return current_state() == AppState::Editor2D ||
-         current_state() == AppState::EditorFrontier;
+         current_state() == AppState::EditorFrontier ||
+         current_state() == AppState::Editor3D;
 }
 
 bool AppFlow::create_new_project_2d(const std::string& name) {
@@ -355,12 +359,20 @@ void AppFlow::request_back_to_projects() {
   } else if (auto* camp = dynamic_cast<FrontierScreen*>(screen_.get())) {
     camp->request_back_to_projects();
     tick(0.0f);
+  } else if (auto* e3 = dynamic_cast<Editor3DScreen*>(screen_.get())) {
+    e3->request_back_to_projects();
+    tick(0.0f);
   }
 }
 
 void AppFlow::request_quit() {
   if (auto* editor = dynamic_cast<Editor2DScreen*>(screen_.get())) {
     editor->request_quit();
+    tick(0.0f);
+    return;
+  }
+  if (auto* e3 = dynamic_cast<Editor3DScreen*>(screen_.get())) {
+    e3->request_quit();
     tick(0.0f);
     return;
   }
@@ -384,6 +396,9 @@ const Workspace2D* AppFlow::editor_workspace() const {
 
 bool AppFlow::editor_save_scene(std::string* error_out) {
   auto* editor = dynamic_cast<Editor2DScreen*>(screen_.get());
+  if (auto* e3 = dynamic_cast<Editor3DScreen*>(screen_.get())) {
+    return e3->save_scene(error_out);
+  }
   if (!editor) {
     if (error_out) {
       *error_out = "Not in Editor2D";
@@ -397,12 +412,18 @@ std::size_t AppFlow::editor_duplicate_selected() {
   if (auto* editor = dynamic_cast<Editor2DScreen*>(screen_.get())) {
     return editor->duplicate_selected();
   }
+  if (auto* e3 = dynamic_cast<Editor3DScreen*>(screen_.get())) {
+    return e3->duplicate_selected();
+  }
   return 0;
 }
 
 std::size_t AppFlow::editor_delete_selected() {
   if (auto* editor = dynamic_cast<Editor2DScreen*>(screen_.get())) {
     return editor->delete_selected();
+  }
+  if (auto* e3 = dynamic_cast<Editor3DScreen*>(screen_.get())) {
+    return e3->delete_selected();
   }
   return 0;
 }
@@ -411,6 +432,9 @@ bool AppFlow::editor_undo() {
   if (auto* editor = dynamic_cast<Editor2DScreen*>(screen_.get())) {
     return editor->undo();
   }
+  if (auto* e3 = dynamic_cast<Editor3DScreen*>(screen_.get())) {
+    return e3->undo();
+  }
   return false;
 }
 
@@ -418,7 +442,14 @@ bool AppFlow::editor_redo() {
   if (auto* editor = dynamic_cast<Editor2DScreen*>(screen_.get())) {
     return editor->redo();
   }
+  if (auto* e3 = dynamic_cast<Editor3DScreen*>(screen_.get())) {
+    return e3->redo();
+  }
   return false;
+}
+
+Editor3DScreen* AppFlow::editor3d_screen() {
+  return dynamic_cast<Editor3DScreen*>(screen_.get());
 }
 
 FrontierScreen* AppFlow::frontier_screen() {
@@ -476,6 +507,14 @@ std::unique_ptr<IScreen> AppFlow::make_screen(AppState state) {
                                               .name = "Untitled 3D",
                                               .kind = ProjectKind::ThreeD};
       return std::make_unique<FrontierScreen>(std::move(project));
+    }
+    case AppState::Editor3D: {
+      ProjectInfo project = active_project_
+                                ? *active_project_
+                                : ProjectInfo{.id = "unknown",
+                                              .name = "Untitled 3D",
+                                              .kind = ProjectKind::ThreeD};
+      return std::make_unique<Editor3DScreen>(std::move(project));
     }
     case AppState::Quit:
       break;

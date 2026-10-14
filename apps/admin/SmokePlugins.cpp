@@ -6,6 +6,7 @@
 #include "editor/projects/ProjectStore.h"
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/screens/FrontierScreen.h"
+#include "editor/editor3d/Editor3DScreen.h"
 #include "plugin/Catalog.h"
 #include "plugin/PluginManager.h"
 #include "plugins/Builtins.h"
@@ -539,9 +540,24 @@ int flow_checks() {
     if (!flow.create_new_project(c.name, c.kind)) return fail("create " + std::string(c.name));
     const int idx = find(c.name);
     if (idx < 0 || flow.projects()[idx].kind != c.kind) return fail("created kind");
-    if (!flow.select_project(static_cast<std::size_t>(idx)) ||
-        flow.current_state() != editor::AppState::EditorFrontier || !flow.frontier_screen()) {
-      return fail("3D / VR projects open the survey camp");
+    if (!flow.select_project(static_cast<std::size_t>(idx))) return fail("open " + std::string(c.name));
+    if (c.kind == editor::ProjectKind::ThreeD) {
+      editor::Editor3DScreen* ed = flow.editor3d_screen();
+      if (flow.current_state() != editor::AppState::Editor3D || !ed) {
+        return fail("3D projects open the 3D editor");
+      }
+      if (ed->scene().entities.empty() || std::string(ed->renderer_backend()) != "null" ||
+          ed->render_frame(64, 64).draws == 0) {
+        return fail("the 3D editor starts with a starter scene drawn through ts_render3d");
+      }
+      flow.request_back_to_projects();
+      if (flow.current_state() != editor::AppState::ProjectManager) {
+        return fail("back to claims from the 3D editor");
+      }
+      continue;
+    }
+    if (flow.current_state() != editor::AppState::EditorFrontier || !flow.frontier_screen()) {
+      return fail("VR projects open the survey camp");
     }
     editor::FrontierScreen* camp = flow.frontier_screen();
     if (std::string(camp->renderer_backend()) != "null" || camp->last_frame().draws != 1 ||
@@ -580,7 +596,7 @@ int flow_checks() {
   auto xs = xr::create_xr_session({});
   if (xs->begin(&err) || err.empty()) return fail("the XR stub must refuse to begin");
   std::cout << "[smoke] plugins: create 2D / 3D / VR from the Project Manager flow, "
-               "survey camp (ts_render3d null frame, ts_xr stub reason) OK\n";
+               "3D editor + VR survey camp (ts_render3d, ts_xr stub reason) OK\n";
   return 0;
 }
 

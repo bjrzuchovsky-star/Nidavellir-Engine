@@ -17,6 +17,7 @@ namespace editor {
 
 class Editor2DScreen;
 class FrontierScreen;
+class Editor3DScreen;
 
 // Admin UI state machine:
 //   Loading -> Login -> ProjectManager -> Editor2D
@@ -81,6 +82,7 @@ class AppFlow {
   Editor2DScreen* editor_screen();
   // Active 3D / VR survey camp (nullptr otherwise).
   FrontierScreen* frontier_screen();
+  Editor3DScreen* editor3d_screen();
 
   const std::vector<ProjectInfo>& projects() const {
     return project_store_.projects();

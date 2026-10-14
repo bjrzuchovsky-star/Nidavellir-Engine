@@ -248,6 +248,7 @@ AppState ProjectManagerScreen::on_update(float /*delta_seconds*/) {
 
   if (open_editor_2d_) {
     const ProjectInfo* p = selected_project();
+    if (p && p->kind == ProjectKind::ThreeD) return AppState::Editor3D;
     return p && p->kind != ProjectKind::TwoD ? AppState::EditorFrontier
                                               : AppState::Editor2D;
   }
@@ -342,7 +343,7 @@ void ProjectManagerScreen::draw_kind_picker() {
   };
   static const Choice kChoices[] = {
       {ProjectKind::TwoD, "2D", "Frontier town", "Ready to ride today"},
-      {ProjectKind::ThreeD, "3D", "Open range", "Unsurveyed: placeholder"},
+      {ProjectKind::ThreeD, "3D", "Open range", "GL 3.3, glTF, PBR"},
       {ProjectKind::VR, "VR", "Through the goggles", "Unsurveyed: OpenXR stub"},
   };
   // Wide enough for the longest line of copy at the current font.
