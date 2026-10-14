@@ -14,8 +14,10 @@
 //               image onto an entity to make it the albedo texture.
 //   Environment sky, sun, shadows, ambient.
 //   Telegraph   editor + play log.   Plugins: the Outfitter's Wagon.
+// Tools (Editor3DScreen_Tools.cpp): parenting, clipboard, group, lock /
+// hide, align, drop to ground, Alt+drag copies, context menus.
 // Every edit is one undo step (Ctrl+Z / Ctrl+Y) and autosaves scene.json
-// (v8). Play (F5) rides the scene in a World3D copy; Stop restores it.
+// (v9). Play (F5) rides the scene in a World3D copy; Stop restores it.
 // VR claims ("dimension": "vr", Editor3DScreen_VR.cpp): Play runs the
 // scene in VR mode through the desktop simulator, "Preview in headset"
 // through OpenXR (falls back to the simulator), with a Headset Mirror
@@ -149,6 +151,48 @@ class Editor3DScreen final : public IScreen {
   void vr_preview_frame(double dt);
   const std::string& vr_status() const { return vr_status_; }
 
+  // ---- Tools (Editor3DScreen_Tools.cpp) ------------------------------------
+  // Each edit is one undo step + autosave; all refuse while playing.
+  // Selection roots: selected entities without a selected ancestor.
+  std::vector<std::uint64_t> selection_roots() const;
+  std::vector<std::uint64_t> children_of(std::uint64_t id) const;
+  bool effectively_hidden(const scene3d::Entity3D& e) const;  // self or an ancestor
+  bool effectively_locked(const scene3d::Entity3D& e) const;
+  // World bounds of one entity (unit box when the renderer is not up).
+  render3d::Aabb world_bounds(const scene3d::Entity3D& e);
+  // Clipboard: the selection's subtrees as 3D scene.json text. Paste works
+  // across scenes / projects (ids remapped, roots land at the scene root).
+  std::string copy_json() const;
+  std::size_t paste_json(const std::string& text, bool offset);
+  bool copy_selected();
+  std::size_t cut_selected();
+  std::size_t paste();
+  static const std::string& clipboard_text();
+  // Parenting. where: 0 before, 1 after, 2 inside `target`.
+  bool set_parent(std::uint64_t id, std::uint64_t parent);
+  bool hierarchy_drop(std::uint64_t id, std::uint64_t target, int where);
+  std::uint64_t group_selected();    // Ctrl+G: empty "Group" at the centre
+  std::size_t ungroup_selected();    // Ctrl+Shift+G
+  bool set_locked(std::uint64_t id, bool on);
+  bool set_hidden(std::uint64_t id, bool on);  // editor only (editor_hidden)
+  bool lock_selected(bool on);       // Ctrl+L / Ctrl+Shift+L
+  bool hide_selected(bool on);       // H / Shift+H
+  // Align selection roots on axis 0/1/2 (x/y/z) at -1 min, 0 centre, 1 max
+  // of the selection's bounds; distribute spaces centres evenly (3+).
+  bool align_selected(int axis, int where);
+  bool distribute_selected(int axis);
+  // Drop to ground (End): each root falls until its bounds rest on the
+  // surface below (another entity or the y = 0 ground).
+  std::size_t drop_to_ground();
+  // Nearest surface under the pixel (entities outside `skip` + ground).
+  bool surface_point(float px, float py, float vw, float vh,
+                     const std::vector<std::uint64_t>& skip, render3d::Vec3* out);
+  // Alt+drag on the gizmo: copy the selection, then drag the copies (one
+  // "Duplicate" undo step; Esc removes the copies).
+  bool gizmo_begin_duplicate(float px, float py, float vw, float vh);
+  // Translate drags stick to surfaces under the mouse while on (Ctrl).
+  void set_surface_snap(bool on) { surface_snap_ = on; }
+
   // ---- Assets ---------------------------------------------------------------
   struct AssetEntry {
     std::string rel;   // "primitive:cube" or "assets/x.gltf"
@@ -189,6 +233,11 @@ class Editor3DScreen final : public IScreen {
   void handle_shortcuts();
   world3d::Input3D poll_play_input() const;
   void draw_vr_mirror();
+  void draw_context_menu(std::uint64_t clicked);
+  void draw_hierarchy_row(const scene3d::Entity3D& e, int depth);
+  std::size_t duplicate_roots(bool offset);
+  // Move one entity by the delta prev -> its current transform's children.
+  void carry_descendants(std::uint64_t id, const render3d::Transform& prev);
   xr::SimDrive poll_sim_drive();
 
   ProjectInfo project_;
@@ -224,6 +273,16 @@ class Editor3DScreen final : public IScreen {
   std::string vr_status_;
   bool vr_mirror_hovered_ = false;
   float vr_last_mx_ = 0.0f, vr_last_my_ = 0.0f;
+  bool dup_drag_ = false;          // gizmo drag is an Alt+drag copy
+  bool surface_snap_ = false;
+  bool rmb_dragged_ = false;       // RMB press orbited/flew (no menu)
+  std::uint64_t context_id_ = 0;
+  char hier_filter_[96] = {0};
+  bool hier_open_context_ = false;
+  std::uint64_t hier_drop_id_ = 0, hier_drop_target_ = 0;
+  int hier_drop_where_ = 1;
+  bool hier_drop_root_ = false;
+  std::uint64_t hier_toggle_lock_ = 0, hier_toggle_hide_ = 0;
   // Last member: unhitched first.
   EditorPlugins plugins_;
 };

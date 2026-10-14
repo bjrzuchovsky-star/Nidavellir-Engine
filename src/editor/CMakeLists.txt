@@ -36,6 +36,7 @@ add_library(ts_editor
   editor3d/Editor3DScreen_UI.cpp
   editor3d/Editor3DScreen_Panels.cpp
   editor3d/Editor3DScreen_VR.cpp
+  editor3d/Editor3DScreen_Tools.cpp
   plugins/EditorPlugins.cpp
   plugins/EditorBuiltinPlugins.cpp
   plugins/FrontierPanels.cpp

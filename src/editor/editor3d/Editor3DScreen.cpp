@@ -338,37 +338,28 @@ std::uint64_t Editor3DScreen::drop_asset(const std::string& rel, const Vec3& pos
 std::size_t Editor3DScreen::duplicate_selected() {
   if (playing() || scene_.selection.empty()) return 0;
   const scene3d::Scene3D before = scene_;
-  std::vector<std::uint64_t> fresh;
-  for (std::uint64_t id : before.selection) {
-    const Entity3D* src = before.find(id);
-    if (!src) continue;
-    Entity3D e = *src;
-    e.id = scene_.next_id();
-    e.transform.position.x += 1.0f;
-    std::string name = src->name + " copy";
-    for (int n = 2; scene_.find_named(name); ++n) name = src->name + " copy " + std::to_string(n);
-    e.name = name;
-    if (e.player) e.player.reset();  // one rider
-    scene_.entities.push_back(e);
-    fresh.push_back(e.id);
-  }
-  scene_.selection = fresh;
+  const std::size_t n = duplicate_roots(true);  // subtrees come along
+  if (n == 0) return 0;
   push_undo("Duplicate", before);
-  return fresh.size();
+  return n;
 }
 
 std::size_t Editor3DScreen::delete_selected() {
   if (playing() || scene_.selection.empty()) return 0;
   const scene3d::Scene3D before = scene_;
-  std::size_t n = 0;
-  for (std::uint64_t id : before.selection) {
-    auto it = std::find_if(scene_.entities.begin(), scene_.entities.end(),
-                           [&](const Entity3D& e) { return e.id == id; });
-    if (it != scene_.entities.end()) {
-      scene_.entities.erase(it);
-      ++n;
-    }
+  std::vector<std::uint64_t> doomed;
+  for (std::uint64_t id : selection_roots()) {
+    doomed.push_back(id);
+    for (std::uint64_t d : scene3d::descendants_of(scene_.entities, id)) doomed.push_back(d);
   }
+  const std::size_t was = scene_.entities.size();
+  scene_.entities.erase(
+      std::remove_if(scene_.entities.begin(), scene_.entities.end(),
+                     [&](const Entity3D& e) {
+                       return std::find(doomed.begin(), doomed.end(), e.id) != doomed.end();
+                     }),
+      scene_.entities.end());
+  const std::size_t n = was - scene_.entities.size();
   scene_.selection.clear();
   push_undo("Delete " + std::to_string(n), before);
   return n;
@@ -379,8 +370,10 @@ bool Editor3DScreen::set_transform(std::uint64_t id, const render3d::Transform& 
   Entity3D* e = scene_.find(id);
   if (!e || playing() || e->transform == t) return false;
   const scene3d::Scene3D before = scene_;
+  const render3d::Transform prev = e->transform;
   e->transform = t;
-  push_undo(label + " " + e->name, before);
+  carry_descendants(id, prev);  // children ride along
+  push_undo(label + " " + scene_.find(id)->name, before);
   return true;
 }
 
@@ -473,7 +466,7 @@ std::uint64_t Editor3DScreen::pick(float px, float py, float vw, float vh) {
   std::uint64_t best = 0;
   float best_t = 1e30f;
   for (const Entity3D& e : scene_.entities) {
-    if (!e.visible) continue;
+    if (!e.visible || effectively_hidden(e) || effectively_locked(e)) continue;
     render3d::Aabb local = view_ ? view_->local_bounds(e) : render3d::Aabb{{-0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, 0.5f}};
     float t = 0.0f;
     if (render3d::ray_obb(ray, local, e.transform.matrix(), &t) && t < best_t) {
@@ -497,7 +490,7 @@ bool Editor3DScreen::ground_point(float px, float py, float vw, float vh, Vec3* 
 
 bool Editor3DScreen::gizmo_begin(float px, float py, float vw, float vh) {
   const Entity3D* e = scene_.find(primary());
-  if (!e || playing()) return false;
+  if (!e || playing() || effectively_locked(*e)) return false;
   const int axis = gizmo_.hit(editor_camera(), vw, vh, e->transform.position, px, py);
   if (axis < 0) return false;
   return gizmo_begin_axis(axis, px, py, vw, vh);
@@ -516,7 +509,21 @@ void Editor3DScreen::gizmo_move(float px, float py, float vw, float vh) {
   Entity3D* e = scene_.find(primary());
   if (!e) return;
   const GizmoSnap steps = snap_steps();
+  const render3d::Transform prev = e->transform;
   e->transform = gizmo_.drag(editor_camera(), vw, vh, px, py, scene_.snap ? &steps : nullptr);
+  if (surface_snap_ && gizmo_.mode == GizmoMode::Translate) {
+    // Stick the bounds' bottom onto whatever is under the mouse.
+    std::vector<std::uint64_t> skip{e->id};
+    for (std::uint64_t d : scene3d::descendants_of(scene_.entities, e->id)) skip.push_back(d);
+    Vec3 hit;
+    if (surface_point(px, py, vw, vh, skip, &hit)) {
+      const render3d::Aabb b = world_bounds(*e);
+      const Vec3 foot{b.center().x, b.min.y, b.center().z};
+      e->transform.position += hit - foot;
+    }
+    e = scene_.find(primary());
+  }
+  carry_descendants(e->id, prev);
 }
 
 void Editor3DScreen::gizmo_end() {
@@ -524,7 +531,11 @@ void Editor3DScreen::gizmo_end() {
   const Entity3D* e = scene_.find(primary());
   const Entity3D* was = gizmo_before_->find(primary());
   gizmo_.cancel();
-  if (e && was && !(e->transform == was->transform)) {
+  if (dup_drag_) {
+    // The copies stay even when they did not move.
+    dup_drag_ = false;
+    push_undo("Duplicate", *gizmo_before_);
+  } else if (e && was && !(e->transform == was->transform)) {
     const char* what = gizmo_.mode == GizmoMode::Translate
                            ? "Move"
                            : (gizmo_.mode == GizmoMode::Rotate ? "Rotate" : "Scale");
@@ -534,7 +545,8 @@ void Editor3DScreen::gizmo_end() {
 }
 
 void Editor3DScreen::gizmo_cancel() {
-  if (gizmo_.active() && gizmo_before_) scene_ = *gizmo_before_;
+  if (gizmo_.active() && gizmo_before_) scene_ = *gizmo_before_;  // copies go too
+  dup_drag_ = false;
   gizmo_.cancel();
   gizmo_before_.reset();
 }
@@ -563,7 +575,18 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
     opt.colliders = show_colliders_;
     opt.light_gizmos = true;
     opt.highlight = scene_.selection;
-    view_->begin(scene_.environment, scene_.entities, cam, width, height, opt);
+    const bool any_hidden = std::any_of(scene_.entities.begin(), scene_.entities.end(),
+                                        [](const Entity3D& e) { return e.editor_hidden; });
+    if (any_hidden) {
+      // Eye toggled off in the hierarchy: not drawn in the editor only.
+      std::vector<Entity3D> shown;
+      for (const Entity3D& e : scene_.entities) {
+        if (!effectively_hidden(e)) shown.push_back(e);
+      }
+      view_->begin(scene_.environment, shown, cam, width, height, opt);
+    } else {
+      view_->begin(scene_.environment, scene_.entities, cam, width, height, opt);
+    }
   }
   last_stats_ = view_->end();
   collect_problems();
