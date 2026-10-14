@@ -283,6 +283,15 @@ end
   r.in.hands[1].squeeze = 0.0f;
   r.tick(1);
   if (w.vr_stats().throws < 1 || w.vr_bodies() != 1) return fail("bottle thrown");
+  {
+    // Grab / throw sounds, placed at the bottle.
+    bool grab = false, whoosh = false;
+    for (const auto& ev : w.take_sounds()) {
+      grab |= ev.clip == "builtin:grab" && ev.entity == b2 && ev.three_d;
+      whoosh |= ev.clip == "builtin:throw" && ev.entity == b2 && ev.positional;
+    }
+    if (!grab || !whoosh) return fail("grab / throw sounds");
+  }
   bool yeehaw = false;
   for (const auto& t : w.take_toasts()) yeehaw |= t.text.rfind("Yeehaw", 0) == 0;
   if (!yeehaw) return fail("on_release(speed) toast");

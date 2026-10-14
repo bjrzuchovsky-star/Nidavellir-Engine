@@ -485,6 +485,7 @@ void World3D::vr_grab(int h) {
   hs.pointed = 0;
   ++vr_stats_.grabs;
   vr_haptic(h, 0.6f, 0.04f);
+  vr_sound("builtin:grab", best, 0.8f, pulled ? 1.25f : 1.0f);
   post(LogLevel::Info, "vr", std::string(hand_name(h)) + " hand grabbed " + e->name, e->id);
   vr_event(best, "on_grab", h, 0.0);
   vr_follow_held();
@@ -508,6 +509,12 @@ void World3D::vr_release(int h) {
   bodies_[id].vel = v;
   ++vr_stats_.releases;
   if (speed > 1.5f) ++vr_stats_.throws;
+  // A whoosh that grows with the throw; a soft drop otherwise.
+  if (speed > 1.5f) {
+    vr_sound("builtin:throw", id, std::min(1.0f, 0.4f + speed * 0.08f), 1.0f);
+  } else {
+    vr_sound("builtin:grab", id, 0.5f, 0.75f);
+  }
   char buf[64];
   std::snprintf(buf, sizeof(buf), " (%.1f m/s)", static_cast<double>(speed));
   post(LogLevel::Info, "vr",
@@ -689,8 +696,21 @@ void World3D::vr_layout_menu() {
   }
 }
 
+void World3D::vr_sound(const char* clip, std::uint64_t entity, float volume, float pitch) {
+  runtime::SoundEvent ev;
+  ev.clip = clip;
+  ev.volume = volume;
+  ev.pitch = pitch;
+  ev.variation = 0.08f;
+  ev.positional = entity != 0;
+  ev.entity = entity;
+  if (entity == 0) ev.bus = "ui";
+  play_sound(std::move(ev));
+}
+
 void World3D::vr_press_menu(int button) {
   if (button < 0 || button >= static_cast<int>(menu_.size())) return;
+  vr_sound("builtin:click", 0, 0.7f, 1.0f);
   using K = VrMenuButton::Kind;
   using Loco = scene3d::VrRig3D::Locomotion;
   switch (menu_[button].kind) {

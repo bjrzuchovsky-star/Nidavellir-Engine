@@ -246,6 +246,8 @@ class World3D final : public runtime::ScriptWorld {
   void vr_locomotion(float dt);
   void vr_hands();
   void vr_grab(int h);
+  // Grab / throw / comfort-menu sounds (0 entity = a ui click, not placed).
+  void vr_sound(const char* clip, std::uint64_t entity, float volume, float pitch);
   void vr_release(int h);
   void vr_laser(int h);
   void vr_bodies_step(float dt);

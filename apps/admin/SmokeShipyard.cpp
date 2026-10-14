@@ -397,6 +397,11 @@ int smoke_ride() {
   const std::uint64_t fired0 = sim.shots_fired();
   step(0, 0, runtime::kButtonUse, 30);  // F
   if (sim.shots_fired() <= fired0) return fail("F should fire the sloop's guns");
+  {
+    bool bang = false;
+    for (const auto& ev : w.take_sounds()) bang |= ev.clip == "builtin:gunshot" && ev.positional;
+    if (!bang) return fail("the sloop's guns should be heard");
+  }
   // Lua: the bounty board pays when a pirate goes down.
   w.take_logs();
   for (const Ship& t : std::vector<Ship>(sim.ships())) {
