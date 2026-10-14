@@ -58,6 +58,11 @@ constexpr TrailPreset kPresets[] = {
 
 bool Editor2DScreen::start_posse() {
   if (posse_running()) return true;
+  if (plugins_.is_open() && !plugins_.loaded("ts.posse")) {
+    note("The posse plugin is unhitched: switch on Posse (Multiplayer) in "
+         "the Plugins panel to ride together.");
+    return false;
+  }
   if (is_playing()) stop_play();
   cancel_rename();
   flush_pending_edit();
@@ -103,6 +108,7 @@ void Editor2DScreen::stop_posse() {
   posse_quads_.clear();
   note("Posse broke camp. The edit scene never left.");
   telegraph_.add(runtime::LogLevel::Info, "posse", "Posse broke camp");
+  apply_plugin_changes_if_idle();
 }
 
 void Editor2DScreen::toggle_posse() {

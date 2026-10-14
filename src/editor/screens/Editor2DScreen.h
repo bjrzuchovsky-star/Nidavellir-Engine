@@ -3,6 +3,8 @@
 #include "editor/ProjectInfo.h"
 #include "editor/assets/TextureCache.h"
 #include "editor/console/TelegraphLog.h"
+#include "editor/plugins/EditorPlugins.h"
+#include "editor/plugins/PluginsPanel.h"
 #include "editor/screens/IScreen.h"
 #include "editor/ui/FolderBrowser.h"
 #include "editor/workspace/Workspace2D.h"
@@ -215,6 +217,20 @@ class Editor2DScreen final : public IScreen {
   // Start a windowed ts_client riding into the running posse.
   bool open_posse_client_window();
   bool show_network_panel() const { return show_network_; }
+
+  // --- Plugins (Editor2DScreen_Plugins.cpp) ----------------------------------
+  // The project's plugins load on enter. Toggling saves project.json at
+  // once; the loaded set changes when no ride is going (right away when
+  // idle, else as Play / the posse stops). Plugin systems and Lua tables
+  // join every Play ride.
+  EditorPlugins& plugins() { return plugins_; }
+  const EditorPlugins& plugins() const { return plugins_; }
+  // set_enabled + apply when idle. False when the id is unknown.
+  bool set_plugin_enabled(const std::string& id, bool on);
+  // Apply a pending plugin change if nothing is riding. True if applied.
+  bool apply_plugin_changes_if_idle();
+  bool show_plugins_panel() const { return show_plugins_; }
+  void set_show_plugins_panel(bool on) { show_plugins_ = on; }
   void set_show_network_panel(bool on) { show_network_ = on; }
 
   // --- Animation (Editor2DScreen_Anim.cpp) ------------------------------------
@@ -314,6 +330,7 @@ class Editor2DScreen final : public IScreen {
   bool focus_log_entry(const runtime::LogEntry& entry);
 
  private:
+  friend class PossePlugin;  // registers the posse UI as plugin contributions
   void draw_ui();
   void draw_menu_bar();
   void draw_toolbar();
@@ -512,8 +529,23 @@ class Editor2DScreen final : public IScreen {
   // Telegraph console.
   TelegraphLog telegraph_;
 
+  // Plugins.
+  void open_plugins();
+  void draw_plugins_window();
+  void draw_plugin_panels();
+  void draw_plugin_view_items();
+  // Contributions to `menu` ("Play", "Toolbar", or a top-level menu).
+  void draw_plugin_menu_items(const std::string& menu);
+  void draw_plugin_top_menus();
+  PluginsPanelState plugins_panel_;
+  bool show_plugins_ = true;
+  bool plugins_applying_ = false;  // no re-entry from plugin unload hooks
+  std::map<std::string, bool> plugin_panel_open_;
+
   // Play with posse.
   void draw_network_panel();
+  void draw_posse_menu_items();
+  void draw_posse_toolbar_button();
   void draw_posse_viewport();
   void draw_posse_map(float height);
   void pump_posse_logs();
@@ -533,6 +565,9 @@ class Editor2DScreen final : public IScreen {
   // Status-bar note (e.g. "Duplicated 3").
   std::string status_note_;
   double status_note_time_ = -1000.0;
+  // Last member: destroyed first, so plugins unhitch while the rest of the
+  // screen (the posse they may stop) is still alive.
+  EditorPlugins plugins_;
 };
 
 }  // namespace editor

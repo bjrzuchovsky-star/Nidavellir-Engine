@@ -86,11 +86,15 @@ bool Editor2DScreen::start_play() {
     mark_dirty_and_autosave();
   }
   std::string err;
+  // Plugin systems and Lua tables ride along (set before the world builds).
+  play_.world().set_extensions(plugins_.manager().world_extensions());
   if (!play_.start(workspace_.entities(), workspace_.tile_solidity(),
                    project_.path, &err)) {
+    play_.world().set_extensions(nullptr);
     note(err.empty() ? std::string("Could not start the ride.") : err);
     return false;
   }
+  plugins_.manager().play_begin(play_.world());
   // The edit scene waits here, untouched, until Stop.
   play_backup_ = workspace_;
   play_free_cam_ = false;
@@ -117,7 +121,9 @@ void Editor2DScreen::stop_play() {
   }
   const std::uint64_t ticks = play_.tick();
   pump_play_logs();  // the last words of the ride
+  plugins_.manager().play_end();
   play_.stop();
+  play_.world().set_extensions(nullptr);
   if (play_backup_) {
     workspace_ = std::move(*play_backup_);
     play_backup_.reset();
@@ -131,6 +137,7 @@ void Editor2DScreen::stop_play() {
   hover_cell_valid_ = false;
   note("Back at camp after " + std::to_string(ticks) +
        " ticks. Edit scene untouched.");
+  apply_plugin_changes_if_idle();
 }
 
 void Editor2DScreen::toggle_play() {
@@ -306,20 +313,8 @@ void Editor2DScreen::draw_play_controls() {
     ImGui::SetTooltip("Save, then run this project in ts_game (own window)");
   }
   ImGui::EndDisabled();
-  ImGui::SameLine();
-  ImGui::BeginDisabled(is_playing());
-  bool posse_on = posse_running();
-  if (theme::ToggleButton("Posse", &posse_on, ImVec2(60, 0))) {
-    toggle_posse();
-  }
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip(posse_running()
-                          ? "Break camp: stop the local server and its riders"
-                          : "Play with posse: a local server + %d rider(s) in this editor, "
-                            "lag sim and Network panel",
-                      posse_riders_);
-  }
-  ImGui::EndDisabled();
+  // Plugin toolbar contributions (the posse toggle when it's hitched).
+  draw_plugin_menu_items("Toolbar");
 }
 
 void Editor2DScreen::draw_play_menu() {
@@ -348,6 +343,12 @@ void Editor2DScreen::draw_play_menu() {
   if (ImGui::MenuItem("Launch Game (ts_game)", nullptr, false, !is_playing())) {
     launch_game();
   }
+  draw_plugin_menu_items("Play");
+  ImGui::EndMenu();
+}
+
+// Posse UI, contributed by the ts.posse plugin (EditorBuiltinPlugins.cpp).
+void Editor2DScreen::draw_posse_menu_items() {
   ImGui::Separator();
   if (ImGui::MenuItem(posse_running() ? "Break Camp (stop posse)###Posse" : "Play with Posse###Posse",
                       nullptr, false, !is_playing())) {
@@ -365,7 +366,23 @@ void Editor2DScreen::draw_play_menu() {
     open_posse_client_window();
   }
   ImGui::MenuItem("Network Panel", nullptr, &show_network_);
-  ImGui::EndMenu();
+}
+
+void Editor2DScreen::draw_posse_toolbar_button() {
+  ImGui::SameLine();
+  ImGui::BeginDisabled(is_playing());
+  bool posse_on = posse_running();
+  if (theme::ToggleButton("Posse", &posse_on, ImVec2(60, 0))) {
+    toggle_posse();
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip(posse_running()
+                          ? "Break camp: stop the local server and its riders"
+                          : "Play with posse: a local server + %d rider(s) in this editor, "
+                            "lag sim and Network panel",
+                      posse_riders_);
+  }
+  ImGui::EndDisabled();
 }
 
 void Editor2DScreen::draw_play_status() {

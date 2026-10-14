@@ -28,6 +28,10 @@ add_library(ts_editor
   screens/Editor2DScreen_Stable.cpp
   screens/Editor2DScreen_Console.cpp
   screens/Editor2DScreen_Scripts.cpp
+  screens/Editor2DScreen_Plugins.cpp
+  plugins/EditorPlugins.cpp
+  plugins/EditorBuiltinPlugins.cpp
+  plugins/PluginsPanel.cpp
   screens/Editor2DScreen_Posse.cpp
   console/TelegraphLog.cpp
   launch/GameLauncher.cpp
@@ -46,6 +50,10 @@ target_link_libraries(ts_editor
     ts_runtime
     ts_net
     ts_mp
+    ts_plugin
+    ts_plugins_builtin
+    ts_render3d
+    ts_xr
     ts_gfx
     ts_imgui
 )

@@ -111,6 +111,7 @@ void Editor2DScreen::on_enter() {
   }
   refresh_assets();
   refresh_scripts();
+  open_plugins();
   telegraph_.add(runtime::LogLevel::Info, "editor",
                  "Telegraph open for " + project_.name + " (" +
                      std::to_string(scripts_.size()) + " scripts on file)");
@@ -123,6 +124,10 @@ void Editor2DScreen::on_exit() {
   if (is_playing()) {
     stop_play();
   }
+  if (posse_running()) {
+    stop_posse();
+  }
+  plugins_.close();
   cancel_rename();
   if (stroke_active()) {
     end_paint_stroke();
