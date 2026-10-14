@@ -8,6 +8,7 @@
 // ts_plugin's PluginManager; the runtime only consumes it, so ts_runtime
 // never depends on the plugin layer.
 
+#include "fx/Light2D.h"
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -47,6 +48,7 @@ struct WorldExtensions {
     std::string name;
     std::string owner;
     bool over = false;  // false: under the actors; true: on top of them
+    bool hud = false;   // drawn last: over the lightmap and glowing particles
     // Append quads (world space) for `view`; alpha = tick interpolation.
     std::function<void(const World& world, const WorldRect& view, float alpha,
                        std::vector<DrawQuad>* out)>
@@ -71,6 +73,30 @@ struct WorldExtensions {
   std::vector<LuaApi> lua;
   std::vector<Component> components;
   std::vector<DrawLayer> layers;
+  // 2D lighting hooks: extra lights each frame, what blocks light (cell
+  // grid, first one wins over the scene's tilemaps) and an ambient that
+  // switches lighting on (true) whatever the scene says.
+  struct LightSource {
+    std::string name;
+    std::string owner;
+    std::function<void(const World& world, const WorldRect& view,
+                       std::vector<fx::LightInstance>* out)>
+        lights;
+  };
+  struct Occluder {
+    std::string name;
+    std::string owner;
+    float cell = 32.0f;
+    std::function<bool(const World& world, int cx, int cy)> solid;
+  };
+  struct Ambient {
+    std::string name;
+    std::string owner;
+    std::function<bool(const World& world, float out[3])> ambient;
+  };
+  std::vector<LightSource> lights;
+  std::vector<Occluder> occluders;
+  std::vector<Ambient> ambients;
   std::vector<Blocker> blockers;
   std::vector<NetChannel> channels;
 

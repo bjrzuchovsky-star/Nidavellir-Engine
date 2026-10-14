@@ -29,6 +29,9 @@
 struct lua_State;
 
 namespace ts {
+namespace fx {
+struct LightInstance;
+}  // namespace fx
 namespace tombstone {
 namespace runtime {
 class World;
@@ -160,6 +163,18 @@ class Registrar {
   using ReceiveFn = std::function<void(runtime::World&, int from_slot,
                                        const std::vector<std::uint8_t>& bytes)>;
   virtual void add_net_channel(const std::string& /*name*/, ReceiveFn /*receive*/) {}
+  // HUD quads (world space, like layers) drawn last: over the lightmap.
+  virtual void add_hud_layer(const std::string& /*name*/, DrawFn /*draw*/) {}
+  // 2D lighting: lights each frame, what blocks light (a grid of `cell`
+  // px) and an ambient that switches lighting on when it returns true.
+  using LightsFn = std::function<void(const runtime::World&, const runtime::WorldRect& view,
+                                      std::vector<fx::LightInstance>* out)>;
+  virtual void add_light_source(const std::string& /*name*/, LightsFn /*lights*/) {}
+  using OccluderFn = std::function<bool(const runtime::World&, int cx, int cy)>;
+  virtual void add_light_occluder(const std::string& /*name*/, float /*cell*/,
+                                  OccluderFn /*solid*/) {}
+  using AmbientFn = std::function<bool(const runtime::World&, float out[3])>;
+  virtual void add_ambient(const std::string& /*name*/, AmbientFn /*ambient*/) {}
 };
 
 // Where the plugin is being loaded.

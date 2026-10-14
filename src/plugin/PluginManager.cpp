@@ -101,7 +101,31 @@ class PluginManager::Collector final : public Registrar {
   }
   void add_draw_layer(const std::string& name, bool over, DrawFn draw) override {
     if (!draw) return;
-    m_.world_->layers.push_back({name, id_, over, std::move(draw)});
+    runtime::WorldExtensions::DrawLayer l;
+    l.name = name;
+    l.owner = id_;
+    l.over = over;
+    l.draw = std::move(draw);
+    m_.world_->layers.push_back(std::move(l));
+  }
+  void add_hud_layer(const std::string& name, DrawFn draw) override {
+    if (!draw) return;
+    runtime::WorldExtensions::DrawLayer l;
+    l.name = name;
+    l.owner = id_;
+    l.over = true;
+    l.hud = true;
+    l.draw = std::move(draw);
+    m_.world_->layers.push_back(std::move(l));
+  }
+  void add_light_source(const std::string& name, LightsFn lights) override {
+    if (lights) m_.world_->lights.push_back({name, id_, std::move(lights)});
+  }
+  void add_light_occluder(const std::string& name, float cell, OccluderFn solid) override {
+    if (solid && cell > 0.0f) m_.world_->occluders.push_back({name, id_, cell, std::move(solid)});
+  }
+  void add_ambient(const std::string& name, AmbientFn ambient) override {
+    if (ambient) m_.world_->ambients.push_back({name, id_, std::move(ambient)});
   }
   void add_blocker(const std::string& name, SolidsFn solids) override {
     if (!solids) return;
