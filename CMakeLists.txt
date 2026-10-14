@@ -42,6 +42,9 @@ endif()
 if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
   include(FetchLua)
   add_subdirectory(src/runtime)
+  # In-game UI + fonts (ts_ui): stb_truetype and two OFL fonts by hash.
+  include(FetchFonts)
+  add_subdirectory(src/ui)
   # Plugins: interface, catalog, manager (ts_plugin) and the built-ins.
   add_subdirectory(src/plugin)
   add_subdirectory(src/plugins)
