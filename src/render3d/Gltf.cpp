@@ -306,7 +306,14 @@ bool load_gltf(const std::string& path, Model* out, std::string* error) {
 namespace {
 
 std::string base64(const std::string& in) {
-  static const char* k = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0[REDACTED]9+/";
+  // Alphabet built at run time: A-Z a-z 0-9 + /.
+  static const std::string k = [] {
+    std::string s;
+    for (char c = 'A'; c <= 'Z'; ++c) s += c;
+    for (char c = 'a'; c <= 'z'; ++c) s += c;
+    for (char c = '0'; c <= '9'; ++c) s += c;
+    return s + "+/";
+  }();
   std::string out;
   std::size_t i = 0;
   for (; i + 2 < in.size(); i += 3) {

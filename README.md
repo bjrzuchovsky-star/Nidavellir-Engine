@@ -51,7 +51,7 @@ Every system is built with performance as the primary goal:
 
 ## Plugins and project types
 
-**Project type.** Every new claim is 2D, 3D or VR, picked on the Project Manager cards and stored as `"dimension"` in `project.json`. 2D is the full editor you know. 3D and VR open a themed survey camp ("this frontier ain't surveyed yet"), backed by stub libraries: `ts_render3d` (camera, mesh, material, null renderer) and `ts_xr` (an OpenXR session stub). A project without `"dimension"` loads as 2D.
+**Project type.** Every new claim is 2D, 3D or VR, picked on the Project Manager cards and stored as `"dimension"` in `project.json`. 2D is the full editor you know. 3D opens the 3D editor (below). VR still opens a themed survey camp backed by `ts_xr` (an OpenXR session stub). A project without `"dimension"` loads as 2D.
 
 **Plugins (`src/plugin`, `ts_plugin`).** A plugin is a `ts::plugin::Plugin` with an id, a semver version and dependencies (required or optional, with a minimum version). `on_register` gets a `Registrar` that can add World systems/components, editor panels and menu items, Lua API tables, asset types and tick hooks. The `PluginManager` orders plugins by dependency (Kahn's algorithm, catalog order breaks ties) and checks versions (same major, >= minimum). Missing, disabled or wrong-version dependencies and loops are reported to the Telegraph, and the skip cascades to dependents. Plugins unload in reverse order.
 
@@ -62,6 +62,37 @@ Every system is built with performance as the primary goal:
 **Per-project enablement.** The Outfitter's Wagon panel (Plugins tab) hitches and unhitches plugins. Hitching a plugin brings its dependencies along, and unhitching one also unhitches its dependents. The list is saved right away to `project.json` as `"plugins"`. Changes take effect when the editor is idle, or after Play or the posse stops (restart-of-play). Old projects without the key get the default built-ins. `ts_game` loads the project's plugins too.
 
 **Tests.** `ts_admin --smoke` covers load order, dependencies, the missing-dependency error, versions and loops, enable/disable persistence, the 2D/3D/VR round trip, an old `project.json`, and the dynamic sample.
+
+## 3D projects
+
+**Renderer (`src/render3d`, `ts_render3d`).** OpenGL 3.3 core forward renderer on the existing GLFW window / loader (functions fetched with `glfwGetProcAddress`; no extra loader library).
+- Passes: sun shadow map (2048², 3×3 PCF, a box that follows the camera target), gradient sky with a sun disc, then meshes, then unlit lines (grid, colliders, gizmos).
+- PBR-lite material: albedo / normal / metal-rough textures (stb_image), metallic, roughness, emissive. GGX specular, hemisphere ambient, Reinhard tone map, gamma 2.2.
+- Lights: one directional sun plus up to 8 point lights per frame.
+- Meshes: built-in primitives `cube`, `plane`, `sphere`, `capsule`, and glTF 2.0 (`.gltf` / `.glb`) through cgltf v1.14, fetched by URL and SHA-256 like the other dependencies.
+- Draws into its own offscreen target (editor viewport, tests, `read_pixels`) or straight into the window (`ts_game`). `make_null_renderer3d()` is the headless backend.
+
+**Scene (`scene.json` v7).** A 3D scene carries `"dimension": "3d"` and entities with a transform (position, rotation quaternion, scale) and optional mesh, material, light, collider (box / capsule, trigger), player and script components, plus environment, editor camera and snap settings. 2D scenes are unchanged. The 2D reader refuses a 3D file (and the 3D reader a 2D one) with a clear reason.
+
+**Editor.** 3D claims open the 3D editor:
+- Viewport: orbit (RMB or Alt+LMB), pan (MMB), zoom (wheel), fly (hold RMB + WASD / Q E), F frames the selection.
+- Selection: click to pick, Ctrl+click to add or remove.
+- Gizmos: W / E / R switch between translate, rotate and scale. Snap is on the toolbar (Shift+G); steps are 0.5 m, 15° and 0.25 by default.
+- Panels: Hierarchy, Inspector for every component, Assets (primitives, `.gltf` / `.glb`, images), Environment (sky, sun, shadows, ambient), Telegraph and Plugins.
+- Assets: drag a model into the viewport to place it on the ground with a collider fitted to it. Drop an image on an entity to make it the albedo texture.
+- Every edit is one undo step (Ctrl+Z / Ctrl+Y) and autosaves `scene.json`.
+
+**Play (F5).**
+- The scene rides in a `World3D` copy, and Stop puts everything back.
+- The rider (Player component) is a capsule. WASD moves relative to the follow camera, Space jumps and E interacts (within 2.5 m). Q / Z or RMB turn the camera.
+- Collision is the capsule against static box / capsule colliders, with gravity. Trigger colliders fire enter / exit.
+- Lua scripts run as in 2D (`self:x()` / `self:y()` map to x / z). 3D adds `pos3`, `set_pos3`, `move3`, `yaw`, `set_yaw`, `spin(deg, axis)`, `scale3` and `set_scale3`.
+
+**ts_game.** `ts_game --project <dir>` rides 3D projects in a GL 3.3 core window. `--smoke` loads the scene, rides 120 ticks, checks the rider moved and landed, and renders one offscreen frame with a pixel check.
+
+**Sample.** `ghost-town-3d` is seeded next to the 2D sample when the projects folder is empty. It has a main street of primitive buildings, a textured boardwalk, glTF lanterns with point lights, a Lua windmill and a bell trigger that rings.
+
+**Tests.** `ts_admin --smoke` runs the 3D checks: math and primitives, the scene v7 round trip (byte-stable), glTF loading and the sample, the play runtime, a GL render with pixel checks, and the editor (gizmos with snap, undo / redo, picking, glTF drop, save / reload, play / stop). For the 3D checks alone, run `ts_admin --smoke-3d`. The GL render check is skipped when there is no display, unless `TS_SMOKE_REQUIRE_GL=1` is set; on Linux CI, run it under `xvfb-run`.
 
 ## Project Goals
 
