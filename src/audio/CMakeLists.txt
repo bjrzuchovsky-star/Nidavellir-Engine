@@ -9,6 +9,7 @@ add_library(ts_audio
   MiniaudioImpl.cpp
   Synth.cpp
   SoundStage.cpp
+  MixerSettings.cpp
 )
 
 target_include_directories(ts_audio

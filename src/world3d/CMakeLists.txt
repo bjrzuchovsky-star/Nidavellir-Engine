@@ -20,3 +20,9 @@ target_compile_features(ts_world3d PUBLIC cxx_std_20)
 if(MSVC)
   target_compile_definitions(ts_world3d PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
+
+# Sound for World3D rides (lives with the audio code, built here because it
+# needs both ts_audio and ts_world3d).
+add_library(ts_audio3d ${CMAKE_CURRENT_SOURCE_DIR}/../audio/SoundStage3D.cpp)
+target_link_libraries(ts_audio3d PUBLIC ts_audio ts_world3d)
+target_compile_features(ts_audio3d PUBLIC cxx_std_20)
