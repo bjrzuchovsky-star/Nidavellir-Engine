@@ -8,6 +8,7 @@ add_executable(ts_admin
   SmokeScriptRuntime.cpp
   SmokeScriptEditor.cpp
   SmokeNetwork.cpp
+  SmokePlugins.cpp
 )
 
 target_link_libraries(ts_admin
@@ -23,10 +24,19 @@ target_link_libraries(ts_admin
     ts_runtime
     ts_gfx
     ts_editor
+    ts_plugin
+    ts_plugins_builtin
+    ts_render3d
+    ts_xr
     ts_imgui
 )
 
 target_compile_features(ts_admin PRIVATE cxx_std_20)
+
+# --smoke loads the sample dynamic plugin from the build tree.
+target_compile_definitions(ts_admin PRIVATE
+  TS_SAMPLE_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugins")
+add_dependencies(ts_admin ts_plugin_lantern)
 
 # MSVC: enable UTF-8 source and avoid min/max macros interfering with ImGui.
 if(MSVC)

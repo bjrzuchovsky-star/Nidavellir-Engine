@@ -11,6 +11,7 @@
 #include "editor/workspace/Workspace2D.h"
 #include "gfx/GlTextureUploader.h"
 
+#include "SmokePlugins.h"
 #include "SmokeRuntime.h"
 
 #include <imgui.h>
@@ -1155,6 +1156,10 @@ int run_console_smoke() {
 
   // Runtime + Play mode (headless; see SmokeRuntime.cpp).
   if (run_runtime_smoke() != 0) {
+    return 1;
+  }
+  // Plugins + project types (see SmokePlugins.cpp).
+  if (run_plugin_smoke() != 0) {
     return 1;
   }
 
