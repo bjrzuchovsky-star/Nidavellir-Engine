@@ -14,9 +14,6 @@ add_subdirectory(src/render)
 add_subdirectory(src/input)
 add_subdirectory(src/physics)
 add_subdirectory(src/scene)
-# 3D / VR sketches (no heavy deps): renderer + OpenXR-shaped session stubs.
-add_subdirectory(src/render3d)
-add_subdirectory(src/xr)
 
 # Windowed apps: GLFW + OpenGL + stb_image for ts_admin, ts_game and
 # ts_client (ts_gfx: texture cache + GL helpers). Dear ImGui is fetched only
@@ -24,6 +21,11 @@ add_subdirectory(src/xr)
 if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT)
   include(FetchImGuiDeps)
   add_subdirectory(src/gfx)
+  # 3D: renderer (GL 3.3 core + null), glTF via cgltf (fetched by hash),
+  # scene.json v7; VR: OpenXR-shaped session stub.
+  include(FetchCgltf)
+  add_subdirectory(src/render3d)
+  add_subdirectory(src/xr)
 endif()
 
 # Game runtime (World, fixed-step PlaySession, Lua gameplay scripts). Pure
