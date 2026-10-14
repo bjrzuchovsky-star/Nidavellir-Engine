@@ -14,7 +14,7 @@ namespace editor {
 // On-disk project list/select shell with ImGui UI.
 // Actions: Open (select index / double-click), New Project (2D / 3D / VR
 // picker), Delete, Settings, Logout. A 2D project opens Editor2D; 3D and
-// VR open the survey camp (EditorFrontier) until those renderers land.
+// VR open Editor3D (VR claims add the headset preview).
 class ProjectManagerScreen final : public IScreen {
  public:
   ProjectManagerScreen(std::vector<ProjectInfo> projects,

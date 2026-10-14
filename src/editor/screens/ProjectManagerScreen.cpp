@@ -96,8 +96,8 @@ void ProjectManagerScreen::draw_project_card(std::size_t i) {
   ImGui::EndGroup();
 
   if (highlight) {
-    const char* hint = p.kind != ProjectKind::TwoD
-                           ? "Opens the survey camp (placeholder)"
+    const char* hint = p.kind == ProjectKind::VR
+                           ? "Opens the 3D editor; Preview in headset to ride it in VR"
                            : "Double-click or Open to ride in";
     const ImVec2 hs = ImGui::CalcTextSize(hint);
     ImGui::SetCursorPos(ImVec2(ImGui::GetWindowWidth() - hs.x - 16.0f,
@@ -248,9 +248,7 @@ AppState ProjectManagerScreen::on_update(float /*delta_seconds*/) {
 
   if (open_editor_2d_) {
     const ProjectInfo* p = selected_project();
-    if (p && p->kind == ProjectKind::ThreeD) return AppState::Editor3D;
-    return p && p->kind != ProjectKind::TwoD ? AppState::EditorFrontier
-                                              : AppState::Editor2D;
+    return p && p->kind != ProjectKind::TwoD ? AppState::Editor3D : AppState::Editor2D;
   }
   if (settings_requested_) {
     return AppState::Settings;
@@ -344,7 +342,7 @@ void ProjectManagerScreen::draw_kind_picker() {
   static const Choice kChoices[] = {
       {ProjectKind::TwoD, "2D", "Frontier town", "Ready to ride today"},
       {ProjectKind::ThreeD, "3D", "Open range", "GL 3.3, glTF, PBR"},
-      {ProjectKind::VR, "VR", "Through the goggles", "Unsurveyed: OpenXR stub"},
+      {ProjectKind::VR, "VR", "Through the goggles", "OpenXR + desktop simulator"},
   };
   // Wide enough for the longest line of copy at the current font.
   float w = 200.0f;
@@ -382,15 +380,15 @@ void ProjectManagerScreen::draw_kind_picker() {
     dl->AddText(ImVec2(p0.x + 64.0f, p0.y + 10.0f),
                 theme::U32(on ? theme::Text() : theme::TextMuted()), c.line1);
     dl->AddText(ImVec2(p0.x + 64.0f, p0.y + 31.0f),
-                theme::U32(c.kind == ProjectKind::TwoD ? theme::Success()
-                                                       : theme::CopperMuted()),
-                c.line2);
+                theme::U32(theme::Success()), c.line2);
     if (hovered) {
       ImGui::SetTooltip("%s", c.kind == ProjectKind::TwoD
                                   ? "The full 2D editor: tiles, sprites, Play, posse."
-                                  : "Staked and saved as this type. Opens a survey camp "
-                                    "with plugins and a placeholder viewport until the "
-                                    "3D renderer rides in.");
+                              : c.kind == ProjectKind::ThreeD
+                                  ? "The 3D editor: glTF, PBR, Lua, Play."
+                                  : "The 3D editor with a VR rig: grab, throw, teleport. "
+                                    "Preview in headset (OpenXR / SteamVR) or the "
+                                    "desktop simulator.");
     }
     ImGui::PopID();
   }
