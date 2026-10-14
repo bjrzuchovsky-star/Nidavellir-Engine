@@ -14,6 +14,9 @@
 #include "mp/PosseSmoke.h"
 #include "net/Net.h"
 #include "net/Transport.h"
+#include "plugins/Builtins.h"
+#include "plugins/RuntimePlugins.h"
+#include "runtime/Log.h"
 #include "runtime/Input.h"
 #include "runtime/World.h"
 
@@ -188,6 +191,19 @@ runtime::PlayerInput poll_input(GLFWwindow* win) {
   if (down(GLFW_KEY_E, GLFW_KEY_SPACE)) keys.buttons |= runtime::kButtonAction;
   if (glfwGetKey(win, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) keys.buttons |= runtime::kButtonAlt;
   if (glfwGetKey(win, GLFW_KEY_ENTER) == GLFW_PRESS) keys.buttons |= runtime::kButtonStart;
+  // Frontier Survival (and any plugin that wants them): F / left mouse use,
+  // G / right mouse place, C fire, Q / X previous / next hotbar slot.
+  if (glfwGetKey(win, GLFW_KEY_F) == GLFW_PRESS ||
+      glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
+    keys.buttons |= runtime::kButtonUse;
+  }
+  if (glfwGetKey(win, GLFW_KEY_G) == GLFW_PRESS ||
+      glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+    keys.buttons |= runtime::kButtonPlace;
+  }
+  if (glfwGetKey(win, GLFW_KEY_C) == GLFW_PRESS) keys.buttons |= runtime::kButtonFire;
+  if (glfwGetKey(win, GLFW_KEY_X) == GLFW_PRESS) keys.buttons |= runtime::kButtonNext;
+  if (glfwGetKey(win, GLFW_KEY_Q) == GLFW_PRESS) keys.buttons |= runtime::kButtonPrev;
   GLFWgamepadstate pad;
   if (glfwGetGamepadState(GLFW_JOYSTICK_1, &pad)) {
     runtime::PlayerInput in;
@@ -212,7 +228,18 @@ int run_window(const Options& opt) {
     std::cerr << "[ts_client] bad --connect \"" << opt.connect << "\" (want host:port)\n";
     return 2;
   }
+  // The project's plugins (needs --project: the client reads project.json
+  // locally). Declared before the client so they outlive its world.
+  plugins::RuntimePlugins rp;
+  if (!opt.project.empty()) {
+    const std::size_t loaded = rp.open(opt.project, "client", [](const plugin::Diagnostic& d) {
+      std::cout << "[plugins] [" << runtime::to_string(d.level) << "] "
+                << (d.plugin.empty() ? "" : d.plugin + ": ") << d.text << '\n';
+    });
+    std::cout << "[ts_client] " << loaded << " plugin(s) riding\n";
+  }
   mp::GameClient client;
+  rp.attach(client.world());
   mp::ClientConfig cc;
   cc.host = host;
   cc.port = port;
@@ -225,6 +252,7 @@ int run_window(const Options& opt) {
     std::cerr << "[ts_client] " << err << '\n';
     return 1;
   }
+  rp.begin(client.world());
   std::cout << "[ts_client] riding to " << host << ':' << port << " as " << client.name()
             << "...\n";
 
@@ -251,12 +279,20 @@ int run_window(const Options& opt) {
     double title_at = 0.0;
     long frames = 0;
     mp::ClientState shown = mp::ClientState::Idle;
+    bool digit_down[10] = {};
     while (!glfwWindowShouldClose(win)) {
       glfwPollEvents();
       if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) break;
       const auto now = std::chrono::steady_clock::now();
       const double dt = std::chrono::duration<double>(now - last).count();
       last = now;
+      for (int k = 0; k < 10; ++k) {
+        const bool down = glfwGetKey(win, GLFW_KEY_0 + k) == GLFW_PRESS;
+        if (down && !digit_down[k]) {
+          plugins::select_hotbar(client.world(), client.slot(), k == 0 ? 9 : k - 1);
+        }
+        digit_down[k] = down;
+      }
       client.update(dt, poll_input(win));
       for (const std::string& e : client.take_events()) std::cout << "[posse] " << e << '\n';
       if (client.state() != shown) {
@@ -306,6 +342,7 @@ int run_window(const Options& opt) {
     renderer.clear();
   }
   client.disconnect();
+  rp.end();
   gfx::set_texture_uploader(nullptr);
   glfwDestroyWindow(win);
   glfwTerminate();

@@ -240,6 +240,13 @@ runtime::InputFrame Editor2DScreen::poll_play_input() const {
     }
     if (ImGui::IsKeyDown(ImGuiKey_LeftShift)) keys.buttons |= runtime::kButtonAlt;
     if (ImGui::IsKeyDown(ImGuiKey_Enter)) keys.buttons |= runtime::kButtonStart;
+    // Frontier Survival: F / left mouse use, G / right mouse place, C fire,
+    // Q / X previous / next hotbar slot, 1-0 pick a slot.
+    if (ImGui::IsKeyDown(ImGuiKey_F)) keys.buttons |= runtime::kButtonUse;
+    if (ImGui::IsKeyDown(ImGuiKey_G)) keys.buttons |= runtime::kButtonPlace;
+    if (ImGui::IsKeyDown(ImGuiKey_C)) keys.buttons |= runtime::kButtonFire;
+    if (ImGui::IsKeyDown(ImGuiKey_X)) keys.buttons |= runtime::kButtonNext;
+    if (ImGui::IsKeyDown(ImGuiKey_Q)) keys.buttons |= runtime::kButtonPrev;
     frame.slot(0) = keys;
   }
   // Gamepads 1-4 ride slots 0-3 (slot 0 shares with the keyboard).

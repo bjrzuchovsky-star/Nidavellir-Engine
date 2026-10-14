@@ -2,6 +2,7 @@
 
 #include "editor/ui/Brand.h"
 #include "editor/ui/Theme.h"
+#include "plugins/Builtins.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -680,6 +681,13 @@ void Editor2DScreen::handle_hotkeys() {
 void Editor2DScreen::draw_ui() {
   // Simulation first so this frame draws the newest ticks.
   if (is_playing()) {
+    if (!ImGui::GetIO().WantTextInput) {
+      for (int k = 0; k < 10; ++k) {
+        if (ImGui::IsKeyPressed(static_cast<ImGuiKey>(ImGuiKey_0 + k), false)) {
+          plugins::select_hotbar(play_.world(), 0, k == 0 ? 9 : k - 1);
+        }
+      }
+    }
     update_play(ImGui::GetIO().DeltaTime, poll_play_input());
   }
   if (posse_running()) {
