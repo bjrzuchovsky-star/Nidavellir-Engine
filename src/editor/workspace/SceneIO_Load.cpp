@@ -15,6 +15,7 @@ void apply_doc(Workspace2D& workspace, scene_json::SceneDoc doc) {
   workspace.replace_scene(std::move(doc.entities), doc.selected_id, doc.pan_x,
                           doc.pan_y, doc.zoom, doc.show_grid);
   workspace.set_tile_solidity(std::move(doc.tile_solidity));
+  workspace.set_lighting(doc.lighting);
   // Optional editor-tool state (older scene.json files simply omit these).
   if (doc.grid_size) {
     workspace.set_grid_size(*doc.grid_size);
