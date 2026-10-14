@@ -36,6 +36,7 @@ add_library(ts_editor
   editor3d/Editor3DScreen_Panels.cpp
   plugins/EditorPlugins.cpp
   plugins/EditorBuiltinPlugins.cpp
+  plugins/FrontierPanels.cpp
   plugins/PluginsPanel.cpp
   screens/Editor2DScreen_Posse.cpp
   console/TelegraphLog.cpp
