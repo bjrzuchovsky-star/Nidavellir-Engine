@@ -49,6 +49,20 @@ Every system is built with performance as the primary goal:
 
 ---
 
+## Plugins and project types
+
+**Project type.** Every new claim is 2D, 3D or VR, picked on the Project Manager cards and stored as `"dimension"` in `project.json`. 2D is the full editor you know. 3D and VR open a themed survey camp ("this frontier ain't surveyed yet"), backed by stub libraries: `ts_render3d` (camera, mesh, material, null renderer) and `ts_xr` (an OpenXR session stub). A project without `"dimension"` loads as 2D.
+
+**Plugins (`src/plugin`, `ts_plugin`).** A plugin is a `ts::plugin::Plugin` with an id, a semver version and dependencies (required or optional, with a minimum version). `on_register` gets a `Registrar` that can add World systems/components, editor panels and menu items, Lua API tables, asset types and tick hooks. The `PluginManager` orders plugins by dependency (Kahn's algorithm, catalog order breaks ties) and checks versions (same major, >= minimum). Missing, disabled or wrong-version dependencies and loops are reported to the Telegraph, and the skip cascades to dependents. Plugins unload in reverse order.
+
+- **Static:** `TS_PLUGIN_STATIC(sym, Class)` in the plugin, plus `TS_PLUGIN_DECLARE(sym)` / `TS_PLUGIN_LINK(sym, catalog, err)` in the host. The explicit link call works on MSVC because there are no global constructors for the linker to strip.
+- **Dynamic:** build a shared module and put `TS_DYNAMIC_PLUGIN(Class)` in it. It exports the C entry `ts_plugin_entry`, which is loaded with `LoadLibrary` on Windows and `dlopen` elsewhere. ABI, API and C++ runtime tags are checked, so a module must be built with the same compiler and runtime as the host. Search path: `$TS_PLUGIN_PATH`, `<project>/plugins`, then the build's `plugins/` directory. `sample.lantern` (`src/plugins/lantern`) is the sample.
+- **Built-ins:** `ts.posse` (multiplayer: Network panel, Play-menu entries, toolbar button; on by default) and `ts.tumbleweed` (sample gameplay plugin: system, `tumbleweed` Lua table, `.tumble.json` asset type; off by default).
+
+**Per-project enablement.** The Outfitter's Wagon panel (Plugins tab) hitches and unhitches plugins. Hitching a plugin brings its dependencies along, and unhitching one also unhitches its dependents. The list is saved right away to `project.json` as `"plugins"`. Changes take effect when the editor is idle, or after Play or the posse stops (restart-of-play). Old projects without the key get the default built-ins. `ts_game` loads the project's plugins too.
+
+**Tests.** `ts_admin --smoke` covers load order, dependencies, the missing-dependency error, versions and loops, enable/disable persistence, the 2D/3D/VR round trip, an old `project.json`, and the dynamic sample.
+
 ## Project Goals
 
 - Deliver a fast, stable, and fully custom C++ engine  
