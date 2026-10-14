@@ -47,6 +47,8 @@ add_library(ts_editor
   launch/GameLauncher.cpp
   launch/OpenWithOs.cpp
   audio/EditorAudio.cpp
+  audio/MixerPanel.cpp
+  audio/AudioWidgets.cpp
 )
 
 target_include_directories(ts_editor

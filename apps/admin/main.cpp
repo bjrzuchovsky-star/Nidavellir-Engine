@@ -1,4 +1,5 @@
 #include "core/Engine.h"
+#include "editor/audio/EditorAudio.h"
 #include "editor/AppFlow.h"
 #include "editor/AppState.h"
 #include "editor/assets/AssetLibrary.h"
@@ -111,6 +112,8 @@ int run_console_smoke() {
     return 1;
   }
 
+  // The sound card opens with the window (TS_AUDIO=null keeps it quiet).
+  editor::EditorAudio::get().start(true);
   AppFlow flow;
   flow.start();
 
@@ -1266,6 +1269,7 @@ int run_imgui_app() {
     const float dt = io.DeltaTime > 0.0f ? io.DeltaTime : (1.0f / 60.0f);
     engine.tick(dt);
     flow.tick(dt);
+    editor::EditorAudio::get().tick(dt);
 
     if (flow.settings().theme != last_theme) {
       apply_theme(flow.settings());
@@ -1302,6 +1306,7 @@ int run_imgui_app() {
     glfwSwapBuffers(window);
   }
 
+  editor::EditorAudio::get().shutdown();
   engine.shutdown();
   // Live caches drop (not delete) their handles once the context is gone.
   gfx::set_texture_uploader(nullptr);

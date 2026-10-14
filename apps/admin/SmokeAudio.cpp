@@ -3,11 +3,15 @@
 #include "SmokeAudioClips.h"
 
 #include "audio/Audio.h"
+#include "audio/MixerSettings.h"
 #include "audio/SoundStage.h"
+#include "audio/SoundStage3D.h"
+#include "editor/audio/EditorAudio.h"
 #include "render3d/Scene3D.h"
 #include "runtime/Sound.h"
 #include "runtime/World.h"
 #include "scene/SceneJson.h"
+#include "world3d/World3D.h"
 
 #include <chrono>
 #include <cmath>
@@ -523,6 +527,86 @@ void event_checks() {
   e.shutdown();
 }
 
+// Saved mixer, the editor's engine, and a World3D ride (what ts_game and the
+// 3D editor Play drive).
+void host_checks(const fs::path& dir) {
+  MixerSettings s;
+  s.volume[static_cast<std::size_t>(Bus::Music)] = 0.4f;
+  s.volume[static_cast<std::size_t>(Bus::Sfx)] = 1.5f;
+  s.muted[static_cast<std::size_t>(Bus::Voice)] = true;
+  const std::string path = (dir / "cfg" / "audio.json").string();
+  check(save_mixer_settings(path, s), "mixer settings save");
+  MixerSettings back;
+  check(load_mixer_settings(path, &back) && back == s, "mixer settings roundtrip");
+  MixerSettings none;
+  check(load_mixer_settings((dir / "nope.json").string(), &none) && none == MixerSettings{},
+        "missing mixer settings = defaults");
+  check(!mixer_settings_from_json("{oops", &none), "bad mixer json rejected");
+  MixerSettings wild;
+  check(mixer_settings_from_json(
+            "{\"buses\":{\"master\":{\"volume\":9,\"muted\":true}}}", &wild) &&
+            near(wild.volume[0], 2.0f) && wild.muted[0] && near(wild.volume[1], 1.0f),
+        "mixer volumes clamp, missing buses default");
+  Engine e;
+  EngineOptions opt;
+  opt.device = false;
+  e.start(opt);
+  apply_mixer_settings(e, s);
+  check(capture_mixer_settings(e) == s, "mixer apply / capture");
+  e.shutdown();
+
+  // Editor engine (null backend headless): preview one at a time, ends.
+  namespace ed = ts::tombstone::editor;
+  ed::EditorAudio& ea = ed::EditorAudio::get();
+  ea.set_settings_path((dir / "editor_audio.json").string());
+  ea.preview("", "builtin:click");
+  check(ea.previewing("builtin:click"), "editor preview plays");
+  ea.preview("", "builtin:chime");
+  check(!ea.previewing("builtin:click") && ea.previewing("builtin:chime"),
+        "editor preview replaces the last");
+  ea.tick(3.0);
+  check(!ea.previewing("builtin:chime"), "editor preview ends");
+  ea.set_bus_volume(Bus::Ui, 0.25f);
+  ea.save_now();
+  MixerSettings saved;
+  check(load_mixer_settings(ea.settings_path(), &saved) &&
+            near(saved.volume[static_cast<std::size_t>(Bus::Ui)], 0.25f),
+        "editor mixer persists");
+  ea.reset_mixer();
+
+  // World3D ride: a looping source plays, follows its entity, and the
+  // listener sits on the camera.
+  s3::Scene3D scene = s3::make_starter_scene();
+  s3::Entity3D src;
+  src.id = scene.next_id();
+  src.name = "Music Box";
+  src.transform.position = {3.0f, 1.0f, 0.0f};
+  src.audio = s3::audio_3d();
+  src.audio->clip = "builtin:chime";
+  scene.entities.push_back(src);
+  ts::tombstone::world3d::World3D world;
+  std::string err;
+  check(world.start(scene, dir.string(), &err), "World3D start: " + err);
+  Engine e3;
+  e3.start(opt);
+  SoundStage stage(e3);
+  stage.begin_ride(dir.string(), true);
+  SoundStage3D ride(stage);
+  ride.update(world, 1.0 / 60.0);
+  check(stage.sources_playing() == 1, "3D source autoplays");
+  ts::tombstone::render3d::Vec3 pos;
+  ts::tombstone::render3d::Vec3 fwd;
+  ts::tombstone::render3d::Vec3 up;
+  world.listener_pose(&pos, &fwd, &up);
+  check(near(e3.listener().position.x, pos.x) && near(e3.listener().position.z, pos.z),
+        "3D listener on the camera");
+  stage.end_ride(0.0f);
+  e3.update(0.1);
+  check(e3.voice_count() == 0, "3D ride end stops its voices");
+  world.stop();
+  e3.shutdown();
+}
+
 }  // namespace
 
 int run_audio_smoke() {
@@ -538,6 +622,7 @@ int run_audio_smoke() {
   music_checks();
   scene_checks();
   event_checks();
+  host_checks(dir);
   fs::remove_all(dir, ec);
   if (g_fail != 0) {
     std::cerr << "audio smoke: " << g_fail << " check(s) failed\n";
@@ -545,6 +630,7 @@ int run_audio_smoke() {
   }
   std::cout << "audio smoke OK (decode wav/ogg/mp3/flac, " << builtin_names().size()
             << " builtins, bus levels, pan/attenuation/doppler, crossfade, playlist, scene v8/v10, "
-               "sound events + Lua + server->client, SoundStage)\n";
+               "sound events + Lua + server->client, SoundStage, mixer settings, editor preview, "
+               "World3D ride)\n";
   return 0;
 }
