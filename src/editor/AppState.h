@@ -12,6 +12,8 @@ enum class AppState {
   ProjectManager,
   Settings,
   Editor2D,
+  // 3D / VR projects: the survey camp (placeholder viewport + plugins).
+  EditorFrontier,
   Quit,
 };
 
@@ -27,6 +29,8 @@ inline const char* to_string(AppState state) {
       return "Settings";
     case AppState::Editor2D:
       return "Editor2D";
+    case AppState::EditorFrontier:
+      return "EditorFrontier";
     case AppState::Quit:
       return "Quit";
   }
