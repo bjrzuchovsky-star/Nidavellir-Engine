@@ -89,6 +89,7 @@ bool World::load_project(const std::string& project_dir,
 
 void World::clear() {
   scripts_.reset();
+  ext_dead_.assign(ext_ ? ext_->systems.size() : 0, false);
   authored_.clear();
   logs_.clear();
   toasts_.clear();
@@ -342,6 +343,7 @@ void World::step(const InputFrame& input) {
     post(LogLevel::Info, "trigger", describe(ev), ev.trigger);
   }
   step_scripts(input);
+  step_extensions();
   step_animation();
   step_camera();
   in_step_ = false;

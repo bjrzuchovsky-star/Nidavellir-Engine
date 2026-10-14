@@ -9,6 +9,7 @@
 #include "runtime/Input.h"
 #include "runtime/Log.h"
 #include "runtime/Script.h"
+#include "runtime/WorldExtensions.h"
 #include "scene/Animation.h"
 #include "scene/SceneData.h"
 #include "scene/TileMap.h"
@@ -292,6 +293,16 @@ class World final : public ScriptWorld {
   void script_toast(int slot, const std::string& text, double seconds,
                     std::uint64_t from) override;
   void script_log(LogEntry entry) override;
+  void script_open_extensions(lua_State* L, int sandbox) override;
+
+  // --- Plugins (WorldExtensions.h) -------------------------------------------
+  // Systems / Lua tables / components plugins add. Outlives build() like the
+  // libraries; set it before build() so scripts see the Lua tables. A system
+  // that throws is switched off for the rest of the ride (logged once).
+  void set_extensions(std::shared_ptr<const WorldExtensions> ext);
+  const WorldExtensions* extensions() const { return ext_.get(); }
+  // Systems still running this ride (a throwing one drops out).
+  std::size_t extension_systems_live() const;
 
   // --- Networking (World_Net.cpp) -------------------------------------------
   // Hooks for ts_mp: the authoritative server steps this world as usual and
@@ -404,6 +415,9 @@ class World final : public ScriptWorld {
   ScriptLibrary script_lib_;
   std::unique_ptr<ScriptHost> scripts_;
   std::vector<Entity2D> authored_;  // spawn() templates, as built
+  std::shared_ptr<const WorldExtensions> ext_;
+  std::vector<bool> ext_dead_;  // per ext_->systems entry, this ride
+  void step_extensions();
   std::vector<LogEntry> logs_;
   std::uint64_t log_total_ = 0;
   std::vector<Toast> toasts_;
