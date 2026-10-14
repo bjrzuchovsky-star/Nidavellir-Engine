@@ -381,6 +381,20 @@ int smoke_combat() {
     return true;
   }();
   if (r.count("arrow") >= arrows0) return fail("firing (C) should spend an arrow");
+  {
+    // Footsteps, knife / pick knocks and the shot are all heard.
+    bool step = false, knock = false, shot = false;
+    for (const auto& ev : r.world().take_sounds()) {
+      knock |= ev.clip == "builtin:mine";
+      shot |= ev.clip == "builtin:gunshot" && ev.positional;
+    }
+    for (int i = 0; i < 40; ++i) r.step(0, i < 20 ? 1.0f : -1.0f, 0.0f);
+    for (const auto& ev : r.world().take_sounds()) step |= ev.clip == "builtin:step";
+    if (!step || !knock || !shot) {
+      return fail(std::string("frontier sounds: step ") + (step ? "y" : "n") + " knock " +
+                  (knock ? "y" : "n") + " shot " + (shot ? "y" : "n"));
+    }
+  }
   if (!dead && hit_hp >= r.sim().data().creatures[static_cast<std::size_t>(coyote)].hp) {
     return fail("the arrow never hit the coyote");
   }
@@ -523,6 +537,17 @@ int smoke_mp() {
   const bool mined = wait_for(8.0, [&] { return cs.tile(ttx, tty).object == kObjNone; });
   buttons = 0;
   if (!mined) return fail("mining with the client's F never broke the cactus (server-authoritative)");
+  {
+    // The server's mining knock rides to the client as a sound event.
+    bool knock = false;
+    wait_for(2.0, [&] {
+      for (const auto& ev : first->client.world().take_sounds()) {
+        knock |= ev.clip == "builtin:mine" && ev.positional;
+      }
+      return knock;
+    });
+    if (!knock) return fail("the mining sound never reached the client");
+  }
   // A late rider gets the edited chunks.
   second = std::make_unique<Rider>();
   if (!join("Wyatt", second.get())) return fail("client two: " + err);

@@ -282,6 +282,46 @@ Parts turn in quarter steps. An engine pushes toward its front (rotation 0 = the
 - Clients draw the last state they received, without interpolation (30 Hz).
 - The designer is an editor panel. Inside `ts_game` you fly saved designs but can't edit them.
 
+## Audio (ts_audio)
+
+Sound runs on [miniaudio](https://miniaud.io) 0.11.21 (wav / mp3 / flac) plus
+stb_vorbis (ogg), both fetched by SHA256 (`cmake/FetchMiniaudio.cmake`). With
+no sound card, or `TS_AUDIO=null`, the engine uses a null backend that still
+mixes, so smokes, servers and CI run headless.
+
+- **Sounds**: drop `.wav/.ogg/.mp3/.flac` into `<project>/assets`. Built-in
+  placeholders are generated in code (CC0 by construction): `builtin:click`,
+  `step`, `gunshot`, `mine`, `boom`, `grab`, `throw`, `chime`, `tune`.
+- **Buses**: master / music / sfx / ui / voice with volume + mute. Music
+  streams on two decks with crossfades and playlists. One-shots take
+  pitch / volume variation.
+- **Space**: 2D equal-power pan + distance fade from the camera; 3D
+  positional audio with the listener on the camera (or the headset in VR),
+  linear attenuation and optional doppler.
+- **Audio Source component** (scene.json v8 for 2D, v10 for 3D; older scenes
+  load unchanged): clip, bus, volume, pitch, autoplay, loop, positional,
+  near / far, doppler.
+- **Lua**: `audio.play(clip, {volume, pitch, variation, bus, loop, at=entity,
+  x, y, z})`, `audio.music(clip, fade)`, `audio.playlist({...}, fade)`,
+  `audio.stop_music(fade)`, `audio.set_volume(bus, v)`, `audio.stop(...)`.
+- **Multiplayer**: on a server, every sound becomes a `ts.audio` event and
+  is replayed on the clients (each hears it from its own camera).
+- **Editor**: *View > Saloon Band (Mixer)* (faders, level lamps, mute
+  "hats", music deck, voices). The Supply Wagon lists sounds with Play /
+  Stop, drag onto the Inspector, or double-click to assign. The Inspector
+  edits Audio Sources in 2D and 3D. Play, the posse (heard through the viewed
+  rider), 3D Play and the VR preview all make sound.
+- **Gameplay**: Frontier Survival footsteps, mining knocks and gunshots;
+  Airship Works guns and breakups; VR grab / throw / comfort-menu clicks;
+  editor toolbar clicks.
+- **Settings**: mixer levels save to `TombStoneConfig/audio.json`. ts_game
+  and ts_client read the same file.
+- **Smokes**: `ts_admin --smoke-audio` covers decoding, bus levels on the
+  null backend, pan / attenuation / doppler math, crossfade + playlist,
+  scene roundtrips, events through Lua and server to client, mixer
+  persistence, editor preview, and a World3D ride. The survival, Shipyard
+  and VR smokes check their gameplay sounds.
+
 ## Project Goals
 
 - Deliver a fast, stable, and fully custom C++ engine  
