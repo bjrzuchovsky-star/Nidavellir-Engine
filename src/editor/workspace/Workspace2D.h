@@ -237,6 +237,10 @@ class Workspace2D {
   // the undo history and of scene.json (v4 "tile_solidity").
   const TileSolidity& tile_solidity() const { return tile_solidity_; }
   void set_tile_solidity(TileSolidity solidity);
+  // Scene lighting (scene.json v9 "lighting"): ambient, day-night, lightmap
+  // resolution. Saved with the scene; not part of undo.
+  const fx::Lighting2D& lighting() const { return lighting_; }
+  void set_lighting(const fx::Lighting2D& lighting);
   // True when the flag changed.
   bool set_tile_solid(const std::string& tileset, int tile_id, bool solid);
 
@@ -336,6 +340,7 @@ class Workspace2D {
 
   std::vector<Entity2D> entities_;
   TileSolidity tile_solidity_;
+  fx::Lighting2D lighting_;
   std::optional<std::uint64_t> selected_id_;
   std::vector<std::uint64_t> selection_;
   std::vector<MoveStart> move_starts_;

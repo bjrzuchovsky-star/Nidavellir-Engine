@@ -5,6 +5,7 @@
 #include "editor/screens/Editor2DScreen.h"
 
 #include "editor/launch/GameLauncher.h"
+#include "editor/ui/QuadBlend.h"
 #include "editor/ui/QuadDraw.h"
 #include "editor/ui/Theme.h"
 #include "editor/workspace/SceneIO.h"
@@ -257,17 +258,21 @@ void Editor2DScreen::draw_posse_viewport() {
       },
       &posse_quads_);
   draw->PushClipRect(canvas_pos, canvas_end, true);
+  quad_blend::Blender blender(draw);
   for (const runtime::DrawQuad& q : posse_quads_) {
     const ImVec2 p0 = to_screen(q.x0, q.y0);
     const ImVec2 p1 = to_screen(q.x1, q.y1);
     const std::uint64_t handle = q.image ? texture(*q.image).handle : 0;
+    blender.set(q.blend);
     if (handle != 0) {
+      quad_blend::smooth(*q.image, handle);
       quad_draw::image(draw, posse_tex_id(handle), p0, p1, q.rotation, ImVec2(q.u0, q.v0), ImVec2(q.u1, q.v1),
                      quad_color(q.rgba));
     } else {
       quad_draw::filled(draw, p0, p1, q.rotation, quad_color(q.rgba));
     }
   }
+  blender.end();
   // Rider tags, plus a ghost box where the server has them right now.
   const runtime::World& sw = posse_->server().world();
   for (const runtime::Actor& a : world.actors()) {

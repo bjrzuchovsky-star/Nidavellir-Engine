@@ -24,6 +24,7 @@ Workspace2D::Workspace2D() {
 void Workspace2D::reset_defaults() {
   entities_.clear();
   tile_solidity_ = TileSolidity{};
+  lighting_ = fx::Lighting2D{};
   selected_id_.reset();
   selection_.clear();
   move_starts_.clear();
@@ -161,6 +162,11 @@ void Workspace2D::replace_scene(std::vector<Entity2D> entities,
   } else if (!entities_.empty()) {
     select(entities_.front().id);
   }
+}
+
+void Workspace2D::set_lighting(const fx::Lighting2D& lighting) {
+  lighting_ = lighting;
+  fx::normalize(lighting_);
 }
 
 void Workspace2D::set_tile_solidity(TileSolidity solidity) {

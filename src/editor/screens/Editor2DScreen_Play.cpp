@@ -3,6 +3,7 @@
 #include "editor/audio/EditorAudio.h"
 
 #include "editor/launch/GameLauncher.h"
+#include "editor/ui/QuadBlend.h"
 #include "editor/ui/QuadDraw.h"
 #include "editor/ui/Theme.h"
 
@@ -97,6 +98,7 @@ bool Editor2DScreen::start_play() {
     note(err.empty() ? std::string("Could not start the ride.") : err);
     return false;
   }
+  play_.world().set_lighting(workspace_.lighting());
   plugins_.manager().play_begin(play_.world());
   begin_sound_ride();
   play_ui_.load(project_.path);
@@ -571,11 +573,14 @@ void Editor2DScreen::draw_play_viewport() {
       &play_quads_);
 
   draw->PushClipRect(canvas_pos, canvas_end, true);
+  quad_blend::Blender blender(draw);
   for (const runtime::DrawQuad& q : play_quads_) {
     const ImVec2 p0 = to_screen(q.x0, q.y0);
     const ImVec2 p1 = to_screen(q.x1, q.y1);
     const std::uint64_t handle = q.image ? texture(*q.image).handle : 0;
+    blender.set(q.blend);
     if (handle != 0) {
+      quad_blend::smooth(*q.image, handle);
       quad_draw::image(draw, play_tex_id(handle), p0, p1, q.rotation, ImVec2(q.u0, q.v0),
                      ImVec2(q.u1, q.v1), quad_u32(q.rgba));
     } else {
@@ -585,6 +590,7 @@ void Editor2DScreen::draw_play_viewport() {
       }
     }
   }
+  blender.end();
   draw->PopClipRect();
   // Collision overlay (K): live walls, bodies and lit-up triggers.
   draw_collision_overlay(draw, canvas_pos, canvas_size, cam.x, cam.y,
