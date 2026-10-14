@@ -5,6 +5,8 @@
 // abstract input, and drawn by whoever asks for a draw list (ImGui in the
 // editor, OpenGL in ts_game). No UI or graphics API in here.
 
+#include "fx/Light2D.h"
+#include "fx/Particles.h"
 #include "runtime/Collision.h"
 #include "runtime/Input.h"
 #include "runtime/Log.h"
@@ -103,6 +105,9 @@ struct DrawQuad {
   bool missing = false;  // sprite image unavailable: solid stand-in
   std::uint64_t entity = 0;
   float rotation = 0.0f;  // degrees clockwise about the quad centre
+  // 0 alpha; 1 additive (glowing particles); 2 the lightmap: 2x multiply
+  // (dst * src * 2, so 128 grey leaves the scene as it is).
+  std::uint8_t blend = 0;
 };
 
 // Something walked into or out of a trigger collider. Recorded per tick;
@@ -311,6 +316,27 @@ class World final : public ScriptWorld {
   void script_open_extensions(lua_State* L, int sandbox) override;
   void script_sound(SoundEvent event) override;
   void script_ui(UiCommand command) override;
+  void script_fx(FxEvent event) override;
+
+  // --- Particles + 2D lighting (World_Fx.cpp) --------------------------------
+  // Entity emitters ("particles") run on the tick; fx() adds one-shot
+  // bursts / emit / stop. On a server non-local events also go out on
+  // "ts.fx"; a client only shows what the server sends (plus local ones,
+  // e.g. footstep dust every peer makes for itself).
+  void fx(FxEvent event);
+  const fx::ParticleWorld& particles() const { return particles_; }
+  std::uint64_t fx_total() const { return fx_total_; }
+  bool footstep_dust = true;
+  // Scene lighting (scene.json "lighting"); set after build().
+  void set_lighting(const fx::Lighting2D& lighting);
+  const fx::Lighting2D& lighting() const { return lighting_; }
+  // Lighting on (the scene's or a plugin ambient) and the ambient now.
+  bool lighting_active(float ambient_out[3] = nullptr) const;
+  // Entity lights + plugin lights near view.
+  void collect_lights(const WorldRect& view, std::vector<fx::LightInstance>* out) const;
+  fx::Occluders occluders() const;
+  // The lightmap of the latest build_draw_list (empty when lighting is off).
+  const fx::Lightmap& lightmap() const { return lightmap_; }
 
   // --- In-game UI (World_Plugins.cpp) ------------------------------------------
   // Lua ui.* requests for the host's ui::UiSystem (newest kMaxUiCommands
@@ -482,6 +508,15 @@ class World final : public ScriptWorld {
   std::vector<NetPost> net_posts_;
   std::vector<SoundEvent> sounds_;
   std::vector<UiCommand> ui_commands_;
+  fx::ParticleWorld particles_{fx::Space::TwoD};
+  fx::Lighting2D lighting_;
+  std::uint64_t fx_total_ = 0;
+  mutable fx::Lightmap lightmap_;
+  mutable std::string lightmap_key_;
+  void step_fx();
+  void apply_fx(const FxEvent& event);
+  void build_particles(bool additive, std::vector<DrawQuad>* out) const;
+  void build_lightmap(const WorldRect& view, std::vector<DrawQuad>* out) const;
   std::uint64_t sound_total_ = 0;
   // Plugin blockers' boxes near the body being moved (reused buffer).
   std::vector<Aabb> blocker_boxes_;

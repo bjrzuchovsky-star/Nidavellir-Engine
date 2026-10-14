@@ -8,6 +8,7 @@ add_library(ts_runtime
   World_Anim.cpp
   World_Script.cpp
   World_Plugins.cpp
+  World_Fx.cpp
   World_Net.cpp
   PlaySession.cpp
   Script.cpp
@@ -23,6 +24,7 @@ target_include_directories(ts_runtime
 target_link_libraries(ts_runtime
   PUBLIC
     ts_scene
+    ts_fx
   PRIVATE
     ts_lua
 )

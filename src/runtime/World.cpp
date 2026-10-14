@@ -87,7 +87,9 @@ bool World::load_project(const std::string& project_dir,
                              &doc, error_out)) {
     return false;
   }
-  return build(doc.entities, doc.tile_solidity, project_dir, error_out);
+  if (!build(doc.entities, doc.tile_solidity, project_dir, error_out)) return false;
+  set_lighting(doc.lighting);
+  return true;
 }
 
 void World::clear() {
@@ -98,6 +100,10 @@ void World::clear() {
   toasts_.clear();
   sounds_.clear();
   ui_commands_.clear();
+  particles_.clear();
+  lighting_ = fx::Lighting2D{};
+  fx_total_ = 0;
+  lightmap_ = fx::Lightmap{};
   next_id_ = 1;
   prev_buttons_ = {};
   in_step_ = false;
@@ -353,6 +359,7 @@ void World::step(const InputFrame& input) {
   follow_parents();
   step_animation();
   step_camera();
+  step_fx();
   in_step_ = false;
   ++tick_;
   // A toast shows through its `until` tick.
@@ -417,10 +424,10 @@ void World::build_draw_list(const WorldRect& view, float alpha,
     return !rel.empty() && image_size && image_size(rel, w, h) && *w > 0 &&
            *h > 0;
   };
-  auto layers = [&](bool over) {
+  auto layers = [&](bool over, bool hud = false) {
     if (!ext_) return;
     for (const WorldExtensions::DrawLayer& l : ext_->layers) {
-      if (l.over != over || !l.draw) continue;
+      if (l.hud != hud || (!hud && l.over != over) || !l.draw) continue;
       try {
         l.draw(*this, view, alpha, out);
       } catch (...) {
@@ -544,7 +551,11 @@ void World::build_draw_list(const WorldRect& view, float alpha,
     }
     out->push_back(q);
   }
+  build_particles(false, out);
   layers(true);
+  build_lightmap(view, out);
+  build_particles(true, out);
+  layers(true, true);
 }
 
 }  // namespace runtime
