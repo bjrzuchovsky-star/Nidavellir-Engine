@@ -369,6 +369,7 @@ std::uint64_t Editor2DScreen::create_sprite_at(const std::string& rel_path,
 
 void Editor2DScreen::refresh_assets() {
   assets_ = assets::list_images(project_.path);
+  sounds_ = assets::list_sounds(project_.path);
   assets_refresh_time_ = now_seconds();
 }
 

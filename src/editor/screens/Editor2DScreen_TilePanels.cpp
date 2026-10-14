@@ -374,6 +374,7 @@ void Editor2DScreen::draw_supply_wagon() {
                      "right-click it for more.");
   ImGui::PopStyleColor();
 
+  draw_wagon_sounds();
   if (assets_.empty()) {
     theme::StatusInfo("Wagon's empty. Import a PNG, or drop files into "
                       "<project>/assets.");

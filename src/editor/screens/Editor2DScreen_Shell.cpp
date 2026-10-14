@@ -1,5 +1,6 @@
 #include "editor/screens/Editor2DScreen.h"
 
+#include "editor/audio/EditorAudio.h"
 #include "editor/ui/Brand.h"
 #include "editor/ui/Theme.h"
 #include "plugins/Builtins.h"
@@ -66,6 +67,7 @@ void Editor2DScreen::setup_default_dock_layout(unsigned int dockspace_id) {
   ImGui::DockBuilderDockWindow("Tile Palette", dock_right_bottom);
   ImGui::DockBuilderDockWindow("Stable", dock_right_bottom);
   ImGui::DockBuilderDockWindow("Network", dock_right_bottom);
+  ImGui::DockBuilderDockWindow("Saloon Band (Mixer)", dock_right_bottom);
   ImGui::DockBuilderFinish(dockspace_id);
 }
 
@@ -253,6 +255,7 @@ void Editor2DScreen::draw_menu_bar() {
     ImGui::MenuItem("Stable (Animation)", nullptr, &show_stable_);
     ImGui::MenuItem("Scripts", nullptr, &show_scripts_);
     ImGui::MenuItem("Telegraph (Console)", nullptr, &show_console_);
+    ImGui::MenuItem("Saloon Band (Mixer)", nullptr, &show_mixer_);
     ImGui::MenuItem("Plugins (Outfitter)", nullptr, &show_plugins_);
     draw_plugin_view_items();
     ImGui::MenuItem("Toolbar", nullptr, &show_toolbar_);
@@ -863,6 +866,14 @@ void Editor2DScreen::draw_ui() {
     }
     if (ImGui::Begin("Telegraph", &show_console_)) {
       draw_console();
+    }
+    ImGui::End();
+  }
+  if (show_mixer_) {
+    // Stays live while riding: set the levels with the band playing.
+    ImGui::SetNextWindowSize(ImVec2(470, 470), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Saloon Band (Mixer)", &show_mixer_)) {
+      draw_mixer_panel();
     }
     ImGui::End();
   }
