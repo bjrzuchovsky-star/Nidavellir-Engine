@@ -1,0 +1,144 @@
+#pragma once
+
+// 3D scene data (scene.json v7, "dimension": "3d"). A flat list of
+// entities, each with a transform (position, rotation quaternion, scale)
+// and optional components. 2D scenes keep their own format (v1..v6,
+// scene/SceneJson.h); the 2D reader refuses a 3D file and vice versa.
+
+#include "render3d/Math3D.h"
+#include "render3d/Renderer3D.h"
+#include "scene/SceneData.h"
+
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace ts {
+namespace tombstone {
+namespace scene3d {
+
+using render3d::Quat;
+using render3d::Transform;
+using render3d::Vec3;
+
+inline constexpr int kScene3DVersion = 7;
+
+// What to draw: "primitive:cube|plane|sphere|capsule" or a project-relative
+// .gltf / .glb path.
+struct MeshRef {
+  std::string source = "primitive:cube";
+  bool cast_shadows = true;
+  bool operator==(const MeshRef& o) const = default;
+  bool is_primitive() const { return source.rfind("primitive:", 0) == 0; }
+};
+
+struct Material3D {
+  float albedo[4] = {0.75f, 0.62f, 0.48f, 1.0f};
+  float metallic = 0.0f;
+  float roughness = 0.75f;
+  float emissive[3] = {0.0f, 0.0f, 0.0f};
+  std::string albedo_texture;       // project-relative image paths
+  std::string normal_texture;
+  std::string metal_rough_texture;
+  // glTF meshes keep their own materials unless this is set.
+  bool override_model = false;
+  bool operator==(const Material3D& o) const = default;
+};
+
+struct Light3D {
+  enum class Type : std::uint8_t { Point, Directional };
+  Type type = Type::Point;
+  float color[3] = {1.0f, 0.78f, 0.5f};
+  float intensity = 6.0f;
+  float range = 8.0f;  // point only
+  bool operator==(const Light3D& o) const = default;
+};
+
+struct Collider3D {
+  enum class Shape : std::uint8_t { Box, Capsule };
+  Shape shape = Shape::Box;
+  Vec3 size{1.0f, 1.0f, 1.0f};  // box: full extents (local, times scale);
+                                // capsule: x = radius, y = height
+  Vec3 offset;                   // local centre offset
+  bool trigger = false;          // reports overlaps, never blocks
+  bool operator==(const Collider3D& o) const = default;
+};
+
+// Third-person rider: WASD relative to the camera, jump, gravity.
+struct Player3D {
+  float speed = 4.5f;        // m/s
+  float jump_speed = 5.5f;   // m/s up
+  float camera_distance = 6.0f;
+  float camera_height = 2.5f;
+  bool operator==(const Player3D& o) const = default;
+};
+
+struct Entity3D {
+  std::uint64_t id = 0;
+  std::string name;
+  Transform transform;
+  bool visible = true;
+  std::optional<MeshRef> mesh;
+  std::optional<Material3D> material;
+  std::optional<Light3D> light;
+  std::optional<Collider3D> collider;
+  std::optional<Player3D> player;
+  std::optional<ScriptData> script;
+  bool operator==(const Entity3D& o) const = default;
+};
+
+struct EditorCamera3D {
+  Vec3 target{0.0f, 0.5f, 0.0f};
+  float yaw = 35.0f;      // degrees around +Y
+  float pitch = 28.0f;    // degrees above the horizon
+  float distance = 14.0f;
+  bool operator==(const EditorCamera3D& o) const = default;
+};
+
+struct Scene3D {
+  int version = kScene3DVersion;
+  render3d::Environment environment;
+  std::vector<Entity3D> entities;
+  EditorCamera3D editor_camera;
+  bool show_grid = true;
+  float snap_translate = 0.5f;
+  float snap_rotate = 15.0f;
+  float snap_scale = 0.25f;
+  bool snap = true;
+  std::vector<std::uint64_t> selection;
+  bool operator==(const Scene3D& o) const = default;
+
+  Entity3D* find(std::uint64_t id);
+  const Entity3D* find(std::uint64_t id) const;
+  const Entity3D* find_named(const std::string& name) const;
+  std::uint64_t next_id() const;
+};
+
+// <project_dir>/scene.json
+std::string scene_path(const std::string& project_dir);
+
+// Text in, text out. parse() refuses 2D scenes with a clear message.
+bool parse(const std::string& text, Scene3D* out, std::string* error);
+std::string write(const Scene3D& scene);
+bool load_file(const std::string& path, Scene3D* out, std::string* error);
+bool save_file(const std::string& path, const Scene3D& scene,
+               std::string* error);
+
+// True when the text is a 3D scene ("dimension": "3d").
+bool is_3d_scene_text(const std::string& text);
+
+// A fresh 3D claim: ground, sun-lit crate, a lamp post, a rider.
+Scene3D make_starter_scene();
+
+// The "ghost-town-3d" sample: main street of primitives, a glTF lantern
+// (assets/lantern.gltf, written alongside), a checker-boarded ground
+// texture (assets/boards.tga), a windmill script, and a rider. Writes
+// project.json too. Returns false with the reason.
+bool write_ghost_town_sample(const std::string& project_dir,
+                             const std::string& display_name,
+                             std::string* error);
+
+}  // namespace scene3d
+}  // namespace tombstone
+}  // namespace ts
