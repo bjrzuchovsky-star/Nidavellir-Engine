@@ -51,7 +51,7 @@ Every system is built with performance as the primary goal:
 
 ## Plugins and project types
 
-**Project type.** Every new claim is 2D, 3D or VR, picked on the Project Manager cards and stored as `"dimension"` in `project.json`. 2D is the full editor you know. 3D opens the 3D editor (below). VR still opens a themed survey camp backed by `ts_xr` (an OpenXR session stub). A project without `"dimension"` loads as 2D.
+**Project type.** Every new claim is 2D, 3D or VR, picked on the Project Manager cards and stored as `"dimension"` in `project.json`. 2D is the full editor you know. 3D opens the 3D editor (below). VR opens the same 3D editor with a VR player rig and headset preview (see [VR projects](#vr-projects)). A project without `"dimension"` loads as 2D.
 
 **Plugins (`src/plugin`, `ts_plugin`).** A plugin is a `ts::plugin::Plugin` with an id, a semver version and dependencies (required or optional, with a minimum version). `on_register` gets a `Registrar` that can add World systems/components, editor panels and menu items, Lua API tables, asset types and tick hooks. The `PluginManager` orders plugins by dependency (Kahn's algorithm, catalog order breaks ties) and checks versions (same major, >= minimum). Missing, disabled or wrong-version dependencies and loops are reported to the Telegraph, and the skip cascades to dependents. Plugins unload in reverse order.
 
@@ -93,6 +93,57 @@ Every system is built with performance as the primary goal:
 **Sample.** `ghost-town-3d` is seeded next to the 2D sample when the projects folder is empty. It has a main street of primitive buildings, a textured boardwalk, glTF lanterns with point lights, a Lua windmill and a bell trigger that rings.
 
 **Tests.** `ts_admin --smoke` runs the 3D checks: math and primitives, the scene v7 round trip (byte-stable), glTF loading and the sample, the play runtime, a GL render with pixel checks, and the editor (gizmos with snap, undo / redo, picking, glTF drop, save / reload, play / stop). For the 3D checks alone, run `ts_admin --smoke-3d`. The GL render check is skipped when there is no display, unless `TS_SMOKE_REQUIRE_GL=1` is set; on Linux CI, run it under `xvfb-run`.
+
+## VR projects
+
+VR projects (`"dimension": "vr"`) are 3D scenes with a **VR Rig** entity (the player's tracking-space floor origin) and props marked **Grabbable**. They open in the 3D editor; the Haunted Saloon VR sample (`haunted-saloon-vr`) is seeded with the other samples.
+
+**Runtime.** `ts_xr` talks to OpenXR through the Khronos loader (OpenXR-SDK 1.1.63, fetched by hash; `-DTS_WITH_OPENXR=OFF` drops it). On Windows it renders with OpenGL (`XR_KHR_opengl_enable`) into the runtime's swapchains, one view and projection per eye. On Linux, and wherever no runtime or headset answers, it falls back to the **desktop simulator**: the same stereo rendering, with mouse and keys driving the head and hands. Tested target: SteamVR.
+
+**In the headset.**
+- Head and both controllers are tracked through one action set, with bindings for Valve Index, HTC Vive, Oculus/Meta Touch and the Khronos simple controller.
+- **Trigger** fires the laser. It calls `on_vr_trigger(hand)` on what it points at, or `on_interact` if the script has no `on_vr_trigger`.
+- **Grip** grabs a Grabbable within reach. If nothing is in reach, it pulls the Grabbable under the laser into your hand. Let go to drop it, or swing and let go to throw it.
+- **Left stick** walks (smooth locomotion; walls block you and low steps are climbed).
+- **Right stick:** push forward to aim the teleport arc and release to jump; push left or right to snap turn (or smooth turn).
+- **Menu** (left controller) opens the comfort menu: vignette, snap angle, locomotion mode, and seated mode. On Vive wands the trackpad acts as the stick.
+- **Comfort defaults** live on the VR Rig component in the inspector: locomotion (teleport / smooth / both), move speed, snap angle (0 = smooth turn), teleport range, vignette while moving, and seated mode with its height offset.
+
+**Editor.** The toolbar has two VR buttons:
+- **Preview in headset** plays the scene in the HMD. A **Headset Mirror** window shows both eyes. If no headset is available, the preview runs in the simulator.
+- **Play (simulator)** plays the scene with the simulator.
+
+Stop ends the session; the authored scene is never changed.
+
+**Simulator keys.**
+- Hold the right mouse button to look; WASD walk.
+- Q / E snap turn; hold T to aim the teleport arc and release to jump.
+- Left mouse is the trigger; G or middle mouse is the grip. Hold Shift to use the left hand instead.
+- M / Tab opens the menu; Ctrl crouches; X / Z move the hands farther or closer.
+
+**ts_game.**
+- `ts_game --project <dir>` runs a VR project in the headset with a mirror window. If no headset is available, it uses the simulator in a window.
+- `--sim` forces the simulator.
+- `--xr-probe` creates and destroys an OpenXR instance and session, prints the runtime, system and view sizes, and exits.
+- `--smoke` runs the simulator headless. It checks stereo pixels, walking, snap turn, grab and throw, and teleport.
+
+**Lua.** Every script in a VR world gets a `vr` table:
+- `vr.active()`
+- `vr.head()` returns x, y, z, yaw.
+- `vr.hand("left"|"right")` returns x, y, z, trigger, grip.
+- `vr.held(hand)` and `vr.pointed(hand)` return an entity or nil.
+- `vr.rig()`
+- `vr.teleport(x, y, z)`
+- `vr.haptic(hand, amplitude, seconds)`
+
+New hooks: `on_grab(hand)`, `on_release(hand, speed)`, `on_point(hand)`, `on_unpoint(hand)` and `on_vr_trigger(hand)`. Triggers fire `on_trigger_enter` for thrown props and for the player's head.
+
+**SteamVR setup (Windows).**
+1. Install Steam and SteamVR, connect the headset, and start SteamVR. The headset and controllers should show green.
+2. In SteamVR, open **Settings → OpenXR** (in older versions, **Settings → Developer**) and click **Set SteamVR as OpenXR runtime**. This sets `HKLM\SOFTWARE\Khronos\OpenXR\1\ActiveRuntime` to SteamVR's `steamxr_win64.json`.
+3. Run `ts_game --xr-probe`. It should print `SteamVR/OpenXR` and the headset. Then open a VR project and click **Preview in headset**, or run `ts_game --project TombStoneProjects/haunted-saloon-vr`.
+
+**scene.json v8** adds two optional entity keys: `"vr_rig"` and `"grabbable"`. v1–v7 files still load, and newer versions are refused.
 
 ## Frontier Survival (2D gameplay plugin)
 
