@@ -99,6 +99,26 @@ class PluginManager::Collector final : public Registrar {
     if (item.menu.empty()) item.menu = "Tools";
     m_.menus_.push_back({id_, std::move(item)});
   }
+  void add_draw_layer(const std::string& name, bool over, DrawFn draw) override {
+    if (!draw) return;
+    m_.world_->layers.push_back({name, id_, over, std::move(draw)});
+  }
+  void add_blocker(const std::string& name, SolidsFn solids) override {
+    if (!solids) return;
+    m_.world_->blockers.push_back({name, id_, std::move(solids)});
+  }
+  void add_net_channel(const std::string& name, ReceiveFn receive) override {
+    if (name.empty() || !receive) return;
+    for (const auto& ch : m_.world_->channels) {
+      if (ch.name == name) {
+        m_.report(LogLevel::Warn, id_,
+                  "network channel '" + name + "' is already claimed by " + ch.owner +
+                      "; this one is ignored");
+        return;
+      }
+    }
+    m_.world_->channels.push_back({name, id_, std::move(receive)});
+  }
 
  private:
   PluginManager& m_;

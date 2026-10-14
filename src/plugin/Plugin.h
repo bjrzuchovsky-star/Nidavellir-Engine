@@ -32,6 +32,9 @@ namespace ts {
 namespace tombstone {
 namespace runtime {
 class World;
+struct DrawQuad;
+struct WorldRect;
+struct Aabb;
 }  // namespace runtime
 
 namespace plugin {
@@ -141,6 +144,22 @@ class Registrar {
   virtual void add_asset_type(const AssetType& type) = 0;
   virtual void add_editor_panel(EditorPanel panel) = 0;
   virtual void add_menu_item(EditorMenuItem item) = 0;
+
+  // Quads (world space) drawn under (over = false) or on top of the actors
+  // in every host that draws the World (editor Play, ts_game, ts_client).
+  using DrawFn = std::function<void(const runtime::World&, const runtime::WorldRect& view,
+                                    float alpha, std::vector<runtime::DrawQuad>* out)>;
+  virtual void add_draw_layer(const std::string& /*name*/, bool /*over*/, DrawFn /*draw*/) {}
+  // Solid boxes the World's movement collides with (riders, bodies, and a
+  // client's prediction alike).
+  using SolidsFn = std::function<void(const runtime::World&, const runtime::Aabb& area,
+                                      std::vector<runtime::Aabb>* out)>;
+  virtual void add_blocker(const std::string& /*name*/, SolidsFn /*solids*/) {}
+  // A network channel: messages between a posse server's world and its
+  // clients' (World::net_post / net_deliver; ts_mp carries them).
+  using ReceiveFn = std::function<void(runtime::World&, int from_slot,
+                                       const std::vector<std::uint8_t>& bytes)>;
+  virtual void add_net_channel(const std::string& /*name*/, ReceiveFn /*receive*/) {}
 };
 
 // Where the plugin is being loaded.
