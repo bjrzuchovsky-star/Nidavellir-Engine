@@ -194,6 +194,8 @@ int run_console_smoke() {
 
   bool opened = false;
   for (std::size_t i = 0; i < flow.projects().size(); ++i) {
+    // The seeded ghost-town-3d sorts first; this walk-through is 2D.
+    if (flow.projects()[i].kind != ts::tombstone::editor::ProjectKind::TwoD) continue;
     if (flow.select_project(i)) {
       opened = true;
       break;
