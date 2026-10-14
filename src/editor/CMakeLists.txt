@@ -28,6 +28,7 @@ add_library(ts_editor
   screens/Editor2DScreen_Stable.cpp
   screens/Editor2DScreen_Console.cpp
   screens/Editor2DScreen_Scripts.cpp
+  screens/Editor2DScreen_Posse.cpp
   console/TelegraphLog.cpp
   launch/GameLauncher.cpp
   launch/OpenWithOs.cpp
@@ -43,6 +44,8 @@ target_link_libraries(ts_editor
     ts_core
     ts_scene
     ts_runtime
+    ts_net
+    ts_mp
     ts_gfx
     ts_imgui
 )

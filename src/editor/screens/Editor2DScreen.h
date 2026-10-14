@@ -6,6 +6,8 @@
 #include "editor/screens/IScreen.h"
 #include "editor/ui/FolderBrowser.h"
 #include "editor/workspace/Workspace2D.h"
+#include "mp/LocalPosse.h"
+#include "net/SimTransport.h"
 #include "runtime/PlaySession.h"
 #include "runtime/Script.h"
 #include "scene/Animation.h"
@@ -13,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -186,6 +189,33 @@ class Editor2DScreen final : public IScreen {
   // Save, then start ts_game --project <this project> as its own process.
   // False (with a status note) when ts_game is not built or will not start.
   bool launch_game();
+
+  // --- Play with posse (Editor2DScreen_Posse.cpp) -----------------------------
+  // A GameServer and 1-4 GameClients in this process (mp::LocalPosse) on a
+  // loopback UDP port, riding a copy of the edit scene. P1 rides the
+  // keyboard / pad, P2-P4 follow bot reins; the Viewport shows the chosen
+  // rider's eyes (prediction + interpolation and all). The Network panel
+  // holds the lag sim (latency / jitter / loss), the riders' RTT,
+  // bandwidth and snapshot rate, and a trail map of server vs client.
+  // Ordinary Play stops first; editing stays open (the posse rides a copy).
+  bool start_posse();
+  void stop_posse();
+  bool posse_running() const { return posse_ && posse_->running(); }
+  void toggle_posse();
+  // Advance the posse by real time; P1 gets `p1`. draw_ui() calls it.
+  void update_posse(double real_seconds, const runtime::PlayerInput& p1);
+  mp::LocalPosse* posse() { return posse_.get(); }
+  int posse_riders() const { return posse_riders_; }
+  void set_posse_riders(int n);  // 1..4; live posse saddles / sends home
+  const net::LinkSim& posse_sim() const { return posse_sim_; }
+  void set_posse_sim(const net::LinkSim& sim);
+  // Whose eyes the Viewport and trail map use (index into the clients).
+  int posse_view() const { return posse_view_; }
+  void set_posse_view(int index) { posse_view_ = index; }
+  // Start a windowed ts_client riding into the running posse.
+  bool open_posse_client_window();
+  bool show_network_panel() const { return show_network_; }
+  void set_show_network_panel(bool on) { show_network_ = on; }
 
   // --- Animation (Editor2DScreen_Anim.cpp) ------------------------------------
   // Animator component: add / edit / remove (nullopt) is one undo step and
@@ -481,6 +511,21 @@ class Editor2DScreen final : public IScreen {
 
   // Telegraph console.
   TelegraphLog telegraph_;
+
+  // Play with posse.
+  void draw_network_panel();
+  void draw_posse_viewport();
+  void draw_posse_map(float height);
+  void pump_posse_logs();
+  std::unique_ptr<mp::LocalPosse> posse_;
+  int posse_riders_ = 2;
+  net::LinkSim posse_sim_{60, 15, 0.02f};
+  bool posse_bots_ = true;
+  int posse_view_ = 0;
+  int posse_windows_ = 0;
+  bool show_network_ = true;
+  bool focus_network_ = false;
+  std::vector<runtime::DrawQuad> posse_quads_;
   char telegraph_search_[128]{};
   bool telegraph_autoscroll_ = true;
   std::uint64_t telegraph_seen_total_ = 0;  // for auto-scroll on new lines
