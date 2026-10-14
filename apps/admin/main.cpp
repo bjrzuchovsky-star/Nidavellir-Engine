@@ -12,6 +12,7 @@
 #include "gfx/GlTextureUploader.h"
 
 #include "Smoke3D.h"
+#include "SmokeTools.h"
 #include "SmokeVR.h"
 #include "SmokePlugins.h"
 #include "SmokeSurvival.h"
@@ -1006,6 +1007,8 @@ int run_console_smoke() {
 
     t.set_grid_size(16.0f);
     t.set_snap_enabled(true);
+    // Grid-only checks: object snap (edges/centres) is covered in SmokeTools.
+    t.set_object_snap(false);
     if (t.snap_value(37.0f) != 32.0f || t.snap_extent(5.0f) != 16.0f) {
       return fail("snap_value / snap_extent");
     }
@@ -1180,6 +1183,9 @@ int run_console_smoke() {
   if (run_survival_smoke() != 0) {
     return 1;
   }
+  if (run_tools_smoke() != 0) {
+    return 1;
+  }
 
   std::cout << "TombStone Admin smoke complete\n";
   return flow.current_state() == AppState::Quit ? 0 : 1;
@@ -1309,6 +1315,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-vr") == 0) {
       // Just the VR checks.
       return run_vr_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-tools") == 0) {
+      // Just the editor tools checks (2D + 3D).
+      return run_tools_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-survival") == 0) {
       // Just the Frontier Survival checks.
