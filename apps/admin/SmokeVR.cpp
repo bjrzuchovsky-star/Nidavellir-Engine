@@ -89,13 +89,13 @@ int scene_io(const fs::path& dir) {
   std::string err;
   s3::Scene3D s;
   if (!s3::load_file(s3::scene_path(dir.string()), &s, &err)) return fail("load saloon: " + err);
-  if (s.version != 8) return fail("saloon is v8");
+  if (s.version != s3::kScene3DVersion) return fail("saloon loads at the current version");
   const s3::Entity3D* rig = s.find_named("VR Rig");
   const s3::Entity3D* hat = s.find_named("Stetson");
   if (!rig || !rig->vr_rig || !hat || !hat->grabbable) return fail("saloon has rig + grabbables");
   s3::Scene3D again;
   if (!s3::parse(s3::write(s), &again, &err)) return fail("reparse: " + err);
-  if (s3::write(again) != s3::write(s)) return fail("v8 round trip is stable");
+  if (s3::write(again) != s3::write(s)) return fail("round trip is stable");
   const s3::Entity3D* rig2 = again.find_named("VR Rig");
   if (rig2->vr_rig->snap_turn_deg != rig->vr_rig->snap_turn_deg ||
       rig2->vr_rig->locomotion != rig->vr_rig->locomotion ||
@@ -104,15 +104,16 @@ int scene_io(const fs::path& dir) {
   }
   // v7 files (no VR keys) still load; a newer version is refused.
   std::string v7 = s3::write(s3::make_starter_scene());
-  const std::string tag = "\"version\": 8";
+  const std::string tag = "\"version\": " + std::to_string(s3::kScene3DVersion);
   const auto at = v7.find(tag);
   if (at == std::string::npos) return fail("version key in the writer");
   v7.replace(at, tag.size(), "\"version\": 7");
   s3::Scene3D old;
   if (!s3::parse(v7, &old, &err)) return fail("v7 loads: " + err);
-  std::string v9 = v7;
-  v9.replace(v9.find("\"version\": 7"), tag.size(), "\"version\": 9");
-  if (s3::parse(v9, &old, &err)) return fail("v9 refused");
+  std::string future = v7;
+  future.replace(future.find("\"version\": 7"), std::string("\"version\": 7").size(),
+                 "\"version\": " + std::to_string(s3::kScene3DVersion + 1));
+  if (s3::parse(future, &old, &err)) return fail("newer version refused");
   s3::Scene3D starter;
   if (!s3::parse(s3::write(s3::make_vr_starter_scene()), &starter, &err) ||
       !starter.find_named("VR Rig")) {

@@ -53,6 +53,19 @@ void Editor3DScreen::draw_inspector() {
   t.after("Rename");
   ImGui::Checkbox("Visible", &e.visible);
   t.after("Visibility");
+  ImGui::SameLine();
+  ImGui::Checkbox("Locked", &e.locked);
+  t.after("Lock");
+  ImGui::SameLine();
+  ImGui::Checkbox("Hidden (editor)", &e.editor_hidden);
+  t.after("Hide");
+  bool unparent = false;
+  if (e.parent != 0) {
+    const scene3d::Entity3D* par = find(e.parent);
+    ImGui::TextDisabled("Parent: %s", par ? par->name.c_str() : "?");
+    ImGui::SameLine();
+    unparent = ImGui::SmallButton("Unparent");
+  }
 
   theme::SectionHeader("Transform");
   ImGui::DragFloat3("Position", &e.transform.position.x, 0.05f);
@@ -235,13 +248,18 @@ void Editor3DScreen::draw_inspector() {
 
   if (t.activated && !inspector_before_) inspector_before_ = scene_;
   if (scene3d::Entity3D* live = scene_.find(e.id)) {
-    if (!(*live == e)) *live = e;
+    if (!(*live == e)) {
+      const render3d::Transform prev = live->transform;
+      *live = e;
+      carry_descendants(e.id, prev);  // children ride along
+    }
   }
   if (t.commit && inspector_before_) {
     const scene3d::Scene3D before = std::move(*inspector_before_);
     inspector_before_.reset();
     if (!(before == scene_)) push_undo(std::string(t.commit) + " " + e.name, before);
   }
+  if (unparent && !inspector_before_) set_parent(e.id, 0);
 }
 
 void Editor3DScreen::draw_environment() {

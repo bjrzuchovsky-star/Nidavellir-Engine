@@ -99,7 +99,8 @@ int scene_roundtrip(const fs::path& root) {
   if (!s3::parse(text, &back, &err)) return fail("parse own output: " + err);
   if (!(back == s)) return fail("scene.json v8 round trip changed the scene");
   if (s3::write(back) != text) return fail("scene.json v8 not byte-stable");
-  if (text.find("\"version\": 8") == std::string::npos || !s3::is_3d_scene_text(text)) {
+  if (text.find("\"version\": " + std::to_string(s3::kScene3DVersion)) == std::string::npos ||
+      !s3::is_3d_scene_text(text)) {
     return fail("v8 header");
   }
   // 2D and 3D refuse each other's files with a clear reason.
