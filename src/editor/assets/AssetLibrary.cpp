@@ -143,6 +143,9 @@ std::string resolve(const std::string& project_dir, const std::string& rel) {
   if (rel.empty()) {
     return {};
   }
+  if (rel.rfind("mem:", 0) == 0) {
+    return rel;  // core/MemImages key (the UI font atlas)
+  }
   const fs::path p = fs::path(rel);
   if (p.is_absolute() || project_dir.empty()) {
     return p.string();

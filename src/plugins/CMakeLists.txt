@@ -31,6 +31,7 @@ target_link_libraries(ts_plugins_builtin
     ts_lua
     ts_runtime
     ts_scene
+    ts_ui
 )
 
 target_compile_features(ts_plugins_builtin PUBLIC cxx_std_20)

@@ -3,6 +3,7 @@
 #include "plugin/Catalog.h"
 #include "runtime/Collision.h"
 #include "runtime/World.h"
+#include "ui/Font.h"
 
 // Lua is built as C++ (cmake/FetchLua.cmake): no extern "C".
 #include "lauxlib.h"
@@ -520,6 +521,29 @@ void SurvivalPlugin::draw_over(const runtime::World& w, const runtime::WorldRect
   }
   // Hotbar (view space: bottom centre of the view).
   const FrontierSim::Player& p = sim_.player(me);
+  const ui::FontAtlas& atlas = ui::default_atlas();
+  static const std::string kAtlas = ui::kAtlasKey;
+  static const float kBone[4] = {0.96f, 0.91f, 0.78f, 1.0f};
+  static const float kShadow[4] = {0.05f, 0.03f, 0.03f, 0.85f};
+  std::vector<ui::UiQuad> glyphs;
+  auto text = [&](const std::string& s, float px, float tx, float ty, const float* c) {
+    glyphs.clear();
+    atlas.text_quads(s, ui::FontFace::Body, px, tx, ty, c, &glyphs);
+    for (const ui::UiQuad& g : glyphs) {
+      runtime::DrawQuad q;
+      q.x0 = g.x0;
+      q.y0 = g.y0;
+      q.x1 = g.x1;
+      q.y1 = g.y1;
+      q.u0 = g.u0;
+      q.v0 = g.v0;
+      q.u1 = g.u1;
+      q.v1 = g.v1;
+      for (int k = 0; k < 4; ++k) q.rgba[k] = g.rgba[k];
+      q.image = &kAtlas;
+      out->push_back(q);
+    }
+  };
   const float vw = view.x1 - view.x0, vh = view.y1 - view.y0;
   const float cell = std::clamp(vw / 26.0f, 18.0f, 44.0f);
   const float gap = cell * 0.12f;
@@ -538,11 +562,27 @@ void SurvivalPlugin::draw_over(const runtime::World& w, const runtime::WorldRect
     if (!it) continue;
     const float m = cell * 0.2f;
     quadc(out, x + m, y0 + m, x + cell - m, y0 + cell - m, it->color);
-    // Count as pips (no font in the runtime draw list): one per 10, max 9.
-    const int pips = std::min(9, (st.count + 9) / 10);
-    for (int k = 0; k < pips && st.count > 1; ++k) {
-      const float px = x + 2 + k * (cell - 4) / 9.0f;
-      quad(out, px, y0 + cell - 4, px + (cell - 4) / 9.0f - 1, y0 + cell - 2, 0.96f, 0.9f, 0.7f);
+    // Stack count, bottom right, lettered from the UI font atlas.
+    if (st.count > 1) {
+      const std::string n = std::to_string(st.count);
+      const float px = cell * 0.42f;
+      const float tw = atlas.measure(n, ui::FontFace::Body, px);
+      const float tx = x + cell - tw - cell * 0.08f;
+      const float ty = y0 + cell - atlas.line_height(ui::FontFace::Body, px) + cell * 0.02f;
+      text(n, px, tx + cell * 0.03f, ty + cell * 0.03f, kShadow);
+      text(n, px, tx, ty, kBone);
+    }
+  }
+  // Selected item's name above the grit bar.
+  {
+    const Stack& st = p.inv.at(p.hotbar);
+    const ItemDef* it = st.empty() ? nullptr : d.item_def(st.item);
+    if (it && !it->name.empty()) {
+      const float px = cell * 0.42f;
+      const float tw = atlas.measure(it->name, ui::FontFace::Body, px);
+      const float ty = y0 - cell * 0.42f - atlas.line_height(ui::FontFace::Body, px);
+      text(it->name, px, x0 + (total - tw) * 0.5f + cell * 0.03f, ty + cell * 0.03f, kShadow);
+      text(it->name, px, x0 + (total - tw) * 0.5f, ty, kBone);
     }
   }
   // Grit bar above the hotbar.
