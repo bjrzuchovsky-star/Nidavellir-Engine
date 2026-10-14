@@ -3,12 +3,19 @@
 
 #include "SmokeNetwork.h"
 
+#include "editor/ProjectInfo.h"
+#include "editor/screens/Editor2DScreen.h"
+#include "mp/GameClient.h"
+#include "mp/LocalPosse.h"
+#include "mp/PosseSmoke.h"
+
 #include "net/ByteStream.h"
 #include "net/SimTransport.h"
 #include "net/Transport.h"
 
 #include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <cstdint>
 #include <functional>
 #include <iostream>
@@ -270,4 +277,103 @@ int run_transport_smoke() {
   return 0;
 }
 
-int run_network_smoke() { return run_transport_smoke(); }
+// The editor's Play with posse: server + riders in the Admin process on the
+// scene the editor has open; riders saddle up and go home live, the lag sim
+// reaches every rider's link, and breaking camp leaves the scene alone.
+int run_editor_posse_smoke() {
+  namespace fs = std::filesystem;
+  using namespace ts::tombstone;
+  auto fail = [](const std::string& what) {
+    std::cerr << "[smoke] editor posse FAILED: " << what << '\n';
+    return 1;
+  };
+  const fs::path dir = fs::path("TombStoneProjects") / "_posse_smoke";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  editor::ProjectInfo info;
+  info.id = "_posse_smoke";
+  info.name = "Posse Smoke";
+  info.path = dir.string();
+  editor::Editor2DScreen scr(info);
+  scr.on_enter();
+  const std::size_t entities = scr.workspace().entities().size();
+  scr.set_posse_riders(3);
+  scr.set_posse_sim(LinkSim{50, 10, 0.03f});
+  if (!scr.start_posse() || !scr.posse_running()) return fail("Play with posse would not start");
+  mp::LocalPosse& posse = *scr.posse();
+  auto pump = [&](double seconds, const std::function<bool()>& done) {
+    const auto end = Clock::now() + std::chrono::duration<double>(seconds);
+    auto last = Clock::now();
+    while (Clock::now() < end) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      const auto now = Clock::now();
+      ts::tombstone::runtime::PlayerInput p1;
+      p1.move_x = 1.0f;
+      p1.connected = true;
+      scr.update_posse(std::chrono::duration<double>(now - last).count(), p1);
+      last = now;
+      if (done && done()) return true;
+    }
+    return !done || done();
+  };
+  auto seated = [&](int n) {
+    return [&posse, n] {
+      if (posse.server().rider_count() != n || static_cast<int>(posse.clients().size()) != n) {
+        return false;
+      }
+      for (const auto& c : posse.clients()) {
+        if (!c->joined() || !c->has_snapshot()) return false;
+      }
+      return true;
+    };
+  };
+  if (!pump(6.0, seated(3))) return fail("3 riders should be seated");
+  const std::uint64_t p1 = posse.clients()[0]->rider();
+  const runtime::Actor* a = posse.server().world().find(p1);
+  const float x0 = a ? a->data.x : 0.0f;
+  pump(0.5, nullptr);
+  a = posse.server().world().find(p1);
+  if (!a || a->data.x <= x0) return fail("P1 should ride the editor's keyboard input");
+  if (posse.clients()[1]->link_sim().latency_ms != 50) return fail("lag sim should reach riders");
+  scr.set_posse_sim(LinkSim{120, 30, 0.1f});
+  for (const auto& c : posse.clients()) {
+    if (c->link_sim().latency_ms != 120) return fail("lag sim changes should reach every rider");
+  }
+  scr.set_posse_riders(4);
+  if (!pump(6.0, seated(4))) return fail("Saddle Another should seat a 4th rider");
+  scr.set_posse_riders(2);
+  if (!pump(6.0, seated(2))) return fail("Send One Home should free two seats");
+  bool wired = false;
+  for (const auto& l : scr.telegraph().lines()) {
+    wired |= l.entry.channel == "posse" && l.entry.text.find("rode in as P3") != std::string::npos;
+  }
+  if (!wired) return fail("the Telegraph should hear riders ride in");
+  const double rtt = posse.clients()[0]->stats().rtt_ms;
+  scr.stop_posse();
+  if (scr.posse_running() || scr.workspace().entities().size() != entities) {
+    return fail("Break Camp should stop the posse and leave the scene alone");
+  }
+  scr.on_exit();
+  fs::remove_all(dir, ec);
+  std::cout << "[smoke] editor posse OK (Play with posse: 3 riders seated, P1 on the keyboard, "
+               "lag sim live on every link (RTT "
+            << static_cast<int>(rtt)
+            << " ms), saddle up to 4 and send 2 home live, Telegraph wired, Break Camp leaves the "
+               "scene untouched)\n";
+  return 0;
+}
+
+int run_network_smoke() {
+  if (run_transport_smoke() != 0) return 1;
+  ts::tombstone::mp::PosseSmokeOptions opt;
+  opt.riders = 3;
+  opt.sim = LinkSim{80, 20, 0.08f};
+  const ts::tombstone::mp::PosseSmokeResult r = ts::tombstone::mp::run_posse_smoke(opt);
+  if (!r.ok) {
+    std::cerr << "[smoke] posse FAILED: " << r.failure << '\n';
+    return 1;
+  }
+  std::cout << "[smoke] posse OK (" << r.summary << ")\n";
+  return run_editor_posse_smoke();
+}

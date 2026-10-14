@@ -17,6 +17,7 @@ target_link_libraries(ts_admin
     ts_render
     ts_input
     ts_net
+    ts_mp
     ts_physics
     ts_scene
     ts_runtime
