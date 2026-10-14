@@ -6,34 +6,6 @@ namespace ts {
 namespace tombstone {
 namespace render3d {
 
-MeshData make_cube(float size) {
-  MeshData m;
-  m.name = "cube";
-  const float h = size * 0.5f;
-  const Vec3 normals[6] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
-                           {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
-  for (const Vec3& n : normals) {
-    // Two axes spanning the face.
-    const Vec3 a = std::fabs(n.y) > 0.5f ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
-    const Vec3 b = cross(n, a);
-    const auto base = static_cast<std::uint32_t>(m.vertices.size());
-    const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-    const float sa[4] = {-1, 1, 1, -1};
-    const float sb[4] = {-1, -1, 1, 1};
-    for (int i = 0; i < 4; ++i) {
-      Vertex3D v;
-      v.position = (n + a * sa[i] + b * sb[i]) * h;
-      v.normal = n;
-      v.u = uv[i][0];
-      v.v = uv[i][1];
-      m.vertices.push_back(v);
-    }
-    const std::uint32_t idx[6] = {0, 1, 2, 0, 2, 3};
-    for (std::uint32_t i : idx) m.indices.push_back(base + i);
-  }
-  return m;
-}
-
 namespace {
 
 class NullRenderer3D final : public Renderer3D {
@@ -67,6 +39,19 @@ class NullRenderer3D final : public Renderer3D {
   }
   void draw(MeshHandle mesh, MaterialHandle material,
             const Transform& /*transform*/) override {
+    count(mesh, material);
+  }
+  void draw_matrix(MeshHandle mesh, MaterialHandle material,
+                   const Mat4& /*world*/, bool /*cast_shadow*/) override {
+    count(mesh, material);
+  }
+  void add_point_light(const PointLight& /*light*/) override {
+    if (frame_.lights < kMaxPointLights) ++frame_.lights;
+  }
+  void draw_line(const Vec3&, const Vec3&, const float*, bool) override {
+    ++frame_.lines;
+  }
+  void count(MeshHandle mesh, MaterialHandle material) {
     auto it = meshes_.find(mesh.id);
     if (it == meshes_.end() || !materials_.count(material.id)) return;
     ++frame_.draws;
