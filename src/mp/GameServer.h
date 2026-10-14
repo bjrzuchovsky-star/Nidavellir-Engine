@@ -137,6 +137,7 @@ class GameServer {
   void send_snapshots();
   void send_roster();
   void forward_world_output();
+  void forward_plugin_posts();
   void measure(double real_seconds);
   Peer* peer(net::PeerId id);
   void log(std::string line);

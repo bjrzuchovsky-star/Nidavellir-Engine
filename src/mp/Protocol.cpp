@@ -75,7 +75,7 @@ std::uint64_t scene_hash(const std::string& scene_json) {
 }
 
 bool peek_type(const std::vector<std::uint8_t>& data, MsgType* out) {
-  if (data.empty() || data[0] < 1 || data[0] > 7) return false;
+  if (data.empty() || data[0] < 1 || data[0] > 8) return false;
   *out = static_cast<MsgType>(data[0]);
   return true;
 }
@@ -276,6 +276,26 @@ bool decode(const std::vector<std::uint8_t>& data, EventMsg* out) {
   if (k < 1 || k > 4 || out->slot >= kMaxPosse || !finite(out->seconds)) return false;
   out->kind = static_cast<EventMsg::Kind>(k);
   return r.ok();
+}
+
+std::vector<std::uint8_t> encode(const PluginMsg& m) {
+  ByteWriter w = start(MsgType::Plugin);
+  w.str(m.channel, kMaxPluginChannel);
+  const std::size_t n = std::min(m.bytes.size(), kMaxPluginBytes);
+  w.varu(n);
+  w.bytes(m.bytes.data(), n);
+  return std::move(w.data());
+}
+
+bool decode(const std::vector<std::uint8_t>& data, PluginMsg* out) {
+  ByteReader r(data);
+  if (!open(data, MsgType::Plugin, &r)) return false;
+  out->channel = r.str(kMaxPluginChannel);
+  const std::uint64_t n = r.varu();
+  if (!r.ok() || out->channel.empty() || n > kMaxPluginBytes || n != r.remaining()) return false;
+  out->bytes.resize(static_cast<std::size_t>(n));
+  for (std::size_t i = 0; i < out->bytes.size(); ++i) out->bytes[i] = r.u8();
+  return r.at_end();
 }
 
 std::vector<std::uint8_t> encode(const RosterMsg& m) {

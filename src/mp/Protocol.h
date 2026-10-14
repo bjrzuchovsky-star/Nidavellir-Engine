@@ -21,7 +21,8 @@ namespace ts {
 namespace tombstone {
 namespace mp {
 
-inline constexpr std::uint16_t kProtocolVersion = 1;
+// 2: plugin channel messages.
+inline constexpr std::uint16_t kProtocolVersion = 2;
 inline constexpr int kMaxPosse = kMaxPlayers;  // four riders
 // Inputs repeated in every input packet (newest first).
 inline constexpr int kInputRedundancy = 8;
@@ -49,6 +50,7 @@ enum class MsgType : std::uint8_t {
   Snapshot = 5,
   Event = 6,
   Roster = 7,
+  Plugin = 8,
 };
 
 struct HelloMsg {
@@ -101,6 +103,14 @@ struct EventMsg {
   std::string text;
 };
 
+// A plugin's network channel (World::net_post / net_deliver). Reliable.
+inline constexpr std::size_t kMaxPluginChannel = 32;
+inline constexpr std::size_t kMaxPluginBytes = 512u * 1024u;
+struct PluginMsg {
+  std::string channel;
+  std::vector<std::uint8_t> bytes;
+};
+
 struct RosterEntry {
   int slot = 0;
   std::string name;
@@ -119,6 +129,7 @@ std::vector<std::uint8_t> encode(const InputMsg& m);
 std::vector<std::uint8_t> encode(const SnapshotMsg& m);
 std::vector<std::uint8_t> encode(const EventMsg& m);
 std::vector<std::uint8_t> encode(const RosterMsg& m);
+std::vector<std::uint8_t> encode(const PluginMsg& m);
 
 // Type of a raw message (false when empty / unknown).
 bool peek_type(const std::vector<std::uint8_t>& data, MsgType* out);
@@ -130,6 +141,7 @@ bool decode(const std::vector<std::uint8_t>& data, InputMsg* out);
 bool decode(const std::vector<std::uint8_t>& data, SnapshotMsg* out);
 bool decode(const std::vector<std::uint8_t>& data, EventMsg* out);
 bool decode(const std::vector<std::uint8_t>& data, RosterMsg* out);
+bool decode(const std::vector<std::uint8_t>& data, PluginMsg* out);
 
 // Printable, trimmed, at most kMaxNameLength; "" becomes "Stranger".
 std::string clean_name(const std::string& name);

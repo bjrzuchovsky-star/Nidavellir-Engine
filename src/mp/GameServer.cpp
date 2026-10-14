@@ -79,6 +79,7 @@ bool GameServer::start(ServerConfig config, std::string* error_out) {
   }
   if (scene_json_.size() > kMaxSceneBytes) return fail("scene.json is too big to send");
   scene_hash_ = scene_hash(scene_json_);
+  world_.set_net_role(runtime::NetRole::Server);
   if (!world_.build(doc.entities, doc.tile_solidity, config_.project_dir, &err)) {
     return fail(err);
   }
@@ -247,6 +248,10 @@ void GameServer::handle(const TransportEvent& ev) {
       } else if (type == MsgType::Input) {
         InputMsg in;
         if (p->seated && decode(ev.data, &in)) on_input(*p, in);
+      } else if (type == MsgType::Plugin) {
+        // Plugin channels: the world's owner decides what a rider may ask.
+        PluginMsg pm;
+        if (p->seated && decode(ev.data, &pm)) world_.net_deliver(pm.channel, p->slot, pm.bytes);
       }
       break;
     }
@@ -402,6 +407,7 @@ void GameServer::tick_once() {
   world_.step(gather_input());
   ++stats_.ticks;
   forward_world_output();
+  forward_plugin_posts();
   if (world_.tick() % static_cast<std::uint64_t>(config_.snapshot_every) == 0) {
     send_snapshots();
   }
@@ -485,6 +491,22 @@ void GameServer::send_roster() {
   std::sort(r.riders.begin(), r.riders.end(),
             [](const RosterEntry& a, const RosterEntry& b) { return a.slot < b.slot; });
   broadcast(Delivery::Reliable, encode(r));
+}
+
+void GameServer::forward_plugin_posts() {
+  for (runtime::NetPost& post : world_.take_net_posts()) {
+    PluginMsg m;
+    m.channel = std::move(post.channel);
+    m.bytes = std::move(post.bytes);
+    const std::vector<std::uint8_t> msg = encode(m);
+    if (post.to_slot < 0) {
+      broadcast(Delivery::Reliable, msg);
+      continue;
+    }
+    for (const auto& [id, p] : peers_) {
+      if (p.seated && p.slot == post.to_slot) transport_->send(id, Delivery::Reliable, msg);
+    }
+  }
 }
 
 void GameServer::forward_world_output() {
