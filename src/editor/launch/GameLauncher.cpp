@@ -182,6 +182,122 @@ bool spawn_game(const std::string& exe, const std::string& project_dir,
 #endif
 }
 
+// --- ts_client (Play with posse > Open a client window) ------------------------
+
+namespace {
+
+#if defined(_WIN32)
+constexpr const char* kClientExe = "ts_client.exe";
+
+std::wstring quote_w(const std::wstring& s) {
+  std::wstring out = L"\"";
+  for (wchar_t c : s) {
+    if (c == L'"') out += L'\\';
+    out += c;
+  }
+  return out + L"\"";
+}
+#else
+constexpr const char* kClientExe = "ts_client";
+#endif
+
+// Start `exe args...` detached (it outlives the editor).
+bool spawn_detached(const std::string& exe, const std::vector<std::string>& args,
+                    std::string* error_out) {
+  std::error_code ec;
+  if (exe.empty() || !fs::is_regular_file(fs::path(exe), ec)) {
+    if (error_out) *error_out = "not found: " + exe;
+    return false;
+  }
+#if defined(_WIN32)
+  const std::wstring exe_w = fs::path(exe).wstring();
+  std::wstring cmd = quote_w(exe_w);
+  for (const std::string& a : args) cmd += L" " + quote_w(fs::path(a).wstring());
+  STARTUPINFOW si{};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi{};
+  if (!CreateProcessW(exe_w.c_str(), cmd.data(), nullptr, nullptr, FALSE, 0, nullptr,
+                      nullptr, &si, &pi)) {
+    if (error_out) {
+      *error_out = "CreateProcess failed (error " +
+                   std::to_string(static_cast<unsigned long>(GetLastError())) + ")";
+    }
+    return false;
+  }
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+  return true;
+#else
+  if (access(exe.c_str(), X_OK) != 0) {
+    if (error_out) *error_out = "not executable: " + exe;
+    return false;
+  }
+  std::vector<const char*> argv;
+  argv.push_back(exe.c_str());
+  for (const std::string& a : args) argv.push_back(a.c_str());
+  argv.push_back(nullptr);
+  // Double fork: the grandchild is adopted by init, so no zombie waits on us.
+  const pid_t child = fork();
+  if (child < 0) {
+    if (error_out) *error_out = "fork failed";
+    return false;
+  }
+  if (child == 0) {
+    const pid_t grandchild = fork();
+    if (grandchild == 0) {
+      execv(exe.c_str(), const_cast<char* const*>(argv.data()));
+      _exit(127);
+    }
+    _exit(grandchild < 0 ? 1 : 0);
+  }
+  int status = 0;
+  pid_t waited = 0;
+  do {
+    waited = waitpid(child, &status, 0);
+  } while (waited < 0 && errno == EINTR);
+  if (waited < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    if (error_out) *error_out = "could not start " + exe;
+    return false;
+  }
+  return true;
+#endif
+}
+
+}  // namespace
+
+std::vector<std::string> client_executable_candidates() {
+  std::vector<std::string> out;
+  const std::string self = self_executable_path();
+  if (self.empty()) return out;
+  const fs::path dir = fs::path(self).parent_path();
+  out.push_back((dir / kClientExe).string());
+  out.push_back((dir.parent_path() / "client" / kClientExe).string());
+  if (dir.has_parent_path()) {
+    out.push_back(
+        (dir.parent_path().parent_path() / "client" / dir.filename() / kClientExe).string());
+  }
+  return out;
+}
+
+std::string find_client_executable() {
+  for (const std::string& c : client_executable_candidates()) {
+    std::error_code ec;
+    if (fs::is_regular_file(fs::path(c), ec)) return c;
+  }
+  return {};
+}
+
+bool spawn_client(const std::string& exe, const std::string& endpoint,
+                  const std::string& name, const std::string& project_dir,
+                  std::string* error_out) {
+  std::vector<std::string> args = {"--connect", endpoint, "--name", name};
+  if (!project_dir.empty()) {
+    args.push_back("--project");
+    args.push_back(clean_project_path(project_dir).string());
+  }
+  return spawn_detached(exe, args, error_out);
+}
+
 }  // namespace launcher
 }  // namespace editor
 }  // namespace tombstone

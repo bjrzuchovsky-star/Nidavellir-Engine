@@ -23,6 +23,16 @@ std::string find_game_executable();
 bool spawn_game(const std::string& exe, const std::string& project_dir,
                 std::string* error_out = nullptr);
 
+// ts_client next to ts_admin, like ts_game above (build/apps/client).
+std::vector<std::string> client_executable_candidates();
+std::string find_client_executable();
+
+// Start `exe --connect <endpoint> --name <name> [--project <dir>]` as its
+// own process (a windowed posse rider). False + reason on failure.
+bool spawn_client(const std::string& exe, const std::string& endpoint,
+                  const std::string& name, const std::string& project_dir,
+                  std::string* error_out = nullptr);
+
 }  // namespace launcher
 }  // namespace editor
 }  // namespace tombstone
