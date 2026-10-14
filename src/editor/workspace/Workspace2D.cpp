@@ -289,6 +289,9 @@ std::size_t Workspace2D::select_in_rect(float x0, float y0, float x1, float y1,
   std::optional<std::uint64_t> primary = additive ? selected_id_ : std::nullopt;
   for (std::size_t idx : sorted_draw_order()) {
     const Entity2D& e = entities_[idx];
+    if (effectively_hidden(e) || effectively_locked(e)) {
+      continue;
+    }
     const bool overlap = e.x <= maxx && e.x + e.w >= minx && e.y <= maxy &&
                          e.y + e.h >= miny;
     if (!overlap) {
@@ -310,7 +313,20 @@ std::optional<std::uint64_t> Workspace2D::pick(float wx, float wy) const {
   std::optional<std::uint64_t> hit;
   for (std::size_t idx : sorted_draw_order()) {
     const Entity2D& e = entities_[idx];
-    if (wx >= e.x && wy >= e.y && wx <= e.x + e.w && wy <= e.y + e.h) {
+    if (effectively_hidden(e) || effectively_locked(e)) {
+      continue;
+    }
+    // Turned entities: test in their own frame.
+    float px = wx;
+    float py = wy;
+    if (e.rotation != 0.0f) {
+      const float a = -e.rotation * 3.14159265f / 180.0f;
+      const float dx = wx - e.center_x();
+      const float dy = wy - e.center_y();
+      px = e.center_x() + dx * std::cos(a) - dy * std::sin(a);
+      py = e.center_y() + dx * std::sin(a) + dy * std::cos(a);
+    }
+    if (px >= e.x && py >= e.y && px <= e.x + e.w && py <= e.y + e.h) {
       hit = e.id;  // draw order ascending -> last hit is topmost
     }
   }
@@ -396,7 +412,12 @@ bool Workspace2D::delete_entity(std::uint64_t id) {
   if (it == entities_.end()) {
     return false;
   }
+  // Its children move up to its parent.
+  const std::uint64_t up = it->parent;
   entities_.erase(it);
+  for (Entity2D& e : entities_) {
+    if (e.parent == id) e.parent = up;
+  }
   const bool was_primary = selected_id_ && *selected_id_ == id;
   prune_selection();
   if (was_primary && selection_.empty() && !entities_.empty()) {
@@ -405,32 +426,46 @@ bool Workspace2D::delete_entity(std::uint64_t id) {
   return true;
 }
 
-std::vector<std::uint64_t> Workspace2D::duplicate_selection() {
+std::vector<std::uint64_t> Workspace2D::duplicate_selection(bool shift) {
   std::vector<std::uint64_t> new_ids;
   if (selection_.empty()) {
     return new_ids;
   }
-  const float offset = snap_enabled_ ? grid_size_ : 16.0f;
-  // Copy first: push_back below may reallocate entities_.
+  const float offset = !shift ? 0.0f : snap_enabled_ ? grid_size_ : 16.0f;
+  // Roots with their subtrees, copied first: push_back below may
+  // reallocate entities_.
   std::vector<Entity2D> sources;
-  for (std::uint64_t id : selection_) {
-    if (const Entity2D* e = find(id)) {
-      sources.push_back(*e);
+  std::vector<std::uint64_t> roots = selection_roots();
+  for (std::uint64_t root : roots) {
+    if (const Entity2D* e = find(root)) sources.push_back(*e);
+    for (std::uint64_t d : descendants_of(root)) {
+      if (const Entity2D* e = find(d)) sources.push_back(*e);
     }
   }
+  std::vector<std::pair<std::uint64_t, std::uint64_t>> remap;  // old -> new
+  for (const Entity2D& src : sources) remap.emplace_back(src.id, alloc_id());
+  auto mapped = [&](std::uint64_t old) -> std::uint64_t {
+    for (const auto& [a, b] : remap) {
+      if (a == old) return b;
+    }
+    return 0;
+  };
   std::optional<std::uint64_t> new_primary;
   for (const Entity2D& src : sources) {
+    const bool is_root = std::find(roots.begin(), roots.end(), src.id) != roots.end();
     Entity2D copy = src;
-    copy.id = alloc_id();
+    copy.id = mapped(src.id);
     copy.name = unique_name(entities_, strip_copy_suffix(src.name));
     copy.x = src.x + offset;
     copy.y = src.y + offset;
-    if (snap_enabled_) {
+    if (snap_enabled_ && is_root && shift) {
       copy.x = snap_value(copy.x);
       copy.y = snap_value(copy.y);
     }
+    if (const std::uint64_t p = mapped(src.parent)) copy.parent = p;
+    copy.locked = is_root ? false : src.locked;
     entities_.push_back(copy);
-    new_ids.push_back(copy.id);
+    if (is_root) new_ids.push_back(copy.id);
     if (selected_id_ && *selected_id_ == src.id) {
       new_primary = copy.id;
     }
@@ -443,7 +478,11 @@ std::size_t Workspace2D::delete_selection() {
   if (selection_.empty()) {
     return 0;
   }
-  const std::vector<std::uint64_t> doomed = selection_;
+  // The selection and every descendant.
+  std::vector<std::uint64_t> doomed = selection_;
+  for (std::uint64_t id : selection_) {
+    for (std::uint64_t d : descendants_of(id)) doomed.push_back(d);
+  }
   const std::size_t before = entities_.size();
   entities_.erase(std::remove_if(entities_.begin(), entities_.end(),
                                  [&doomed](const Entity2D& e) {
@@ -479,9 +518,9 @@ bool Workspace2D::nudge_selection(int dir_x, int dir_y, bool large) {
   const float step = snap_enabled_ ? grid_size_ * (large ? 4.0f : 1.0f)
                                    : (large ? 10.0f : 1.0f);
   bool moved = false;
-  for (std::uint64_t id : selection_) {
-    Entity2D* e = find(id);
-    if (!e) {
+  for (std::uint64_t id : selection_roots()) {
+    const Entity2D* e = find(id);
+    if (!e || effectively_locked(*e)) {
       continue;
     }
     float nx = e->x + static_cast<float>(dir_x) * step;
@@ -491,8 +530,7 @@ bool Workspace2D::nudge_selection(int dir_x, int dir_y, bool large) {
       ny = snap_step(e->y, dir_y, step);
     }
     if (nx != e->x || ny != e->y) {
-      e->x = nx;
-      e->y = ny;
+      move_subtree(id, nx - e->x, ny - e->y);
       moved = true;
     }
   }
@@ -501,13 +539,13 @@ bool Workspace2D::nudge_selection(int dir_x, int dir_y, bool large) {
 
 bool Workspace2D::snap_selection_to_grid() {
   bool changed = false;
-  for (std::uint64_t id : selection_) {
-    if (Entity2D* e = find(id)) {
+  for (std::uint64_t id : selection_roots()) {
+    if (const Entity2D* e = find(id)) {
+      if (effectively_locked(*e)) continue;
       const float nx = snap_always(e->x);
       const float ny = snap_always(e->y);
       if (nx != e->x || ny != e->y) {
-        e->x = nx;
-        e->y = ny;
+        move_subtree(id, nx - e->x, ny - e->y);
         changed = true;
       }
     }
@@ -517,9 +555,20 @@ bool Workspace2D::snap_selection_to_grid() {
 
 void Workspace2D::begin_move() {
   move_starts_.clear();
-  for (std::uint64_t id : selection_) {
+  move_roots_.clear();
+  guides_.clear();
+  for (std::uint64_t id : moving_set()) {
     if (const Entity2D* e = find(id)) {
       move_starts_.push_back({e->id, e->x, e->y});
+    }
+  }
+  for (std::uint64_t id : selection_roots()) {
+    const Entity2D* e = find(id);
+    if (!e || effectively_locked(*e)) continue;
+    if (selected_id_ && *selected_id_ == id) {
+      move_roots_.insert(move_roots_.begin(), id);
+    } else {
+      move_roots_.push_back(id);
     }
   }
   move_active_ = !move_starts_.empty();
@@ -530,19 +579,41 @@ void Workspace2D::update_move(float dx, float dy) {
   if (!move_active_) {
     return;
   }
-  if (snap_enabled_) {
-    // Snap the primary (or first) entity; everyone else keeps formation.
-    const MoveStart* anchor = &move_starts_.front();
-    if (selected_id_) {
-      for (const MoveStart& s : move_starts_) {
-        if (s.id == *selected_id_) {
-          anchor = &s;
-          break;
-        }
-      }
+  auto start_of = [&](std::uint64_t id) -> const MoveStart* {
+    for (const MoveStart& s : move_starts_) {
+      if (s.id == id) return &s;
     }
+    return nullptr;
+  };
+  if (snap_enabled_) {
+    // Snap the primary (or first) root; everyone else keeps formation.
+    const MoveStart* anchor = move_roots_.empty() ? &move_starts_.front()
+                                                  : start_of(move_roots_.front());
+    if (!anchor) anchor = &move_starts_.front();
     dx = snap_value(anchor->x + dx) - anchor->x;
     dy = snap_value(anchor->y + dy) - anchor->y;
+  }
+  guides_.clear();
+  if (object_snap_ && !move_roots_.empty()) {
+    // Bounds of the moving roots at the proposed offset.
+    float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+    for (std::uint64_t id : move_roots_) {
+      const MoveStart* st = start_of(id);
+      const Entity2D* e = find(id);
+      if (!st || !e) continue;
+      x0 = std::min(x0, st->x + dx);
+      y0 = std::min(y0, st->y + dy);
+      x1 = std::max(x1, st->x + dx + e->w);
+      y1 = std::max(y1, st->y + dy + e->h);
+    }
+    if (x0 <= x1) {
+      std::vector<std::uint64_t> moving;
+      for (const MoveStart& s : move_starts_) moving.push_back(s.id);
+      float sx = 0.0f, sy = 0.0f;
+      snap_box_to_objects(x0, y0, x1, y1, moving, &sx, &sy, &guides_);
+      dx += sx;
+      dy += sy;
+    }
   }
   for (const MoveStart& s : move_starts_) {
     if (Entity2D* e = find(s.id)) {
@@ -571,6 +642,8 @@ bool Workspace2D::end_move() {
     }
   }
   move_starts_.clear();
+  move_roots_.clear();
+  guides_.clear();
   move_active_ = false;
   move_changed_ = false;
   return changed;
@@ -594,6 +667,8 @@ void Workspace2D::cancel_move() {
     }
   }
   move_starts_.clear();
+  move_roots_.clear();
+  guides_.clear();
   move_active_ = false;
   move_changed_ = false;
 }

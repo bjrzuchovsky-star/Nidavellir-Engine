@@ -7,6 +7,7 @@ add_library(ts_editor
   workspace/Workspace2D.cpp
   workspace/Workspace2D_History.cpp
   workspace/Workspace2D_Tiles.cpp
+  workspace/Workspace2D_Tools.cpp
   workspace/SceneIO_Load.cpp
   workspace/SceneIO_Save.cpp
   assets/AssetLibrary.cpp

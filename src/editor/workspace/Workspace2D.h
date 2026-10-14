@@ -73,7 +73,8 @@ class Workspace2D {
   // --- Editing tools (operate on the whole selection) ----------------------
   // Copies every selected entity (offset by one grid cell when snapping, else
   // 16 px), selects the copies and returns their ids in order.
-  std::vector<std::uint64_t> duplicate_selection();
+  // offset = false leaves the copies on top of the originals (Alt+drag).
+  std::vector<std::uint64_t> duplicate_selection(bool offset = true);
   // Removes every selected entity. Returns how many were removed.
   std::size_t delete_selection();
   // Arrow-key nudge. dir_x/dir_y in {-1,0,1}. Step = grid (x4 when large) with
@@ -92,6 +93,88 @@ class Workspace2D {
   bool end_move();
   void cancel_move();  // restore start positions (Esc during a drag)
   bool move_active() const { return move_active_; }
+
+  // --- Editor tools (Workspace2D_Tools.cpp) ---------------------------------
+  // Hierarchy: Entity2D::parent links (world-space positions; children
+  // follow their parent's moves, resizes and turns). The Hierarchy lists
+  // roots in entities() order, each child under its parent in the same
+  // order. Moving / deleting / duplicating a selected entity takes its
+  // whole subtree along.
+  std::vector<std::uint64_t> children_of(std::uint64_t id) const;
+  std::vector<std::uint64_t> descendants_of(std::uint64_t id) const;  // depth-first
+  bool is_ancestor(std::uint64_t ancestor, std::uint64_t id) const;
+  int depth_of(std::uint64_t id) const;
+  // Selected entities whose ancestors are not selected (what moves).
+  std::vector<std::uint64_t> selection_roots() const;
+  // Hidden / locked here or on any ancestor.
+  bool effectively_hidden(const Entity2D& e) const;
+  bool effectively_locked(const Entity2D& e) const;
+  // Reparent (0 = root). Refuses loops and unknown ids. True if changed.
+  bool set_parent(std::uint64_t id, std::uint64_t parent);
+  // Hierarchy drag: put `id` (with its subtree) before / after `target`
+  // (same parent as target) or inside it (last child). True if changed.
+  enum class HierDrop { Before, After, Inside };
+  bool hierarchy_drop(std::uint64_t id, std::uint64_t target, HierDrop where);
+  // New "Group" around the selection roots (bounding box, transparent,
+  // under their common parent) holding them; selected. Returns its id.
+  std::uint64_t group_selection(const std::string& name = "Group");
+  // Children of each selected entity move up one level and the (now
+  // empty) parents are removed. Returns entities freed.
+  std::size_t ungroup_selection();
+  // Lock / hide every selected entity. True if anything changed.
+  bool set_selection_locked(bool locked);
+  bool set_selection_hidden(bool hidden);
+  bool set_locked(std::uint64_t id, bool locked);
+  bool set_hidden(std::uint64_t id, bool hidden);
+
+  // Snap to other entities: edges / centres of everything visible that is
+  // not moving, within `threshold` world px. Grid snapping (when on) runs
+  // first; an object guide wins when closer. Lines for the viewport.
+  struct SnapGuide {
+    bool vertical = true;  // x = pos (else y = pos)
+    float pos = 0.0f;
+    float from = 0.0f, to = 0.0f;  // extent along the other axis
+  };
+  void set_object_snap(bool on) { object_snap_ = on; }
+  bool object_snap() const { return object_snap_; }
+  void set_snap_threshold(float world_px) { snap_threshold_ = world_px; }
+  const std::vector<SnapGuide>& guides() const { return guides_; }
+  void clear_guides() { guides_.clear(); }
+  // Offset that snaps a box (minus `moving` ids) to the nearest guides.
+  void snap_box_to_objects(float x0, float y0, float x1, float y1,
+                           const std::vector<std::uint64_t>& moving, float* dx,
+                           float* dy, std::vector<SnapGuide>* guides) const;
+
+  // Resize / rotate the primary selection with the viewport handles.
+  // Handle (hx, hy) in {-1, 0, 1}: which side moves (corner = both).
+  // keep_aspect (Shift) keeps the start ratio. Children scale along.
+  // begin -> update (any number, absolute mouse) -> end; Esc cancels.
+  bool begin_transform();
+  void resize_to(int hx, int hy, float wx, float wy, bool keep_aspect);
+  // Turn to start + delta degrees (step > 0 rounds to it). Children orbit.
+  void rotate_to(float delta_deg, float step);
+  bool end_transform();     // true if anything changed
+  void cancel_transform();  // restore the start
+  bool transform_active() const { return xform_active_; }
+
+  // Align (multi-select; to the selection bounds) and distribute (3+, equal
+  // gaps between the edges). Subtrees move with their roots.
+  enum class Align { Left, CenterX, Right, Top, CenterY, Bottom };
+  bool align_selection(Align how);
+  bool distribute_selection(bool horizontal);
+
+  // Clipboard: the selection roots and their subtrees as scene.json text
+  // (entities only). paste_json adds copies with fresh ids (parents inside
+  // the clip kept, others under the root), offset when `offset`, selects
+  // them and returns the new root ids. Bad text pastes nothing.
+  std::string copy_selection_json() const;
+  std::vector<std::uint64_t> paste_json(const std::string& text, bool offset);
+
+  // World-space bounds of the selection (or every visible entity when
+  // nothing is selected); false when empty.
+  bool selection_bounds(float* x0, float* y0, float* x1, float* y1) const;
+  // Centre the view on the selection and zoom to fit (F).
+  bool frame_selection(float viewport_w, float viewport_h);
 
   // Viewport camera (world space).
   float pan_x() const { return pan_x_; }
@@ -237,6 +320,9 @@ class Workspace2D {
     float x;
     float y;
   };
+  // Selection roots plus every descendant (each once), skipping locked.
+  std::vector<std::uint64_t> moving_set() const;
+  void move_subtree(std::uint64_t id, float dx, float dy);
 
   struct HistoryStep {
     std::string label;
@@ -262,6 +348,13 @@ class Workspace2D {
   float zoom_ = 1.0f;
   bool show_grid_ = true;
   float grid_size_ = 32.0f;
+  // Editor tools.
+  std::vector<std::uint64_t> move_roots_;  // primary-first roots of a drag
+  bool object_snap_ = true;
+  float snap_threshold_ = 6.0f;
+  std::vector<SnapGuide> guides_;
+  bool xform_active_ = false;
+  std::vector<Entity2D> xform_start_;  // primary first, then its subtree
 };
 
 }  // namespace editor
