@@ -15,6 +15,7 @@
 #include "SmokeTools.h"
 #include "SmokeVR.h"
 #include "SmokePlugins.h"
+#include "SmokeShipyard.h"
 #include "SmokeSurvival.h"
 #include "SmokeRuntime.h"
 
@@ -1186,6 +1187,10 @@ int run_console_smoke() {
   if (run_tools_smoke() != 0) {
     return 1;
   }
+  // Airship Works plugin (see SmokeShipyard.cpp).
+  if (run_shipyard_smoke() != 0) {
+    return 1;
+  }
 
   std::cout << "TombStone Admin smoke complete\n";
   return flow.current_state() == AppState::Quit ? 0 : 1;
@@ -1319,6 +1324,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-tools") == 0) {
       // Just the editor tools checks (2D + 3D).
       return run_tools_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-shipyard") == 0) {
+      // Just the Airship Works checks.
+      return run_shipyard_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-survival") == 0) {
       // Just the Frontier Survival checks.

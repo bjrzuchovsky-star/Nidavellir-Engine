@@ -10,6 +10,7 @@ add_executable(ts_admin
   SmokeNetwork.cpp
   SmokePlugins.cpp
   SmokeSurvival.cpp
+  SmokeShipyard.cpp
   Smoke3D.cpp
   Smoke3DEditor.cpp
   SmokeVR.cpp
