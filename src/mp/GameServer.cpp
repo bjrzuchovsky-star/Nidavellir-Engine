@@ -4,9 +4,11 @@
 #include "net/Net.h"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <thread>
 #include <utility>
 
 namespace ts {
@@ -121,6 +123,20 @@ void GameServer::stop() {
   }
   for (auto& [id, p] : peers_) {
     transport_->disconnect(id, kReasonShutdown);
+  }
+  // Let the goodbyes out (up to a third of a second) so riders hear the
+  // reason instead of timing out.
+  if (!peers_.empty()) {
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
+    std::size_t gone = 0;
+    net::TransportEvent ev;
+    while (gone < peers_.size() && std::chrono::steady_clock::now() < until) {
+      transport_->flush();
+      while (transport_->poll(&ev)) {
+        gone += ev.type == net::TransportEvent::Type::Disconnected ? 1 : 0;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
   }
   transport_->flush();
   transport_->close();
