@@ -306,6 +306,20 @@ void Editor2DScreen::draw_play_controls() {
     ImGui::SetTooltip("Save, then run this project in ts_game (own window)");
   }
   ImGui::EndDisabled();
+  ImGui::SameLine();
+  ImGui::BeginDisabled(is_playing());
+  bool posse_on = posse_running();
+  if (theme::ToggleButton("Posse", &posse_on, ImVec2(60, 0))) {
+    toggle_posse();
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip(posse_running()
+                          ? "Break camp: stop the local server and its riders"
+                          : "Play with posse: a local server + %d rider(s) in this editor, "
+                            "lag sim and Network panel",
+                      posse_riders_);
+  }
+  ImGui::EndDisabled();
 }
 
 void Editor2DScreen::draw_play_menu() {
@@ -334,6 +348,23 @@ void Editor2DScreen::draw_play_menu() {
   if (ImGui::MenuItem("Launch Game (ts_game)", nullptr, false, !is_playing())) {
     launch_game();
   }
+  ImGui::Separator();
+  if (ImGui::MenuItem(posse_running() ? "Break Camp (stop posse)###Posse" : "Play with Posse###Posse",
+                      nullptr, false, !is_playing())) {
+    toggle_posse();
+  }
+  if (ImGui::BeginMenu("Posse Size", !posse_running())) {
+    for (int n = 1; n <= mp::kMaxPosse; ++n) {
+      char label[32];
+      std::snprintf(label, sizeof(label), "%d rider%s", n, n == 1 ? "" : "s");
+      if (ImGui::MenuItem(label, nullptr, posse_riders_ == n)) set_posse_riders(n);
+    }
+    ImGui::EndMenu();
+  }
+  if (ImGui::MenuItem("Open Client Window (ts_client)", nullptr, false, posse_running())) {
+    open_posse_client_window();
+  }
+  ImGui::MenuItem("Network Panel", nullptr, &show_network_);
   ImGui::EndMenu();
 }
 

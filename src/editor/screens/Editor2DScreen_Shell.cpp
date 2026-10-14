@@ -63,6 +63,7 @@ void Editor2DScreen::setup_default_dock_layout(unsigned int dockspace_id) {
   ImGui::DockBuilderDockWindow("Inspector", dock_right);
   ImGui::DockBuilderDockWindow("Tile Palette", dock_right_bottom);
   ImGui::DockBuilderDockWindow("Stable", dock_right_bottom);
+  ImGui::DockBuilderDockWindow("Network", dock_right_bottom);
   ImGui::DockBuilderFinish(dockspace_id);
 }
 
@@ -218,6 +219,7 @@ void Editor2DScreen::draw_menu_bar() {
     ImGui::MenuItem("Stable (Animation)", nullptr, &show_stable_);
     ImGui::MenuItem("Scripts", nullptr, &show_scripts_);
     ImGui::MenuItem("Telegraph (Console)", nullptr, &show_console_);
+    ImGui::MenuItem("Network (Posse)", nullptr, &show_network_);
     ImGui::MenuItem("Toolbar", nullptr, &show_toolbar_);
     ImGui::MenuItem("Status Bar", nullptr, &show_status_bar_);
     ImGui::Separator();
@@ -677,6 +679,9 @@ void Editor2DScreen::draw_ui() {
   if (is_playing()) {
     update_play(ImGui::GetIO().DeltaTime, poll_play_input());
   }
+  if (posse_running()) {
+    update_posse(ImGui::GetIO().DeltaTime, poll_play_input().slot(0));
+  }
   draw_menu_bar();
   draw_toolbar();
   draw_status_bar();
@@ -736,6 +741,8 @@ void Editor2DScreen::draw_ui() {
                          ImGuiWindowFlags_NoScrollWithMouse)) {
       if (locked) {
         draw_play_viewport();
+      } else if (posse_running()) {
+        draw_posse_viewport();
       } else {
         draw_viewport();
       }
@@ -793,6 +800,17 @@ void Editor2DScreen::draw_ui() {
     }
     if (ImGui::Begin("Telegraph", &show_console_)) {
       draw_console();
+    }
+    ImGui::End();
+  }
+  if (show_network_) {
+    if (focus_network_) {
+      ImGui::SetNextWindowFocus();
+      focus_network_ = false;
+    }
+    ImGui::SetNextWindowSize(ImVec2(520, 560), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Network", &show_network_)) {
+      draw_network_panel();
     }
     ImGui::End();
   }
