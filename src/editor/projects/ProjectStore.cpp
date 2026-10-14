@@ -274,6 +274,28 @@ bool ProjectStore::write_project_json(const ProjectInfo& project,
   return true;
 }
 
+void ProjectStore::seed_vr_sample(bool force) {
+  // Roots seeded before VR landed get the saloon once (a marker file keeps
+  // a deleted sample deleted).
+  const fs::path root(projects_root_);
+  const fs::path marker = root / ".haunted-saloon-vr.seeded";
+  std::error_code ec;
+  if (!force && fs::exists(marker, ec)) return;
+  const fs::path dir = root / "haunted-saloon-vr";
+  if (!fs::exists(dir, ec)) {
+    std::string err;
+    ProjectInfo saloon;
+    if (scene3d::write_haunted_saloon_sample(dir.string(), "Haunted Saloon VR", &err) &&
+        load_project_json(dir.string(), &saloon, &err)) {
+      projects_.push_back(std::move(saloon));
+    } else {
+      std::cerr << "[ProjectStore] haunted-saloon-vr sample: " << err << '\n';
+      return;
+    }
+  }
+  std::ofstream(marker) << "seeded\n";
+}
+
 bool ProjectStore::seed_sample_2d_if_empty() {
   if (!projects_.empty()) {
     return true;
@@ -302,6 +324,9 @@ bool ProjectStore::seed_sample_2d_if_empty() {
   } else {
     std::cerr << "[ProjectStore] ghost-town-3d sample: " << ghost_err << '\n';
   }
+
+  // And the VR claim: the haunted saloon (grab, throw, teleport, laser).
+  seed_vr_sample(true);
 
   // And the Frontier Survival claim (2D with the ts.frontier plugin on).
   const std::string frontier_dir = (fs::path(projects_root_) / survival::kSampleId).string();
@@ -366,6 +391,14 @@ bool ProjectStore::refresh() {
 
   if (!seed_sample_2d_if_empty()) {
     return false;
+  }
+  if (!projects_.empty()) {
+    const std::size_t before = projects_.size();
+    seed_vr_sample(false);
+    if (projects_.size() != before) {
+      std::sort(projects_.begin(), projects_.end(),
+                [](const ProjectInfo& a, const ProjectInfo& b) { return a.name < b.name; });
+    }
   }
   return true;
 }

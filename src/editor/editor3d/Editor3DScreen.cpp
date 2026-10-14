@@ -1,5 +1,7 @@
 #include "editor/editor3d/Editor3DScreen.h"
 
+#include "world3d/VrOverlay.h"
+
 #include "render3d/GlRenderer3D.h"
 
 #include <GLFW/glfw3.h>
@@ -51,11 +53,13 @@ void Editor3DScreen::on_enter() {
   std::string err;
   const std::string path = scene3d::scene_path(project_.path);
   if (!fs::exists(path)) {
-    scene_ = scene3d::make_starter_scene();
+    scene_ = vr_project() ? scene3d::make_vr_starter_scene() : scene3d::make_starter_scene();
     if (!scene3d::save_file(path, scene_, &err)) {
       note("Could not write the starter scene: " + err, LogLevel::Error);
     } else {
-      note("Staked a fresh 3D claim: ground, crate, lamp and a rider");
+      note(vr_project() ? "Staked a fresh VR claim: ground, crate, lamp, a table of things to "
+                          "grab and the VR rig"
+                        : "Staked a fresh 3D claim: ground, crate, lamp and a rider");
     }
   } else if (!scene3d::load_file(path, &scene_, &err)) {
     note(err, LogLevel::Error);
@@ -123,7 +127,10 @@ void Editor3DScreen::collect_problems() {
 }
 
 AppState Editor3DScreen::on_update(float delta_seconds) {
-  if (playing()) {
+  if (vr_previewing()) {
+    vr_preview_frame(delta_seconds);
+    for (const world3d::Toast3D& t : world_.take_toasts()) toasts_.push_back({t.text, t.seconds});
+  } else if (playing()) {
     world_.update(delta_seconds, ImGui::GetCurrentContext() ? poll_play_input()
                                                             : world3d::Input3D{});
     for (const world3d::Toast3D& t : world_.take_toasts()) toasts_.push_back({t.text, t.seconds});
@@ -541,7 +548,15 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
   render3d::Camera3D cam;
   if (playing()) {
     cam = free_camera_in_play_ ? editor_camera() : world_.camera();
-    view_->begin(world_.authored().environment, world_.entities(), cam, width, height, opt);
+    if (world_.vr()) {
+      // VR preview: the head's view plus the hands, lasers and menu.
+      std::vector<scene3d::Entity3D> ents = world_.entities();
+      world3d::vr_overlay_entities(world_, false, &ents);
+      view_->begin(world_.authored().environment, ents, cam, width, height, opt);
+      world3d::vr_overlay_lines(world_, renderer_.get());
+    } else {
+      view_->begin(world_.authored().environment, world_.entities(), cam, width, height, opt);
+    }
   } else {
     cam = editor_camera();
     opt.grid = scene_.show_grid;
@@ -557,6 +572,8 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
 
 bool Editor3DScreen::play_start() {
   if (playing()) return true;
+  if (vr_project()) return vr_preview_start(true);
+  world_.set_vr(false);
   gizmo_cancel();
   world_.set_log_sink([this](const runtime::LogEntry& e) {
     log_.push_back(e);
@@ -572,6 +589,12 @@ bool Editor3DScreen::play_start() {
 }
 
 void Editor3DScreen::play_stop() {
+  if (vr_session_) {
+    vr_session_->end();
+    vr_session_.reset();
+    vr_presenter_.reset();
+    vr_status_.clear();
+  }
   if (!playing()) return;
   world_.stop();
   toasts_.clear();

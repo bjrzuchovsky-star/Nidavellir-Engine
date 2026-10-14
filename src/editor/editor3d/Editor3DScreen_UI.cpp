@@ -117,6 +117,7 @@ void Editor3DScreen::draw_ui() {
   ImGui::End();
   if (ImGui::Begin(kTelegraph)) draw_telegraph();
   ImGui::End();
+  draw_vr_mirror();
 }
 
 void Editor3DScreen::draw_menu_bar() {
@@ -202,6 +203,10 @@ void Editor3DScreen::draw_toolbar() {
     if (ImGui::Checkbox("Pause", &paused)) world_.set_paused(paused);
     ImGui::SameLine();
     ImGui::Checkbox("Free cam (C)", &free_camera_in_play_);
+  } else if (vr_project()) {
+    if (theme::PrimaryButton("Preview in headset")) vr_preview_start(false);
+    ImGui::SameLine();
+    if (theme::SecondaryButton("Play (simulator)")) vr_preview_start(true);
   } else if (theme::PrimaryButton("Play", ImVec2(64, 0))) {
     play_start();
   }
