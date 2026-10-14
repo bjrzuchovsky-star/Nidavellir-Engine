@@ -341,8 +341,9 @@ void scene_checks() {
   std::string err;
   check(sj::parse(text, &back, &err) && back.entities == doc.entities && sj::write(back) == text,
         "2D audio round trip: " + err);
-  check(sj::kSceneVersion == 8 && text.find("\"version\": 8") != std::string::npos,
-        "2D writes v8");
+  check(sj::kSceneVersion >= 8 &&
+            text.find("\"version\": " + std::to_string(sj::kSceneVersion)) != std::string::npos,
+        "2D writes v8+");
   check(text.find("\"audio\"") != std::string::npos &&
             sj::write([&] {
               sj::SceneDoc q = doc;
@@ -354,7 +355,10 @@ void scene_checks() {
   sj::SceneDoc plain = doc;
   plain.entities[0].audio.reset();
   std::string v7 = sj::write(plain);
-  v7.replace(v7.find("\"version\": 8"), 12, "\"version\": 7");
+  {
+    const std::string cur = "\"version\": " + std::to_string(sj::kSceneVersion);
+    v7.replace(v7.find(cur), cur.size(), "\"version\": 7");
+  }
   sj::SceneDoc old;
   check(sj::parse(v7, &old, &err) && old.entities == plain.entities, "2D v7 loads: " + err);
   // Bad values clamp, unknown bus falls back to sfx; a non-object rejects.
@@ -375,12 +379,16 @@ void scene_checks() {
   const std::string t3 = s3::write(s);
   s3::Scene3D b3;
   check(s3::parse(t3, &b3, &err) && b3 == s && s3::write(b3) == t3, "3D audio round trip: " + err);
-  check(s3::kScene3DVersion == 10 && t3.find("\"version\": 10") != std::string::npos,
-        "3D writes v10");
+  check(s3::kScene3DVersion >= 10 &&
+            t3.find("\"version\": " + std::to_string(s3::kScene3DVersion)) != std::string::npos,
+        "3D writes v10+");
   check(b3.entities[0].audio->min_distance == 2.0f && b3.entities[0].audio->max_distance == 40.0f,
         "3D metre defaults");
   std::string v9 = s3::write(s3::make_starter_scene());
-  v9.replace(v9.find("\"version\": 10"), 13, "\"version\": 9");
+  {
+    const std::string cur = "\"version\": " + std::to_string(s3::kScene3DVersion);
+    v9.replace(v9.find(cur), cur.size(), "\"version\": 9");
+  }
   s3::Scene3D o3;
   check(s3::parse(v9, &o3, &err) && !o3.entities[0].audio, "3D v9 loads: " + err);
 }

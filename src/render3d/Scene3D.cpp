@@ -3,9 +3,11 @@
 #include "core/JsonMini.h"
 #include "render3d/Gltf.h"
 #include "render3d/Json.h"
+#include "scene/JsonFlat.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -146,6 +148,19 @@ Value entity_json(const Entity3D& e) {
     v.set("doppler", Value::boolean(a.doppler));
     o.set("audio", std::move(v));
   }
+  if (e.particles) {
+    Value v = Value::object();
+    for (const fx::Field& f : fx::to_fields(*e.particles)) {
+      if (f.json == "true" || f.json == "false") {
+        v.set(f.key, Value::boolean(f.json == "true"));
+      } else if (!f.json.empty() && f.json.front() == '"') {
+        v.set(f.key, Value::string(f.json.substr(1, f.json.size() - 2)));
+      } else {
+        v.set(f.key, Value::number(std::strtod(f.json.c_str(), nullptr)));
+      }
+    }
+    o.set("particles", std::move(v));
+  }
   return o;
 }
 
@@ -270,6 +285,16 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     a.doppler = v.flag("doppler", a.doppler);
     normalize_audio(a);
     e.audio = a;
+  }
+  if (o["particles"].is_object()) {
+    const Value& v = o["particles"];
+    e.particles = fx::from_fields([&](const std::string& k) -> std::optional<std::string> {
+      const Value& f = v[k];
+      if (f.is_bool()) return std::string(f.as_bool() ? "true" : "false");
+      if (f.is_string()) return f.as_string();
+      if (f.is_number()) return json_flat::format_float(f.as_float());
+      return std::nullopt;
+    });
   }
   *out = std::move(e);
   return true;

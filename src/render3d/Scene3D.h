@@ -5,6 +5,7 @@
 // and optional components. 2D scenes keep their own format (v1..v6,
 // scene/SceneJson.h); the 2D reader refuses a 3D file and vice versa.
 
+#include "fx/Particles.h"
 #include "render3d/Math3D.h"
 #include "render3d/Renderer3D.h"
 #include "scene/SceneData.h"
@@ -24,8 +25,9 @@ using render3d::Vec3;
 
 // v8 added the VR components (vr_rig, grabbable); v9 parenting (parent)
 // and the editor-only locked / editor_hidden flags; v10 the sound source
-// (audio, distances in metres). v7 / v8 / v9 files still load.
-inline constexpr int kScene3DVersion = 10;
+// (audio, distances in metres). v11 adds "particles" (emitters).
+// v7 / v8 / v9 / v10 files still load.
+inline constexpr int kScene3DVersion = 11;
 
 // What to draw: "primitive:cube|plane|sphere|capsule" or a project-relative
 // .gltf / .glb path.
@@ -124,6 +126,7 @@ struct Entity3D {
   bool locked = false;         // v9, editor only: not pickable / movable
   bool editor_hidden = false;  // v9, editor only: not drawn in the editor
   std::optional<AudioSourceData> audio;  // v10, 3D defaults: audio_3d()
+  std::optional<fx::EmitterDesc> particles;  // v11, metres, y up
   bool operator==(const Entity3D& o) const = default;
 };
 
