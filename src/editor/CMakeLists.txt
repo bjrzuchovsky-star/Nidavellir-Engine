@@ -13,6 +13,7 @@ add_library(ts_editor
   assets/AssetLibrary.cpp
   ui/FolderBrowser.cpp
   ui/Theme.cpp
+  ui/PlayUi.cpp
   screens/LoadingScreen.cpp
   screens/LoginScreen.cpp
   screens/ProjectManagerScreen.cpp
@@ -73,6 +74,7 @@ target_link_libraries(ts_editor
     ts_imgui
     ts_audio
     ts_audio3d
+    ts_ui
 )
 
 target_compile_features(ts_editor PUBLIC cxx_std_20)
