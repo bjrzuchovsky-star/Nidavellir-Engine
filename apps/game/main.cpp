@@ -13,6 +13,7 @@
 #include "audio/GameAudio.h"
 #include "Game3D.h"
 #include "GameRenderer.h"
+#include "GameUi.h"
 #include "HudText.h"
 
 #include "core/JsonMini.h"
@@ -26,6 +27,7 @@
 #include "runtime/World.h"
 #include "scene/SampleScripts.h"
 #include "scene/SceneJson.h"
+#include "ui/UiScript.h"
 
 #if defined(__APPLE__)
 #define GL_SILENCE_DEPRECATION
@@ -48,6 +50,7 @@ namespace {
 using namespace ts::tombstone;
 namespace fs = std::filesystem;
 using game::GameRenderer;
+using game::GameUi;
 
 constexpr const char* kUsage =
     "Usage: ts_game --project <dir> [--smoke] [--frames N] [--collision]\n"
@@ -63,7 +66,7 @@ constexpr const char* kUsage =
     "                   a session, no window) and exit\n"
     "Keys: WASD / arrows move P1 | E / Space / pad A action |\n"
     "      gamepads ride P1-P4 | P or F6 pause | F10 step while paused |\n"
-    "      R or F5 reload scene.json | K collision overlay | Esc quit\n"
+    "      R or F5 reload scene.json | K collision overlay | Esc pause menu\n"
     "Scripts under <project>/scripts/ hot-reload when saved.\n";
 
 struct Options {
@@ -498,6 +501,7 @@ struct GameState {
   runtime::PlaySession session;
   bool reload = false;
   bool show_collision = false;
+  GameUi* ui = nullptr;  // menus / text boxes take the keys while open
 };
 
 void on_key(GLFWwindow* win, int key, int /*scancode*/, int action,
@@ -507,9 +511,11 @@ void on_key(GLFWwindow* win, int key, int /*scancode*/, int action,
     return;
   }
   const bool repeat = action == GLFW_REPEAT;
-  if (key == GLFW_KEY_ESCAPE && !repeat) {
-    glfwSetWindowShouldClose(win, GLFW_TRUE);
-  } else if ((key == GLFW_KEY_P || key == GLFW_KEY_F6) && !repeat) {
+  // Esc (pause menu) and menu keys are polled by GameUi.
+  if (g->ui && (g->ui->wants_input() || key == GLFW_KEY_ESCAPE)) {
+    return;
+  }
+  if ((key == GLFW_KEY_P || key == GLFW_KEY_F6) && !repeat) {
     g->session.toggle_pause();
   } else if (key == GLFW_KEY_F10) {
     g->session.step_once(poll_input(win));
@@ -565,6 +571,11 @@ int run_window(const Options& opt, Telegraph& telegraph) {
       std::cerr << "[ts_game] " << err << '\n';
       code = 1;
     } else {
+      GameUi gui;
+      gui.load(opt.project);
+      gui.attach(win);
+      g.ui = &gui;
+      bool menu_paused = false;  // the pause menu holds the session
       glfwSetWindowUserPointer(win, &g);
       glfwSetKeyCallback(win, on_key);
       std::cout << "[ts_game] riding \"" << name << "\": "
@@ -588,6 +599,7 @@ int run_window(const Options& opt, Telegraph& telegraph) {
           if (g.session.start_project(opt.project, &err)) {
             g.plugins.begin(g.session.world());
             sound.restart(opt.project, false);
+            gui.load(opt.project);
             std::cout << "[ts_game] reloaded scene.json\n";
           } else {
             std::cerr << "[ts_game] reload failed: " << err << '\n';
@@ -595,7 +607,22 @@ int run_window(const Options& opt, Telegraph& telegraph) {
           }
         }
         const double now = glfwGetTime();
-        g.session.update(now - last, poll_input(win));
+        {
+          // In-game UI: input, pause menu, Lua ui.* both ways.
+          const GameUi::Frame uf = gui.update(win, now - last, &sound.engine());
+          if (uf.quit) glfwSetWindowShouldClose(win, GLFW_TRUE);
+          if (gui.pause_open() && !g.session.paused()) {
+            g.session.toggle_pause();
+            menu_paused = true;
+          } else if (!gui.pause_open() && menu_paused) {
+            if (g.session.paused()) g.session.toggle_pause();
+            menu_paused = false;
+          }
+          ui::forward_ui_events(g.session.world(), uf.events);
+        }
+        g.session.update(now - last,
+                         gui.wants_input() ? runtime::InputFrame{} : poll_input(win));
+        ui::apply_ui_commands(gui.system(), g.session.world().take_ui_commands());
         {
           // Ears on the camera centre.
           runtime::World& world = g.session.world();
@@ -635,6 +662,7 @@ int run_window(const Options& opt, Telegraph& telegraph) {
             renderer.render_overlay(boxes);
           }
           game::render_toasts(game::hud_toasts(world), fw, fh);
+          gui.render_gl(renderer, fw, fh);
           glfwSwapBuffers(win);
         }
         if (now - title_at >= 0.5) {
@@ -671,6 +699,7 @@ int run_window(const Options& opt, Telegraph& telegraph) {
       }
       std::cout << ". So long.\n";
       glfwSetWindowUserPointer(win, nullptr);
+      gui.detach(win);
     }
     renderer.clear();  // drop GL textures while the context lives
   }

@@ -17,6 +17,7 @@ add_executable(ts_game
   main.cpp
   GameRenderer.cpp
   HudText.cpp
+  GameUi.cpp
   Game3D.cpp
   GameVR.cpp
 )
@@ -35,6 +36,7 @@ target_link_libraries(ts_game
     ts_audio
     ts_audio3d
     ts_xr
+    ts_ui
     glfw
     OpenGL::GL
 )
