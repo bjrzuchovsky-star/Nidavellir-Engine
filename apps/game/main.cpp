@@ -16,6 +16,7 @@
 #include "gfx/TextureCache.h"
 #include "runtime/Input.h"
 #include "runtime/Log.h"
+#include "plugins/Builtins.h"
 #include "plugins/RuntimePlugins.h"
 #include "runtime/PlaySession.h"
 #include "runtime/World.h"
@@ -181,6 +182,19 @@ runtime::InputFrame poll_input(GLFWwindow* win) {
   if (glfwGetKey(win, GLFW_KEY_ENTER) == GLFW_PRESS) {
     keys.buttons |= runtime::kButtonStart;
   }
+  // Frontier Survival (and any plugin that wants them): F / left mouse use,
+  // G / right mouse place, C fire, Q / X previous / next hotbar slot.
+  if (glfwGetKey(win, GLFW_KEY_F) == GLFW_PRESS ||
+      glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
+    keys.buttons |= runtime::kButtonUse;
+  }
+  if (glfwGetKey(win, GLFW_KEY_G) == GLFW_PRESS ||
+      glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+    keys.buttons |= runtime::kButtonPlace;
+  }
+  if (glfwGetKey(win, GLFW_KEY_C) == GLFW_PRESS) keys.buttons |= runtime::kButtonFire;
+  if (glfwGetKey(win, GLFW_KEY_X) == GLFW_PRESS) keys.buttons |= runtime::kButtonNext;
+  if (glfwGetKey(win, GLFW_KEY_Q) == GLFW_PRESS) keys.buttons |= runtime::kButtonPrev;
   frame.slot(0) = keys;
   // Gamepads 1-4 ride slots 0-3 (slot 0 shares with the keyboard).
   for (int slot = 0; slot < kMaxPlayers; ++slot) {
@@ -489,6 +503,9 @@ void on_key(GLFWwindow* win, int key, int /*scancode*/, int action,
   } else if ((key == GLFW_KEY_R || key == GLFW_KEY_F5) && !repeat &&
              (mods & GLFW_MOD_CONTROL) == 0) {
     g->reload = true;
+  } else if (key >= GLFW_KEY_0 && key <= GLFW_KEY_9 && !repeat) {
+    // Hotbar slots 1..9, 0 = the tenth (Frontier Survival).
+    plugins::select_hotbar(g->session.world(), 0, key == GLFW_KEY_0 ? 9 : key - GLFW_KEY_1);
   } else if (key == GLFW_KEY_K && !repeat) {
     g->show_collision = !g->show_collision;
     std::cout << "[ts_game] collision overlay "

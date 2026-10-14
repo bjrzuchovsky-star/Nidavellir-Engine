@@ -1,10 +1,14 @@
 #include "plugins/Builtins.h"
 
+#include "plugins/survival/SurvivalPlugin.h"
+#include "runtime/World.h"
+
 #include <cstdlib>
 #include <filesystem>
 
 // Static plugin links (TS_PLUGIN_STATIC in each plugin's .cpp).
 TS_PLUGIN_DECLARE(tumbleweed);
+TS_PLUGIN_DECLARE(frontier);
 
 namespace ts {
 namespace tombstone {
@@ -14,6 +18,10 @@ void register_builtin_plugins(plugin::Catalog& catalog,
                               std::vector<std::string>* errors) {
   std::string err;
   if (!TS_PLUGIN_LINK(tumbleweed, catalog, &err) && errors) {
+    errors->push_back(err);
+  }
+  err.clear();
+  if (!TS_PLUGIN_LINK(frontier, catalog, &err) && errors) {
     errors->push_back(err);
   }
 }
@@ -52,6 +60,13 @@ void fill_catalog(plugin::Catalog& catalog, const std::string& project_dir,
   for (const std::string& dir : plugin_search_dirs(project_dir)) {
     catalog.scan_folder(dir, errors);
   }
+}
+
+bool select_hotbar(runtime::World& world, int slot, int index) {
+  survival::SurvivalPlugin* p = survival::SurvivalPlugin::current();
+  if (!p || !p->sim().active() || p->world() != &world) return false;
+  p->sim().select(world, slot, index);
+  return true;
 }
 
 }  // namespace plugins

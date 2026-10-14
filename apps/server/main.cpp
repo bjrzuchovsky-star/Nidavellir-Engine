@@ -9,6 +9,8 @@
 #include "mp/GameServer.h"
 #include "mp/PosseSmoke.h"
 #include "net/Net.h"
+#include "plugins/RuntimePlugins.h"
+#include "runtime/Log.h"
 
 #include <atomic>
 #include <chrono>
@@ -129,7 +131,16 @@ int run_smoke(const Options& opt) {
 }
 
 int run_server(const Options& opt) {
+  // The project's plugins ride on the server too (project.json "plugins"):
+  // declared before the server so they outlive its world.
+  plugins::RuntimePlugins rp;
+  const std::size_t loaded = rp.open(opt.project, "server", [](const plugin::Diagnostic& d) {
+    std::cout << "[plugins] [" << runtime::to_string(d.level) << "] "
+              << (d.plugin.empty() ? "" : d.plugin + ": ") << d.text << '\n';
+  });
+  std::cout << "[ts_server] " << loaded << " plugin(s) riding\n";
   mp::GameServer server;
+  rp.attach(server.world());
   mp::ServerConfig cfg;
   cfg.project_dir = opt.project;
   cfg.port = static_cast<std::uint16_t>(opt.port);
@@ -140,6 +151,7 @@ int run_server(const Options& opt) {
     std::cerr << "[ts_server] " << err << '\n';
     return 1;
   }
+  rp.begin(server.world());
   std::signal(SIGINT, on_signal);
   std::signal(SIGTERM, on_signal);
   using Clock = std::chrono::steady_clock;
@@ -171,6 +183,7 @@ int run_server(const Options& opt) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
   std::cout << "[ts_server] closing up after " << server.tick() << " ticks. So long.\n";
+  rp.end();
   server.stop();
   return 0;
 }

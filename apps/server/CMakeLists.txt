@@ -11,6 +11,8 @@ target_link_libraries(ts_server
     ts_runtime
     ts_net
     ts_mp
+    ts_plugin
+    ts_plugins_builtin
 )
 
 target_compile_features(ts_server PRIVATE cxx_std_20)
