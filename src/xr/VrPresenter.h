@@ -31,6 +31,8 @@ class VrPresenter {
   // Renderer state to restore after the eyes (the editor renders its own
   // viewport offscreen).
   void set_restore_offscreen(bool on) { restore_offscreen_ = on; }
+  // Extra entities drawn in both eyes until replaced (the VR UI panel).
+  void set_extra_entities(std::vector<scene3d::Entity3D> extra) { extra_ = std::move(extra); }
 
   // One frame. real_seconds: wall time since the last frame (world step).
   // False when the session wants to stop (exiting / lost).
@@ -48,6 +50,7 @@ class VrPresenter {
   render3d::Renderer3D* r_;
   render3d::SceneView* view_;
   bool restore_offscreen_ = false;
+  std::vector<scene3d::Entity3D> extra_;
 };
 
 }  // namespace xr

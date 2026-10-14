@@ -104,6 +104,55 @@ void vr_overlay_entities(const World3D& w, bool vignette, std::vector<Entity3D>*
   }
 }
 
+void vr_place_ui_panel(const World3D& w, float distance, VrUiPanel* p) {
+  const VrPose head = w.head();
+  Vec3 fwd = head.orientation.rotate({0, 0, -1});
+  fwd.y = 0;
+  const float len = std::sqrt(fwd.x * fwd.x + fwd.z * fwd.z);
+  fwd = len > 1e-4f ? Vec3{fwd.x / len, 0, fwd.z / len} : Vec3{0, 0, -1};
+  p->center = head.position + fwd * distance + Vec3{0, -0.15f, 0};
+  // Plane normal (+Y) turned to +Z, then yawed so +Z points at the head.
+  const float yaw = std::atan2(-fwd.x, -fwd.z);
+  p->rotation = Quat::axis_angle({0, 1, 0}, yaw) *
+                Quat::axis_angle({1, 0, 0}, render3d::radians(90.0f));
+}
+
+void vr_ui_panel_entity(const VrUiPanel& p, std::vector<Entity3D>* out) {
+  if (!p.visible) return;
+  Entity3D e;
+  e.id = kVrOverlayIdBase + 0x900;
+  e.name = "UI Panel";
+  e.transform.position = p.center;
+  e.transform.rotation = p.rotation;
+  e.transform.scale = {p.width, 1.0f, p.height};
+  e.mesh = scene3d::MeshRef{"primitive:plane", false};
+  scene3d::Material3D m;
+  m.albedo[0] = m.albedo[1] = m.albedo[2] = m.albedo[3] = 1.0f;
+  m.albedo_texture = p.image;
+  m.unlit = true;
+  e.material = m;
+  out->push_back(std::move(e));
+}
+
+bool vr_ui_panel_hit(const World3D& w, const VrUiPanel& p, int hand, float* u, float* v) {
+  if (!p.visible || hand < 0 || hand > 1) return false;
+  const VrHandState& hs = w.hand(hand);
+  const VrPose& aim = hs.aim.valid ? hs.aim : hs.grip;
+  if (!aim.valid) return false;
+  const Quat inv = p.rotation.conjugate();
+  const Vec3 o = inv.rotate(aim.position - p.center);
+  const Vec3 d = inv.rotate(aim.orientation.rotate({0, 0, -1}));
+  if (std::fabs(d.y) < 1e-5f) return false;
+  const float t = -o.y / d.y;
+  if (t < 0.0f || t > 20.0f) return false;
+  const float x = o.x + d.x * t, z = o.z + d.z * t;
+  const float uu = x / p.width + 0.5f, vv = z / p.height + 0.5f;
+  if (uu < 0 || uu > 1 || vv < 0 || vv > 1) return false;
+  *u = uu;
+  *v = vv;
+  return true;
+}
+
 void vr_overlay_lines(const World3D& w, render3d::Renderer3D* r) {
   if (!r) return;
   for (int h = 0; h < 2; ++h) {
