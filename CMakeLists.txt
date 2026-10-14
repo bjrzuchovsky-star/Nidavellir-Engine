@@ -22,8 +22,9 @@ if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT)
   include(FetchImGuiDeps)
   add_subdirectory(src/gfx)
   # 3D: renderer (GL 3.3 core + null), glTF via cgltf (fetched by hash),
-  # scene.json v7; VR: OpenXR-shaped session stub.
+  # scene.json v8; VR: OpenXR loader (fetched by hash) + desktop simulator.
   include(FetchCgltf)
+  include(FetchOpenXR)
   add_subdirectory(src/render3d)
   add_subdirectory(src/xr)
 endif()

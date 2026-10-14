@@ -181,6 +181,25 @@ struct Mat4 {
     return r;
   }
 
+  // Asymmetric frustum from OpenXR-style half-angles (radians; left and
+  // down are negative).
+  static Mat4 perspective_fov(float left, float right, float up, float down, float z_near,
+                              float z_far) {
+    const float tl = std::tan(left), tr = std::tan(right);
+    const float tu = std::tan(up), td = std::tan(down);
+    const float w = tr - tl, h = tu - td;
+    Mat4 r;
+    r.at(0, 0) = 2.0f / w;
+    r.at(0, 2) = (tr + tl) / w;
+    r.at(1, 1) = 2.0f / h;
+    r.at(1, 2) = (tu + td) / h;
+    r.at(2, 2) = -(z_far + z_near) / (z_far - z_near);
+    r.at(2, 3) = -(2.0f * z_far * z_near) / (z_far - z_near);
+    r.at(3, 2) = -1.0f;
+    r.at(3, 3) = 0.0f;
+    return r;
+  }
+
   static Mat4 ortho(float l, float r, float b, float t, float n, float f) {
     Mat4 o;
     o.at(0, 0) = 2.0f / (r - l);
