@@ -11,6 +11,7 @@ add_library(ts_render3d
   Renderer3D.cpp
   GlApi.cpp
   GlRenderer3D.cpp
+  HiddenGl.cpp
 )
 target_include_directories(ts_render3d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(ts_render3d

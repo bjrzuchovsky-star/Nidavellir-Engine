@@ -37,6 +37,10 @@ if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
   # Plugins: interface, catalog, manager (ts_plugin) and the built-ins.
   add_subdirectory(src/plugin)
   add_subdirectory(src/plugins)
+  # 3D play runtime (needs ts_render3d, so windowed apps only).
+  if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT)
+    add_subdirectory(src/world3d)
+  endif()
 endif()
 
 # Networking (ts_net: Transport interface + ENet backend). ENet is fetched by
