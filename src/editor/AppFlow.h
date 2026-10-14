@@ -16,7 +16,6 @@ namespace tombstone {
 namespace editor {
 
 class Editor2DScreen;
-class FrontierScreen;
 class Editor3DScreen;
 
 // Admin UI state machine:
@@ -80,8 +79,7 @@ class AppFlow {
   // Active Editor2D screen (nullptr otherwise); lets --smoke drive the same
   // edit paths as the GUI.
   Editor2DScreen* editor_screen();
-  // Active 3D / VR survey camp (nullptr otherwise).
-  FrontierScreen* frontier_screen();
+  // Active 3D editor (3D and VR claims; nullptr otherwise).
   Editor3DScreen* editor3d_screen();
 
   const std::vector<ProjectInfo>& projects() const {

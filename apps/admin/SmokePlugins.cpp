@@ -5,7 +5,6 @@
 #include "editor/plugins/EditorPlugins.h"
 #include "editor/projects/ProjectStore.h"
 #include "editor/screens/Editor2DScreen.h"
-#include "editor/screens/FrontierScreen.h"
 #include "editor/editor3d/Editor3DScreen.h"
 #include "plugin/Catalog.h"
 #include "plugin/PluginManager.h"
@@ -510,7 +509,7 @@ int editor_checks() {
   return 0;
 }
 
-// --- 5. Create-project flow + survey camp --------------------------------------
+// --- 5. Create-project flow + 3D / VR editor --------------------------------------
 
 int flow_checks() {
   Engine engine;
@@ -541,36 +540,34 @@ int flow_checks() {
     const int idx = find(c.name);
     if (idx < 0 || flow.projects()[idx].kind != c.kind) return fail("created kind");
     if (!flow.select_project(static_cast<std::size_t>(idx))) return fail("open " + std::string(c.name));
-    if (c.kind == editor::ProjectKind::ThreeD) {
-      editor::Editor3DScreen* ed = flow.editor3d_screen();
-      if (flow.current_state() != editor::AppState::Editor3D || !ed) {
-        return fail("3D projects open the 3D editor");
-      }
-      if (ed->scene().entities.empty() || std::string(ed->renderer_backend()) != "null" ||
-          ed->render_frame(64, 64).draws == 0) {
-        return fail("the 3D editor starts with a starter scene drawn through ts_render3d");
-      }
-      flow.request_back_to_projects();
-      if (flow.current_state() != editor::AppState::ProjectManager) {
-        return fail("back to claims from the 3D editor");
-      }
-      continue;
+    editor::Editor3DScreen* ed = flow.editor3d_screen();
+    if (flow.current_state() != editor::AppState::Editor3D || !ed) {
+      return fail("3D and VR projects open the 3D editor");
     }
-    if (flow.current_state() != editor::AppState::EditorFrontier || !flow.frontier_screen()) {
-      return fail("VR projects open the survey camp");
+    if (ed->scene().entities.empty() || std::string(ed->renderer_backend()) != "null" ||
+        ed->render_frame(64, 64).draws == 0) {
+      return fail("the 3D editor starts with a starter scene drawn through ts_render3d");
     }
-    editor::FrontierScreen* camp = flow.frontier_screen();
-    if (std::string(camp->renderer_backend()) != "null" || camp->last_frame().draws != 1 ||
-        camp->last_frame().triangles != 12) {
-      return fail("the camp should draw a frame through ts_render3d's null backend");
+    bool has_rig = false;
+    for (const auto& e : ed->scene().entities) has_rig = has_rig || e.vr_rig.has_value();
+    if (has_rig != (c.kind == editor::ProjectKind::VR)) {
+      return fail("only VR claims start with a VR rig");
     }
-    if (c.kind == editor::ProjectKind::VR &&
-        (camp->xr_available() || camp->xr_status().find("surveyed") == std::string::npos)) {
-      return fail("VR: the ts_xr stub should report why goggles are unavailable");
+    if (c.kind == editor::ProjectKind::VR) {
+      // Play in a VR claim = the desktop simulator, headless here.
+      if (!ed->play_start() || !ed->vr_previewing() || !ed->vr_sim() || !ed->world().vr()) {
+        return fail("VR Play should start the simulator preview");
+      }
+      for (int i = 0; i < 10; ++i) ed->vr_preview_frame(1.0 / 60.0);
+      if (ed->world().tick() < 5 || ed->world().vr_rig_id() == 0) {
+        return fail("the VR preview should tick the world with the rig");
+      }
+      ed->play_stop();
+      if (ed->vr_previewing() || ed->playing()) return fail("Stop ends the VR preview");
     }
     flow.request_back_to_projects();
     if (flow.current_state() != editor::AppState::ProjectManager) {
-      return fail("back to claims from the camp");
+      return fail("back to claims from the 3D editor");
     }
   }
   if (!flow.create_new_project("Dusty Town", editor::ProjectKind::TwoD)) return fail("create 2D");
@@ -593,10 +590,13 @@ int flow_checks() {
   if (r->create_mesh(bad).id != 0 || !render3d::make_cube().valid()) {
     return fail("mesh validation");
   }
-  auto xs = xr::create_xr_session({});
-  if (xs->begin(&err) || err.empty()) return fail("the XR stub must refuse to begin");
+  auto xs = xr::create_sim_session({});
+  if (!xs->begin(&err) || !xs->running() || !xs->simulated()) {
+    return fail("the VR simulator should begin anywhere: " + err);
+  }
+  xs->end();
   std::cout << "[smoke] plugins: create 2D / 3D / VR from the Project Manager flow, "
-               "3D editor + VR survey camp (ts_render3d, ts_xr stub reason) OK\n";
+               "3D editor for 3D + VR claims (VR rig, simulator preview) OK\n";
   return 0;
 }
 

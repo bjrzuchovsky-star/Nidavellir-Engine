@@ -29,12 +29,11 @@ add_library(ts_editor
   screens/Editor2DScreen_Console.cpp
   screens/Editor2DScreen_Scripts.cpp
   screens/Editor2DScreen_Plugins.cpp
-  screens/FrontierScreen.cpp
-  editor3d/Editor3DScreen_VR.cpp
   editor3d/Gizmo3D.cpp
   editor3d/Editor3DScreen.cpp
   editor3d/Editor3DScreen_UI.cpp
   editor3d/Editor3DScreen_Panels.cpp
+  editor3d/Editor3DScreen_VR.cpp
   plugins/EditorPlugins.cpp
   plugins/EditorBuiltinPlugins.cpp
   plugins/FrontierPanels.cpp
