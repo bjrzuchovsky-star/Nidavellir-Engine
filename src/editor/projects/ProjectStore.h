@@ -66,6 +66,8 @@ class ProjectStore {
   static std::string now_timestamp();
   static std::string trim_copy(const std::string& s);
   bool seed_sample_2d_if_empty();
+  // haunted-saloon-vr: always with the other samples, once for older roots.
+  void seed_vr_sample(bool force);
 
   std::string projects_root_;
   std::vector<ProjectInfo> projects_;
