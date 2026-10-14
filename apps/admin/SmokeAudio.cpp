@@ -20,6 +20,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -564,7 +565,11 @@ void host_checks(const fs::path& dir) {
   ea.preview("", "builtin:chime");
   check(!ea.previewing("builtin:click") && ea.previewing("builtin:chime"),
         "editor preview replaces the last");
-  ea.tick(3.0);
+  // Null backend: tick mixes; a real device (if one opened) plays in real time.
+  for (int i = 0; i < 60 && ea.previewing("builtin:chime"); ++i) {
+    ea.tick(0.25);
+    if (ea.engine().has_device()) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
   check(!ea.previewing("builtin:chime"), "editor preview ends");
   ea.set_bus_volume(Bus::Ui, 0.25f);
   ea.save_now();
