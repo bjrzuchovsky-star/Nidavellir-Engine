@@ -24,6 +24,8 @@
 #include <string>
 #include <vector>
 
+struct lua_State;
+
 namespace ts {
 namespace tombstone {
 namespace runtime {
@@ -103,6 +105,9 @@ class ScriptWorld {
   virtual void script_toast(int slot, const std::string& text, double seconds,
                             std::uint64_t from) = 0;
   virtual void script_log(LogEntry entry) = 0;
+  // Plugins: add Lua globals to the sandbox table at stack index `sandbox`
+  // (absolute). Default: nothing.
+  virtual void script_open_extensions(lua_State* /*L*/, int /*sandbox*/) {}
 };
 
 class ScriptHost {

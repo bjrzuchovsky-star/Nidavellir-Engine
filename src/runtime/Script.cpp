@@ -330,6 +330,9 @@ bool ScriptHost::State::open() {
     lua_setfield(L, -2, name);
   }
   open_script_api(L);
+  if (world) {
+    world->script_open_extensions(L, lua_gettop(L));
+  }
   sandbox = luaL_ref(L, LUA_REGISTRYINDEX);
 
   lua_newtable(L);
