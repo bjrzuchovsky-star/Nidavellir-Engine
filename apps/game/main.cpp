@@ -5,7 +5,10 @@
 //   ts_game --project <dir>            ride the project
 //   ts_game --smoke --project <dir>    headless check (no window)
 //   ts_game --project <dir> --log <f>  also keep the Telegraph in <f>
-// "dimension": "3d" projects ride in a GL 3.3 core window (Game3D.cpp).
+// "dimension": "3d" projects ride in a GL 3.3 core window (Game3D.cpp);
+// "dimension": "vr" ones in a headset through OpenXR, else the desktop
+// simulator (GameVR.cpp).
+//   ts_game --xr-probe                 OpenXR runtime / headset / session check
 
 #include "Game3D.h"
 #include "GameRenderer.h"
@@ -54,6 +57,9 @@ constexpr const char* kUsage =
     "  --collision      start with the collision overlay on (K)\n"
     "  --log <file>     also write the Telegraph (script, toast and trigger\n"
     "                   log lines, always on stdout) to <file>\n"
+    "  --sim            VR projects: use the desktop simulator, not the headset\n"
+    "  --xr-probe       check the OpenXR runtime + headset (creates and destroys\n"
+    "                   a session, no window) and exit\n"
     "Keys: WASD / arrows move P1 | E / Space / pad A action |\n"
     "      gamepads ride P1-P4 | P or F6 pause | F10 step while paused |\n"
     "      R or F5 reload scene.json | K collision overlay | Esc quit\n"
@@ -65,6 +71,8 @@ struct Options {
   long frames = -1;
   bool collision = false;
   bool help = false;
+  bool sim = false;
+  bool xr_probe = false;
   std::string log_path;
 };
 
@@ -79,6 +87,10 @@ bool parse_args(int argc, char** argv, Options* out, std::string* err) {
       out->frames = std::strtol(argv[++i], nullptr, 10);
     } else if (a == "--log" && i + 1 < argc) {
       out->log_path = argv[++i];
+    } else if (a == "--sim") {
+      out->sim = true;
+    } else if (a == "--xr-probe") {
+      out->xr_probe = true;
     } else if (a == "--collision") {
       out->collision = true;
     } else if (a == "--help" || a == "-h") {
@@ -671,6 +683,9 @@ int main(int argc, char** argv) {
     std::cout << kUsage;
     return 0;
   }
+  if (opt.xr_probe) {
+    return game::run_xr_probe();
+  }
   if (opt.project.empty()) {
     std::cerr << "ts_game needs a project.\n" << kUsage;
     return 2;
@@ -685,6 +700,11 @@ int main(int argc, char** argv) {
     return 2;
   }
   std::cout << "TombStone Game\n";
+  if (game::is_vr_project(opt.project)) {
+    const std::string name = project_name(opt.project);
+    return opt.smoke ? game::run_smoke_vr(opt.project, name)
+                     : game::run_window_vr(opt.project, name, opt.frames, opt.sim);
+  }
   if (game::is_3d_project(opt.project)) {
     const std::string name = project_name(opt.project);
     return opt.smoke ? game::run_smoke_3d(opt.project, name)

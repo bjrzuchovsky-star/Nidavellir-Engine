@@ -18,6 +18,7 @@ add_executable(ts_game
   GameRenderer.cpp
   HudText.cpp
   Game3D.cpp
+  GameVR.cpp
 )
 
 target_include_directories(ts_game PRIVATE ${ts_stb_easy_font_SOURCE_DIR})
@@ -31,6 +32,7 @@ target_link_libraries(ts_game
     ts_gfx
     ts_render3d
     ts_world3d
+    ts_xr
     glfw
     OpenGL::GL
 )
