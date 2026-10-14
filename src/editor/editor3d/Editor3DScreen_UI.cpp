@@ -1,5 +1,6 @@
 #include "editor/editor3d/Editor3DScreen.h"
 
+#include "editor/audio/EditorAudio.h"
 #include "editor/ui/Theme.h"
 
 #include <imgui.h>
@@ -119,6 +120,11 @@ void Editor3DScreen::draw_ui() {
   ImGui::End();
   if (ImGui::Begin(kTelegraph)) draw_telegraph();
   ImGui::End();
+  if (show_mixer_) {
+    ImGui::SetNextWindowSize(ImVec2(470, 470), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Saloon Band (Mixer)", &show_mixer_)) draw_mixer_panel();
+    ImGui::End();
+  }
   draw_vr_mirror();
 }
 
@@ -190,6 +196,7 @@ void Editor3DScreen::draw_menu_bar() {
   if (ImGui::BeginMenu("View")) {
     ImGui::MenuItem("Grid", "G", &scene_.show_grid);
     ImGui::MenuItem("Colliders", nullptr, &show_colliders_);
+    ImGui::MenuItem("Saloon Band (Mixer)", nullptr, &show_mixer_);
     if (ImGui::MenuItem("Frame selection", "F")) frame_selection();
     ImGui::EndMenu();
   }
@@ -753,6 +760,7 @@ void Editor3DScreen::draw_context_menu(std::uint64_t clicked) {
     if (ImGui::MenuItem("Light", nullptr, false, !e->light)) { c.light = scene3d::Light3D{}; add = true; }
     if (ImGui::MenuItem("Collider", nullptr, false, !e->collider)) { c.collider = scene3d::Collider3D{}; add = true; }
     if (ImGui::MenuItem("Grabbable", nullptr, false, !e->grabbable)) { c.grabbable = scene3d::Grabbable3D{}; add = true; }
+    if (ImGui::MenuItem("Audio Source", nullptr, false, !e->audio)) { c.audio = scene3d::audio_3d(); add = true; }
     if (add) replace_entity(c, "Add component " + c.name);
     ImGui::EndMenu();
   }

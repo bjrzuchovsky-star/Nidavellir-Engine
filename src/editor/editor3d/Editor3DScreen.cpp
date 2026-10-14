@@ -1,5 +1,7 @@
 #include "editor/editor3d/Editor3DScreen.h"
 
+#include "editor/assets/AssetLibrary.h"
+#include "editor/audio/EditorAudio.h"
 #include "world3d/VrOverlay.h"
 
 #include "render3d/GlRenderer3D.h"
@@ -135,6 +137,7 @@ AppState Editor3DScreen::on_update(float delta_seconds) {
                                                             : world3d::Input3D{});
     for (const world3d::Toast3D& t : world_.take_toasts()) toasts_.push_back({t.text, t.seconds});
   }
+  update_sound(delta_seconds);
   for (auto& t : toasts_) t.second -= delta_seconds;
   while (!toasts_.empty() && toasts_.front().second <= 0) toasts_.pop_front();
   if (ImGui::GetCurrentContext() != nullptr) draw_ui();
@@ -618,6 +621,7 @@ void Editor3DScreen::play_stop() {
     vr_presenter_.reset();
     vr_status_.clear();
   }
+  end_sound();
   if (!playing()) return;
   world_.stop();
   toasts_.clear();
@@ -627,9 +631,31 @@ void Editor3DScreen::play_stop() {
 
 // ---- Assets ------------------------------------------------------------------------
 
+void Editor3DScreen::update_sound(double dt) {
+  if (!playing()) {
+    end_sound();
+    return;
+  }
+  if (!sound_stage_) {
+    sound_stage_ = std::make_unique<audio::SoundStage>(EditorAudio::get().engine());
+    sound_stage_->begin_ride(project_.path, true);
+    sound3d_ = std::make_unique<audio::SoundStage3D>(*sound_stage_);
+  }
+  // Ears on the camera, or the headset in VR.
+  sound3d_->update(world_, dt);
+}
+
+void Editor3DScreen::end_sound() {
+  if (!sound_stage_) return;
+  sound3d_.reset();
+  sound_stage_->end_ride();
+  sound_stage_.reset();
+}
+
 void Editor3DScreen::rescan_assets() {
   assets_.clear();
   scripts_.clear();
+  sounds_ = assets::list_sounds(project_.path);
   for (const std::string& p : render3d::primitive_names()) {
     AssetEntry a;
     a.rel = "primitive:" + p;

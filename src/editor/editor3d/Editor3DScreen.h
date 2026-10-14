@@ -24,6 +24,8 @@
 // window showing both eyes; inspector has the VR Rig / Grabbable
 // components.
 
+#include "audio/SoundStage.h"
+#include "audio/SoundStage3D.h"
 #include "editor/AppState.h"
 #include "editor/ProjectInfo.h"
 #include "editor/editor3d/Gizmo3D.h"
@@ -257,6 +259,13 @@ class Editor3DScreen final : public IScreen {
   bool free_camera_in_play_ = false;
   std::vector<AssetEntry> assets_;
   std::vector<std::string> scripts_;
+  std::vector<std::string> sounds_;  // project sounds (Audio Source picker)
+  bool show_mixer_ = false;
+  // Sound while riding (Play or VR preview); null otherwise.
+  std::unique_ptr<audio::SoundStage> sound_stage_;
+  std::unique_ptr<audio::SoundStage3D> sound3d_;
+  void update_sound(double dt);
+  void end_sound();
   std::deque<runtime::LogEntry> log_;
   std::deque<std::pair<std::string, double>> toasts_;
   render3d::FrameStats last_stats_;

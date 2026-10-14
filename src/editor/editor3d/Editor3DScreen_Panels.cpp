@@ -2,6 +2,7 @@
 // one undo step is pushed when a widget is released after an edit.
 #include "editor/editor3d/Editor3DScreen.h"
 
+#include "editor/audio/EditorAudio.h"
 #include "editor/ui/Theme.h"
 
 #include <imgui.h>
@@ -243,6 +244,18 @@ void Editor3DScreen::draw_inspector() {
       ImGui::EndCombo();
     }
     ImGui::TextDisabled("%zu prop override(s)", e.script->props.size());
+  }
+  if (component("Audio Source", e.audio.has_value(), [&] { e.audio = scene3d::audio_3d(); },
+                [&] { e.audio.reset(); })) {
+    const char* step = "Audio Source";
+    const AudioEdit r = draw_audio_source_fields(
+        *e.audio, sounds_, project_.path, true, [&](const char* l) { t.after(l); }, &step);
+    if (r == AudioEdit::Commit || r == AudioEdit::Remove) {
+      if (r == AudioEdit::Remove) e.audio.reset();
+      t.activated = true;
+      t.commit = step;
+    }
+    if (e.audio) normalize_audio(*e.audio);
   }
   ImGui::PopID();
 
