@@ -13,6 +13,7 @@ add_library(ts_plugins_builtin
   survival/Sample.cpp
   shipyard/Parts.cpp
   shipyard/Design.cpp
+  shipyard/ShipSim.cpp
 )
 
 target_include_directories(ts_plugins_builtin
