@@ -31,6 +31,16 @@ namespace ts {
 namespace tombstone {
 namespace runtime {
 
+// A script's request to the in-game UI (Lua ui.*): queued by the world and
+// applied by the host's ui::UiSystem (see ui/UiScript.h).
+struct UiCommand {
+  enum class Kind { Show, Hide, SetText, SetValue, SetVisible };
+  Kind kind = Kind::Show;
+  std::string target;  // document name, or widget id ("doc.widget" or "widget")
+  std::string text;
+  double value = 0.0;  // SetValue; SetVisible (0 / 1)
+};
+
 // Scripts tick with the world (World::kTickRate; checked where they meet).
 inline constexpr int kScriptTickRate = 60;
 
@@ -110,6 +120,8 @@ class ScriptWorld {
   // (absolute). Default: nothing.
   // audio.play / audio.music / ... (queued for the host, see Sound.h).
   virtual void script_sound(SoundEvent /*event*/) {}
+  // ui.show / ui.hide / ui.set_text / ... (queued for the host's UI).
+  virtual void script_ui(UiCommand /*command*/) {}
   virtual void script_open_extensions(lua_State* /*L*/, int /*sandbox*/) {}
 };
 
@@ -146,6 +158,10 @@ class ScriptHost {
   // A hook called with (text, number): the VR hand events on_grab(hand),
   // on_release(hand, speed), on_point(hand), on_unpoint(hand),
   // on_vr_trigger(hand). Missing hooks are skipped.
+  // The host's UI reports a widget event: every ui.on_click(id, fn) /
+  // ui.on_change(id, fn) handler for that widget id runs fn(id, value, text).
+  void ui_event(const std::string& widget, bool change, double value, const std::string& text);
+  std::size_t ui_handler_count() const;
   void hand_event(std::uint64_t target, const char* hook, const std::string& text,
                   double number);
   void run_timers(std::uint64_t tick);

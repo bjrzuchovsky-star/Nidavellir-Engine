@@ -630,6 +630,87 @@ bool to_script_value(lua_State* L, int idx, ScriptValue* out) {
   }
 }
 
+// ui.show(doc) / ui.hide(doc) / ui.set_text(id, text) / ui.set_value(id, v)
+// / ui.set_visible(id, on): queued for the host's UI. ui.on_click(id, fn) /
+// ui.on_change(id, fn): fn(id, value, text) when the widget is clicked /
+// changed (slider value, list index, input text).
+
+int send_ui(lua_State* L, UiCommand cmd) {
+  State& s = host(L);
+  if (!s.world) {
+    return luaL_error(L, "ui can only be used while the world runs (not at load)");
+  }
+  if (cmd.target.empty() || cmd.target.size() > 128) {
+    return luaL_argerror(L, 1, "ui target must be 1..128 characters");
+  }
+  s.world->script_ui(std::move(cmd));
+  return 0;
+}
+
+int u_show(lua_State* L) {
+  UiCommand c;
+  c.kind = UiCommand::Kind::Show;
+  c.target = luaL_checkstring(L, 1);
+  return send_ui(L, std::move(c));
+}
+
+int u_hide(lua_State* L) {
+  UiCommand c;
+  c.kind = UiCommand::Kind::Hide;
+  c.target = luaL_checkstring(L, 1);
+  return send_ui(L, std::move(c));
+}
+
+int u_set_text(lua_State* L) {
+  UiCommand c;
+  c.kind = UiCommand::Kind::SetText;
+  c.target = luaL_checkstring(L, 1);
+  std::size_t n = 0;
+  const char* t = luaL_tolstring(L, 2, &n);
+  c.text.assign(t, std::min<std::size_t>(n, 4096));
+  lua_pop(L, 1);
+  return send_ui(L, std::move(c));
+}
+
+int u_set_value(lua_State* L) {
+  UiCommand c;
+  c.kind = UiCommand::Kind::SetValue;
+  c.target = luaL_checkstring(L, 1);
+  c.value = luaL_checknumber(L, 2);
+  return send_ui(L, std::move(c));
+}
+
+int u_set_visible(lua_State* L) {
+  UiCommand c;
+  c.kind = UiCommand::Kind::SetVisible;
+  c.target = luaL_checkstring(L, 1);
+  c.value = lua_toboolean(L, 2) ? 1.0 : 0.0;
+  return send_ui(L, std::move(c));
+}
+
+int add_ui_handler(lua_State* L, bool change) {
+  const std::string id = luaL_checkstring(L, 1);
+  luaL_checktype(L, 2, LUA_TFUNCTION);
+  State& s = host(L);
+  if (!s.current) {
+    return luaL_error(L, "ui.on_click / ui.on_change need a running script");
+  }
+  if (s.ui_handlers.size() >= ScriptHost::kMaxTimers) {
+    return luaL_error(L, "too many ui handlers");
+  }
+  lua_pushvalue(L, 2);
+  ScriptUiHandler h;
+  h.entity = s.current->entity;
+  h.widget = id;
+  h.change = change;
+  h.fn = luaL_ref(L, LUA_REGISTRYINDEX);
+  s.ui_handlers.push_back(std::move(h));
+  return 0;
+}
+
+int u_on_click(lua_State* L) { return add_ui_handler(L, false); }
+int u_on_change(lua_State* L) { return add_ui_handler(L, true); }
+
 void open_script_api(lua_State* L) {
   // Entity handles: full userdata holding the id, methods via __index.
   const luaL_Reg methods[] = {
@@ -671,6 +752,15 @@ void open_script_api(lua_State* L) {
       {nullptr, nullptr}};
   luaL_newlib(L, audio_fns);
   lua_setfield(L, -2, "audio");
+
+  const luaL_Reg ui_fns[] = {
+      {"show", u_show},           {"hide", u_hide},
+      {"set_text", u_set_text},   {"set_value", u_set_value},
+      {"set_visible", u_set_visible},
+      {"on_click", u_on_click},   {"on_change", u_on_change},
+      {nullptr, nullptr}};
+  luaL_newlib(L, ui_fns);
+  lua_setfield(L, -2, "ui");
 
   lua_getfield(L, -1, LUA_MATHLIBNAME);
   lua_pushcfunction(L, m_random);

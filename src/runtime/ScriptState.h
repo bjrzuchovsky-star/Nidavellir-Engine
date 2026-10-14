@@ -37,6 +37,13 @@ struct ScriptTimer {
   int fn = LUA_NOREF;
 };
 
+struct ScriptUiHandler {
+  std::uint64_t entity = 0;
+  std::string widget;
+  bool change = false;  // on_change (else on_click)
+  int fn = LUA_NOREF;
+};
+
 struct ScriptHost::State {
   ScriptWorld* world = nullptr;  // null while describing a file
   ScriptLibrary* library = nullptr;
@@ -52,6 +59,7 @@ struct ScriptHost::State {
 
   std::vector<std::unique_ptr<ScriptInstance>> instances;
   std::vector<ScriptTimer> timers;
+  std::vector<ScriptUiHandler> ui_handlers;
   std::uint64_t next_timer = 1;
   std::uint64_t rng = 0x9E3779B97F4A7C15ull;  // math.random (replayable)
 

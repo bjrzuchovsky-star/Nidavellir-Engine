@@ -418,6 +418,14 @@ void ScriptHost::State::drop_timers(std::uint64_t entity) {
     return true;
   });
   timers.erase(it, timers.end());
+  auto ui = std::remove_if(ui_handlers.begin(), ui_handlers.end(), [&](const ScriptUiHandler& h) {
+    if (h.entity != entity) {
+      return false;
+    }
+    luaL_unref(L, LUA_REGISTRYINDEX, h.fn);
+    return true;
+  });
+  ui_handlers.erase(ui, ui_handlers.end());
 }
 
 bool ScriptHost::State::push_hook(ScriptInstance& in, const char* hook) {
@@ -693,6 +701,28 @@ void ScriptHost::hand_event(std::uint64_t target, const char* hook, const std::s
     s.sweep();
   });
 }
+
+void ScriptHost::ui_event(const std::string& widget, bool change, double value,
+                          const std::string& text) {
+  guarded(*s_, [&] {
+    State& s = *s_;
+    // Copy first: a handler may add or drop handlers.
+    const std::vector<ScriptUiHandler> hs = s.ui_handlers;
+    for (const ScriptUiHandler& h : hs) {
+      if (h.change != change || h.widget != widget) continue;
+      ScriptInstance* in = s.find(h.entity);
+      if (!in || !in->enabled || !s.world->script_entity(h.entity)) continue;
+      lua_rawgeti(s.L, LUA_REGISTRYINDEX, h.fn);
+      lua_pushlstring(s.L, widget.data(), widget.size());
+      lua_pushnumber(s.L, value);
+      lua_pushlstring(s.L, text.data(), text.size());
+      s.call(in, 3);
+    }
+    s.sweep();
+  });
+}
+
+std::size_t ScriptHost::ui_handler_count() const { return s_->ui_handlers.size(); }
 
 void ScriptHost::run_timers(std::uint64_t tick) {
   guarded(*s_, [&] {
