@@ -12,8 +12,9 @@ namespace tombstone {
 namespace editor {
 
 // On-disk project list/select shell with ImGui UI.
-// Actions: Open (select index / double-click), New 2D Project, Delete, Settings, Logout.
-// Selecting a 2D project opens Editor2D; 3D reports a clear error.
+// Actions: Open (select index / double-click), New Project (2D / 3D / VR
+// picker), Delete, Settings, Logout. A 2D project opens Editor2D; 3D and
+// VR open the survey camp (EditorFrontier) until those renderers land.
 class ProjectManagerScreen final : public IScreen {
  public:
   ProjectManagerScreen(std::vector<ProjectInfo> projects,
@@ -43,6 +44,11 @@ class ProjectManagerScreen final : public IScreen {
   }
 
   void request_new_project_2d(std::string name = "New 2D Project");
+  void request_new_project(std::string name, ProjectKind kind);
+  // Project-type picker (Break Ground).
+  ProjectKind new_project_kind() const { return new_kind_; }
+  void set_new_project_kind(ProjectKind kind);
+  ProjectKind pending_new_project_kind() const { return pending_new_kind_; }
   void request_delete_highlighted();
   void request_settings();
   void request_logout();
@@ -65,6 +71,7 @@ class ProjectManagerScreen final : public IScreen {
  private:
   void draw_ui();
   void draw_project_card(std::size_t index);
+  void draw_kind_picker();
 
   std::vector<ProjectInfo> projects_;
   std::string projects_root_;
@@ -72,7 +79,9 @@ class ProjectManagerScreen final : public IScreen {
   std::string error_message_;
   std::optional<std::size_t> highlighted_index_;
   std::optional<std::size_t> selected_index_;
-  bool open_editor_2d_ = false;
+  bool open_editor_2d_ = false;  // open the selected project (any kind)
+  ProjectKind new_kind_ = ProjectKind::TwoD;
+  ProjectKind pending_new_kind_ = ProjectKind::TwoD;
   bool new_project_requested_ = false;
   std::string pending_new_project_name_;
   bool delete_requested_ = false;

@@ -32,6 +32,8 @@ void ProjectManagerScreen::on_enter() {
   logout_requested_ = false;
   error_message_.clear();
   std::memset(new_name_buf_, 0, sizeof(new_name_buf_));
+  new_kind_ = ProjectKind::TwoD;
+  pending_new_kind_ = ProjectKind::TwoD;
   std::strncpy(new_name_buf_, "New 2D Project", sizeof(new_name_buf_) - 1);
 
   std::cout << "[ProjectManager] root=" << projects_root_ << '\n';
@@ -94,7 +96,7 @@ void ProjectManagerScreen::draw_project_card(std::size_t i) {
 
   if (highlight) {
     const char* hint = p.kind != ProjectKind::TwoD
-                           ? "3D: not open for business yet"
+                           ? "Opens the survey camp (placeholder)"
                            : "Double-click or Open to ride in";
     const ImVec2 hs = ImGui::CalcTextSize(hint);
     ImGui::SetCursorPos(ImVec2(ImGui::GetWindowWidth() - hs.x - 16.0f,
@@ -140,7 +142,7 @@ void ProjectManagerScreen::draw_ui() {
   ImGui::Spacing();
 
   ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
-  ImGui::BeginChild("ProjectList", ImVec2(0, -96), ImGuiChildFlags_None);
+  ImGui::BeginChild("ProjectList", ImVec2(0, -164), ImGuiChildFlags_None);
   if (projects_.empty()) {
     const float w = ImGui::GetContentRegionAvail().x;
     ImGui::Dummy(ImVec2(0, 36));
@@ -152,7 +154,7 @@ void ProjectManagerScreen::draw_ui() {
     ImGui::Dummy(ImVec2(w, 68.0f));
     theme::CenteredText("Nothing staked yet.", 22.0f, theme::Text(), w);
     ImGui::Dummy(ImVec2(0, 4));
-    theme::CenteredText("Name a 2D project below and break ground.",
+    theme::CenteredText("Pick 2D, 3D or VR below, name it and break ground.",
                         ImGui::GetFontSize(), theme::TextMuted(), w);
     theme::CenteredText("An empty territory gets a sample claim on next load.",
                         ImGui::GetFontSize(), theme::TextMuted(), w);
@@ -164,19 +166,23 @@ void ProjectManagerScreen::draw_ui() {
   ImGui::EndChild();
   ImGui::PopStyleColor();
 
-  theme::SectionHeader("Break Ground", "new 2D project");
+  theme::SectionHeader("Break Ground", "new project: pick your territory");
+  draw_kind_picker();
   ImGui::SetNextItemWidth(260.0f);
   ImGui::InputTextWithHint("##newname", "Name your claim", new_name_buf_,
                            sizeof(new_name_buf_));
   ImGui::SameLine();
-  if (theme::PrimaryButton("+ New 2D", ImVec2(96, 0))) {
+  char create_label[32];
+  std::snprintf(create_label, sizeof(create_label), "+ New %s###newproj",
+                to_string(new_kind_));
+  if (theme::PrimaryButton(create_label, ImVec2(96, 0))) {
     std::string validate_err;
     if (!ProjectStore::validate_project_name(new_name_buf_, &validate_err)) {
       error_message_ = validate_err;
       status_message_.clear();
     } else {
       error_message_.clear();
-      request_new_project_2d(new_name_buf_);
+      request_new_project(new_name_buf_, new_kind_);
     }
   }
   ImGui::SameLine();
@@ -240,7 +246,9 @@ AppState ProjectManagerScreen::on_update(float /*delta_seconds*/) {
   }
 
   if (open_editor_2d_) {
-    return AppState::Editor2D;
+    const ProjectInfo* p = selected_project();
+    return p && p->kind != ProjectKind::TwoD ? AppState::EditorFrontier
+                                              : AppState::Editor2D;
   }
   if (settings_requested_) {
     return AppState::Settings;
@@ -271,21 +279,12 @@ bool ProjectManagerScreen::select_project(std::size_t index) {
   }
 
   const ProjectInfo& project = projects_[index];
-  if (project.kind != ProjectKind::TwoD) {
-    error_message_ = "Cannot open \"" + project.name +
-                     "\": 3D isn't open for business yet. "
-                     "Pick a 2D claim.";
-    status_message_.clear();
-    std::cout << "[ProjectManager] " << error_message_ << '\n';
-    return false;
-  }
-
   highlighted_index_ = index;
   selected_index_ = index;
   open_editor_2d_ = true;
   error_message_.clear();
-  std::cout << "[ProjectManager] selected 2D project \"" << project.name
-            << "\"\n";
+  std::cout << "[ProjectManager] selected " << to_string(project.kind)
+            << " project \"" << project.name << "\"\n";
   return true;
 }
 
@@ -307,10 +306,86 @@ const ProjectInfo* ProjectManagerScreen::selected_project() const {
 }
 
 void ProjectManagerScreen::request_new_project_2d(std::string name) {
+  request_new_project(std::move(name), ProjectKind::TwoD);
+}
+
+void ProjectManagerScreen::request_new_project(std::string name,
+                                               ProjectKind kind) {
   pending_new_project_name_ = std::move(name);
+  pending_new_kind_ = kind;
   new_project_requested_ = true;
-  std::cout << "[ProjectManager] New 2D Project requested: \""
-            << pending_new_project_name_ << "\"\n";
+  std::cout << "[ProjectManager] New " << to_string(kind)
+            << " Project requested: \"" << pending_new_project_name_
+            << "\"\n";
+}
+
+void ProjectManagerScreen::set_new_project_kind(ProjectKind kind) {
+  // Keep a default name in step with the type ("New 3D Project").
+  const std::string current = new_name_buf_;
+  const std::string old_default =
+      std::string("New ") + to_string(new_kind_) + " Project";
+  new_kind_ = kind;
+  if (current.empty() || current == old_default) {
+    const std::string fresh = std::string("New ") + to_string(kind) + " Project";
+    std::memset(new_name_buf_, 0, sizeof(new_name_buf_));
+    std::strncpy(new_name_buf_, fresh.c_str(), sizeof(new_name_buf_) - 1);
+  }
+}
+
+void ProjectManagerScreen::draw_kind_picker() {
+  struct Choice {
+    ProjectKind kind;
+    const char* title;
+    const char* line1;
+    const char* line2;
+  };
+  static const Choice kChoices[] = {
+      {ProjectKind::TwoD, "2D", "Frontier town", "Ready to ride today"},
+      {ProjectKind::ThreeD, "3D", "Open range", "Unsurveyed: placeholder camp"},
+      {ProjectKind::VR, "VR", "Through the goggles", "Unsurveyed: OpenXR stub"},
+  };
+  const float w = 188.0f;
+  const float h = 58.0f;
+  for (int i = 0; i < 3; ++i) {
+    const Choice& c = kChoices[i];
+    const bool on = new_kind_ == c.kind;
+    if (i > 0) ImGui::SameLine(0.0f, 8.0f);
+    ImGui::PushID(i);
+    const ImVec2 p0 = ImGui::GetCursorScreenPos();
+    if (ImGui::InvisibleButton("kind", ImVec2(w, h))) {
+      set_new_project_kind(c.kind);
+    }
+    const bool hovered = ImGui::IsItemHovered();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 p1(p0.x + w, p0.y + h);
+    const ImVec4 base = theme::PanelBg();
+    const ImVec4 lit = theme::Accent();
+    const float mix = on ? 0.16f : (hovered ? 0.07f : 0.0f);
+    const ImVec4 fill(base.x + (lit.x - base.x) * mix,
+                      base.y + (lit.y - base.y) * mix,
+                      base.z + (lit.z - base.z) * mix, 1.0f);
+    dl->AddRectFilled(p0, p1, theme::U32(fill), theme::metrics::kRadiusCard);
+    dl->AddRect(p0, p1, theme::U32(on ? theme::Accent() : theme::Border()),
+                theme::metrics::kRadiusCard, 0, on ? 2.0f : 1.0f);
+    // Big type letters on the left, two lines of copy on the right.
+    theme::DrawSizedText(dl, ImVec2(p0.x + 12.0f, p0.y + 12.0f), 30.0f,
+                         theme::U32(on ? theme::Accent() : theme::Sand()),
+                         c.title);
+    dl->AddText(ImVec2(p0.x + 64.0f, p0.y + 10.0f),
+                theme::U32(on ? theme::Text() : theme::TextMuted()), c.line1);
+    dl->AddText(ImVec2(p0.x + 64.0f, p0.y + 31.0f),
+                theme::U32(c.kind == ProjectKind::TwoD ? theme::Success()
+                                                       : theme::CopperMuted()),
+                c.line2);
+    if (hovered) {
+      ImGui::SetTooltip("%s", c.kind == ProjectKind::TwoD
+                                  ? "The full 2D editor: tiles, sprites, Play, posse."
+                                  : "Staked and saved as this type. Opens a survey camp "
+                                    "with plugins and a placeholder viewport until the "
+                                    "3D renderer rides in.");
+    }
+    ImGui::PopID();
+  }
 }
 
 void ProjectManagerScreen::request_delete_highlighted() {

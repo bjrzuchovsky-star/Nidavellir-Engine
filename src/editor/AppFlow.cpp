@@ -1,6 +1,8 @@
 #include "editor/AppFlow.h"
 
+#include "editor/plugins/EditorPlugins.h"
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/screens/FrontierScreen.h"
 #include "editor/screens/LoadingScreen.h"
 #include "editor/screens/LoginScreen.h"
 #include "editor/screens/ProjectManagerScreen.h"
@@ -136,7 +138,7 @@ void AppFlow::tick(float delta_seconds) {
         settings_return_state_ = AppState::ProjectManager;
       }
       if (auto* pm = dynamic_cast<ProjectManagerScreen*>(screen_.get())) {
-        if (next == AppState::Editor2D) {
+        if (next == AppState::Editor2D || next == AppState::EditorFrontier) {
           if (const ProjectInfo* selected = pm->selected_project()) {
             active_project_ = std::make_unique<ProjectInfo>(*selected);
             project_store_.touch_last_opened(selected->path);
@@ -155,7 +157,9 @@ void AppFlow::tick(float delta_seconds) {
           }
         }
       }
-    } else if (state_ == AppState::Editor2D && next == AppState::ProjectManager) {
+    } else if ((state_ == AppState::Editor2D ||
+                state_ == AppState::EditorFrontier) &&
+               next == AppState::ProjectManager) {
       active_project_.reset();
       status_message_.clear();
       reload_projects();
@@ -169,8 +173,9 @@ void AppFlow::handle_pending_screen_actions() {
   if (auto* pm = dynamic_cast<ProjectManagerScreen*>(screen_.get())) {
     if (pm->new_project_requested()) {
       const std::string name = pm->pending_new_project_name();
+      const ProjectKind kind = pm->pending_new_project_kind();
       pm->clear_new_project_request();
-      create_new_project_2d(name);
+      create_new_project(name, kind);
     }
     if (pm->delete_requested()) {
       const auto idx = pm->pending_delete_index();
@@ -226,23 +231,31 @@ bool AppFlow::select_project(std::size_t index) {
     return false;
   }
   tick(0.0f);
-  return current_state() == AppState::Editor2D;
+  return current_state() == AppState::Editor2D ||
+         current_state() == AppState::EditorFrontier;
 }
 
 bool AppFlow::create_new_project_2d(const std::string& name) {
+  return create_new_project(name, ProjectKind::TwoD);
+}
+
+bool AppFlow::create_new_project(const std::string& name, ProjectKind kind) {
   last_error_.clear();
   ProjectInfo created;
-  if (!project_store_.create_project_2d(name, &created)) {
+  const std::vector<std::string> plugins = EditorPlugins::default_ids(kind);
+  if (!project_store_.create_project(name, kind, &plugins, &created)) {
     last_error_ = project_store_.last_error();
     status_message_.clear();
-    std::cout << "[AppFlow] create 2D project failed: " << last_error_ << '\n';
+    std::cout << "[AppFlow] create " << to_string(kind)
+              << " project failed: " << last_error_ << '\n';
     if (auto* pm = dynamic_cast<ProjectManagerScreen*>(screen_.get())) {
       pm->set_error_message(last_error_);
       pm->set_status_message({});
     }
     return false;
   }
-  status_message_ = "Created 2D project \"" + created.name + "\"";
+  status_message_ = std::string("Created ") + to_string(kind) + " project \"" +
+                    created.name + "\"";
   std::cout << "[AppFlow] " << status_message_ << " at " << created.path
             << '\n';
 
@@ -339,6 +352,9 @@ void AppFlow::request_back_to_projects() {
   if (auto* editor = dynamic_cast<Editor2DScreen*>(screen_.get())) {
     editor->request_back_to_projects();
     tick(0.0f);
+  } else if (auto* camp = dynamic_cast<FrontierScreen*>(screen_.get())) {
+    camp->request_back_to_projects();
+    tick(0.0f);
   }
 }
 
@@ -405,6 +421,10 @@ bool AppFlow::editor_redo() {
   return false;
 }
 
+FrontierScreen* AppFlow::frontier_screen() {
+  return dynamic_cast<FrontierScreen*>(screen_.get());
+}
+
 Editor2DScreen* AppFlow::editor_screen() {
   return dynamic_cast<Editor2DScreen*>(screen_.get());
 }
@@ -448,6 +468,14 @@ std::unique_ptr<IScreen> AppFlow::make_screen(AppState state) {
                                               .name = "Untitled 2D",
                                               .kind = ProjectKind::TwoD};
       return std::make_unique<Editor2DScreen>(std::move(project));
+    }
+    case AppState::EditorFrontier: {
+      ProjectInfo project = active_project_
+                                ? *active_project_
+                                : ProjectInfo{.id = "unknown",
+                                              .name = "Untitled 3D",
+                                              .kind = ProjectKind::ThreeD};
+      return std::make_unique<FrontierScreen>(std::move(project));
     }
     case AppState::Quit:
       break;

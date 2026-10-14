@@ -16,6 +16,7 @@ namespace tombstone {
 namespace editor {
 
 class Editor2DScreen;
+class FrontierScreen;
 
 // Admin UI state machine:
 //   Loading -> Login -> ProjectManager -> Editor2D
@@ -47,6 +48,8 @@ class AppFlow {
   // ProjectManager helpers.
   bool select_project(std::size_t index);  // Open
   bool create_new_project_2d(const std::string& name = "New 2D Project");
+  // Any kind; starts with the default plugins for that kind.
+  bool create_new_project(const std::string& name, ProjectKind kind);
   bool delete_project(std::size_t index);
   bool open_settings_from_projects();
   bool logout();
@@ -76,6 +79,8 @@ class AppFlow {
   // Active Editor2D screen (nullptr otherwise); lets --smoke drive the same
   // edit paths as the GUI.
   Editor2DScreen* editor_screen();
+  // Active 3D / VR survey camp (nullptr otherwise).
+  FrontierScreen* frontier_screen();
 
   const std::vector<ProjectInfo>& projects() const {
     return project_store_.projects();

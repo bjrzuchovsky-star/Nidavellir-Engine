@@ -29,6 +29,7 @@ add_library(ts_editor
   screens/Editor2DScreen_Console.cpp
   screens/Editor2DScreen_Scripts.cpp
   screens/Editor2DScreen_Plugins.cpp
+  screens/FrontierScreen.cpp
   plugins/EditorPlugins.cpp
   plugins/EditorBuiltinPlugins.cpp
   plugins/PluginsPanel.cpp
