@@ -76,6 +76,37 @@ void World::script_open_extensions(lua_State* L, int sandbox) {
   }
 }
 
+void World::net_post(std::string channel, int to_slot, std::vector<std::uint8_t> bytes) {
+  if (net_role_ == NetRole::Local) return;
+  if (net_posts_.size() >= kMaxNetPosts) net_posts_.erase(net_posts_.begin());
+  net_posts_.push_back(NetPost{std::move(channel), to_slot, std::move(bytes)});
+}
+
+std::vector<NetPost> World::take_net_posts() {
+  std::vector<NetPost> out;
+  out.swap(net_posts_);
+  return out;
+}
+
+bool World::net_deliver(const std::string& channel, int from_slot,
+                        const std::vector<std::uint8_t>& bytes) {
+  if (!ext_) return false;
+  for (const WorldExtensions::NetChannel& ch : ext_->channels) {
+    if (ch.name != channel || !ch.receive) continue;
+    try {
+      ch.receive(*this, from_slot, bytes);
+      return true;
+    } catch (const std::exception& e) {
+      post(LogLevel::Error, "plugin",
+           "[" + ch.owner + "] channel '" + ch.name + "' threw: " + e.what(), 0);
+    } catch (...) {
+      post(LogLevel::Error, "plugin", "[" + ch.owner + "] channel '" + ch.name + "' threw", 0);
+    }
+    return false;
+  }
+  return false;
+}
+
 void World::step_extensions() {
   if (!ext_ || ext_->systems.empty()) return;
   if (ext_dead_.size() != ext_->systems.size()) {

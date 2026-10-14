@@ -154,6 +154,17 @@ struct NetActor {
   bool operator==(const NetActor& o) const = default;
 };
 
+// Where a world runs: alone (editor Play, ts_game), as the authoritative
+// server of a posse, or as a client's mirror that is never stepped.
+enum class NetRole { Local, Server, Client };
+
+// A plugin message waiting for the network layer (World::net_post).
+struct NetPost {
+  std::string channel;
+  int to_slot = -1;  // server: rider slot, -1 = everybody; client: ignored
+  std::vector<std::uint8_t> bytes;
+};
+
 class World final : public ScriptWorld {
  public:
   World() = default;
@@ -183,6 +194,9 @@ class World final : public ScriptWorld {
   void step(const InputFrame& input);
   std::uint64_t tick() const { return tick_; }
   double time_seconds() const { return static_cast<double>(tick_) * kTickSeconds; }
+
+  // Input of the tick being simulated (the latest one between ticks).
+  const InputFrame& last_input() const { return input_; }
 
   const std::vector<Actor>& actors() const { return actors_; }
   Actor* find(std::uint64_t id);
@@ -304,6 +318,21 @@ class World final : public ScriptWorld {
   // Systems still running this ride (a throwing one drops out).
   std::size_t extension_systems_live() const;
 
+  // --- Plugin network channels (World_Plugins.cpp) ---------------------------
+  // The host (GameServer / GameClient) says what this world is; plugins
+  // read it to decide whether to simulate or mirror.
+  void set_net_role(NetRole role) { net_role_ = role; }
+  NetRole net_role() const { return net_role_; }
+  // Queue a message on a plugin channel. Dropped in a Local world; the
+  // queue keeps the newest kMaxNetPosts.
+  static constexpr std::size_t kMaxNetPosts = 4096;
+  void net_post(std::string channel, int to_slot, std::vector<std::uint8_t> bytes);
+  std::vector<NetPost> take_net_posts();
+  // Hand an arrived message to the channel's owner; false when no loaded
+  // plugin owns `channel` (or it threw, logged).
+  bool net_deliver(const std::string& channel, int from_slot,
+                   const std::vector<std::uint8_t>& bytes);
+
   // --- Networking (World_Net.cpp) -------------------------------------------
   // Hooks for ts_mp: the authoritative server steps this world as usual and
   // captures NetActor rows for snapshots; a client keeps a world it never
@@ -423,6 +452,11 @@ class World final : public ScriptWorld {
   std::vector<Toast> toasts_;
   std::uint64_t next_id_ = 1;
   std::array<std::uint32_t, kMaxPlayers> prev_buttons_{};
+  InputFrame input_{};
+  NetRole net_role_ = NetRole::Local;
+  std::vector<NetPost> net_posts_;
+  // Plugin blockers' boxes near the body being moved (reused buffer).
+  std::vector<Aabb> blocker_boxes_;
   bool in_step_ = false;  // script_tick() = the tick being simulated
   bool dirty_ = false;    // apply_changes() has work
 };

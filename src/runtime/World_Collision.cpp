@@ -233,6 +233,17 @@ void World::resolve_axis(Actor& a, int axis, float delta) {
       consider(collider_box(actors_[idx].data));
     }
   }
+  if (ext_ && !ext_->blockers.empty()) {
+    // Plugin solids (a chunked survival map...) around the swept box.
+    Aabb area{std::min(now.x0, before.x0), std::min(now.y0, before.y0),
+              std::max(now.x1, before.x1), std::max(now.y1, before.y1)};
+    for (const WorldExtensions::Blocker& b : ext_->blockers) {
+      if (!b.solids) continue;
+      blocker_boxes_.clear();
+      b.solids(*this, area, &blocker_boxes_);
+      for (const Aabb& o : blocker_boxes_) consider(o);
+    }
+  }
   if (!hit) {
     return;
   }

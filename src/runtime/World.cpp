@@ -330,6 +330,7 @@ void World::step(const InputFrame& input) {
     return;
   }
   events_.clear();
+  input_ = input;
   in_step_ = true;
   // Scripts that joined since the last tick start before anybody moves.
   if (scripts_) {
@@ -383,6 +384,18 @@ void World::build_draw_list(const WorldRect& view, float alpha,
     return !rel.empty() && image_size && image_size(rel, w, h) && *w > 0 &&
            *h > 0;
   };
+  auto layers = [&](bool over) {
+    if (!ext_) return;
+    for (const WorldExtensions::DrawLayer& l : ext_->layers) {
+      if (l.over != over || !l.draw) continue;
+      try {
+        l.draw(*this, view, alpha, out);
+      } catch (...) {
+        // A broken layer draws nothing; the system side reports errors.
+      }
+    }
+  };
+  layers(false);
   for (std::size_t idx : draw_order_) {
     const Actor& a = actors_[idx];
     const Entity2D& e = a.data;
@@ -497,6 +510,7 @@ void World::build_draw_list(const WorldRect& view, float alpha,
     }
     out->push_back(q);
   }
+  layers(true);
 }
 
 }  // namespace runtime
