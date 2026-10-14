@@ -14,6 +14,7 @@
 #include "gfx/TextureCache.h"
 #include "runtime/Input.h"
 #include "runtime/Log.h"
+#include "plugins/RuntimePlugins.h"
 #include "runtime/PlaySession.h"
 #include "runtime/World.h"
 #include "scene/SampleScripts.h"
@@ -203,6 +204,16 @@ runtime::InputFrame poll_input(GLFWwindow* win) {
   return frame;
 }
 
+// The project's plugins (project.json "plugins"; runtime built-ins + DLLs),
+// reported on stdout like the Telegraph.
+void open_plugins(plugins::RuntimePlugins& rp, const std::string& dir) {
+  const std::size_t n = rp.open(dir, "game", [](const plugin::Diagnostic& d) {
+    std::cout << "[plugins] [" << runtime::to_string(d.level) << "] "
+              << (d.plugin.empty() ? "" : d.plugin + ": ") << d.text << '\n';
+  });
+  std::cout << "[ts_game] " << n << " plugin(s) riding\n";
+}
+
 // --smoke, part two: when the project still has the seeded corral gate and
 // gold nugget (scripts/gate.lua, scripts/gold.lua), ride them headless on a
 // fresh session: left onto the nugget, on to the gate, action button, and
@@ -305,11 +316,15 @@ int run_smoke(const std::string& dir, Telegraph& telegraph) {
   }
   const std::string disk_before = read_file(scene);
 
+  plugins::RuntimePlugins rp;
+  open_plugins(rp, dir);
   runtime::PlaySession session;
+  rp.attach(session.world());
   std::string err;
   if (!session.start_project(dir, &err)) {
     return fail(err);
   }
+  rp.begin(session.world());
   runtime::World& world = session.world();
   world.set_view_size(1280.0f, 720.0f);
   const std::size_t actor_count = world.actors().size();
@@ -448,6 +463,9 @@ int run_smoke(const std::string& dir, Telegraph& telegraph) {
 }
 
 struct GameState {
+  // Declared before the session: destroyed after it (the world holds the
+  // plugins' systems).
+  plugins::RuntimePlugins plugins;
   runtime::PlaySession session;
   bool reload = false;
   bool show_collision = false;
@@ -506,8 +524,12 @@ int run_window(const Options& opt, Telegraph& telegraph) {
     GameRenderer renderer(opt.project);
     GameState g;
     g.show_collision = opt.collision;
+    open_plugins(g.plugins, opt.project);
+    g.plugins.attach(g.session.world());
     std::string err;
-    if (!g.session.start_project(opt.project, &err)) {
+    const bool started = g.session.start_project(opt.project, &err);
+    if (started) g.plugins.begin(g.session.world());
+    if (!started) {
       std::cerr << "[ts_game] " << err << '\n';
       code = 1;
     } else {
@@ -529,7 +551,9 @@ int run_window(const Options& opt, Telegraph& telegraph) {
           g.reload = false;
           telegraph.drain(g.session.world());
           renderer.clear();
+          g.plugins.end();
           if (g.session.start_project(opt.project, &err)) {
+            g.plugins.begin(g.session.world());
             std::cout << "[ts_game] reloaded scene.json\n";
           } else {
             std::cerr << "[ts_game] reload failed: " << err << '\n';

@@ -26,6 +26,7 @@ target_link_libraries(ts_game
     ts_core
     ts_scene
     ts_runtime
+    ts_plugins_builtin
     ts_gfx
     glfw
     OpenGL::GL
