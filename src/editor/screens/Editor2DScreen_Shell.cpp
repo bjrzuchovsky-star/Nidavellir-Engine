@@ -58,6 +58,7 @@ void Editor2DScreen::setup_default_dock_layout(unsigned int dockspace_id) {
   ImGui::DockBuilderDockWindow("Hierarchy", dock_left);
   ImGui::DockBuilderDockWindow("Supply Wagon", dock_left_bottom);
   ImGui::DockBuilderDockWindow("Scripts", dock_left_bottom);
+  ImGui::DockBuilderDockWindow("Plugins", dock_left_bottom);
   ImGui::DockBuilderDockWindow("Telegraph", dock_bottom);
   ImGui::DockBuilderDockWindow("Viewport2D", dock_center);
   ImGui::DockBuilderDockWindow("Inspector", dock_right);
@@ -219,7 +220,8 @@ void Editor2DScreen::draw_menu_bar() {
     ImGui::MenuItem("Stable (Animation)", nullptr, &show_stable_);
     ImGui::MenuItem("Scripts", nullptr, &show_scripts_);
     ImGui::MenuItem("Telegraph (Console)", nullptr, &show_console_);
-    ImGui::MenuItem("Network (Posse)", nullptr, &show_network_);
+    ImGui::MenuItem("Plugins (Outfitter)", nullptr, &show_plugins_);
+    draw_plugin_view_items();
     ImGui::MenuItem("Toolbar", nullptr, &show_toolbar_);
     ImGui::MenuItem("Status Bar", nullptr, &show_status_bar_);
     ImGui::Separator();
@@ -260,6 +262,7 @@ void Editor2DScreen::draw_menu_bar() {
   }
 
   draw_play_menu();
+  draw_plugin_top_menus();
 
   if (ImGui::BeginMenu("Help")) {
     draw_help_menu_contents();
@@ -803,17 +806,8 @@ void Editor2DScreen::draw_ui() {
     }
     ImGui::End();
   }
-  if (show_network_) {
-    if (focus_network_) {
-      ImGui::SetNextWindowFocus();
-      focus_network_ = false;
-    }
-    ImGui::SetNextWindowSize(ImVec2(520, 560), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Network", &show_network_)) {
-      draw_network_panel();
-    }
-    ImGui::End();
-  }
+  draw_plugins_window();
+  draw_plugin_panels();
   if (import_browser_.draw("Import Image##SupplyWagon")) {
     const std::string picked = import_browser_.take_result();
     if (!picked.empty()) {
