@@ -88,6 +88,7 @@ bool Editor2DScreen::start_posse() {
   }
   posse->set_bots(posse_bots_);
   posse_ = std::move(posse);
+  begin_sound_ride();
   posse_view_ = 0;
   show_network_ = true;
   focus_network_ = true;
@@ -103,6 +104,7 @@ bool Editor2DScreen::start_posse() {
 
 void Editor2DScreen::stop_posse() {
   if (!posse_) return;
+  end_sound_ride();
   posse_->stop();
   pump_posse_logs();
   posse_.reset();
@@ -149,6 +151,27 @@ void Editor2DScreen::update_posse(double real_seconds, const runtime::PlayerInpu
   posse_->set_bots(posse_bots_);
   posse_->update(real_seconds, p1);
   pump_posse_logs();
+  // Hear the posse through the rider the viewport follows; the others'
+  // replicated sounds are let go.
+  const auto& clients = posse_->clients();
+  for (std::size_t i = 0; i < clients.size(); ++i) {
+    mp::GameClient& c = *clients[i];
+    if (static_cast<int>(i) != posse_view_ || !sound_stage_ || !c.has_snapshot()) {
+      c.world().take_sounds();
+      continue;
+    }
+    float x = 0.0f;
+    float y = 0.0f;
+    if (const runtime::Actor* me = c.world().find(c.rider())) {
+      x = me->data.center_x();
+      y = me->data.center_y();
+    } else {
+      const runtime::CameraView cam = c.world().camera();
+      x = cam.x;
+      y = cam.y;
+    }
+    sound_stage_->update_2d(c.world(), x, y);
+  }
 }
 
 void Editor2DScreen::pump_posse_logs() {
@@ -344,7 +367,7 @@ void Editor2DScreen::draw_posse_map(float height) {
       draw->AddCircle(v, 8.0f, theme::U32(col, 0.85f), 16, 1.5f);
       draw->AddLine(c, v, theme::U32(col, 0.5f));
     }
-    char tag[8];
+    char tag[16];
     std::snprintf(tag, sizeof(tag), "P%d", r.slot + 1);
     draw->AddText(ImVec2(c.x + 9.0f, c.y - 7.0f), theme::U32(col), tag);
   }

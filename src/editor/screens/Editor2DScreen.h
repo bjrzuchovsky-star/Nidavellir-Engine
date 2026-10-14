@@ -1,5 +1,6 @@
 #pragma once
 
+#include "audio/SoundStage.h"
 #include "editor/ProjectInfo.h"
 #include "editor/assets/TextureCache.h"
 #include "editor/console/TelegraphLog.h"
@@ -388,6 +389,11 @@ class Editor2DScreen final : public IScreen {
   // Script section of the Inspector; Scripts panel; Telegraph panel and its
   // status-bar badge.
   void draw_inspector_script(std::uint64_t id);
+  void draw_inspector_audio(std::uint64_t id);
+  void draw_wagon_sounds();
+  bool set_audio_source(std::uint64_t id, const std::optional<AudioSourceData>& audio,
+                        const char* label);
+  std::vector<std::string> sounds_;  // project sounds under assets/
   void draw_scripts_panel();
   void draw_console();
   void draw_telegraph_badge();
@@ -464,6 +470,7 @@ class Editor2DScreen final : public IScreen {
   bool show_stable_ = true;
   bool show_scripts_ = true;
   bool show_console_ = true;
+  bool show_mixer_ = false;
   bool focus_console_ = false;  // bring the Telegraph forward next frame
   bool dock_layout_initialized_ = false;
 
@@ -551,6 +558,10 @@ class Editor2DScreen final : public IScreen {
 
   // Play mode.
   runtime::PlaySession play_;
+  // Sound for Play and the posse (one at a time; null when idle).
+  std::unique_ptr<audio::SoundStage> sound_stage_;
+  void begin_sound_ride();
+  void end_sound_ride();
   std::optional<Workspace2D> play_backup_;  // the edit workspace, untouched
   bool play_free_cam_ = false;
   bool play_focus_viewport_ = false;  // focus Viewport2D on the next frame

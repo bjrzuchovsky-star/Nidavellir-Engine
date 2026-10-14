@@ -43,6 +43,7 @@ add_library(ts_editor
   plugins/ShipyardPanels.cpp
   plugins/PluginsPanel.cpp
   screens/Editor2DScreen_Posse.cpp
+  screens/Editor2DScreen_Audio.cpp
   console/TelegraphLog.cpp
   launch/GameLauncher.cpp
   launch/OpenWithOs.cpp

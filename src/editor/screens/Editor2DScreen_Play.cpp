@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/audio/EditorAudio.h"
 
 #include "editor/launch/GameLauncher.h"
 #include "editor/ui/QuadDraw.h"
@@ -96,6 +97,7 @@ bool Editor2DScreen::start_play() {
     return false;
   }
   plugins_.manager().play_begin(play_.world());
+  begin_sound_ride();
   // The edit scene waits here, untouched, until Stop.
   play_backup_ = workspace_;
   play_free_cam_ = false;
@@ -123,6 +125,7 @@ void Editor2DScreen::stop_play() {
   const std::uint64_t ticks = play_.tick();
   pump_play_logs();  // the last words of the ride
   plugins_.manager().play_end();
+  end_sound_ride();
   play_.stop();
   play_.world().set_extensions(nullptr);
   if (play_backup_) {
@@ -142,6 +145,7 @@ void Editor2DScreen::stop_play() {
 }
 
 void Editor2DScreen::toggle_play() {
+  EditorAudio::get().click();
   if (is_playing()) {
     stop_play();
   } else {
@@ -173,6 +177,15 @@ bool Editor2DScreen::step_play() {
 int Editor2DScreen::update_play(double real_seconds,
                                 const runtime::InputFrame& input) {
   const int ticks = play_.update(real_seconds, input);
+  if (sound_stage_ && is_playing()) {
+    // Ears ride with the camera the viewport shows.
+    runtime::CameraView cam = play_.world().camera(play_.alpha());
+    if (play_free_cam_) {
+      cam.x = play_cam_x_;
+      cam.y = play_cam_y_;
+    }
+    sound_stage_->update_2d(play_.world(), cam.x, cam.y);
+  }
   // Saved scripts ride back in twice a second (a broken save keeps the old
   // version and says why on the Telegraph).
   const double now = now_seconds();
@@ -182,6 +195,18 @@ int Editor2DScreen::update_play(double real_seconds,
   }
   pump_play_logs();
   return ticks;
+}
+
+void Editor2DScreen::begin_sound_ride() {
+  end_sound_ride();
+  sound_stage_ = std::make_unique<audio::SoundStage>(EditorAudio::get().engine());
+  sound_stage_->begin_ride(project_.path, false);
+}
+
+void Editor2DScreen::end_sound_ride() {
+  if (!sound_stage_) return;
+  sound_stage_->end_ride();
+  sound_stage_.reset();
 }
 
 void Editor2DScreen::set_play_free_camera(bool on) {
@@ -568,7 +593,7 @@ void Editor2DScreen::draw_play_viewport() {
     }
     const float x = a.prev_x + (a.data.x - a.prev_x) * alpha;
     const float y = a.prev_y + (a.data.y - a.prev_y) * alpha;
-    char tag[8];
+    char tag[16];
     std::snprintf(tag, sizeof(tag), "P%d", a.data.player->slot + 1);
     const ImVec2 at = to_screen(x + a.data.w * 0.5f, y);
     const float tw = ImGui::CalcTextSize(tag).x;
@@ -805,6 +830,8 @@ void Editor2DScreen::draw_inspector_gameplay(std::uint64_t id) {
   draw_inspector_collider(id);
   // Script: file + per-entity props.
   draw_inspector_script(id);
+  // Audio Source: clip, bus, autoplay / loop, positional.
+  draw_inspector_audio(id);
 }
 
 }  // namespace editor
