@@ -336,9 +336,12 @@ void Editor2DScreen::draw_entity_context_menu(std::uint64_t clicked) {
     if (ImGui::MenuItem("Spawn Point", nullptr, false, t && !t->spawn)) add_component(clicked, "Spawn");
     ImGui::EndMenu();
   }
-  if (!e) {
-    ImGui::Separator();
-    if (ImGui::MenuItem("New Entity")) create_entity("Entity");
+  // Always the last entries (the menu sizes to fit, so nothing is cut off).
+  ImGui::Separator();
+  if (ImGui::MenuItem("New Entity", nullptr, false, !is_playing())) create_entity("Entity");
+  if (e && ImGui::MenuItem("New Child Entity", nullptr, false, !is_playing())) {
+    const std::uint64_t parent = e->id;
+    if (const std::uint64_t kid = create_entity("Entity")) reparent(kid, parent);
   }
 }
 
