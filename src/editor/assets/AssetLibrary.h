@@ -23,6 +23,10 @@ bool ensure_assets_dir(const std::string& project_dir,
 bool is_image_path(const std::string& path);
 // Sorted project-relative paths of every image under assets/ (recursive).
 std::vector<std::string> list_images(const std::string& project_dir);
+// .wav / .ogg / .mp3 / .flac.
+bool is_audio_path(const std::string& path);
+// Sorted project-relative paths of every sound under assets/ (recursive).
+std::vector<std::string> list_sounds(const std::string& project_dir);
 // Copy an outside image into assets/ (name_2.png etc. on collision).
 // rel_out receives the project-relative path.
 bool import_image(const std::string& project_dir, const std::string& source,

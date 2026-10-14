@@ -1,5 +1,7 @@
 #include "editor/assets/AssetLibrary.h"
 
+#include "audio/Audio.h"
+
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -51,7 +53,10 @@ bool is_image_path(const std::string& path) {
   return false;
 }
 
-std::vector<std::string> list_images(const std::string& project_dir) {
+namespace {
+
+std::vector<std::string> list_matching(const std::string& project_dir,
+                                       bool (*keep)(const std::string&)) {
   std::vector<std::string> out;
   if (project_dir.empty()) {
     return out;
@@ -65,7 +70,7 @@ std::vector<std::string> list_images(const std::string& project_dir) {
   for (fs::recursive_directory_iterator it(dir, ec), end; it != end && !ec;
        it.increment(ec)) {
     std::error_code fec;
-    if (!it->is_regular_file(fec) || !is_image_path(it->path().string())) {
+    if (!it->is_regular_file(fec) || !keep(it->path().string())) {
       continue;
     }
     std::error_code rec;
@@ -77,6 +82,18 @@ std::vector<std::string> list_images(const std::string& project_dir) {
   }
   std::sort(out.begin(), out.end());
   return out;
+}
+
+}  // namespace
+
+std::vector<std::string> list_images(const std::string& project_dir) {
+  return list_matching(project_dir, &is_image_path);
+}
+
+bool is_audio_path(const std::string& path) { return audio::is_audio_file(path); }
+
+std::vector<std::string> list_sounds(const std::string& project_dir) {
+  return list_matching(project_dir, &is_audio_path);
 }
 
 bool import_image(const std::string& project_dir, const std::string& source,

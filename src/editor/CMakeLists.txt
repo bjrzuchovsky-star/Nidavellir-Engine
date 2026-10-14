@@ -46,6 +46,7 @@ add_library(ts_editor
   console/TelegraphLog.cpp
   launch/GameLauncher.cpp
   launch/OpenWithOs.cpp
+  audio/EditorAudio.cpp
 )
 
 target_include_directories(ts_editor
@@ -67,6 +68,8 @@ target_link_libraries(ts_editor
     ts_xr
     ts_gfx
     ts_imgui
+    ts_audio
+    ts_audio3d
 )
 
 target_compile_features(ts_editor PUBLIC cxx_std_20)
