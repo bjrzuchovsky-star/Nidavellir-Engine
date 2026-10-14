@@ -9,6 +9,7 @@ add_executable(ts_admin
   SmokeScriptEditor.cpp
   SmokeNetwork.cpp
   SmokePlugins.cpp
+  SmokeSurvival.cpp
   Smoke3D.cpp
   Smoke3DEditor.cpp
 )

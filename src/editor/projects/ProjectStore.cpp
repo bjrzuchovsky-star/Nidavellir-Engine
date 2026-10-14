@@ -1,5 +1,6 @@
 #include "editor/projects/ProjectStore.h"
 
+#include "plugins/survival/Sample.h"
 #include "render3d/Scene3D.h"
 
 #include "editor/settings/JsonMini.h"
@@ -300,6 +301,17 @@ bool ProjectStore::seed_sample_2d_if_empty() {
     projects_.push_back(std::move(ghost));
   } else {
     std::cerr << "[ProjectStore] ghost-town-3d sample: " << ghost_err << '\n';
+  }
+
+  // And the Frontier Survival claim (2D with the ts.frontier plugin on).
+  const std::string frontier_dir = (fs::path(projects_root_) / survival::kSampleId).string();
+  std::string frontier_err;
+  ProjectInfo frontier;
+  if (survival::write_frontier_sample(frontier_dir, survival::kSampleName, &frontier_err) &&
+      load_project_json(frontier_dir, &frontier, &frontier_err)) {
+    projects_.push_back(std::move(frontier));
+  } else {
+    std::cerr << "[ProjectStore] frontier-survival sample: " << frontier_err << '\n';
   }
   return true;
 }
