@@ -109,6 +109,16 @@ void GameRenderer::render(const runtime::WorldRect& view, int framebuffer_w,
   for (const runtime::DrawQuad& q : quads) {
     const std::uint64_t handle = q.image ? texture(*q.image).handle : 0;
     glColor4f(q.rgba[0], q.rgba[1], q.rgba[2], q.rgba[3]);
+    const bool turned = q.rotation != 0.0f;
+    if (turned) {
+      // Clockwise on screen (y down) about the quad centre.
+      const float cx = (q.x0 + q.x1) * 0.5f;
+      const float cy = (q.y0 + q.y1) * 0.5f;
+      glPushMatrix();
+      glTranslatef(cx, cy, 0.0f);
+      glRotatef(q.rotation, 0.0f, 0.0f, 1.0f);
+      glTranslatef(-cx, -cy, 0.0f);
+    }
     if (handle != 0) {
       glEnable(GL_TEXTURE_2D);
       glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(handle));
@@ -130,6 +140,7 @@ void GameRenderer::render(const runtime::WorldRect& view, int framebuffer_w,
         missing_cross(q.x0, q.y0, q.x1, q.y1);
       }
     }
+    if (turned) glPopMatrix();
   }
 }
 

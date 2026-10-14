@@ -47,13 +47,15 @@ int check_v6_format() {
   doc.entities[0].script = sc;
   const std::string v6 = scene_json::write(doc);
   scene_json::SceneDoc back;
-  if (v6.find("\"version\": 6") == std::string::npos ||
+  const std::string vtag =
+      "\"version\": " + std::to_string(scene_json::kSceneVersion);
+  if (v6.find(vtag) == std::string::npos ||
       v6.find("\"script\": {\"path\": \"scripts/gate.lua\", \"props\": "
               "[{\"name\": \"big\", \"number\": 70000.0625}, {\"name\": "
               "\"line\", \"text\": \"Gate's \\\"open\\\"\\n\"}, {\"name\": "
               "\"locked\", \"bool\": false}, {\"name\": \"reach\", "
               "\"number\": 0.1}]}") == std::string::npos ||
-      !scene_json::parse(v6, &back, &err) || back.version != 6 ||
+      !scene_json::parse(v6, &back, &err) || back.version != scene_json::kSceneVersion ||
       back.entities != doc.entities || scene_json::write(back) != v6) {
     return fail("v6 script roundtrip: " + err + "\n" + v6);
   }

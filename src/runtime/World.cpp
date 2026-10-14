@@ -345,6 +345,7 @@ void World::step(const InputFrame& input) {
   }
   step_scripts(input);
   step_extensions();
+  follow_parents();
   step_animation();
   step_camera();
   in_step_ = false;
@@ -353,6 +354,33 @@ void World::step(const InputFrame& input) {
   toasts_.erase(std::remove_if(toasts_.begin(), toasts_.end(),
                                [&](const Toast& t) { return t.until < tick_; }),
                 toasts_.end());
+}
+
+void World::follow_parents() {
+  // depth[i]: how many parents up to the root (loops count as roots).
+  std::vector<std::pair<int, std::size_t>> order;
+  for (std::size_t i = 0; i < actors_.size(); ++i) {
+    if (actors_[i].data.parent == 0 || actors_[i].dead) continue;
+    int depth = 0;
+    std::uint64_t at = actors_[i].data.parent;
+    while (at != 0 && depth <= static_cast<int>(actors_.size())) {
+      const Actor* p = find(at);
+      if (!p) break;
+      ++depth;
+      at = p->data.parent;
+    }
+    order.emplace_back(depth, i);
+  }
+  if (order.empty()) return;
+  std::stable_sort(order.begin(), order.end(),
+                   [](const auto& a, const auto& b) { return a.first < b.first; });
+  for (const auto& [depth, i] : order) {
+    Actor& c = actors_[i];
+    const Actor* p = find(c.data.parent);
+    if (!p || p == &c) continue;
+    c.data.x += p->data.x - p->prev_x;
+    c.data.y += p->data.y - p->prev_y;
+  }
 }
 
 // --- Draw list ------------------------------------------------------------------
@@ -468,6 +496,7 @@ void World::build_draw_list(const WorldRect& view, float alpha,
       q.rgba[i] = e.color[i];
     }
     q.entity = e.id;
+    q.rotation = e.rotation;
     const AnimLibrary::Entry* anim = anim_set(a);
     if (anim && anim->ok) {
       const AnimClip* clip = anim->set.find(a.anim.clip);

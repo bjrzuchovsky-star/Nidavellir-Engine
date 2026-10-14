@@ -102,6 +102,7 @@ struct DrawQuad {
   float v1 = 1.0f;
   bool missing = false;  // sprite image unavailable: solid stand-in
   std::uint64_t entity = 0;
+  float rotation = 0.0f;  // degrees clockwise about the quad centre
 };
 
 // Something walked into or out of a trigger collider. Recorded per tick;
@@ -399,6 +400,9 @@ class World final : public ScriptWorld {
   // Drop destroyed actors, re-index collision + draw order after spawns,
   // destroys and collider toggles.
   void apply_changes();
+  // Children (Entity2D::parent) ride along with their parent's motion
+  // this tick, parents first.
+  void follow_parents();
   std::uint64_t add_actor(Entity2D data);
   Actor* live(std::uint64_t id);
   const Actor* live(std::uint64_t id) const;
