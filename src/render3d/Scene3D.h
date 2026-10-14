@@ -46,6 +46,9 @@ struct Material3D {
   std::string metal_rough_texture;
   // glTF meshes keep their own materials unless this is set.
   bool override_model = false;
+  // Runtime only (not saved): show the albedo as is, no lighting -- the VR
+  // UI panel.
+  bool unlit = false;
   bool operator==(const Material3D& o) const = default;
 };
 

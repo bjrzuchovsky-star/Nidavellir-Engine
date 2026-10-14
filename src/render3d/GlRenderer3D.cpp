@@ -57,6 +57,7 @@ uniform sampler2D u_normal_tex;
 uniform sampler2D u_mr_tex;
 uniform sampler2DShadow u_shadow;
 uniform int u_has_normal;
+uniform int u_unlit;
 uniform int u_shadows;
 uniform float u_shadow_texel;
 uniform vec3 u_cam;
@@ -103,6 +104,10 @@ vec3 brdf(vec3 n, vec3 v, vec3 l, vec3 radiance, vec3 albedo, float metal, float
 
 void main() {
   vec4 base = u_albedo * texture(u_albedo_tex, v_uv);
+  if (u_unlit != 0) {
+    o_color = base;
+    return;
+  }
   vec3 albedo = pow(base.rgb, vec3(2.2));
   vec4 mr = texture(u_mr_tex, v_uv);
   float rough = clamp(u_roughness * mr.g, 0.04, 1.0);
@@ -622,7 +627,8 @@ class GlRenderer3D final : public Renderer3D {
     g.ActiveTexture(GL_TEXTURE0 + 3);
     glBindTexture(GL_TEXTURE_2D, shadow_tex_);
     const GLint u_model = U("u_model"), u_alb = U("u_albedo"), u_met = U("u_metallic"),
-                u_rgh = U("u_roughness"), u_emi = U("u_emissive"), u_hn = U("u_has_normal");
+                u_rgh = U("u_roughness"), u_emi = U("u_emissive"), u_hn = U("u_has_normal"),
+                u_unl = U("u_unlit");
     const MaterialDesc fallback;
     for (const DrawItem& d : draws_) {
       const GpuMesh& m = meshes_[d.mesh];
@@ -640,6 +646,7 @@ class GlRenderer3D final : public Renderer3D {
       g.Uniform1f(u_rgh, md.roughness);
       g.Uniform3f(u_emi, md.emissive[0], md.emissive[1], md.emissive[2]);
       g.Uniform1i(u_hn, mat && mat->normal ? 1 : 0);
+      g.Uniform1i(u_unl, md.unlit ? 1 : 0);
       g.ActiveTexture(GL_TEXTURE0);
       glBindTexture(GL_TEXTURE_2D, mat && mat->albedo ? mat->albedo : white_tex_);
       g.ActiveTexture(GL_TEXTURE0 + 1);

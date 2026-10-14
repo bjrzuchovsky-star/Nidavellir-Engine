@@ -1,8 +1,11 @@
 #include "render3d/SceneView.h"
 
+#include "core/MemImages.h"
+
 #include <cstdio>
 #include <algorithm>
 #include <filesystem>
+#include <iterator>
 
 namespace ts {
 namespace tombstone {
@@ -102,6 +105,23 @@ void SceneView::upload(ModelEntry& m) {
 
 std::shared_ptr<const Image> SceneView::image(const std::string& rel) {
   if (rel.empty()) return nullptr;
+  if (mem_images::is_key(rel)) {
+    // In-memory raster (the VR UI panel): cached per version.
+    const mem_images::MemImage* m = mem_images::get(rel);
+    if (!m) return nullptr;
+    const std::string k = rel + "#v" + std::to_string(m->version);
+    auto mit = images_.find(k);
+    if (mit != images_.end()) return mit->second;
+    for (auto i = images_.begin(); i != images_.end();) {
+      i = i->first.rfind(rel + "#v", 0) == 0 ? images_.erase(i) : std::next(i);
+    }
+    auto img = std::make_shared<Image>();
+    img->width = m->width;
+    img->height = m->height;
+    img->rgba = m->rgba;
+    images_[k] = img;
+    return img;
+  }
   auto it = images_.find(rel);
   if (it != images_.end()) return it->second;
   auto img = std::make_shared<Image>();
@@ -119,8 +139,24 @@ MaterialHandle SceneView::material_for(const scene3d::Material3D& m) {
   std::snprintf(key, sizeof(key), "%g,%g,%g,%g|%g|%g|%g,%g,%g|", m.albedo[0], m.albedo[1],
                 m.albedo[2], m.albedo[3], m.metallic, m.roughness, m.emissive[0],
                 m.emissive[1], m.emissive[2]);
-  const std::string k = std::string(key) + m.albedo_texture + "|" + m.normal_texture + "|" +
-                        m.metal_rough_texture;
+  std::string k = std::string(key) + m.albedo_texture + "|" + m.normal_texture + "|" +
+                  m.metal_rough_texture + (m.unlit ? "|unlit" : "");
+  if (mem_images::is_key(m.albedo_texture)) {
+    // A new raster version replaces the old material (and its texture).
+    const mem_images::MemImage* mi = mem_images::get(m.albedo_texture);
+    const std::string tag = m.albedo_texture + "#v";
+    k += "#v" + std::to_string(mi ? mi->version : 0);
+    if (materials_.find(k) == materials_.end()) {
+      for (auto i = materials_.begin(); i != materials_.end();) {
+        if (i->first.find(tag) != std::string::npos) {
+          if (r_) r_->destroy_material(i->second.handle);
+          i = materials_.erase(i);
+        } else {
+          ++i;
+        }
+      }
+    }
+  }
   auto it = materials_.find(k);
   if (it != materials_.end()) return it->second.handle;
   MaterialDesc d;
@@ -131,6 +167,7 @@ MaterialHandle SceneView::material_for(const scene3d::Material3D& m) {
   d.base_color_texture = m.albedo_texture;
   d.normal_texture = m.normal_texture;
   d.metal_rough_texture = m.metal_rough_texture;
+  d.unlit = m.unlit;
   d.base_color_image = image(m.albedo_texture);
   d.normal_image = image(m.normal_texture);
   d.metal_rough_image = image(m.metal_rough_texture);

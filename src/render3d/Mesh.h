@@ -61,6 +61,7 @@ struct MaterialDesc {
   std::shared_ptr<const Image> normal_image;
   std::shared_ptr<const Image> metal_rough_image;
   bool double_sided = false;
+  bool unlit = false;  // albedo straight out (UI panels)
 };
 
 // Opaque handles a renderer hands out (0 = none).
