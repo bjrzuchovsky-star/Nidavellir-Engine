@@ -3,14 +3,18 @@
 // mirror window, the headless VR smoke and the --xr-probe check.
 
 #include "Game3D.h"
+#include "GameUi.h"
 
 #include "core/JsonMini.h"
+#include "core/MemImages.h"
 #include "render3d/GlApi.h"
 #include "render3d/GlRenderer3D.h"
 #include "render3d/HiddenGl.h"
 #include "render3d/Scene3D.h"
 #include "render3d/SceneView.h"
 #include "runtime/Log.h"
+#include "ui/UiScript.h"
+#include "world3d/VrOverlay.h"
 #include "world3d/World3D.h"
 #include "xr/VrPresenter.h"
 #include "xr/XrSession.h"
@@ -328,18 +332,77 @@ int run_window_vr(const std::string& dir, const std::string& name, long frames, 
       if (sim) {
         std::cout << "[ts_game] simulator: RMB drag look | WASD move | Q/E snap turn | hold T "
                      "teleport | LMB trigger | G/MMB grab | Shift left hand | M comfort menu | "
-                     "Ctrl crouch | Z/X reach | Esc quit\n";
+                     "Ctrl crouch | Z/X reach | Esc pause menu\n";
       }
       std::size_t seen = 0;
       double last = glfwGetTime(), mx = 0, my = 0;
       glfwGetCursorPos(win, &mx, &my);
       long n = 0;
+      // In-game UI on a world-space panel: laid out on a 768x432 canvas,
+      // rasterised into "mem:ui/vr_panel", pointed at with either laser
+      // (trigger = click). Esc opens the pause menu.
+      constexpr int kPanelW = 768, kPanelH = 432;
+      GameUi gui;
+      gui.load(dir);
+      gui.attach(win);
+      gui.set_fixed_canvas(kPanelW, kPanelH);
+      world3d::VrUiPanel panel;
+      bool menu_paused = false;
+      std::uint64_t panel_version = 0;
       while (!glfwWindowShouldClose(win)) {
         glfwPollEvents();
-        if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) break;
         const double now = glfwGetTime();
         const double dt = now - last;
         last = now;
+        {
+          bool hit = false, down = false;
+          float px = -1, py = -1;
+          for (int h = 0; h < 2 && !hit; ++h) {
+            float u = 0, v = 0;
+            if (world3d::vr_ui_panel_hit(world, panel, h, &u, &v)) {
+              hit = true;
+              px = u * kPanelW;
+              py = v * kPanelH;
+              down = world.hand(h).trigger > 0.5f;
+            }
+          }
+          gui.set_virtual_pointer(hit, px, py, down);
+          const GameUi::Frame uf = gui.update(win, dt, nullptr);
+          if (uf.quit) break;
+          if (gui.pause_open() && !world.paused()) {
+            world.set_paused(true);
+            menu_paused = true;
+          } else if (!gui.pause_open() && menu_paused) {
+            world.set_paused(false);
+            menu_paused = false;
+          }
+          ui::forward_ui_events(world, uf.events);
+          ui::apply_ui_commands(gui.system(), world.take_ui_commands());
+          const bool show = gui.anything_visible();
+          if (show && !panel.visible) world3d::vr_place_ui_panel(world, 0.9f, &panel);
+          panel.visible = show;
+          std::vector<scene3d::Entity3D> extra;
+          if (show) {
+            std::uint64_t ver = 0;
+            const std::vector<unsigned char>& px_rgba = gui.raster(kPanelW, kPanelH, &ver);
+            if (ver != panel_version && !px_rgba.empty()) {
+              panel_version = ver;
+              // Opaque over Dusk charcoal: the panel is not blended.
+              std::vector<unsigned char> rgba(px_rgba.size());
+              const float bg[3] = {21, 19, 18};
+              for (std::size_t i = 0; i + 3 < rgba.size(); i += 4) {
+                const float a = px_rgba[i + 3] / 255.0f;
+                for (int c = 0; c < 3; ++c) {
+                  rgba[i + c] = static_cast<unsigned char>(px_rgba[i + c] * a + bg[c] * (1 - a));
+                }
+                rgba[i + 3] = 255;
+              }
+              mem_images::put(panel.image, kPanelW, kPanelH, std::move(rgba));
+            }
+            world3d::vr_ui_panel_entity(panel, &extra);
+          }
+          presenter.set_extra_entities(std::move(extra));
+        }
         if (sim) sim->drive(glfw_drive(win, &mx, &my), dt);
         if (!presenter.frame(*session, world, dt)) {
           std::cout << "[ts_game] the headset session ended\n";
@@ -347,7 +410,7 @@ int run_window_vr(const std::string& dir, const std::string& name, long frames, 
         }
         for (const world3d::Toast3D& t : world.take_toasts()) {
           std::cout << "[toast] " << t.text << '\n';
-          glfwSetWindowTitle(win, (name + " | TombStone VR | " + t.text).c_str());
+          gui.toast(t.text, t.seconds);
         }
         print_log(world, &seen);
         // Mirror: both eyes side by side, letterboxed.
@@ -374,6 +437,7 @@ int run_window_vr(const std::string& dir, const std::string& name, long frames, 
         glfwSwapBuffers(win);
         if (frames >= 0 && ++n >= frames) break;
       }
+      gui.detach(win);
       std::cout << "[ts_game] rode " << world.tick() << " ticks in VR. So long.\n";
       session->end();
       world.stop();

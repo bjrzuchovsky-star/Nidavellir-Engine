@@ -103,8 +103,8 @@ GameUi::Frame GameUi::update(GLFWwindow* win, double dt, ts::audio::Engine* a) {
   glfwGetWindowSize(win, &ww, &wh);
   glfwGetFramebufferSize(win, &fw, &fh);
   if (fw <= 0 || fh <= 0 || ww <= 0 || wh <= 0) return f;
-  width_ = static_cast<float>(fw);
-  height_ = static_cast<float>(fh);
+  width_ = static_cast<float>(fixed_w_ > 0 ? fixed_w_ : fw);
+  height_ = static_cast<float>(fixed_h_ > 0 ? fixed_h_ : fh);
   for (Toast& t : toasts_) t.left -= dt;
   toasts_.erase(std::remove_if(toasts_.begin(), toasts_.end(),
                                [](const Toast& t) { return t.left <= 0; }),
@@ -143,6 +143,15 @@ GameUi::Frame GameUi::update(GLFWwindow* win, double dt, ts::audio::Engine* a) {
   in.mouse_x = static_cast<float>(mx * fw / ww);
   in.mouse_y = static_cast<float>(my * fh / wh);
   in.mouse_down = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+  if (fixed_w_ > 0) {
+    in.mouse_x = in.mouse_y = -1.0f;  // the window is only a mirror
+    in.mouse_down = false;
+  }
+  if (virtual_) {
+    in.mouse_x = vx_;
+    in.mouse_y = vy_;
+    in.mouse_down = vdown_;
+  }
 
   const bool text = ui_.wants_text();
   const bool modal = ui_.modal_open();
@@ -196,6 +205,14 @@ GameUi::Frame GameUi::update(GLFWwindow* win, double dt, ts::audio::Engine* a) {
     }
   }
   return f;
+}
+
+bool GameUi::anything_visible() const {
+  if (!toasts_.empty()) return true;
+  for (const std::string& n : ui_.names()) {
+    if (ui_.visible(n)) return true;
+  }
+  return false;
 }
 
 void GameUi::draws(std::vector<ui::UiDraw>* out) const {

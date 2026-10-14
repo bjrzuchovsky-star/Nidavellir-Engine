@@ -49,6 +49,21 @@ class GameUi {
   // (volumes go to `audio` when given).
   Frame update(GLFWwindow* win, double dt, ts::audio::Engine* audio);
 
+  // VR: lay the UI out on a fixed canvas (the panel raster) and point at
+  // it with a laser instead of the mouse. 0 x 0 = the framebuffer.
+  void set_fixed_canvas(int w, int h) {
+    fixed_w_ = w;
+    fixed_h_ = h;
+  }
+  void set_virtual_pointer(bool active, float x, float y, bool down) {
+    virtual_ = active;
+    vx_ = x;
+    vy_ = y;
+    vdown_ = down;
+  }
+  // Anything to show (a visible document or a toast)?
+  bool anything_visible() const;
+
   bool pause_open() const { return ui_.visible("pause"); }
   // Game input should be held back (a modal is up or a text box is focused).
   bool wants_input() const { return ui_.wants_input(); }
@@ -76,6 +91,9 @@ class GameUi {
   };
   std::vector<Toast> toasts_;
   float width_ = 1280.0f, height_ = 720.0f;
+  int fixed_w_ = 0, fixed_h_ = 0;
+  bool virtual_ = false, vdown_ = false;
+  float vx_ = -1.0f, vy_ = -1.0f;
   // Key / pad edges.
   bool prev_[16] = {};
   std::string typed_;
