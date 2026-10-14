@@ -15,18 +15,18 @@ add_subdirectory(src/input)
 add_subdirectory(src/physics)
 add_subdirectory(src/scene)
 
-# Windowed apps: GLFW + OpenGL + stb_image for ts_admin and ts_game (ts_gfx:
-# texture cache + GL helpers). Dear ImGui is fetched only for the Admin.
-# Client builds stay free of all of it.
-if(TS_BUILD_ADMIN OR TS_BUILD_GAME)
+# Windowed apps: GLFW + OpenGL + stb_image for ts_admin, ts_game and
+# ts_client (ts_gfx: texture cache + GL helpers). Dear ImGui is fetched only
+# for the Admin (see FetchImGuiDeps). ts_server needs none of it.
+if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT)
   include(FetchImGuiDeps)
   add_subdirectory(src/gfx)
 endif()
 
 # Game runtime (World, fixed-step PlaySession, Lua gameplay scripts). Pure
-# C++ with no window or GL; built for the apps that run the game. Lua 5.4 is
-# fetched by hash, so Client-only builds still download nothing.
-if(TS_BUILD_ADMIN OR TS_BUILD_GAME)
+# C++ with no window or GL; built for every app that runs the game (the
+# headless server included). Lua 5.4 is fetched by hash.
+if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
   include(FetchLua)
   add_subdirectory(src/runtime)
 endif()
@@ -36,6 +36,8 @@ endif()
 if(TS_BUILD_ADMIN OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
   include(FetchENet)
   add_subdirectory(src/net)
+  # Multiplayer game layer (protocol, GameServer, GameClient, LocalPosse).
+  add_subdirectory(src/mp)
 endif()
 
 # Editor / Admin UI module (screens + AppFlow). Admin-only.
@@ -46,6 +48,10 @@ endif()
 
 if(TS_BUILD_CLIENT)
   add_subdirectory(apps/client)
+endif()
+
+if(TS_BUILD_SERVER)
+  add_subdirectory(apps/server)
 endif()
 
 if(TS_BUILD_GAME)
