@@ -134,6 +134,25 @@ struct Toast {
   std::uint64_t entity = 0;  // whose script sent it
 };
 
+// One actor in a network snapshot: what a client needs to draw it and
+// predict against it.
+struct NetActor {
+  std::uint64_t id = 0;
+  float x = 0.0f;
+  float y = 0.0f;
+  float in_x = 0.0f;  // rider move intent (animation heading)
+  float in_y = 0.0f;
+  std::int8_t facing = 1;
+  Facing dir = Facing::Down;
+  bool hidden = false;
+  bool collider_on = true;  // false: a script parked its collider
+  int slot = -1;            // rider slot (-1 = not a rider)
+  bool spawned = false;     // made during the ride: `name` is its template
+  std::string name;
+
+  bool operator==(const NetActor& o) const = default;
+};
+
 class World final : public ScriptWorld {
  public:
   World() = default;
@@ -274,6 +293,28 @@ class World final : public ScriptWorld {
                     std::uint64_t from) override;
   void script_log(LogEntry entry) override;
 
+  // --- Networking (World_Net.cpp) -------------------------------------------
+  // Hooks for ts_mp: the authoritative server steps this world as usual and
+  // captures NetActor rows for snapshots; a client keeps a world it never
+  // steps, applies snapshot rows to it, and predicts its own rider with
+  // predict_rider() (movement + walls only, no scripts or triggers).
+  //
+  // The rider for `slot`, cloning the first rider (slot 0 preferred) onto
+  // that slot's SpawnPoint (or beside the template) when the scene has
+  // none. `forced_id` (client side) reuses the server's id. 0 = the scene
+  // has no rider to clone.
+  std::uint64_t ensure_rider(int slot, std::uint64_t forced_id = 0);
+  // One tick of `in` for rider `id` exactly as step() moves riders.
+  void predict_rider(std::uint64_t id, const PlayerInput& in);
+  // Every live actor as a snapshot row (id order of the world).
+  void net_capture(std::vector<NetActor>* out) const;
+  // Make the world match `rows`: move / flag known actors, create unknown
+  // ones (spawned copies by template name, cloned riders by slot), drop
+  // actors that are missing. prev = current (no tick interpolation).
+  void net_apply(const std::vector<NetActor>& rows);
+  // Advance animators one tick without simulating (client side).
+  void net_animate();
+
   // Quads for everything visible in `view`, back to front. Cameras and
   // spawn points are editor markers and do not draw, nor do hidden
   // entities. Animators draw the current frame of their sheet in place of
@@ -308,6 +349,8 @@ class World final : public ScriptWorld {
   void separate_dynamics();
   void update_triggers();
   void step_players(const InputFrame& input);
+  // One rider, one tick of input (step_players / predict_rider).
+  void move_rider(Actor& a, const PlayerInput& in);
   void step_camera();
   void setup_animation();
   void setup_actor_animation(Actor& a);

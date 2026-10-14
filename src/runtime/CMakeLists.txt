@@ -7,6 +7,7 @@ add_library(ts_runtime
   World_Collision.cpp
   World_Anim.cpp
   World_Script.cpp
+  World_Net.cpp
   PlaySession.cpp
   Script.cpp
   ScriptApi.cpp

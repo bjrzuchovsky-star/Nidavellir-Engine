@@ -287,7 +287,6 @@ WorldRect World::view_rect(const CameraView& cam, float width, float height) {
 // --- Simulation ---------------------------------------------------------------
 
 void World::step_players(const InputFrame& input) {
-  const float dt = static_cast<float>(kTickSeconds);
   for (Actor& a : actors_) {
     a.prev_x = a.data.x;
     a.prev_y = a.data.y;
@@ -296,29 +295,32 @@ void World::step_players(const InputFrame& input) {
     if (!a.data.player) {
       continue;
     }
-    const PlayerInput& in = input.slot(a.data.player->slot);
-    float mx = std::clamp(in.move_x, -1.0f, 1.0f);
-    float my = std::clamp(in.move_y, -1.0f, 1.0f);
-    // Diagonals are no faster than straight lines.
-    const float len = std::sqrt(mx * mx + my * my);
-    if (len > 1.0f) {
-      mx /= len;
-      my /= len;
-    }
-    a.in_x = mx;
-    a.in_y = my;
-    const float x0 = a.data.x;
-    const float y0 = a.data.y;
-    move_body(a, mx * a.data.player->speed * dt,
-              my * a.data.player->speed * dt);
-    // Report what actually happened (0 when stopped flush on a wall).
-    a.vx = (a.data.x - x0) / dt;
-    a.vy = (a.data.y - y0) / dt;
-    if (mx > 0.0f) {
-      a.facing = 1;
-    } else if (mx < 0.0f) {
-      a.facing = -1;
-    }
+    move_rider(a, input.slot(a.data.player->slot));
+  }
+}
+
+void World::move_rider(Actor& a, const PlayerInput& in) {
+  const float dt = static_cast<float>(kTickSeconds);
+  float mx = std::clamp(in.move_x, -1.0f, 1.0f);
+  float my = std::clamp(in.move_y, -1.0f, 1.0f);
+  // Diagonals are no faster than straight lines.
+  const float len = std::sqrt(mx * mx + my * my);
+  if (len > 1.0f) {
+    mx /= len;
+    my /= len;
+  }
+  a.in_x = mx;
+  a.in_y = my;
+  const float x0 = a.data.x;
+  const float y0 = a.data.y;
+  move_body(a, mx * a.data.player->speed * dt, my * a.data.player->speed * dt);
+  // Report what actually happened (0 when stopped flush on a wall).
+  a.vx = (a.data.x - x0) / dt;
+  a.vy = (a.data.y - y0) / dt;
+  if (mx > 0.0f) {
+    a.facing = 1;
+  } else if (mx < 0.0f) {
+    a.facing = -1;
   }
 }
 
