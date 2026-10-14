@@ -143,7 +143,7 @@ New hooks: `on_grab(hand)`, `on_release(hand, speed)`, `on_point(hand)`, `on_unp
 2. In SteamVR, open **Settings → OpenXR** (in older versions, **Settings → Developer**) and click **Set SteamVR as OpenXR runtime**. This sets `HKLM\SOFTWARE\Khronos\OpenXR\1\ActiveRuntime` to SteamVR's `steamxr_win64.json`.
 3. Run `ts_game --xr-probe`. It should print `SteamVR/OpenXR` and the headset. Then open a VR project and click **Preview in headset**, or run `ts_game --project TombStoneProjects/haunted-saloon-vr`.
 
-**scene.json v8** adds two optional entity keys: `"vr_rig"` and `"grabbable"`. v1–v7 files still load, and newer versions are refused.
+**scene.json v8** adds two optional entity keys: `"vr_rig"` and `"grabbable"`. **v9** adds `"parent"` (entity id; children follow their parent in the editor and at runtime) and the editor-only `"locked"` / `"editor_hidden"`. v1–v8 files still load, and newer versions are refused.
 
 ## Frontier Survival (2D gameplay plugin)
 
@@ -297,6 +297,28 @@ When snap is on, drag moves, nudges, duplicates, and Inspector X/Y/W/H edits all
 
 **Undo / redo** covers every workspace edit: create, rename, delete (single or multi), duplicate, drag-move, arrow nudge, snap-selection-to-grid, Reset Scene, and Inspector edits (name, X/Y/W/H, tint, layer). History is snapshot based (entity list, including each entity's tile grid and sprite, + selection), capped at 200 steps, kept in memory only, and cleared when a project is opened or closed. Continuous edits coalesce into one step: a whole viewport drag is one "Move", an Inspector field is one step from activation to release, and held or rapid arrow nudges (within 0.6 s) are one "Nudge". The Edit menu names the step ("Undo Move 3"), and the status bar reports "Undid: Move 3" / "Redid: Duplicate 2". Any new edit clears the redo stack. Undo and redo restore the selection from that step and autosave `scene.json`. Grid, snap, and camera are view settings and are not tracked. While a text field is active, Ctrl+Z belongs to the text field. `--smoke` runs six edits, undoes all of them back to the initial state, redoes them, checks that a new edit clears redo, and confirms `scene.json` after each step.
 
+### Editor tools (2D + 3D)
+
+Mouse-first editing in both editors. Every tool is one undo step, autosaves `scene.json`, and is off while playing. `--smoke` (or just `--smoke-tools`) drives each tool through the same code paths as the mouse and keys.
+
+| Action | 2D | 3D |
+|---|---|---|
+| Resize | Drag the 8 handles on the primary selection (Shift keeps the aspect; snap rounds to the grid) | Scale gizmo (R) |
+| Rotate | Drag the round knob above the box (Shift or snap: 15° steps) | Rotate gizmo (E) |
+| Duplicate while dragging | Alt+drag an entity: the copies move and the originals stay (Esc takes the copies back) | Alt+drag a gizmo handle |
+| Snapping | Grid plus other entities' edges and centres, with red guide lines (View > Snap to Objects) | Grid steps; hold Ctrl while moving to stick to the surface under the mouse; End = drop to ground (lands on the entity below or y = 0) |
+| Context menu | Right-click in the viewport or Hierarchy: rename, duplicate, delete, copy/cut/paste, group/ungroup, unparent, lock, hide, focus, align/distribute, add component, new entity | Same, plus Create |
+| Frame selection | F (Bucket fill moved to U) | F |
+| Copy / cut / paste | Ctrl+C / Ctrl+X / Ctrl+V. The clip is scene.json text on the system clipboard, so it pastes into another scene or project (ids remapped, parent links inside the clip kept) | Same |
+| Group / ungroup | Ctrl+G (a transparent "Group" around the selection) / Ctrl+Shift+G | Ctrl+G (empty "Group" at the selection centre) / Ctrl+Shift+G |
+| Lock / hide | Ctrl+L / Ctrl+Shift+L, H / Shift+H, or the eye and lock toggles on each Hierarchy row. Locked entities can't be picked or moved. Hidden is editor-only, and the game still draws them | Same (`editor_hidden`) |
+| Parenting | Drag a Hierarchy row onto another: top quarter = before, bottom quarter = after, middle = child. Drop on empty space to unparent | Same |
+| Align / distribute | Edit > Align / Distribute or the context menu (left/centre/right/top/middle/bottom; distribute needs 3+) | Min/centre/max and distribute on X/Y/Z |
+| Pan / zoom | Wheel zooms toward the cursor; MMB drag, RMB drag, or Alt+drag on empty canvas pans | RMB orbit/fly, MMB pan, wheel dolly |
+| Search | Filter box at the top of the Hierarchy (name; parents of a match stay listed) | Name filter |
+
+Children keep world-space transforms and follow their parent's moves, resizes and turns in the editor, through Inspector edits, and at runtime (`ts_game`, Play, the posse). Moving, duplicating, copying or deleting a parent takes its subtree along. In 2D, rotation draws in the editor, Play, the posse view and `ts_game`, but runtime colliders stay axis-aligned.
+
 ### TileMaps (painting)
 
 A TileMap entity owns a grid of tile ids: width x height in cells, tile size in px, origin at the entity's x/y (its w/h always follow the grid). `0` is empty. Any number of TileMaps can live in a scene (seeded scenes get an 8x2 painted "TileMap"; **Edit → Create TileMap** or the Tile Palette's **+ TileMap** stakes a 16x8 one).
@@ -308,7 +330,7 @@ Tiles come from the TileMap's **tileset** image when one is assigned (sliced lef
 | Select | V | Original pick / drag / box-select behaviour |
 | Brush | B | LMB click or drag on the selected TileMap; a whole stroke (mouse down → up) is one undo step |
 | Erase | E | Same as Brush, clears cells |
-| Fill | F | Bucket-fill the 4-connected region matching the clicked tile |
+| Fill | U | Bucket-fill the 4-connected region matching the clicked tile |
 | Rect | R | Drag a box of tiles (hold Shift on release to erase the box) |
 | Eyedropper | I or Alt+click | Pick the tile under the cursor as the brush (I then returns to Brush) |
 | Brush size | 1 / 2 / 3 | 1x1, 2x2, 3x3 (also in the Tile Palette) |
@@ -648,7 +670,7 @@ Joins, leaves and every script line land on the Telegraph (channel `posse` for t
 
 ### scene.json format
 
-`"version": 6` (current). Every entity has id/name, x/y/w/h, r/g/b/a and layer, plus optional component objects. Version 2 added `tilemap` and `sprite`, version 3 added the gameplay components `player`, `camera` and `spawn`, version 4 added `collider` and the top-level `tile_solidity`, version 5 added `animator`, and version 6 adds `script`:
+`"version": 7` (current; v7 adds the optional entity keys `rotation` (degrees, clockwise), `parent` (entity id) and the editor-only `locked` / `hidden`, all written only when set; v1–v6 files still load and bad parent links are cleared). Every entity has id/name, x/y/w/h, r/g/b/a and layer, plus optional component objects. Version 2 added `tilemap` and `sprite`, version 3 added the gameplay components `player`, `camera` and `spawn`, version 4 added `collider` and the top-level `tile_solidity`, version 5 added `animator`, and version 6 adds `script`:
 
 ```json
 "tilemap": {"cols": 8, "rows": 2, "tile_size": 32, "tileset": "", "encoding": "rle", "data": "8*4,8*1"},
