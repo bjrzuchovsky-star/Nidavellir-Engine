@@ -10,6 +10,7 @@
 #include "fx/Light2D.h"
 #include "fx/Particles.h"
 #include "render3d/Scene3D.h"
+#include "runtime/World.h"
 #include "scene/SceneJson.h"
 
 namespace {
@@ -317,6 +318,134 @@ void scenes() {
   check(t3.find("\"version\": 11") != std::string::npos, "3D writes v11");
 }
 
+// The 2D world: entity emitters + lights, Lua particles.*, footstep dust,
+// draw-list order (alpha, lightmap, additive) and bursts over the wire.
+void world() {
+  namespace rt = ts::tombstone::runtime;
+  namespace tsb = ts::tombstone;
+  auto scene = [] {
+    std::vector<tsb::Entity2D> es;
+    tsb::Entity2D fire;
+    fire.id = 1;
+    fire.name = "Campfire";
+    fire.x = 200;
+    fire.y = 200;
+    fire.w = fire.h = 32;
+    fire.particles = *fx::preset("campfire", fx::Space::TwoD);
+    fire.light = fx::Light2DData{};
+    fire.script = tsb::ScriptData{};
+    fire.script->path = "scripts/fire.lua";
+    es.push_back(fire);
+    tsb::Entity2D rider;
+    rider.id = 2;
+    rider.name = "Rider";
+    rider.x = 40;
+    rider.y = 40;
+    rider.w = rider.h = 32;
+    rider.player = tsb::PlayerControllerData{};
+    es.push_back(rider);
+    return es;
+  };
+  const char* lua =
+      "function on_start()\n"
+      "  particles.burst('sparks', {x = 10, y = 20}, 5)\n"
+      "  particles.burst(self)\n"
+      "  particles.emit(self, 7)\n"
+      "  self:set('bad', not pcall(particles.burst, 'sparks'))\n"
+      "  after(0.5, function() particles.stop(self) end)\n"
+      "end\n";
+  rt::World w;
+  w.script_library().put("scripts/fire.lua", lua);
+  std::string err;
+  check(w.build(scene(), "", &err), "fx world builds: " + err);
+  fx::Lighting2D night;
+  night.enabled = true;
+  night.ambient[0] = night.ambient[1] = night.ambient[2] = 0.2f;
+  w.set_lighting(night);
+  rt::InputFrame in;
+  in.slot(0) = rt::digital_input(false, true, false, false);
+  w.step(in);
+  // 5 sparks + campfire burst (rate/2 = 15) + emitter's first tick + 7.
+  check(w.fx_total() == 3, "lua bursts counted " + std::to_string(w.fx_total()));
+  check(w.particles().alive() >= 5 + 15 + 7, "lua particles alive " + std::to_string(w.particles().alive()));
+  const tsb::ScriptValue* bad = w.script_get(1, "bad");
+  check(bad && bad->flag, "burst without a place refused");
+  for (int i = 0; i < 60; ++i) w.step(in);
+  check(w.fx_total() >= 5, "footstep dust while riding");
+  // After stop() (0.5 s) the campfire drains.
+  for (int i = 0; i < 120; ++i) w.step(rt::InputFrame{});
+  int fire_left = w.particles().alive();
+  check(fire_left == 0, "particles.stop drains (" + std::to_string(fire_left) + ")");
+  // Draw list: lightmap (blend 2) between alpha and additive particles.
+  w.fx(rt::FxEvent{rt::FxEvent::Kind::Burst, "dust", 0, 100, 100, 0, 0});
+  w.fx(rt::FxEvent{rt::FxEvent::Kind::Burst, "sparks", 0, 100, 100, 0, 0});
+  w.step(rt::InputFrame{});
+  std::vector<rt::DrawQuad> quads;
+  w.build_draw_list(rt::WorldRect{0, 0, 640, 360}, 1.0f, nullptr, &quads);
+  int first_add = -1, last_alpha_fx = -1, lm = -1;
+  for (int i = 0; i < static_cast<int>(quads.size()); ++i) {
+    if (quads[i].blend == 2) lm = i;
+    if (quads[i].blend == 1 && first_add < 0) first_add = i;
+    if (quads[i].blend == 0 && quads[i].image && *quads[i].image == fx::kDotImage) last_alpha_fx = i;
+  }
+  check(lm > last_alpha_fx && last_alpha_fx >= 0 && first_add > lm, "draw order alpha < lightmap < additive");
+  const fx::Lightmap& map = w.lightmap();
+  check(map.width > 0 && map.rgba.size() == static_cast<std::size_t>(map.width * map.height * 4),
+        "lightmap built");
+  // Bright at the campfire, ambient (0.2 -> 26) far away.
+  auto texel = [&](float x, float y) {
+    const int tx = static_cast<int>((x - map.view.x0) / (map.view.x1 - map.view.x0) * map.width);
+    const int ty = static_cast<int>((y - map.view.y0) / (map.view.y1 - map.view.y0) * map.height);
+    return map.rgba[(static_cast<std::size_t>(ty) * map.width + tx) * 4];
+  };
+  check(texel(216, 216) > 100 && texel(600, 30) < 30, "lightmap fire vs ambient");
+  w.set_lighting(fx::Lighting2D{});
+  quads.clear();
+  w.build_draw_list(rt::WorldRect{0, 0, 640, 360}, 1.0f, nullptr, &quads);
+  bool any_lm = false;
+  for (const rt::DrawQuad& q : quads) any_lm |= q.blend == 2;
+  check(!any_lm, "lighting off: no lightmap");
+
+  // Network: the server's bursts reach the client; the client's own don't
+  // count; local (dust) never travels.
+  rt::World server, client;
+  server.script_library().put("scripts/fire.lua", "function on_start() end\n");
+  client.script_library().put("scripts/fire.lua", "function on_start() end\n");
+  check(server.build(scene(), "", &err) && client.build(scene(), "", &err), "posse worlds");
+  server.set_net_role(rt::NetRole::Server);
+  client.set_net_role(rt::NetRole::Client);
+  server.footstep_dust = false;
+  rt::FxEvent boom;
+  boom.preset = "explosion";
+  boom.x = 50;
+  boom.y = 60;
+  boom.dir = 90;
+  server.fx(boom);
+  rt::FxEvent dust = boom;
+  dust.preset = "dust";
+  dust.local = true;
+  server.fx(dust);
+  int sent = 0;
+  for (const rt::NetPost& p : server.take_net_posts()) {
+    if (p.channel != rt::kFxChannel) continue;
+    ++sent;
+    rt::FxEvent back;
+    check(rt::decode_fx(p.bytes, &back) && back.preset == "explosion" && back.x == 50 &&
+              back.dir == 90,
+          "fx wire round trip");
+    client.net_deliver(p.channel, -1, p.bytes);
+  }
+  check(sent == 1, "one burst sent (local dust stays)");
+  check(client.particles().alive() == 60, "client shows the server's explosion");
+  const int before = client.particles().alive();
+  client.fx(boom);
+  check(client.particles().alive() == before, "client's own burst ignored");
+  std::vector<std::uint8_t> junk = rt::encode_fx(boom);
+  junk.push_back(1);
+  rt::FxEvent tmp;
+  check(!rt::decode_fx(junk, &tmp) && !rt::decode_fx({}, &tmp), "bad fx bytes refused");
+}
+
 }  // namespace
 
 int run_fx_smoke() {
@@ -324,10 +453,12 @@ int run_fx_smoke() {
   particles();
   lighting();
   scenes();
+  world();
   if (g_fail) return 1;
   std::cout << "[smoke] fx OK (10 presets x 2D/3D, field round trip, burst / continuous / "
                "duration / cap, gravity + drag, curves, local space, deterministic seed, "
                "one-shots, sprite sheet, lightmap falloff / spot / tile shadows / soft / "
-               "day-night, 2D v9 / 3D v11 scenes)\n";
+               "day-night, 2D v9 / 3D v11 scenes, World emitters + lights, Lua particles.*, "
+               "footstep dust, draw order, replicated bursts)\n";
   return 0;
 }

@@ -3,6 +3,7 @@
 // everything ScriptWorld lets a script do (move, hide, collider toggles,
 // spawn / destroy, per-entity state, toasts, Telegraph lines).
 
+#include "core/MemImages.h"
 #include "runtime/World.h"
 
 #include <algorithm>
@@ -24,7 +25,9 @@ constexpr std::size_t kMaxToastText = 200;
 
 }  // namespace
 
-World::~World() = default;
+World::~World() {
+  if (!lightmap_key_.empty()) mem_images::remove(lightmap_key_);
+}
 
 Actor* World::live(std::uint64_t id) {
   Actor* a = find(id);

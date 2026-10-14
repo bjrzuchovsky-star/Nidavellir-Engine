@@ -135,6 +135,14 @@ bool World::net_deliver(const std::string& channel, int from_slot,
     ++sound_total_;
     return true;
   }
+  if (channel == kFxChannel) {
+    // Server -> client only, like sound.
+    FxEvent ev;
+    if (net_role_ != NetRole::Client || !decode_fx(bytes, &ev)) return false;
+    ev.at_entity = false;
+    apply_fx(ev);
+    return true;
+  }
   if (!ext_) return false;
   for (const WorldExtensions::NetChannel& ch : ext_->channels) {
     if (ch.name != channel || !ch.receive) continue;
