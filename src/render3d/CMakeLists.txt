@@ -3,7 +3,6 @@
 # two renderers behind one interface: null (headless) and an OpenGL 3.3
 # core forward renderer (GlRenderer3D). Built with the windowed apps.
 add_library(ts_render3d
-  Json.cpp
   Mesh.cpp
   Gltf.cpp
   Scene3D.cpp

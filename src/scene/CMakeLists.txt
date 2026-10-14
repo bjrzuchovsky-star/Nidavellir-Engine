@@ -4,6 +4,7 @@
 add_library(ts_scene
   Animation.cpp
   JsonFlat.cpp
+  JsonTree.cpp
   SampleRider.cpp
   SampleScripts.cpp
   Scene.cpp
