@@ -1,6 +1,7 @@
 #include "editor/screens/Editor2DScreen.h"
 
 #include "editor/assets/AssetLibrary.h"
+#include "editor/ui/QuadDraw.h"
 #include "editor/ui/Theme.h"
 
 #include <imgui.h>
@@ -44,14 +45,68 @@ struct ViewXform {
   }
 };
 
-void draw_corner_handles(ImDrawList* draw, const ImVec2& p0, const ImVec2& p1,
-                         ImU32 col) {
-  const float h = 3.0f;
-  const ImVec2 corners[4] = {p0, ImVec2(p1.x, p0.y), p1, ImVec2(p0.x, p1.y)};
-  for (const ImVec2& c : corners) {
-    draw->AddRectFilled(ImVec2(c.x - h, c.y - h), ImVec2(c.x + h, c.y + h),
-                        col);
+// Screen spot of handle (hx, hy) on the rect p0..p1 turned by deg; the
+// rotate knob (rotate=true) sits 24 px above the top edge's middle.
+ImVec2 handle_spot(const ImVec2& p0, const ImVec2& p1, float deg, int hx, int hy,
+                   bool rotate) {
+  const float cx = (p0.x + p1.x) * 0.5f, cy = (p0.y + p1.y) * 0.5f;
+  float lx = hx * (p1.x - p0.x) * 0.5f;
+  float ly = hy * (p1.y - p0.y) * 0.5f;
+  if (rotate) {
+    lx = 0.0f;
+    ly = -(p1.y - p0.y) * 0.5f - 24.0f;
   }
+  const float a = deg * 3.14159265f / 180.0f;
+  const float c = std::cos(a), s = std::sin(a);
+  return ImVec2(cx + lx * c - ly * s, cy + lx * s + ly * c);
+}
+
+// Eight resize squares + the rotate knob on the primary selection.
+void draw_transform_handles(ImDrawList* draw, const ImVec2& p0, const ImVec2& p1,
+                            float deg, ImU32 col, int hot_x, int hot_y, bool hot_rot,
+                            bool hot) {
+  const float h = 4.0f;
+  const ImVec2 top = handle_spot(p0, p1, deg, 0, -1, false);
+  const ImVec2 knob = handle_spot(p0, p1, deg, 0, 0, true);
+  draw->AddLine(top, knob, col, 1.5f);
+  draw->AddCircleFilled(knob, 5.5f, (hot && hot_rot) ? IM_COL32(255, 255, 255, 255) : col);
+  draw->AddCircle(knob, 5.5f, IM_COL32(20, 16, 12, 220), 0, 1.0f);
+  for (int hy = -1; hy <= 1; ++hy) {
+    for (int hx = -1; hx <= 1; ++hx) {
+      if (hx == 0 && hy == 0) continue;
+      const ImVec2 c = handle_spot(p0, p1, deg, hx, hy, false);
+      const bool lit = hot && !hot_rot && hx == hot_x && hy == hot_y;
+      draw->AddRectFilled(ImVec2(c.x - h, c.y - h), ImVec2(c.x + h, c.y + h),
+                          lit ? IM_COL32(255, 255, 255, 255) : col);
+      draw->AddRect(ImVec2(c.x - h, c.y - h), ImVec2(c.x + h, c.y + h),
+                    IM_COL32(20, 16, 12, 220));
+    }
+  }
+}
+
+// Which handle of the rect sits under the mouse (6 px reach).
+bool hit_handle(const ImVec2& p0, const ImVec2& p1, float deg, const ImVec2& m,
+                int* hx_out, int* hy_out, bool* rot_out) {
+  auto close_to = [&](const ImVec2& c) {
+    return std::abs(m.x - c.x) <= 6.0f && std::abs(m.y - c.y) <= 6.0f;
+  };
+  if (close_to(handle_spot(p0, p1, deg, 0, 0, true))) {
+    *hx_out = 0;
+    *hy_out = 0;
+    *rot_out = true;
+    return true;
+  }
+  for (int hy = -1; hy <= 1; ++hy) {
+    for (int hx = -1; hx <= 1; ++hx) {
+      if ((hx != 0 || hy != 0) && close_to(handle_spot(p0, p1, deg, hx, hy, false))) {
+        *hx_out = hx;
+        *hy_out = hy;
+        *rot_out = false;
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 // Small amber "!" flag in the top-right corner: sprite image missing.
@@ -83,8 +138,8 @@ void Editor2DScreen::draw_viewport() {
         to_string(tool_));
   } else {
     ImGui::TextUnformatted(
-        "LMB drag move | Ctrl+click multi | drag empty: box select | "
-        "MMB/RMB/Alt pan | wheel zoom | drop assets here | K collision");
+        "LMB drag move | handles: resize (Shift aspect) / rotate | Alt+drag "
+        "copy | RMB menu | MMB/RMB-drag pan | wheel zoom | F frame | K collision");
   }
   ImGui::PopStyleColor();
 
@@ -108,6 +163,8 @@ void Editor2DScreen::draw_viewport() {
   const bool alt = io.KeyAlt;
   const bool ctrl = io.KeyCtrl || io.KeySuper;
   const bool shift = io.KeyShift;
+  viewport_w_ = canvas_size.x;
+  viewport_h_ = canvas_size.y;
 
   // Alt+click over the target TileMap picks a tile instead of panning.
   std::uint64_t target = paint_target();
@@ -119,16 +176,32 @@ void Editor2DScreen::draw_viewport() {
     alt_pick = workspace_.world_to_cell(target, w.x, w.y, nullptr, nullptr);
   }
 
-  // --- Camera: MMB / RMB / Alt+LMB pan, wheel zoom -------------------------
+  // Alt+LMB on an entity (select tool) = duplicate drag, on empty = pan.
+  bool alt_dup = false;
+  if (!tile_mode && alt && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    const ViewXform pre{workspace_.pan_x(), workspace_.pan_y(),
+                        workspace_.zoom(), canvas_pos, canvas_size};
+    const ImVec2 w = pre.to_world(io.MousePos.x, io.MousePos.y);
+    alt_dup = workspace_.pick(w.x, w.y).has_value() && !is_playing();
+  }
+
+  // --- Camera: MMB / RMB-drag / Alt+LMB pan, wheel zoom ----------------------
+  if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+    rmb_dragged_ = false;
+  }
+  if (ImGui::IsMouseDragging(ImGuiMouseButton_Right, 4.0f)) {
+    rmb_dragged_ = true;
+  }
   if (hovered && (ImGui::IsMouseClicked(ImGuiMouseButton_Middle) ||
                   ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
-                  (alt && !alt_pick &&
+                  (alt && !alt_pick && !alt_dup &&
                    ImGui::IsMouseClicked(ImGuiMouseButton_Left)))) {
     panning_ = true;
   }
   const bool pan_button_down = ImGui::IsMouseDown(ImGuiMouseButton_Middle) ||
                                ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
-                               (alt && ImGui::IsMouseDown(ImGuiMouseButton_Left));
+                               (alt && ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+                                drag_mode_ == DragMode::None);
   if (panning_ && pan_button_down) {
     const ImVec2 delta = io.MouseDelta;
     workspace_.add_pan(-delta.x / workspace_.zoom(),
@@ -147,6 +220,23 @@ void Editor2DScreen::draw_viewport() {
   const ViewXform view{workspace_.pan_x(), workspace_.pan_y(),
                        workspace_.zoom(), canvas_pos, canvas_size};
   const ImVec2 mouse_world = view.to_world(io.MousePos.x, io.MousePos.y);
+  workspace_.set_snap_threshold(6.0f / std::max(view.zoom, 0.01f));
+
+  // --- RMB click (no drag): context menu on the entity under the cursor ------
+  if (!tile_mode && hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
+      !rmb_dragged_ && drag_mode_ == DragMode::None) {
+    const std::optional<std::uint64_t> hit =
+        workspace_.pick(mouse_world.x, mouse_world.y);
+    context_id_ = hit.value_or(0);
+    if (hit && !workspace_.is_selected(*hit)) {
+      workspace_.select(*hit);
+    }
+    ImGui::OpenPopup("##ViewportContext");
+  }
+  if (ImGui::BeginPopup("##ViewportContext")) {
+    draw_entity_context_menu(context_id_);
+    ImGui::EndPopup();
+  }
 
   // --- Supply Wagon drop: new sprite entity at the drop point --------------
   if (ImGui::BeginDragDropTarget()) {
@@ -254,7 +344,63 @@ void Editor2DScreen::draw_viewport() {
   }
 
   // --- Selection / drag-move / marquee ---------------------------------------
-  if (!tile_mode && hovered && !alt && !panning_ &&
+  // Handles on the primary selection win over picking.
+  int hot_hx = 0, hot_hy = 0;
+  bool hot_rot = false;
+  bool hot_handle = false;
+  const Entity2D* prim = workspace_.selected();
+  const bool handles_on = !tile_mode && prim && !workspace_.effectively_locked(*prim) &&
+                          !workspace_.effectively_hidden(*prim) && !is_playing();
+  if (handles_on && hovered && drag_mode_ == DragMode::None && !panning_) {
+    hot_handle = hit_handle(view.to_screen(prim->x, prim->y),
+                            view.to_screen(prim->x + prim->w, prim->y + prim->h),
+                            prim->rotation, io.MousePos, &hot_hx, &hot_hy, &hot_rot);
+    if (hot_handle) {
+      ImGui::SetMouseCursor(hot_rot ? ImGuiMouseCursor_Hand
+                            : (hot_hx == 0)  ? ImGuiMouseCursor_ResizeNS
+                            : (hot_hy == 0)  ? ImGuiMouseCursor_ResizeEW
+                            : (hot_hx == hot_hy) ? ImGuiMouseCursor_ResizeNWSE
+                                                 : ImGuiMouseCursor_ResizeNESW);
+    }
+  }
+  if (hot_handle && !alt && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    cancel_rename();
+    if (begin_handle_drag(hot_hx, hot_hy, hot_rot, mouse_world.x, mouse_world.y)) {
+      drag_mode_ = DragMode::Handle;
+    }
+  } else if (alt_dup) {
+    cancel_rename();
+    const std::optional<std::uint64_t> hit =
+        workspace_.pick(mouse_world.x, mouse_world.y);
+    if (hit && !workspace_.is_selected(*hit)) {
+      workspace_.select(*hit);
+    } else if (hit) {
+      workspace_.add_to_selection(*hit);
+    }
+    drag_moved_ = false;
+    drag_additive_ = true;
+    drag_hit_id_ = 0;
+    if (begin_duplicate_drag()) {
+      drag_mode_ = DragMode::Move;
+    }
+  }
+
+  if (drag_mode_ == DragMode::Handle) {
+    if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+      update_handle_drag(mouse_world.x, mouse_world.y, shift);
+      if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        cancel_handle_drag();
+        note("Handle drag cancelled");
+        drag_mode_ = DragMode::None;
+      }
+    } else {
+      end_handle_drag();
+      drag_mode_ = DragMode::None;
+    }
+  }
+
+  if (!tile_mode && hovered && !alt && !panning_ && !hot_handle &&
+      drag_mode_ == DragMode::None &&
       ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     cancel_rename();
     const std::optional<std::uint64_t> hit =
@@ -299,8 +445,9 @@ void Editor2DScreen::draw_viewport() {
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
       if (drag_mode_ == DragMode::Move) {
+        const bool was_copy = dup_drag_;
         cancel_drag_move();
-        note("Move cancelled");
+        note(was_copy ? "Copy called off" : "Move cancelled");
       }
       drag_mode_ = DragMode::None;
     }
@@ -368,6 +515,10 @@ void Editor2DScreen::draw_viewport() {
   const ImU32 edge_col = theme::U32(theme::Charcoal(), 0.8f);
   for (std::size_t idx : workspace_.sorted_draw_order()) {
     const Entity2D& e = workspace_.entities()[idx];
+    if (workspace_.effectively_hidden(e)) {
+      continue;  // eye toggled off in the hierarchy (editor only)
+    }
+    const float rot = e.tilemap ? 0.0f : e.rotation;
     const ImVec2 p0 = view.to_screen(e.x, e.y);
     const ImVec2 p1 = view.to_screen(e.x + e.w, e.y + e.h);
     if (e.tilemap) {
@@ -417,30 +568,39 @@ void Editor2DScreen::draw_viewport() {
       // (running when View > Preview Animations is on).
       EntityImage img;
       if (entity_image(e, now_seconds(), &img) && img.texture->handle != 0) {
-        draw->AddImage(tex_id(img.texture->handle), p0, p1,
-                       ImVec2(img.u0, img.v0), ImVec2(img.u1, img.v1),
-                       color_u32(e.color));
+        quad_draw::image(draw, tex_id(img.texture->handle), p0, p1, rot,
+                         ImVec2(img.u0, img.v0), ImVec2(img.u1, img.v1),
+                         color_u32(e.color));
       } else {
-        draw->AddRectFilled(p0, p1, color_u32(e.color), 1.0f);
+        quad_draw::filled(draw, p0, p1, rot, color_u32(e.color));
         draw_missing_marker(draw, p0, p1);
       }
     } else {
-      draw->AddRectFilled(p0, p1, color_u32(e.color), 1.0f);
+      quad_draw::filled(draw, p0, p1, rot, color_u32(e.color));
     }
     const bool selected = workspace_.is_selected(e.id);
     const bool primary =
         workspace_.selected_id().has_value() && *workspace_.selected_id() == e.id;
     if (primary) {
-      draw->AddRect(p0, p1, primary_col, 1.0f, 0, 2.5f);
-      if (!(tile_mode && e.tilemap)) {
-        draw_corner_handles(draw, p0, p1, primary_col);
+      quad_draw::outline(draw, p0, p1, rot, primary_col, 2.5f);
+      if (handles_on && drag_mode_ != DragMode::Move) {
+        draw_transform_handles(draw, p0, p1, rot, primary_col, hot_hx, hot_hy,
+                               hot_rot, hot_handle);
       }
     } else if (selected) {
-      draw->AddRect(p0, p1, secondary_col, 1.0f, 0, 2.0f);
+      quad_draw::outline(draw, p0, p1, rot, secondary_col, 2.0f);
     } else if (hover_id && *hover_id == e.id) {
-      draw->AddRect(p0, p1, hover_col, 1.0f, 0, 1.5f);
+      quad_draw::outline(draw, p0, p1, rot, hover_col, 1.5f);
     } else {
-      draw->AddRect(p0, p1, edge_col, 1.0f, 0, 1.0f);
+      quad_draw::outline(draw, p0, p1, rot, edge_col, 1.0f);
+    }
+    if (workspace_.effectively_locked(e)) {
+      // Padlock: small shackle + body in the top-left corner.
+      const ImVec2 at(p0.x + 3.0f, p1.y - 13.0f);
+      draw->AddRectFilled(at, ImVec2(at.x + 9.0f, at.y + 7.0f),
+                          theme::U32(theme::Sand(), 0.9f), 1.0f);
+      draw->AddCircle(ImVec2(at.x + 4.5f, at.y), 3.0f,
+                      theme::U32(theme::Sand(), 0.9f), 10, 1.5f);
     }
     if (view.zoom >= 0.45f) {
       draw->AddText(ImVec2(p0.x + 4.0f, p0.y + 2.0f),
@@ -566,6 +726,36 @@ void Editor2DScreen::draw_viewport() {
                         0.0f, 0, 2.0f);
         }
       }
+    }
+  }
+
+  // --- Snap guides (object edges / centres) ----------------------------------
+  if (drag_mode_ == DragMode::Move && drag_moved_) {
+    const ImU32 gcol = theme::U32(theme::Danger(), 0.9f);
+    for (const Workspace2D::SnapGuide& g : workspace_.guides()) {
+      if (g.vertical) {
+        const ImVec2 a = view.to_screen(g.pos, g.from);
+        const ImVec2 b = view.to_screen(g.pos, g.to);
+        draw->AddLine(ImVec2(a.x, a.y - 8.0f), ImVec2(b.x, b.y + 8.0f), gcol, 1.0f);
+      } else {
+        const ImVec2 a = view.to_screen(g.from, g.pos);
+        const ImVec2 b = view.to_screen(g.to, g.pos);
+        draw->AddLine(ImVec2(a.x - 8.0f, a.y), ImVec2(b.x + 8.0f, b.y), gcol, 1.0f);
+      }
+    }
+  }
+
+  // --- Handle readout ---------------------------------------------------------
+  if (drag_mode_ == DragMode::Handle) {
+    if (const Entity2D* p = workspace_.selected()) {
+      char buf[96];
+      if (handle_rotate_) {
+        std::snprintf(buf, sizeof(buf), "%.1f deg", p->rotation);
+      } else {
+        std::snprintf(buf, sizeof(buf), "%.0f x %.0f", p->w, p->h);
+      }
+      draw->AddText(ImVec2(io.MousePos.x + 14.0f, io.MousePos.y + 10.0f),
+                    primary_col, buf);
     }
   }
 

@@ -35,7 +35,7 @@ constexpr ToolDef kTools[] = {
     {TileTool::Select, "Select", "V", "Pick, drag and box-select entities"},
     {TileTool::Paint, "Brush", "B", "Paint the selected TileMap (drag = one step)"},
     {TileTool::Erase, "Erase", "E", "Clear tiles (drag = one step)"},
-    {TileTool::Fill, "Fill", "F", "Bucket-fill the matching region"},
+    {TileTool::Fill, "Fill", "U", "Bucket-fill the matching region"},
     {TileTool::Rect, "Rect", "R", "Drag a box of tiles (Shift: erase box)"},
     {TileTool::Eyedropper, "Pick", "I", "Pick a tile from the map (or Alt+click)"},
 };

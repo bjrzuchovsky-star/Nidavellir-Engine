@@ -96,13 +96,21 @@ void Editor2DScreen::draw_help_menu_contents() {
   theme::KeyHint("F2", "Rename primary");
   theme::KeyHint("G / Shift+G", "Toggle grid / snap");
   theme::KeyHint("[ / ]", "Halve / double grid size");
-  theme::KeyHint("MMB/RMB/Alt", "Pan viewport");
+  theme::KeyHint("Handles", "Drag edges/corners resize (Shift aspect), knob rotates");
+  theme::KeyHint("Alt+drag", "Duplicate and drag the copy");
+  theme::KeyHint("RMB click", "Context menu (viewport + hierarchy)");
+  theme::KeyHint("Ctrl+C/X/V", "Copy / cut / paste (works across scenes)");
+  theme::KeyHint("Ctrl+G / +Shift", "Group / ungroup");
+  theme::KeyHint("Ctrl+L / +Shift", "Lock / unlock");
+  theme::KeyHint("H / Shift+H", "Hide / show selection");
+  theme::KeyHint("F", "Frame selection");
+  theme::KeyHint("MMB/RMB-drag/Alt", "Pan viewport");
   theme::KeyHint("Wheel", "Zoom toward cursor");
   theme::KeyHint("Ctrl+S", "Save scene.json");
   ImGui::Separator();
   theme::KeyHint("V", "Select tool");
   theme::KeyHint("B / E", "Brush / Erase tiles (drag = 1 undo step)");
-  theme::KeyHint("F", "Bucket fill");
+  theme::KeyHint("U", "Bucket fill");
   theme::KeyHint("R", "Rect fill (Shift: erase box)");
   theme::KeyHint("I / Alt+click", "Pick tile from the map");
   theme::KeyHint("1 / 2 / 3", "Brush size (tile tools)");
@@ -196,6 +204,30 @@ void Editor2DScreen::draw_menu_bar() {
       delete_selected();
     }
     ImGui::Separator();
+    if (ImGui::MenuItem("Copy", "Ctrl+C", false, has_sel)) copy_selected();
+    if (ImGui::MenuItem("Cut", "Ctrl+X", false, has_sel)) cut_selected();
+    if (ImGui::MenuItem("Paste", "Ctrl+V", false, !clipboard_text().empty())) paste();
+    if (ImGui::MenuItem("Group", "Ctrl+G", false, has_sel)) group_selected();
+    if (ImGui::MenuItem("Ungroup", "Ctrl+Shift+G", false, has_sel)) ungroup_selected();
+    if (ImGui::MenuItem("Lock Selection", "Ctrl+L", false, has_sel)) lock_selected(true);
+    if (ImGui::MenuItem("Unlock Selection", "Ctrl+Shift+L", false, has_sel)) lock_selected(false);
+    if (ImGui::MenuItem("Hide Selection", "H", false, has_sel)) hide_selected(true);
+    if (ImGui::MenuItem("Show Selection", "Shift+H", false, has_sel)) hide_selected(false);
+    if (ImGui::MenuItem("Frame Selection", "F", false, has_sel)) frame_selected();
+    const std::size_t nsel = workspace_.selection_count();
+    if (ImGui::BeginMenu("Align / Distribute", nsel >= 2)) {
+      if (ImGui::MenuItem("Align left")) align_selected(Workspace2D::Align::Left);
+      if (ImGui::MenuItem("Align centre (H)")) align_selected(Workspace2D::Align::CenterX);
+      if (ImGui::MenuItem("Align right")) align_selected(Workspace2D::Align::Right);
+      if (ImGui::MenuItem("Align top")) align_selected(Workspace2D::Align::Top);
+      if (ImGui::MenuItem("Align middle (V)")) align_selected(Workspace2D::Align::CenterY);
+      if (ImGui::MenuItem("Align bottom")) align_selected(Workspace2D::Align::Bottom);
+      ImGui::Separator();
+      if (ImGui::MenuItem("Distribute horizontally", nullptr, false, nsel >= 3)) distribute_selected(true);
+      if (ImGui::MenuItem("Distribute vertically", nullptr, false, nsel >= 3)) distribute_selected(false);
+      ImGui::EndMenu();
+    }
+    ImGui::Separator();
     if (ImGui::MenuItem("Select All", "Ctrl+A")) {
       workspace_.select_all();
     }
@@ -242,6 +274,11 @@ void Editor2DScreen::draw_menu_bar() {
     if (ImGui::MenuItem("Snap to Grid", "Shift+G", snap)) {
       workspace_.set_snap_enabled(!snap);
       mark_dirty_and_autosave();
+    }
+    if (ImGui::MenuItem("Snap to Objects", nullptr, workspace_.object_snap())) {
+      workspace_.set_object_snap(!workspace_.object_snap());
+      note(workspace_.object_snap() ? "Object snap on (edges + centres)"
+                                    : "Object snap off");
     }
     if (ImGui::BeginMenu("Grid Size")) {
       for (float g : kGridPresets) {
@@ -583,6 +620,21 @@ void Editor2DScreen::handle_hotkeys() {
   if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_D)) {
     duplicate_selected();
   }
+  if (drag_mode_ == DragMode::None && !is_playing()) {
+    if (scene_focus && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_C)) copy_selected();
+    if (scene_focus && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_X)) cut_selected();
+    if (scene_focus && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_V)) paste();
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_G)) group_selected();
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_G)) ungroup_selected();
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_L)) lock_selected(true);
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_L)) lock_selected(false);
+    if (scene_focus && !ctrl && !alt && ImGui::IsKeyPressed(ImGuiKey_H, false)) {
+      hide_selected(!shift);
+    }
+    if (scene_focus && !ctrl && !alt && !shift && ImGui::IsKeyPressed(ImGuiKey_F, false)) {
+      frame_selected();
+    }
+  }
   if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) &&
       workspace_.selection_count() > 0) {
     delete_selected();
@@ -609,7 +661,7 @@ void Editor2DScreen::handle_hotkeys() {
     };
     static constexpr ToolKey kToolKeys[] = {
         {ImGuiKey_V, TileTool::Select}, {ImGuiKey_B, TileTool::Paint},
-        {ImGuiKey_E, TileTool::Erase},  {ImGuiKey_F, TileTool::Fill},
+        {ImGuiKey_E, TileTool::Erase},  {ImGuiKey_U, TileTool::Fill},
         {ImGuiKey_R, TileTool::Rect},   {ImGuiKey_I, TileTool::Eyedropper},
     };
     for (const ToolKey& k : kToolKeys) {

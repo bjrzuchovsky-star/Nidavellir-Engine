@@ -60,145 +60,66 @@ void Editor2DScreen::draw_hierarchy() {
 
   theme::Divider();
 
+  // Search filter: name, id or component tag. Matches show flat.
+  ImGui::SetNextItemWidth(-1.0f);
+  ImGui::InputTextWithHint("##HierFilter", "Search entities...", hierarchy_filter_,
+                           sizeof(hierarchy_filter_));
+  const bool filtering = hierarchy_filter_[0] != '\0';
+
+  hier_rows_prev_.swap(hier_rows_);
+  hier_rows_.clear();
+  hier_open_context_ = false;
+  hier_drop_id_ = 0;
+  hier_drop_root_ = false;
+  hier_toggle_lock_ = 0;
+  hier_toggle_hide_ = 0;
+
   ImGui::SetNextItemOpen(true, ImGuiCond_Once);
   if (ImGui::TreeNodeEx("Scene##root",
                         ImGuiTreeNodeFlags_DefaultOpen |
                             ImGuiTreeNodeFlags_SpanAvailWidth)) {
-    const ImGuiIO& io = ImGui::GetIO();
-    // Deferred so the list is not mutated mid-iteration.
-    std::optional<std::uint64_t> delete_one;
-    bool delete_sel = false;
-    bool dupe_sel = false;
-
-    const auto& ents = workspace_.entities();
-    for (std::size_t i = 0; i < ents.size(); ++i) {
-      const Entity2D& e = ents[i];
-      const bool selected = workspace_.is_selected(e.id);
-      const bool primary = workspace_.selected_id().has_value() &&
-                           *workspace_.selected_id() == e.id;
-
-      if (renaming_ && rename_id_ == e.id) {
-        ImGui::PushID(static_cast<int>(e.id));
-        ImGui::SetKeyboardFocusHere();
-        if (ImGui::InputText("##rename", rename_buf_, sizeof(rename_buf_),
-                             ImGuiInputTextFlags_EnterReturnsTrue |
-                                 ImGuiInputTextFlags_AutoSelectAll)) {
-          commit_rename();
-        }
-        if (!ImGui::IsItemActive() && ImGui::IsMouseClicked(0) &&
-            !ImGui::IsItemHovered()) {
-          commit_rename();
-        }
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-          cancel_rename();
-        }
-        ImGui::PopID();
-        continue;
+    // Dropping a row on the "Scene" header moves it to the scene root.
+    if (ImGui::BeginDragDropTarget()) {
+      if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("TS_ENTITY2D")) {
+        hier_drop_id_ = *static_cast<const std::uint64_t*>(pl->Data);
+        hier_drop_root_ = true;
       }
-
-      ImGuiTreeNodeFlags flags =
-          ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen |
-          ImGuiTreeNodeFlags_SpanAvailWidth;
-      if (selected) {
-        flags |= ImGuiTreeNodeFlags_Selected;
-      }
-      ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<uintptr_t>(e.id)),
-                        flags, "%s", e.name.c_str());
-      std::string tag;
-      if (e.tilemap || e.sprite) {
-        tag = e.tilemap ? "tiles" : "sprite";
-      }
-      // Gameplay tags: rider slot, camera, spawn slot.
-      if (e.player) {
-        tag += (tag.empty() ? "P" : " P") + std::to_string(e.player->slot + 1);
-      }
-      if (e.camera) {
-        tag += tag.empty() ? "cam" : " cam";
-      }
-      if (e.spawn) {
-        tag += (tag.empty() ? "spawn P" : " spawn P") +
-               std::to_string(e.spawn->slot + 1);
-      }
-      if (!tag.empty()) {
-        // Component tag, right-aligned in the row.
-        const ImVec2 mx = ImGui::GetItemRectMax();
-        const ImVec2 mn = ImGui::GetItemRectMin();
-        const float tw = ImGui::CalcTextSize(tag.c_str()).x;
-        ImGui::GetWindowDrawList()->AddText(
-            ImVec2(mx.x - tw - 6.0f, mn.y + ImGui::GetStyle().FramePadding.y),
-            theme::U32(theme::TextMuted()), tag.c_str());
-      }
-      if (primary) {
-        const ImVec2 mn = ImGui::GetItemRectMin();
-        const ImVec2 mx = ImGui::GetItemRectMax();
-        ImGui::GetWindowDrawList()->AddRectFilled(
-            mn, ImVec2(mn.x + 3.0f, mx.y), theme::U32(theme::Accent()));
-      }
-      if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
-        const bool ctrl = io.KeyCtrl || io.KeySuper;
-        if (io.KeyShift && has_range_anchor_ && range_anchor_ < ents.size()) {
-          // Shift+click: range from the anchor row (Ctrl+Shift extends).
-          const std::size_t lo = std::min(range_anchor_, i);
-          const std::size_t hi = std::max(range_anchor_, i);
-          std::vector<std::uint64_t> ids;
-          if (ctrl) {
-            ids = workspace_.selection();
-          }
-          for (std::size_t k = lo; k <= hi; ++k) {
-            ids.push_back(ents[k].id);
-          }
-          workspace_.set_selection(ids, e.id);
-        } else if (ctrl) {
-          workspace_.toggle_selection(e.id);
-          range_anchor_ = i;
-          has_range_anchor_ = true;
-        } else {
-          workspace_.select(e.id);
-          range_anchor_ = i;
-          has_range_anchor_ = true;
-        }
-      }
-      if (ImGui::IsItemHovered() &&
-          ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-        begin_rename(e.id);
-      }
-      if (ImGui::BeginPopupContextItem()) {
-        if (!selected) {
-          workspace_.select(e.id);
-        }
-        const std::size_t n = workspace_.selection_count();
-        if (ImGui::MenuItem("Rename", "F2", false, n == 1)) {
-          begin_rename(e.id);
-        }
-        if (ImGui::MenuItem("Duplicate", "Ctrl+D")) {
-          dupe_sel = true;
-        }
-        if (n > 1) {
-          if (ImGui::MenuItem("Delete selection", "Del")) {
-            delete_sel = true;
-          }
-        } else if (ImGui::MenuItem("Delete", "Del")) {
-          delete_one = e.id;
-        }
-        ImGui::EndPopup();
+      ImGui::EndDragDropTarget();
+    }
+    for (const Entity2D& e : workspace_.entities()) {
+      if (filtering) {
+        if (hierarchy_row_visible(e)) draw_hierarchy_row(e, 0);
+      } else if (e.parent == 0) {
+        draw_hierarchy_row(e, 0);
       }
     }
     ImGui::TreePop();
+  }
 
-    if (dupe_sel) {
-      duplicate_selected();
-    } else if (delete_sel) {
-      delete_selected();
-    } else if (delete_one) {
-      cancel_rename();
-      Workspace2D::Snapshot before = prepare_edit();
-      if (workspace_.delete_entity(*delete_one)) {
-        workspace_.commit_step("Delete 1", std::move(before));
-        has_range_anchor_ = false;
-        mark_dirty_and_autosave();
-        note("Buried 1 entity");
-      }
+  // Queued row actions (safe now that iteration is over).
+  if (hier_toggle_lock_ != 0) {
+    if (const Entity2D* e = workspace_.find(hier_toggle_lock_)) {
+      set_entity_locked(e->id, !e->locked);
     }
+  }
+  if (hier_toggle_hide_ != 0) {
+    if (const Entity2D* e = workspace_.find(hier_toggle_hide_)) {
+      set_entity_hidden(e->id, !e->hidden);
+    }
+  }
+  if (hier_drop_id_ != 0) {
+    if (hier_drop_root_) {
+      reparent(hier_drop_id_, 0);
+    } else {
+      hierarchy_drop(hier_drop_id_, hier_drop_target_, hier_drop_where_);
+    }
+  }
+  if (hier_open_context_) {
+    ImGui::OpenPopup("##HierarchyContext");
+  }
+  if (ImGui::BeginPopup("##HierarchyContext")) {
+    draw_entity_context_menu(context_id_);
+    ImGui::EndPopup();
   }
 
   // Click on empty space below the list clears the selection.
@@ -209,6 +130,173 @@ void Editor2DScreen::draw_hierarchy() {
         !(ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift)) {
       workspace_.clear_selection();
     }
+    // Drop below the list: unparent to the scene root.
+    if (ImGui::BeginDragDropTarget()) {
+      if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("TS_ENTITY2D")) {
+        reparent(*static_cast<const std::uint64_t*>(pl->Data), 0);
+      }
+      ImGui::EndDragDropTarget();
+    }
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+      context_id_ = 0;
+      ImGui::OpenPopup("##HierarchyEmptyContext");
+    }
+    if (ImGui::BeginPopup("##HierarchyEmptyContext")) {
+      draw_entity_context_menu(0);
+      ImGui::EndPopup();
+    }
+  }
+}
+
+void Editor2DScreen::draw_hierarchy_row(const Entity2D& e, int depth) {
+  const ImGuiIO& io = ImGui::GetIO();
+  const std::size_t row = hier_rows_.size();
+  hier_rows_.push_back(e.id);
+  const bool selected = workspace_.is_selected(e.id);
+  const bool primary =
+      workspace_.selected_id().has_value() && *workspace_.selected_id() == e.id;
+  const bool filtering = hierarchy_filter_[0] != '\0';
+  const std::vector<std::uint64_t> kids =
+      filtering ? std::vector<std::uint64_t>{} : workspace_.children_of(e.id);
+
+  if (renaming_ && rename_id_ == e.id) {
+    ImGui::PushID(static_cast<int>(e.id));
+    ImGui::Indent(depth * 12.0f);
+    ImGui::SetKeyboardFocusHere();
+    if (ImGui::InputText("##rename", rename_buf_, sizeof(rename_buf_),
+                         ImGuiInputTextFlags_EnterReturnsTrue |
+                             ImGuiInputTextFlags_AutoSelectAll)) {
+      commit_rename();
+    }
+    if (!ImGui::IsItemActive() && ImGui::IsMouseClicked(0) && !ImGui::IsItemHovered()) {
+      commit_rename();
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+      cancel_rename();
+    }
+    ImGui::Unindent(depth * 12.0f);
+    ImGui::PopID();
+    return;
+  }
+
+  // Eye + lock toggles at the row start.
+  ImGui::PushID(static_cast<int>(e.id));
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2.0f, 0.0f));
+  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+  ImGui::PushStyleColor(ImGuiCol_Text, e.hidden ? theme::TextMuted() : theme::Sand());
+  if (ImGui::SmallButton(e.hidden ? "-##eye" : "o##eye")) hier_toggle_hide_ = e.id;
+  ImGui::PopStyleColor();
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip(e.hidden ? "Show (H)" : "Hide (H)");
+  ImGui::SameLine(0.0f, 2.0f);
+  ImGui::PushStyleColor(ImGuiCol_Text, e.locked ? theme::Warning() : theme::TextMuted());
+  if (ImGui::SmallButton(e.locked ? "L##lock" : ".##lock")) hier_toggle_lock_ = e.id;
+  ImGui::PopStyleColor(2);
+  ImGui::PopStyleVar();
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip(e.locked ? "Unlock (Ctrl+Shift+L)" : "Lock (Ctrl+L)");
+  ImGui::PopID();
+  ImGui::SameLine(0.0f, 4.0f);
+
+  ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth |
+                             ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_DefaultOpen;
+  if (kids.empty()) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+  if (selected) flags |= ImGuiTreeNodeFlags_Selected;
+  const bool dim = workspace_.effectively_hidden(e);
+  if (dim) ImGui::PushStyleColor(ImGuiCol_Text, theme::TextMuted());
+  const bool open = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<uintptr_t>(e.id)),
+                                      flags, "%s", e.name.c_str());
+  if (dim) ImGui::PopStyleColor();
+
+  std::string tag;
+  if (e.tilemap || e.sprite) tag = e.tilemap ? "tiles" : "sprite";
+  if (e.player) tag += (tag.empty() ? "P" : " P") + std::to_string(e.player->slot + 1);
+  if (e.camera) tag += tag.empty() ? "cam" : " cam";
+  if (e.spawn) {
+    tag += (tag.empty() ? "spawn P" : " spawn P") + std::to_string(e.spawn->slot + 1);
+  }
+  if (!kids.empty() && e.color[3] == 0.0f && !e.sprite && !e.tilemap) {
+    tag += tag.empty() ? "group" : " group";
+  }
+  const ImVec2 mn = ImGui::GetItemRectMin();
+  const ImVec2 mx = ImGui::GetItemRectMax();
+  if (!tag.empty()) {
+    const float tw = ImGui::CalcTextSize(tag.c_str()).x;
+    ImGui::GetWindowDrawList()->AddText(
+        ImVec2(mx.x - tw - 6.0f, mn.y + ImGui::GetStyle().FramePadding.y),
+        theme::U32(theme::TextMuted()), tag.c_str());
+  }
+  if (primary) {
+    ImGui::GetWindowDrawList()->AddRectFilled(mn, ImVec2(mn.x + 3.0f, mx.y),
+                                              theme::U32(theme::Accent()));
+  }
+
+  // Drag source / target: top quarter = before, bottom quarter = after,
+  // middle = make it a child.
+  if (!is_playing() && ImGui::BeginDragDropSource()) {
+    ImGui::SetDragDropPayload("TS_ENTITY2D", &e.id, sizeof(e.id));
+    ImGui::Text("%s", e.name.c_str());
+    ImGui::EndDragDropSource();
+  }
+  if (ImGui::BeginDragDropTarget()) {
+    const float h = mx.y - mn.y;
+    const float my = io.MousePos.y - mn.y;
+    Workspace2D::HierDrop where = Workspace2D::HierDrop::Inside;
+    if (my < h * 0.25f) {
+      where = Workspace2D::HierDrop::Before;
+    } else if (my > h * 0.75f) {
+      where = Workspace2D::HierDrop::After;
+    }
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImU32 col = theme::U32(theme::Accent());
+    if (where == Workspace2D::HierDrop::Before) {
+      dl->AddLine(ImVec2(mn.x, mn.y), ImVec2(mx.x, mn.y), col, 2.0f);
+    } else if (where == Workspace2D::HierDrop::After) {
+      dl->AddLine(ImVec2(mn.x, mx.y), ImVec2(mx.x, mx.y), col, 2.0f);
+    } else {
+      dl->AddRect(mn, mx, col, 2.0f, 0, 1.5f);
+    }
+    if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload(
+            "TS_ENTITY2D", ImGuiDragDropFlags_AcceptNoDrawDefaultRect)) {
+      hier_drop_id_ = *static_cast<const std::uint64_t*>(pl->Data);
+      hier_drop_target_ = e.id;
+      hier_drop_where_ = where;
+    }
+    ImGui::EndDragDropTarget();
+  }
+
+  if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
+    const bool ctrl = io.KeyCtrl || io.KeySuper;
+    if (io.KeyShift && has_range_anchor_ && range_anchor_ < hier_rows_prev_.size() &&
+        row < hier_rows_prev_.size()) {
+      std::vector<std::uint64_t> ids;
+      if (ctrl) ids = workspace_.selection();
+      const std::size_t lo = std::min(range_anchor_, row);
+      const std::size_t hi = std::max(range_anchor_, row);
+      for (std::size_t k = lo; k <= hi; ++k) ids.push_back(hier_rows_prev_[k]);
+      workspace_.set_selection(ids, e.id);
+    } else if (ctrl) {
+      workspace_.toggle_selection(e.id);
+      range_anchor_ = row;
+      has_range_anchor_ = true;
+    } else {
+      workspace_.select(e.id);
+      range_anchor_ = row;
+      has_range_anchor_ = true;
+    }
+  }
+  if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+    begin_rename(e.id);
+  }
+  if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+    if (!selected) workspace_.select(e.id);
+    context_id_ = e.id;
+    hier_open_context_ = true;
+  }
+
+  if (open && !kids.empty()) {
+    for (std::uint64_t k : kids) {
+      if (const Entity2D* c = workspace_.find(k)) draw_hierarchy_row(*c, depth + 1);
+    }
+    ImGui::TreePop();
   }
 }
 
@@ -309,8 +397,21 @@ void Editor2DScreen::draw_inspector() {
 
     ImGui::SeparatorText(workspace_.snap_enabled() ? "Transform  [snap]"
                                                    : "Transform");
+    const float old_x = e->x, old_y = e->y;
     transform_field("X", &e->x, 0, -1.0e6f, 1.0e6f, false);
     transform_field("Y", &e->y, 1, -1.0e6f, 1.0e6f, false);
+    if (e->x != old_x || e->y != old_y) {
+      // Children ride along with their parent.
+      const float dx = e->x - old_x, dy = e->y - old_y;
+      const std::uint64_t self = e->id;
+      for (std::uint64_t d : workspace_.descendants_of(self)) {
+        if (Entity2D* c = workspace_.find(d)) {
+          c->x += dx;
+          c->y += dy;
+        }
+      }
+      e = workspace_.find(self);
+    }
     if (e->tilemap) {
       // A TileMap's size is its grid: edit Cols / Rows / Tile px below.
       ImGui::BeginDisabled();
@@ -324,7 +425,36 @@ void Editor2DScreen::draw_inspector() {
       transform_field("W", &e->w, 2, 1.0f, 4096.0f, true);
       transform_field("H", &e->h, 3, 1.0f, 4096.0f, true);
     }
+    if (!e->tilemap) {
+      float rot = e->rotation;
+      if (ImGui::DragFloat("Rotation", &rot, 0.5f, -360.0f, 360.0f, "%.1f deg")) {
+        e->rotation = rot;
+        mark_dirty();
+      }
+      track_inspector_item("Rotate");
+    }
+    {
+      const std::uint64_t self = e->id;
+      bool locked = e->locked;
+      bool hidden = e->hidden;
+      const bool lock_hit = ImGui::Checkbox("Locked", &locked);
+      ImGui::SameLine();
+      const bool hide_hit = ImGui::Checkbox("Hidden (editor)", &hidden);
+      if (lock_hit) set_entity_locked(self, locked);
+      if (hide_hit) set_entity_hidden(self, hidden);
+      e = workspace_.find(self);
+      if (e->parent != 0) {
+        const Entity2D* par = workspace_.find(e->parent);
+        ImGui::TextDisabled("Parent: %s", par ? par->name.c_str() : "?");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Unparent")) {
+          reparent(self, 0);
+          e = workspace_.find(self);
+        }
+      }
+    }
     if (count > 1 || !workspace_.snap_enabled()) {
+
       if (theme::SecondaryButton("Snap selection to grid", ImVec2(-1, 0))) {
         snap_selected_to_grid();
       }
