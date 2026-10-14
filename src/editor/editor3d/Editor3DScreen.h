@@ -15,7 +15,12 @@
 //   Environment sky, sun, shadows, ambient.
 //   Telegraph   editor + play log.   Plugins: the Outfitter's Wagon.
 // Every edit is one undo step (Ctrl+Z / Ctrl+Y) and autosaves scene.json
-// (v7). Play (F5) rides the scene in a World3D copy; Stop restores it.
+// (v8). Play (F5) rides the scene in a World3D copy; Stop restores it.
+// VR claims ("dimension": "vr", Editor3DScreen_VR.cpp): Play runs the
+// scene in VR mode through the desktop simulator, "Preview in headset"
+// through OpenXR (falls back to the simulator), with a Headset Mirror
+// window showing both eyes; inspector has the VR Rig / Grabbable
+// components.
 
 #include "editor/AppState.h"
 #include "editor/ProjectInfo.h"
@@ -28,6 +33,8 @@
 #include "render3d/SceneView.h"
 #include "runtime/Log.h"
 #include "world3d/World3D.h"
+#include "xr/VrPresenter.h"
+#include "xr/XrSession.h"
 
 #include <cstdint>
 #include <deque>
@@ -128,6 +135,20 @@ class Editor3DScreen final : public IScreen {
   world3d::World3D& world() { return world_; }
   void play_ticks(int n, const world3d::Input3D& in) { world_.run_ticks(n, in); }
 
+  // ---- VR (Editor3DScreen_VR.cpp) -------------------------------------------
+  bool vr_project() const { return project_.kind == ProjectKind::VR; }
+  // Start the scene in VR mode: OpenXR headset unless `simulator`, falling
+  // back to the simulator (the reason goes to the Telegraph).
+  bool vr_preview_start(bool simulator);
+  void vr_preview_stop();
+  bool vr_previewing() const { return vr_session_ != nullptr; }
+  xr::XrSession* vr_session() { return vr_session_.get(); }
+  xr::SimXrSession* vr_sim();
+  const xr::VrFrameResult& vr_last_frame() const { return vr_frame_; }
+  // One preview frame (on_update calls it; tests may too).
+  void vr_preview_frame(double dt);
+  const std::string& vr_status() const { return vr_status_; }
+
   // ---- Assets ---------------------------------------------------------------
   struct AssetEntry {
     std::string rel;   // "primitive:cube" or "assets/x.gltf"
@@ -167,6 +188,8 @@ class Editor3DScreen final : public IScreen {
   void draw_telegraph();
   void handle_shortcuts();
   world3d::Input3D poll_play_input() const;
+  void draw_vr_mirror();
+  xr::SimDrive poll_sim_drive();
 
   ProjectInfo project_;
   bool back_requested_ = false;
@@ -195,6 +218,12 @@ class Editor3DScreen final : public IScreen {
   float viewport_w_ = 1280.0f, viewport_h_ = 720.0f;
   char rename_buf_[128] = {0};
   PluginsPanelState plugins_panel_;
+  std::unique_ptr<xr::XrSession> vr_session_;
+  std::unique_ptr<xr::VrPresenter> vr_presenter_;
+  xr::VrFrameResult vr_frame_;
+  std::string vr_status_;
+  bool vr_mirror_hovered_ = false;
+  float vr_last_mx_ = 0.0f, vr_last_my_ = 0.0f;
   // Last member: unhitched first.
   EditorPlugins plugins_;
 };

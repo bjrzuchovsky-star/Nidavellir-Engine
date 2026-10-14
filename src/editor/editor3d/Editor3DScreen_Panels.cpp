@@ -183,6 +183,40 @@ void Editor3DScreen::draw_inspector() {
     ImGui::DragFloat("Cam height", &p.camera_height, 0.05f, 0.0f, 50.0f);
     t.after("Camera");
   }
+  if (component("VR Rig", e.vr_rig.has_value(), [&] { e.vr_rig = scene3d::VrRig3D{}; },
+                [&] { e.vr_rig.reset(); })) {
+    scene3d::VrRig3D& r = *e.vr_rig;
+    int loco = static_cast<int>(r.locomotion);
+    if (ImGui::Combo("Locomotion", &loco, "Teleport only\0Smooth only\0Teleport + smooth\0")) {
+      r.locomotion = static_cast<scene3d::VrRig3D::Locomotion>(loco);
+      t.activated = true;
+      t.commit = "Locomotion";
+    }
+    ImGui::DragFloat("Move speed", &r.move_speed, 0.05f, 0.1f, 20.0f, "%.1f m/s");
+    t.after("Move speed");
+    ImGui::DragFloat("Snap turn", &r.snap_turn_deg, 1.0f, 0.0f, 180.0f, "%.0f deg (0 = smooth)");
+    t.after("Snap turn");
+    ImGui::DragFloat("Smooth turn", &r.smooth_turn_speed, 1.0f, 10.0f, 720.0f, "%.0f deg/s");
+    t.after("Smooth turn");
+    ImGui::DragFloat("Teleport range", &r.teleport_range, 0.1f, 1.0f, 50.0f, "%.1f m");
+    t.after("Teleport range");
+    ImGui::Checkbox("Comfort vignette", &r.vignette);
+    t.after("Vignette");
+    ImGui::Checkbox("Seated", &r.seated);
+    t.after("Seated");
+    ImGui::DragFloat("Seated lift", &r.seated_offset, 0.01f, 0.0f, 1.5f, "%.2f m");
+    t.after("Seated lift");
+  }
+  if (component("Grabbable", e.grabbable.has_value(), [&] { e.grabbable = scene3d::Grabbable3D{}; },
+                [&] { e.grabbable.reset(); })) {
+    scene3d::Grabbable3D& g = *e.grabbable;
+    ImGui::Checkbox("Throwable", &g.throwable);
+    t.after("Throwable");
+    ImGui::Checkbox("Snap to hand", &g.snap_to_hand);
+    t.after("Snap to hand");
+    ImGui::DragFloat("Throw scale", &g.throw_scale, 0.01f, 0.0f, 5.0f, "%.2fx");
+    t.after("Throw scale");
+  }
   if (component("Script", e.script.has_value(), [&] { e.script = ScriptData{}; },
                 [&] { e.script.reset(); })) {
     if (ImGui::BeginCombo("Lua", e.script->path.empty() ? "(none)" : e.script->path.c_str())) {
