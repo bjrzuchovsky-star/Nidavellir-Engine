@@ -30,6 +30,10 @@ add_library(ts_editor
   screens/Editor2DScreen_Scripts.cpp
   screens/Editor2DScreen_Plugins.cpp
   screens/FrontierScreen.cpp
+  editor3d/Gizmo3D.cpp
+  editor3d/Editor3DScreen.cpp
+  editor3d/Editor3DScreen_UI.cpp
+  editor3d/Editor3DScreen_Panels.cpp
   plugins/EditorPlugins.cpp
   plugins/EditorBuiltinPlugins.cpp
   plugins/PluginsPanel.cpp
@@ -54,6 +58,7 @@ target_link_libraries(ts_editor
     ts_plugin
     ts_plugins_builtin
     ts_render3d
+    ts_world3d
     ts_xr
     ts_gfx
     ts_imgui
