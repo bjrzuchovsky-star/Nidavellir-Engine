@@ -1,7 +1,7 @@
 #pragma once
 
-// Perspective camera for 3D / VR projects (sketch). In VR the XR session
-// overrides view + projection per eye; the camera then is the rig origin.
+// Perspective camera for 3D / VR projects. In VR the XR session overrides
+// view + projection per eye; the camera then is the rig origin.
 
 #include "render3d/Math3D.h"
 
@@ -19,8 +19,33 @@ struct Camera3D {
 
   Mat4 view() const { return Mat4::look_at(position, target, up); }
   Mat4 projection(float aspect) const {
-    return Mat4::perspective(fov_y_degrees * 3.14159265f / 180.0f, aspect,
-                             z_near, z_far);
+    return Mat4::perspective(radians(fov_y_degrees), aspect, z_near, z_far);
+  }
+  Vec3 forward() const { return normalize(target - position); }
+
+  // World ray through a pixel (0,0 = top-left) of a width x height view.
+  Ray screen_ray(float px, float py, float width, float height) const {
+    const float aspect = height > 0.0f ? width / height : 1.0f;
+    const Mat4 inv = (projection(aspect) * view()).inverse();
+    const float nx = (2.0f * px / (width > 0 ? width : 1.0f)) - 1.0f;
+    const float ny = 1.0f - (2.0f * py / (height > 0 ? height : 1.0f));
+    const Vec3 a = inv.transform_point({nx, ny, -1.0f});
+    const Vec3 b = inv.transform_point({nx, ny, 1.0f});
+    return {a, normalize(b - a)};
+  }
+
+  // World point to pixel coordinates; false when behind the camera.
+  bool project(const Vec3& p, float width, float height, float* sx,
+               float* sy) const {
+    const float aspect = height > 0.0f ? width / height : 1.0f;
+    const Mat4 vp = projection(aspect) * view();
+    const float x = vp.at(0, 0) * p.x + vp.at(0, 1) * p.y + vp.at(0, 2) * p.z + vp.at(0, 3);
+    const float y = vp.at(1, 0) * p.x + vp.at(1, 1) * p.y + vp.at(1, 2) * p.z + vp.at(1, 3);
+    const float w = vp.at(3, 0) * p.x + vp.at(3, 1) * p.y + vp.at(3, 2) * p.z + vp.at(3, 3);
+    if (w <= 1e-5f) return false;
+    *sx = (x / w * 0.5f + 0.5f) * width;
+    *sy = (1.0f - (y / w * 0.5f + 0.5f)) * height;
+    return true;
   }
 };
 
