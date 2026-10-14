@@ -2,6 +2,7 @@
 # C++ (no GL): hosts draw the sprites / lightmap.
 add_library(ts_fx
   Particles.cpp
+  Light2D.cpp
 )
 
 target_include_directories(ts_fx
