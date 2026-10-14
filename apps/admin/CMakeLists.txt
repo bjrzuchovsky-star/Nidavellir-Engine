@@ -9,6 +9,8 @@ add_executable(ts_admin
   SmokeScriptEditor.cpp
   SmokeNetwork.cpp
   SmokePlugins.cpp
+  Smoke3D.cpp
+  Smoke3DEditor.cpp
 )
 
 target_link_libraries(ts_admin
@@ -27,6 +29,7 @@ target_link_libraries(ts_admin
     ts_plugin
     ts_plugins_builtin
     ts_render3d
+    ts_world3d
     ts_xr
     ts_imgui
 )

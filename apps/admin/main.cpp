@@ -11,6 +11,7 @@
 #include "editor/workspace/Workspace2D.h"
 #include "gfx/GlTextureUploader.h"
 
+#include "Smoke3D.h"
 #include "SmokePlugins.h"
 #include "SmokeRuntime.h"
 
@@ -1162,6 +1163,11 @@ int run_console_smoke() {
   if (run_plugin_smoke() != 0) {
     return 1;
   }
+  // 3D: scene v7, glTF, play runtime, GL offscreen render, 3D editor
+  // (see Smoke3D.cpp / Smoke3DEditor.cpp).
+  if (run_3d_smoke() != 0) {
+    return 1;
+  }
 
   std::cout << "TombStone Admin smoke complete\n";
   return flow.current_state() == AppState::Quit ? 0 : 1;
@@ -1284,6 +1290,10 @@ int run_imgui_app() {
 int main(int argc, char** argv) {
   bool smoke = false;
   for (int i = 1; i < argc; ++i) {
+    if (std::strcmp(argv[i], "--smoke-3d") == 0) {
+      // Just the 3D checks (quick loop while working on the 3D side).
+      return run_3d_smoke();
+    }
     if (std::strcmp(argv[i], "--smoke") == 0) {
       smoke = true;
     }
