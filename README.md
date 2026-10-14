@@ -31,7 +31,10 @@ Tombstone Engine is structured into three distinct build types:
   Full engine + editor tools. Used internally for development, debugging, and engine management.
 
 - **Client Build**  
-  Lightweight engine runtime for developers building games on top of Tombstone Engine.
+  Lightweight engine runtime for developers building games on top of Tombstone Engine. `ts_client` is the multiplayer client (connects to a `ts_server`).
+
+- **Server Build**  
+  `ts_server`: the headless, authoritative multiplayer server (no window, no GL). See [Multiplayer](#multiplayer-the-posse).
 
 - **Game Build**  
   Stripped-down runtime containing only what shipped games need for execution and performance.
@@ -90,7 +93,8 @@ src/core/               # Engine core (types, assert, Engine, JsonMini)
 src/platform/           # Platform / window stubs
 src/render/             # Renderer stubs
 src/input/              # Input stubs
-src/net/                # Networking stubs (4-player MMO target later)
+src/net/                # Transport interface + ENet backend, link simulator (lag / jitter / loss), byte codec
+src/mp/                 # Multiplayer: wire protocol, GameServer, GameClient (prediction + interpolation), LocalPosse, posse smoke
 src/physics/            # 2D physics stubs
 src/scene/              # Scene data: Entity2D + components, TileMap, scene.json read/write (no UI, no GL)
 src/runtime/            # Game runtime: World, PlaySession (60 Hz fixed step), abstract input, Lua script host, Telegraph log (no UI, no GL)
@@ -98,7 +102,8 @@ src/gfx/                # stb_image TextureCache + OpenGL texture uploader (admi
 src/editor/             # Admin UI (AppFlow, settings, projects, workspace, Play mode, launcher, ui, screens)
 cmake/FetchImGuiDeps.cmake  # FetchContent GLFW + stb_image (admin + game) and Dear ImGui (admin only)
 cmake/FetchLua.cmake    # FetchContent Lua 5.4.8 (hash-pinned, core + pure libs only, built as C++)
-apps/admin|client|game/ # Build targets controlled by TS_BUILD_*
+cmake/FetchENet.cmake   # FetchContent ENet 1.3.18 (hash-pinned; ws2_32 + winmm on Windows)
+apps/admin|client|game|server/ # Build targets controlled by TS_BUILD_*
 ```
 
 ### Admin flow (ImGui)
@@ -445,7 +450,52 @@ World lines carry their tick: `[tick 99] [info] scripts/gate.lua:32: Corral Gate
 
 `ts_game` opens its own GLFW window (1280x720, resizable), loads `<project>/scene.json`, its images and `.anim.json` sets through the runtime, and draws tilemaps and (animated) sprites with a small fixed-function OpenGL renderer (no ImGui, no editor code). Keys: WASD / arrows (and gamepads 1-4) ride, E / Space (pad A) action, P or F6 pause, F10 step while paused, R or F5 reload `scene.json` from disk, K collision overlay (same colours as the editor; `--collision` starts with it on), Esc quit. The title bar shows P1's position and the latest trigger event. Script toasts draw as leather cards at the bottom of the window, newest lowest and fading out, tagged `P2:` when more than one rider is in, using the public-domain [stb_easy_font](https://github.com/nothings/stb) (no font files are shipped). Scripts hot-reload twice a second when their files change. The editor's **Launch Game** finds `ts_game` next to `ts_admin` or in the build tree (`build/apps/game/`); if it isn't built it says so (configure with `-DTS_BUILD_GAME=ON`).
 
-**Runtime architecture.** `src/scene` owns the data (Entity2D and its optional components, tilemaps, the scene.json reader/writer) and `src/runtime` owns the game: a `World` built from a copy of the entities, advanced by a `PlaySession` at a fixed 60 Hz (accumulator, at most 8 catch-up ticks per frame) from an abstract per-player `InputFrame` (move x/y + action buttons for slots 0-3), with a follow camera and a renderer-neutral draw list (world-space quads + UVs) interpolated between ticks. Neither library knows about ImGui or OpenGL: the editor feeds it keyboard/gamepad input and draws the list with ImGui, `ts_game` feeds GLFW input and draws it with OpenGL, and `--smoke` feeds scripted input. Collision, animation and scripts all run inside the World's tick. Networked players (a local server plus up to four clients) will slot in as more `InputFrame` sources without touching the editor.
+**Runtime architecture.** `src/scene` owns the data (Entity2D and its optional components, tilemaps, the scene.json reader/writer) and `src/runtime` owns the game: a `World` built from a copy of the entities, advanced by a `PlaySession` at a fixed 60 Hz (accumulator, at most 8 catch-up ticks per frame) from an abstract per-player `InputFrame` (move x/y + action buttons for slots 0-3), with a follow camera and a renderer-neutral draw list (world-space quads + UVs) interpolated between ticks. Neither library knows about ImGui or OpenGL: the editor feeds it keyboard/gamepad input and draws the list with ImGui, `ts_game` feeds GLFW input and draws it with OpenGL, and `--smoke` feeds scripted input. Collision, animation and scripts all run inside the World's tick. Networked players (a server plus up to four clients, see [Multiplayer](#multiplayer-the-posse)) are just more `InputFrame` sources: the server steps the same World.
+
+### Multiplayer (the posse)
+
+Four riders, one frontier. Multiplayer is server-authoritative: `ts_server` runs the real `World` (collision, animation, Lua scripts and all) at the fixed 60 Hz tick, and every `ts_client` sends its rider's input and draws what the server says, with prediction so its own horse never feels laggy.
+
+```bash
+# Host (UDP 24642 by default):
+./build/apps/server/ts_server --project ./TombStoneProjects/sample-2d-platformer
+# Riders (up to four), on this machine or another:
+./build/apps/client/ts_client --connect 127.0.0.1:24642 --name Ike --project ./TombStoneProjects/sample-2d-platformer
+./build/apps/client/ts_client --connect 192.168.1.20 --name Doc     # no --project: sprites draw as solid stand-ins
+# Headless checks:
+./build/apps/server/ts_server --smoke     # loopback posse of 2 (90 ms +-25, 10% loss) and 4 (40 ms +-10, 5% loss)
+./build/apps/client/ts_client --smoke     # 2 riders at 70 ms +-20, 8% loss + the client's draw list
+./build/apps/server/ts_server --smoke --riders 1 --lag 50 --jitter 20 --loss 10   # one custom run
+```
+
+`ts_server` flags: `--project <dir>`, `--port N` (0 = any free port), `--snapshot-every N` (ticks between snapshots, default 2 = 30 Hz), `--lag MS` / `--jitter MS` / `--loss PCT` (simulate a rough line on the server side), `--seconds S` (close after S seconds), `--smoke`. It logs joins, leaves and the Telegraph to stdout and a status line every 10 s; Ctrl+C closes it politely (riders hear "the server closed up shop").
+
+`ts_client` flags: `--connect host[:port]` (also `[v6]:port`), `--name NAME`, `--project <dir>` (optional local copy for images; the scene itself always comes from the server, so a rider can't be out of date), `--lag` / `--jitter` / `--loss` on its own link, `--interp MS` (how far behind other riders are drawn, default 100), `--frames N`, `--smoke`. Keys as in `ts_game` (WASD / arrows, E / Space action, gamepad 1). The title bar shows your seat, the posse size, RTT, snapshot rate and bandwidth; script toasts show on your HUD (everyone's, plus your own).
+
+**How it rides.**
+
+- **Seats.** The first four riders get slots P1-P4 (the lowest free one). Each is seated on the scene's rider for that slot; when the scene has fewer riders than the posse, the server clones the first rider onto the slot's SpawnPoint (or beside P1). Empty seats ride hidden with their collider parked. A fifth rider is turned away ("The posse is full"); a protocol mismatch is refused with a reason.
+- **Handshake.** Hello (protocol version, name, hash of the client's own `scene.json`) -> Welcome (slot, rider entity, tick, snapshot rate and the server's whole `scene.json`) or Reject. A differing local scene is noted in the server log and the server's wins.
+- **Input.** Every client tick (60 Hz) sends its input unreliably, with the last 8 inputs repeated so loss costs nothing. The server keeps a small jitter buffer per rider and applies every input exactly once, in order; a backlog after a lag spike is ridden off at once (extra moves through the same movement code prediction uses) so it never turns into lasting delay. A tick with no input waits instead of guessing.
+- **Snapshots** go out unreliably every `snapshot_every` ticks (30 Hz): server tick, the last input applied for *this* rider, a time echo for RTT, and one row per entity (position, visibility, collider on/off, rider heading, template name for script-spawned entities). Spawns and destroys made by scripts ride along: a client creates or removes them to match.
+- **Events** go reliably: rode in / rode out (with the reason), script toasts (once each, the client times them), Telegraph lines from the world, and the roster with each rider's RTT once a second.
+- **Prediction + reconciliation.** The client moves its own rider the moment you press, with `World::predict_rider` (exactly the movement + wall resolution `World::step` uses, no scripts). On every newer snapshot it snaps the rider to the server's position, replays the inputs the server has not applied yet, and smooths any difference away over a few ticks (more than 64 px jumps). With a single rider the prediction is exact: the smoke sees **zero** corrections at 50 ms +-20, 10% loss. Corrections come from things the client can't foresee: other riders shoving you (dynamic bodies), scripts moving you.
+- **Interpolation.** Everything else is drawn `--interp` ms in the past, between the two snapshots around that moment, so remote riders glide even at 30 Hz with jitter and loss. Collider switches (an opened gate) apply from the newest snapshot right away, so you can ride through the instant the server opens it.
+- **Determinism.** The server is the only place scripts run. Clients build a World from the server's scene only to draw and predict against it.
+
+**Play with posse (editor).** The toolbar's **Posse** toggle (or *Play > Play with Posse*) starts a `GameServer` on a free loopback port and 1-4 `GameClient`s inside `ts_admin`, riding a copy of the scene you have open (unsaved edits included; your scene is never touched). You're P1 on the keyboard / pad; P2-P4 follow bot reins (a slow square, each out of step) unless you turn them off. The Viewport shows the ride through the chosen rider's eyes (prediction, interpolation and all), with each rider's server position as a faint box so you can *see* the lag. The **Network** panel (docked with the Stable; *View > Network*):
+
+- **Posse:** Ride with Posse / **Break Camp**, rider count, **Saddle Another** / **Send One Home** while riding, **Open Client Window** (a real `ts_client` process riding into the same server).
+- **Rough Trail:** latency (each way), jitter and loss sliders on every rider's line, live, with *Town* (none), *Prairie* (60 ms +-15, 2%) and *Mountain Pass* (150 ms +-40, 10%) presets.
+- **Server:** snapshots per second per rider, snapshot size, KB/s out / in, joins / leaves / turned away.
+- **Riders:** seat, name, RTT, snapshots/s, KB/s in / out, reconciliations ("fixes": hover for the last / worst correction and inputs in flight) and **Look** to ride through that rider's eyes.
+- **Trail Map:** the whole scene in miniature, a dot where the server has each rider and a ring where the chosen client draws it.
+
+Joins, leaves and every script line land on the Telegraph (channel `posse` for the server's own news).
+
+**Smoke.** `run_posse_smoke` (`src/mp/PosseSmoke.cpp`, shared by `ts_server --smoke`, `ts_client --smoke` and `ts_admin --smoke`) writes a small four-seat project (a rider, four SpawnPoints, a wall, a bell script that toasts every second and rolls a spawned tumbleweed across town), starts a loopback server and 2-4 clients behind the link simulator, lets bots ride for ~3 s, then reins everybody in and requires every client to agree with the server to **0.01 px** (own rider predicted, the others interpolated) within a few seconds. Every client must have seen a toast and the spawned tumbleweed; with four riders a fifth is turned away; the last rider leaves and the seat must free, the rider vanish for everyone and the posse be told, and a newcomer must get that same seat. `ts_admin --smoke` also drives the editor's Play with posse headless.
+
+**Ports and firewalls.** One UDP port (default 24642). Riders across a network need it open on the host. Windows links ENet against `ws2_32` and `winmm` (handled by `cmake/FetchENet.cmake`); nothing POSIX-only is used outside `#ifdef`s.
 
 ### scene.json format
 
@@ -519,14 +569,16 @@ Requirements (in addition to C++20):
 - On Windows/MSVC: a working desktop OpenGL driver (Visual Studio 2019+ recommended)
 
 ```bash
-cmake -S . -B build -DTS_BUILD_ADMIN=ON -DTS_BUILD_CLIENT=ON -DTS_BUILD_GAME=ON
-cmake --build build --target ts_admin ts_game
+cmake -S . -B build -DTS_BUILD_ADMIN=ON -DTS_BUILD_CLIENT=ON -DTS_BUILD_GAME=ON -DTS_BUILD_SERVER=ON
+cmake --build build
 ./build/apps/admin/ts_admin          # GUI
 ./build/apps/admin/ts_admin --smoke  # headless flow smoke (no window, no GL)
 ./build/apps/game/ts_game --smoke --project <dir>
+./build/apps/server/ts_server --smoke
+./build/apps/client/ts_client --smoke
 ```
 
-Only Admin fetches and links ImGui; Client fetches nothing. `-DTS_BUILD_ADMIN=OFF` skips `src/editor` and ImGui; with Admin and Game both off, no FetchContent deps are pulled at all.
+Only Admin fetches and links ImGui. `ts_client` uses GLFW, stb_image, stb_easy_font, Lua and ENet (no ImGui); `ts_server` only Lua and ENet (headless: no GLFW, no GL). `-DTS_BUILD_ADMIN=OFF` skips `src/editor` and ImGui.
 
 ### Projects & settings (on disk)
 
