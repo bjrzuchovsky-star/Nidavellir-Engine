@@ -12,6 +12,7 @@ add_executable(ts_admin
   SmokeSurvival.cpp
   Smoke3D.cpp
   Smoke3DEditor.cpp
+  SmokeVR.cpp
 )
 
 target_link_libraries(ts_admin

@@ -12,6 +12,7 @@
 #include "gfx/GlTextureUploader.h"
 
 #include "Smoke3D.h"
+#include "SmokeVR.h"
 #include "SmokePlugins.h"
 #include "SmokeSurvival.h"
 #include "SmokeRuntime.h"
@@ -1166,9 +1167,13 @@ int run_console_smoke() {
   if (run_plugin_smoke() != 0) {
     return 1;
   }
-  // 3D: scene v7, glTF, play runtime, GL offscreen render, 3D editor
+  // 3D: scene v8, glTF, play runtime, GL offscreen render, 3D editor
   // (see Smoke3D.cpp / Smoke3DEditor.cpp).
   if (run_3d_smoke() != 0) {
+    return 1;
+  }
+  // VR: rig / grabbables, saloon sample driven through World3D (SmokeVR.cpp).
+  if (run_vr_smoke() != 0) {
     return 1;
   }
   // Frontier Survival plugin (see SmokeSurvival.cpp).
@@ -1300,6 +1305,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-3d") == 0) {
       // Just the 3D checks (quick loop while working on the 3D side).
       return run_3d_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-vr") == 0) {
+      // Just the VR checks.
+      return run_vr_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-survival") == 0) {
       // Just the Frontier Survival checks.
