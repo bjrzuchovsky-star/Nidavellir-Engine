@@ -351,9 +351,17 @@ void Editor2DScreen::begin_drag_move() {
 bool Editor2DScreen::end_drag_move() {
   const std::size_t n = workspace_.selection_count();
   const bool moved = workspace_.end_move();
+  const bool copied = dup_drag_;
+  dup_drag_ = false;
   if (edit_source_ == EditSource::Drag) {
-    workspace_.set_edit_label(count_label("Move", n));
+    workspace_.set_edit_label(count_label(copied ? "Duplicate" : "Move", n));
     flush_pending_edit();
+  }
+  if (copied) {
+    // The copies exist whether or not they moved.
+    mark_dirty_and_autosave();
+    note("Duplicated " + std::to_string(n) + (n == 1 ? " entity" : " entities"));
+    return true;
   }
   if (moved) {
     mark_dirty_and_autosave();
@@ -367,9 +375,14 @@ bool Editor2DScreen::end_drag_move() {
 void Editor2DScreen::cancel_drag_move() {
   workspace_.cancel_move();
   if (edit_source_ == EditSource::Drag) {
-    workspace_.cancel_edit();
+    if (dup_drag_) {
+      workspace_.revert_edit();  // take the copies back too
+    } else {
+      workspace_.cancel_edit();
+    }
     edit_source_ = EditSource::None;
   }
+  dup_drag_ = false;
 }
 
 void Editor2DScreen::begin_inspector_edit(const char* label) {

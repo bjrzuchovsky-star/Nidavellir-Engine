@@ -119,6 +119,43 @@ class Editor2DScreen final : public IScreen {
   // Inspector). Returns true if an undo step was pushed.
   bool flush_pending_edit();
 
+  // --- Editor tools (Editor2DScreen_Tools.cpp) --------------------------------
+  // Each is one undo step and autosaves, like the rest. Locked while playing.
+  // Clipboard: scene.json text of the selection (and subtrees), shared
+  // across scenes / projects through the system clipboard.
+  bool copy_selected();
+  std::size_t cut_selected();
+  std::size_t paste();  // offset copies, selected
+  static const std::string& clipboard_text();
+  std::uint64_t group_selected();     // Ctrl+G
+  std::size_t ungroup_selected();     // Ctrl+Shift+G
+  bool set_entity_locked(std::uint64_t id, bool locked);
+  bool set_entity_hidden(std::uint64_t id, bool hidden);
+  bool lock_selected(bool locked);    // Ctrl+L / Ctrl+Shift+L
+  bool hide_selected(bool hidden);    // H / Shift+H
+  bool reparent(std::uint64_t id, std::uint64_t parent);
+  bool hierarchy_drop(std::uint64_t id, std::uint64_t target,
+                      Workspace2D::HierDrop where);
+  bool align_selected(Workspace2D::Align how);
+  bool distribute_selected(bool horizontal);
+  // F: centre + zoom the viewport on the selection (everything when none).
+  bool frame_selected();
+  // "Collider" / "Player" / "Camera" / "Spawn". False if present / unknown.
+  bool add_component(std::uint64_t id, const std::string& kind);
+  // Viewport handles on the primary selection. hx / hy in {-1, 0, 1};
+  // rotate = the turn knob. update takes the mouse in world space; shift
+  // keeps the aspect (resize) or steps 15 degrees (turn). One undo step.
+  bool begin_handle_drag(int hx, int hy, bool rotate, float wx, float wy);
+  void update_handle_drag(float wx, float wy, bool shift);
+  bool end_handle_drag();
+  void cancel_handle_drag();
+  // Alt+drag: copies of the selection on the spot, then a normal drag
+  // moves the copies. One "Duplicate N" step; Esc takes the copies back.
+  bool begin_duplicate_drag();
+  // Scene Hierarchy filter (case-insensitive substring of the name).
+  void set_hierarchy_filter(const std::string& text);
+  bool hierarchy_row_visible(const Entity2D& e) const;
+
   // --- Tile tools (Editor2DScreen_Tiles.cpp) ---------------------------------
   // All public so --smoke drives the same paths as the viewport. Every
   // committed edit is one undo step and autosaves scene.json.
@@ -396,6 +433,9 @@ class Editor2DScreen final : public IScreen {
   double now_seconds() const;
   void setup_default_dock_layout(unsigned int dockspace_id);
 
+  // Right-click menu body shared by the viewport and the Hierarchy.
+  void draw_entity_context_menu(std::uint64_t clicked);
+  void draw_hierarchy_row(const Entity2D& e, int depth);
   void begin_rename(std::uint64_t id);
   void commit_rename();
   void cancel_rename();
@@ -433,7 +473,7 @@ class Editor2DScreen final : public IScreen {
   char rename_buf_[128]{};
 
   // Viewport interaction.
-  enum class DragMode { None, Move, Marquee, Paint, RectFill };
+  enum class DragMode { None, Move, Marquee, Paint, RectFill, Handle };
   bool panning_ = false;
   DragMode drag_mode_ = DragMode::None;
   std::uint64_t drag_hit_id_ = 0;  // entity under the cursor at press (0=none)
@@ -442,6 +482,27 @@ class Editor2DScreen final : public IScreen {
   bool viewport_focused_ = false;
   bool hierarchy_focused_ = false;
   bool nudge_pending_save_ = false;  // autosave once arrows are released
+  // Editor tools.
+  bool dup_drag_ = false;           // the open drag is an Alt+drag copy
+  int handle_x_ = 0, handle_y_ = 0;  // resize handle side
+  bool handle_rotate_ = false;
+  bool handle_active_ = false;
+  float handle_start_wx_ = 0.0f, handle_start_wy_ = 0.0f;
+  float viewport_w_ = 800.0f, viewport_h_ = 600.0f;  // last canvas size
+  bool rmb_dragged_ = false;         // RMB press panned (no context menu)
+  std::uint64_t context_id_ = 0;     // entity the context menu opened on
+  char hierarchy_filter_[96]{};
+  std::uint64_t hier_drag_id_ = 0;
+  // Hierarchy rows in drawn (tree) order this frame: Shift+click ranges.
+  std::vector<std::uint64_t> hier_rows_;
+  std::vector<std::uint64_t> hier_rows_prev_;  // last frame's (full) order
+  // Hierarchy actions are queued while rows draw and applied after the loop
+  // (the entity list must not change under the iteration).
+  bool hier_open_context_ = false;
+  std::uint64_t hier_drop_id_ = 0, hier_drop_target_ = 0;
+  Workspace2D::HierDrop hier_drop_where_ = Workspace2D::HierDrop::After;
+  bool hier_drop_root_ = false;
+  std::uint64_t hier_toggle_lock_ = 0, hier_toggle_hide_ = 0;
 
   // Which coalesced edit (if any) currently owns workspace_.edit_open().
   enum class EditSource { None, Drag, Inspector, Nudge, Paint };

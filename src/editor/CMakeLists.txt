@@ -22,6 +22,7 @@ add_library(ts_editor
   screens/Editor2DScreen_Shell.cpp
   screens/Editor2DScreen_Viewport.cpp
   screens/Editor2DScreen_Tiles.cpp
+  screens/Editor2DScreen_Tools.cpp
   screens/Editor2DScreen_TilePanels.cpp
   screens/Editor2DScreen_Play.cpp
   screens/Editor2DScreen_Collision.cpp
