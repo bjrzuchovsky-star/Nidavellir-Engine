@@ -709,6 +709,83 @@ int add_ui_handler(lua_State* L, bool change) {
 }
 
 int u_on_click(lua_State* L) { return add_ui_handler(L, false); }
+
+// particles.burst(what, at[, count]): what = preset name ("dust",
+// "sparks"...) or an entity (its own emitter); at = an entity or a
+// position table {x, y[, z]} (or {x=, y=, z=}); without `at` an entity
+// bursts where it stands. particles.emit(entity, count) adds particles to
+// an entity's emitter; particles.stop(entity) / particles.start(entity).
+int send_fx(lua_State* L, FxEvent ev) {
+  State& s = host(L);
+  if (!s.world) {
+    return luaL_error(L, "particles can only be used while the world runs (not at load)");
+  }
+  s.world->script_fx(std::move(ev));
+  return 0;
+}
+
+float table_num(lua_State* L, int idx, int pos, const char* key) {
+  lua_getfield(L, idx, key);
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 1);
+    lua_rawgeti(L, idx, pos);
+  }
+  const float v = static_cast<float>(lua_tonumber(L, -1));
+  lua_pop(L, 1);
+  return v;
+}
+
+int p_burst(lua_State* L) {
+  FxEvent ev;
+  ev.kind = FxEvent::Kind::Burst;
+  int next = 2;
+  if (lua_type(L, 1) == LUA_TSTRING) {
+    ev.preset = lua_tostring(L, 1);
+    if (ev.preset.empty() || ev.preset.size() > 64) return luaL_argerror(L, 1, "preset name");
+  } else {
+    ev.entity = check_entity(L, 1);
+    ev.at_entity = true;
+  }
+  if (lua_isuserdata(L, 2)) {
+    ev.entity = check_entity(L, 2);
+    ev.at_entity = true;
+    next = 3;
+  } else if (lua_istable(L, 2)) {
+    ev.x = table_num(L, 2, 1, "x");
+    ev.y = table_num(L, 2, 2, "y");
+    ev.z = table_num(L, 2, 3, "z");
+    ev.at_entity = false;
+    next = 3;
+  } else if (!ev.at_entity) {
+    return luaL_argerror(L, 2, "an entity or a position table {x, y[, z]}");
+  }
+  ev.count = static_cast<int>(luaL_optinteger(L, next, 0));
+  if (ev.count < 0 || ev.count > 2048) return luaL_argerror(L, next, "count must be 0..2048");
+  return send_fx(L, std::move(ev));
+}
+
+int p_emit(lua_State* L) {
+  FxEvent ev;
+  ev.kind = FxEvent::Kind::Emit;
+  ev.entity = check_entity(L, 1);
+  ev.count = static_cast<int>(luaL_checkinteger(L, 2));
+  if (ev.count < 0 || ev.count > 2048) return luaL_argerror(L, 2, "count must be 0..2048");
+  return send_fx(L, std::move(ev));
+}
+
+int p_stop(lua_State* L) {
+  FxEvent ev;
+  ev.kind = FxEvent::Kind::Stop;
+  ev.entity = check_entity(L, 1);
+  return send_fx(L, std::move(ev));
+}
+
+int p_start(lua_State* L) {
+  FxEvent ev;
+  ev.kind = FxEvent::Kind::Start;
+  ev.entity = check_entity(L, 1);
+  return send_fx(L, std::move(ev));
+}
 int u_on_change(lua_State* L) { return add_ui_handler(L, true); }
 
 void open_script_api(lua_State* L) {
@@ -761,6 +838,12 @@ void open_script_api(lua_State* L) {
       {nullptr, nullptr}};
   luaL_newlib(L, ui_fns);
   lua_setfield(L, -2, "ui");
+
+  const luaL_Reg fx_fns[] = {
+      {"burst", p_burst}, {"emit", p_emit}, {"stop", p_stop}, {"start", p_start},
+      {nullptr, nullptr}};
+  luaL_newlib(L, fx_fns);
+  lua_setfield(L, -2, "particles");
 
   lua_getfield(L, -1, LUA_MATHLIBNAME);
   lua_pushcfunction(L, m_random);

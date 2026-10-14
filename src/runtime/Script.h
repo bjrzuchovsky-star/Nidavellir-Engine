@@ -122,6 +122,8 @@ class ScriptWorld {
   virtual void script_sound(SoundEvent /*event*/) {}
   // ui.show / ui.hide / ui.set_text / ... (queued for the host's UI).
   virtual void script_ui(UiCommand /*command*/) {}
+  // particles.burst / emit / stop / start (World::fx / World3D::fx).
+  virtual void script_fx(FxEvent /*event*/) {}
   virtual void script_open_extensions(lua_State* /*L*/, int /*sandbox*/) {}
 };
 

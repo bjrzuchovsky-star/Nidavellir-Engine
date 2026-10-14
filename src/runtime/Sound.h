@@ -48,6 +48,30 @@ inline constexpr const char* kSoundChannel = "ts.audio";
 std::vector<std::uint8_t> encode_sound(const SoundEvent& ev);
 bool decode_sound(const std::vector<std::uint8_t>& bytes, SoundEvent* out);
 
+// A particle effect event (Lua particles.*, gameplay, the network). On a
+// server they go out on the "ts.fx" channel so every rider sees bursts;
+// `local` ones (footstep dust) are made on every peer and never sent.
+struct FxEvent {
+  enum class Kind : std::uint8_t {
+    Burst = 0,  // preset (or the entity's emitter) at x, y, z
+    Emit,       // count extra particles from the entity's emitter
+    Stop,       // entity's emitter stops (live particles finish)
+    Start,      // and starts again
+  };
+  Kind kind = Kind::Burst;
+  std::string preset;        // "dust", "sparks"... ("" = entity's emitter)
+  std::uint64_t entity = 0;
+  float x = 0.0f, y = 0.0f, z = 0.0f;
+  int count = 0;             // 0 = the preset's own burst
+  float dir = 0.0f;          // degrees: turns the effect (muzzle flash aim)
+  bool local = false;        // never replicated
+  bool at_entity = false;    // position from `entity` (resolved before sending)
+  bool operator==(const FxEvent& o) const = default;
+};
+inline constexpr const char* kFxChannel = "ts.fx";
+std::vector<std::uint8_t> encode_fx(const FxEvent& ev);
+bool decode_fx(const std::vector<std::uint8_t>& bytes, FxEvent* out);
+
 }  // namespace runtime
 }  // namespace tombstone
 }  // namespace ts

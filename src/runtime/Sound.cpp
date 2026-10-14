@@ -1,5 +1,6 @@
 #include "runtime/Sound.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace ts {
@@ -123,6 +124,39 @@ bool decode_sound(const std::vector<std::uint8_t>& bytes, SoundEvent* out) {
   for (std::uint32_t i = 0; i < n && r.ok; ++i) ev.list.push_back(r.str());
   if (!r.ok || r.at != bytes.size()) return false;
   if (out) *out = std::move(ev);
+  return true;
+}
+
+std::vector<std::uint8_t> encode_fx(const FxEvent& ev) {
+  Writer w;
+  w.u8(kWireVersion);
+  w.u8(static_cast<std::uint8_t>(ev.kind));
+  w.str(ev.preset.size() > 64 ? ev.preset.substr(0, 64) : ev.preset);
+  w.u64(ev.entity);
+  w.f32(ev.x);
+  w.f32(ev.y);
+  w.f32(ev.z);
+  w.u32(static_cast<std::uint32_t>(ev.count < 0 ? 0 : ev.count));
+  w.f32(ev.dir);
+  return w.b;
+}
+
+bool decode_fx(const std::vector<std::uint8_t>& bytes, FxEvent* out) {
+  Reader r{bytes};
+  if (r.u8() != kWireVersion) return false;
+  FxEvent ev;
+  const std::uint8_t kind = r.u8();
+  if (kind > static_cast<std::uint8_t>(FxEvent::Kind::Start)) return false;
+  ev.kind = static_cast<FxEvent::Kind>(kind);
+  ev.preset = r.str();
+  ev.entity = r.u64();
+  ev.x = r.f32();
+  ev.y = r.f32();
+  ev.z = r.f32();
+  ev.count = static_cast<int>(std::min<std::uint32_t>(r.u32(), 2048));
+  ev.dir = r.f32();
+  if (!r.ok || r.at != bytes.size() || ev.preset.size() > 64) return false;
+  *out = std::move(ev);
   return true;
 }
 
