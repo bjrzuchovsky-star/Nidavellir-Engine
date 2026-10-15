@@ -15,6 +15,8 @@ add_subdirectory(src/input)
 add_subdirectory(src/physics)
 add_subdirectory(src/scene)
 add_subdirectory(src/fx)
+# Virtual filesystem + .tspak archives (runtime mount, export cooking).
+add_subdirectory(src/vfs)
 
 # Sound (ts_audio): miniaudio + stb_vorbis fetched by hash, null backend
 # when no device opens (headless smokes and tools run it that way).
