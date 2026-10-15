@@ -69,8 +69,44 @@ struct ColliderData {
   float h = 32.0f;
   bool trigger = false;  // false = solid
   bool dynamic = false;  // false = static
+  // v10: the shape inside the box (circle: the largest that fits; capsule:
+  // round ends on the long side). Colliders turn with the entity rotation.
+  enum class Shape : std::uint8_t { Box, Circle, Capsule };
+  Shape shape = Shape::Box;
 
   bool operator==(const ColliderData& o) const = default;
+};
+
+// v10 "body": a Box2D rigid body on the entity's collider (the collider box
+// by default). Riders, tiles and plain colliders keep the deterministic
+// platformer collision; bodies collide with all of them (riders push
+// dynamic bodies, static / kinematic bodies block riders).
+struct RigidBody2DData {
+  enum class Motion : std::uint8_t { Static, Kinematic, Dynamic };
+  Motion motion = Motion::Dynamic;
+  float density = 1.0f;       // kg / m^2 (32 px = 1 m)
+  float mass = 0.0f;          // kg; > 0 overrides density
+  float friction = 0.6f;
+  float restitution = 0.0f;
+  float linear_damping = 0.0f;
+  float angular_damping = 0.05f;
+  float gravity_scale = 1.0f;  // 0 for top-down games
+  bool fixed_rotation = false;
+  bool bullet = false;         // continuous collision for fast things
+  bool operator==(const RigidBody2DData& o) const = default;
+};
+
+// v10 "joint": this entity's body to `target` (0 = the world). Anchor is
+// relative to the entity centre (px); limits in degrees (revolute) or px.
+struct Joint2DData {
+  enum class Type : std::uint8_t { Weld, Revolute, Prismatic, Distance };
+  Type type = Type::Revolute;
+  std::uint64_t target = 0;
+  float anchor_x = 0.0f, anchor_y = 0.0f;
+  float axis_x = 1.0f, axis_y = 0.0f;  // prismatic
+  bool limits = false;
+  float min = 0.0f, max = 0.0f;
+  bool operator==(const Joint2DData& o) const = default;
 };
 
 // Plays clips from an animation set (scene.json v5 "animator"). The set
@@ -202,6 +238,9 @@ struct Entity2D {
   // Particle emitter and 2D light (scene.json v9).
   std::optional<fx::EmitterDesc> particles;
   std::optional<fx::Light2DData> light;
+  // Box2D rigid body and joint (scene.json v10).
+  std::optional<RigidBody2DData> body;
+  std::optional<Joint2DData> joint;
 
   float center_x() const { return x + w * 0.5f; }
   float center_y() const { return y + h * 0.5f; }

@@ -92,6 +92,7 @@ void World::net_capture(std::vector<NetActor>* out) const {
     r.id = a.data.id;
     r.x = a.data.x;
     r.y = a.data.y;
+    r.rotation = a.data.rotation;
     r.in_x = a.in_x;
     r.in_y = a.in_y;
     r.facing = static_cast<std::int8_t>(a.facing < 0 ? -1 : 1);
@@ -140,6 +141,7 @@ void World::net_apply(const std::vector<NetActor>& rows) {
     }
     a->data.x = r.x;
     a->data.y = r.y;
+    a->data.rotation = r.rotation;
     a->prev_x = r.x;
     a->prev_y = r.y;
     a->in_x = r.in_x;

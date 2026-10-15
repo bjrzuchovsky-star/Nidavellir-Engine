@@ -7,6 +7,7 @@
 
 #include "fx/Light2D.h"
 #include "fx/Particles.h"
+#include "physics2d/Physics2D.h"
 #include "runtime/Collision.h"
 #include "runtime/Input.h"
 #include "runtime/Log.h"
@@ -147,6 +148,7 @@ struct NetActor {
   std::uint64_t id = 0;
   float x = 0.0f;
   float y = 0.0f;
+  float rotation = 0.0f;  // degrees (2D rigid bodies turn)
   float in_x = 0.0f;  // rider move intent (animation heading)
   float in_y = 0.0f;
   std::int8_t facing = 1;
@@ -419,6 +421,18 @@ class World final : public ScriptWorld {
                        const ImageSizeFn& image_size,
                        std::vector<DrawQuad>* out) const;
 
+  // --- 2D rigid bodies (Box2D; null / 0 without "body" entities) ---------
+  physics2d::World* physics2d() { return phys2d_.get(); }
+  const physics2d::World* physics2d() const { return phys2d_.get(); }
+  // The Box2D body standing for an entity (rigid bodies, and the proxies of
+  // riders / pushables / static solids). 0 = none.
+  std::uint32_t body2d_of(std::uint64_t entity) const;
+  std::uint64_t entity_of_body2d(std::uint32_t body) const;
+  std::uint32_t joint2d_of(std::uint64_t entity) const;
+  // Body hits during the latest tick (approach speed in px / s).
+  const std::vector<physics2d::Contact>& contacts2d() const { return contacts2d_; }
+  std::size_t rigid_body_count() const;
+
  private:
   struct CameraRig {
     std::uint64_t entity = 0;  // camera entity (0 = implicit)
@@ -485,6 +499,21 @@ class World final : public ScriptWorld {
   std::vector<std::size_t> static_solids_;  // actor indices
   std::vector<std::size_t> dynamics_;       // dynamic solid actors
   std::vector<std::size_t> triggers_;       // trigger actors
+  std::vector<std::size_t> body_blockers_;  // static / kinematic rigid bodies
+
+  // Box2D (only when the scene has rigid bodies; World_Physics2D.cpp).
+  struct Body2D {
+    std::uint32_t id = 0;
+    bool proxy = false;  // a rider / pushable's kinematic stand-in
+    float x = 0.0f, y = 0.0f, rotation = 0.0f;  // last pose written / read
+  };
+  std::unique_ptr<physics2d::World> phys2d_;
+  std::map<std::uint64_t, Body2D> bodies2d_;   // entity id -> body
+  std::map<std::uint64_t, std::uint32_t> joints2d_;  // entity id -> joint
+  std::uint32_t tiles2d_ = 0;   // static body holding every solid tile run
+  std::vector<physics2d::Contact> contacts2d_;  // this tick's impacts
+  void setup_physics2d();
+  void step_physics2d();
   float step_limit_ = 1.0e9f;
   // (trigger id, other id) pairs overlapping after the latest tick, sorted.
   std::vector<std::pair<std::uint64_t, std::uint64_t>> inside_;

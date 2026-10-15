@@ -350,6 +350,7 @@ void World::step(const InputFrame& input) {
   apply_changes();
   step_players(input);
   separate_dynamics();
+  step_physics2d();
   update_triggers();
   for (const TriggerEvent& ev : events_) {
     post(LogLevel::Info, "trigger", describe(ev), ev.trigger);

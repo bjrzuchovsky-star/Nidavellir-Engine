@@ -42,6 +42,7 @@ enum RowFlags : std::uint8_t {
   kRowRider = 1u << 2,
   kRowSpawned = 1u << 3,
   kRowFaceLeft = 1u << 4,
+  kRowRotated = 1u << 5,  // v3: f32 rotation (degrees) follows x / y
 };
 
 }  // namespace
@@ -201,10 +202,12 @@ std::vector<std::uint8_t> encode(const SnapshotMsg& m) {
     if (a.slot >= 0) f |= kRowRider;
     if (a.spawned) f |= kRowSpawned;
     if (a.facing < 0) f |= kRowFaceLeft;
+    if (a.rotation != 0.0f) f |= kRowRotated;
     w.varu(a.id);
     w.u8(f);
     w.f32(a.x);
     w.f32(a.y);
+    if (a.rotation != 0.0f) w.f32(a.rotation);
     if (a.slot >= 0) {
       w.u8(static_cast<std::uint8_t>(a.slot));
       w.u8(static_cast<std::uint8_t>(q8(a.in_x)));
@@ -232,6 +235,7 @@ bool decode(const std::vector<std::uint8_t>& data, SnapshotMsg* out) {
     const std::uint8_t f = r.u8();
     a.x = r.f32();
     a.y = r.f32();
+    if (f & kRowRotated) a.rotation = r.f32();
     a.hidden = (f & kRowHidden) != 0;
     a.collider_on = (f & kRowCollider) != 0;
     a.spawned = (f & kRowSpawned) != 0;
@@ -245,7 +249,7 @@ bool decode(const std::vector<std::uint8_t>& data, SnapshotMsg* out) {
       a.dir = static_cast<runtime::Facing>(d);
     }
     if (a.spawned) a.name = r.str(256);
-    if (!finite(a.x) || !finite(a.y) || a.id == 0) return false;
+    if (!finite(a.x) || !finite(a.y) || !finite(a.rotation) || a.id == 0) return false;
     out->actors.push_back(std::move(a));
   }
   return r.ok() && r.at_end();

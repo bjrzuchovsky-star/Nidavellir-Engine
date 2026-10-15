@@ -5,6 +5,7 @@
 add_library(ts_runtime
   World.cpp
   World_Collision.cpp
+  World_Physics2D.cpp
   World_Anim.cpp
   World_Script.cpp
   World_Plugins.cpp
@@ -34,6 +35,7 @@ target_link_libraries(ts_runtime
   PUBLIC
     ts_scene
     ts_fx
+    ts_physics2d
   PRIVATE
     ts_lua
     ${CMAKE_DL_LIBS}

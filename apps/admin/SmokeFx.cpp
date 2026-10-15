@@ -296,14 +296,15 @@ void scenes() {
   check(sj::parse(text, &back, &err) && back.entities == doc.entities &&
             back.lighting == doc.lighting && sj::write(back) == text,
         "2D v9 round trip: " + err);
-  check(text.find("\"version\": 9") != std::string::npos, "2D writes v9");
+  const std::string cur2d = "\"version\": " + std::to_string(sj::kSceneVersion);
+  check(sj::kSceneVersion >= 9 && text.find(cur2d) != std::string::npos, "2D writes v9+");
   // A v8 file (no particles / light / lighting) loads with defaults.
   sj::SceneDoc plain;
   plain.entities = {fire};
   plain.entities[0].particles.reset();
   plain.entities[0].light.reset();
   std::string v8 = sj::write(plain);
-  v8.replace(v8.find("\"version\": 9"), 12, "\"version\": 8");
+  v8.replace(v8.find(cur2d), cur2d.size(), "\"version\": 8");
   sj::SceneDoc old;
   check(sj::parse(v8, &old, &err) && old.entities == plain.entities &&
             old.lighting == fx::Lighting2D{},

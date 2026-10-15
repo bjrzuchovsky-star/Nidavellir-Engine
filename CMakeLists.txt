@@ -47,6 +47,10 @@ endif()
 # headless server included). Lua 5.4 is fetched by hash.
 if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
   include(FetchLua)
+  # 2D physics core (ts_physics2d): Box2D v3 fetched by hash.
+  enable_language(C)
+  include(FetchBox2D)
+  add_subdirectory(src/physics2d)
   add_subdirectory(src/runtime)
   # In-game UI + fonts (ts_ui): stb_truetype and two OFL fonts by hash.
   include(FetchFonts)

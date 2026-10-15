@@ -30,6 +30,7 @@ add_executable(ts_admin
   SmokeTradingPost.cpp
   SmokeCSharp.cpp
   SmokePhysics.cpp
+  SmokePhysics2D.cpp
 )
 
 target_link_libraries(ts_admin

@@ -22,7 +22,8 @@ namespace tombstone {
 namespace mp {
 
 // 2: plugin channel messages.
-inline constexpr std::uint16_t kProtocolVersion = 2;
+// 3 = snapshot rows carry rotation (Box2D bodies turn).
+inline constexpr std::uint16_t kProtocolVersion = 3;
 inline constexpr int kMaxPosse = kMaxPlayers;  // four riders
 // Inputs repeated in every input packet (newest first).
 inline constexpr int kInputRedundancy = 8;

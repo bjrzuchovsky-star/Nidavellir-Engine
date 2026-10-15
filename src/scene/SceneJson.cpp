@@ -243,6 +243,10 @@ bool apply_components(Entity2D& e, const FlatMap& nested, std::string* why) {
     }
     c.trigger = type == "trigger";
     c.dynamic = body == "dynamic";
+    const std::string shape = map_string(*co, "shape", "box");
+    c.shape = shape == "circle"    ? ColliderData::Shape::Circle
+              : shape == "capsule" ? ColliderData::Shape::Capsule
+                                   : ColliderData::Shape::Box;
     e.collider = c;
   } else if (nested.count("collider")) {
     return bad("bad collider object");
@@ -308,6 +312,47 @@ bool apply_components(Entity2D& e, const FlatMap& nested, std::string* why) {
     e.light = l;
   } else if (nested.count("light")) {
     return bad("bad light object");
+  }
+  if (auto bo = parse_nested(nested, "body")) {
+    RigidBody2DData b;
+    const std::string m = map_string(*bo, "motion", "dynamic");
+    b.motion = m == "static"      ? RigidBody2DData::Motion::Static
+               : m == "kinematic" ? RigidBody2DData::Motion::Kinematic
+                                  : RigidBody2DData::Motion::Dynamic;
+    auto clampf = [](float v, float lo, float hi, float d) {
+      return std::isfinite(v) ? std::clamp(v, lo, hi) : d;
+    };
+    b.density = clampf(map_float(*bo, "density", b.density), 0.0f, 1000.0f, 1.0f);
+    b.mass = clampf(map_float(*bo, "mass", b.mass), 0.0f, 100000.0f, 0.0f);
+    b.friction = clampf(map_float(*bo, "friction", b.friction), 0.0f, 10.0f, 0.6f);
+    b.restitution = clampf(map_float(*bo, "restitution", b.restitution), 0.0f, 1.0f, 0.0f);
+    b.linear_damping = clampf(map_float(*bo, "linear_damping", b.linear_damping), 0.0f, 100.0f, 0.0f);
+    b.angular_damping = clampf(map_float(*bo, "angular_damping", b.angular_damping), 0.0f, 100.0f, 0.05f);
+    b.gravity_scale = clampf(map_float(*bo, "gravity_scale", b.gravity_scale), -10.0f, 10.0f, 1.0f);
+    b.fixed_rotation = map_bool(*bo, "fixed_rotation", false);
+    b.bullet = map_bool(*bo, "bullet", false);
+    e.body = b;
+  } else if (nested.count("body")) {
+    return bad("bad body object");
+  }
+  if (auto jo = parse_nested(nested, "joint")) {
+    Joint2DData j;
+    const std::string t = map_string(*jo, "type", "revolute");
+    j.type = t == "weld"        ? Joint2DData::Type::Weld
+             : t == "prismatic" ? Joint2DData::Type::Prismatic
+             : t == "distance"  ? Joint2DData::Type::Distance
+                                : Joint2DData::Type::Revolute;
+    j.target = std::strtoull(map_string(*jo, "target", "0").c_str(), nullptr, 10);
+    j.anchor_x = map_float(*jo, "anchor_x", 0.0f);
+    j.anchor_y = map_float(*jo, "anchor_y", 0.0f);
+    j.axis_x = map_float(*jo, "axis_x", 1.0f);
+    j.axis_y = map_float(*jo, "axis_y", 0.0f);
+    j.limits = map_bool(*jo, "limits", false);
+    j.min = map_float(*jo, "min", 0.0f);
+    j.max = map_float(*jo, "max", 0.0f);
+    e.joint = j;
+  } else if (nested.count("joint")) {
+    return bad("bad joint object");
   }
   normalize_components(e);
   return true;
@@ -430,7 +475,12 @@ void write_entity(std::ostringstream& out, const Entity2D& e) {
         << ", \"w\": " << format_float(c.w)
         << ", \"h\": " << format_float(c.h) << ", \"type\": \""
         << (c.trigger ? "trigger" : "solid") << "\", \"body\": \""
-        << (c.dynamic ? "dynamic" : "static") << "\"}";
+        << (c.dynamic ? "dynamic" : "static") << "\"";
+    if (c.shape != ColliderData::Shape::Box) {
+      out << ", \"shape\": \"" << (c.shape == ColliderData::Shape::Circle ? "circle" : "capsule")
+          << "\"";
+    }
+    out << "}";
   }
   if (e.animator) {
     const AnimatorData& a = *e.animator;
@@ -475,6 +525,31 @@ void write_entity(std::ostringstream& out, const Entity2D& e) {
         << ", \"min_distance\": " << format_float(a.min_distance)
         << ", \"max_distance\": " << format_float(a.max_distance)
         << ", \"doppler\": " << (a.doppler ? "true" : "false") << "}";
+  }
+  if (e.body) {
+    const RigidBody2DData& b = *e.body;
+    out << ",\n      \"body\": {\"motion\": \""
+        << (b.motion == RigidBody2DData::Motion::Static      ? "static"
+            : b.motion == RigidBody2DData::Motion::Kinematic ? "kinematic"
+                                                             : "dynamic")
+        << "\", \"density\": " << format_float(b.density) << ", \"mass\": " << format_float(b.mass)
+        << ", \"friction\": " << format_float(b.friction)
+        << ", \"restitution\": " << format_float(b.restitution)
+        << ", \"linear_damping\": " << format_float(b.linear_damping)
+        << ", \"angular_damping\": " << format_float(b.angular_damping)
+        << ", \"gravity_scale\": " << format_float(b.gravity_scale)
+        << ", \"fixed_rotation\": " << (b.fixed_rotation ? "true" : "false")
+        << ", \"bullet\": " << (b.bullet ? "true" : "false") << "}";
+  }
+  if (e.joint) {
+    const Joint2DData& j = *e.joint;
+    static const char* kTypes[] = {"weld", "revolute", "prismatic", "distance"};
+    out << ",\n      \"joint\": {\"type\": \"" << kTypes[static_cast<int>(j.type) & 3]
+        << "\", \"target\": " << j.target << ", \"anchor_x\": " << format_float(j.anchor_x)
+        << ", \"anchor_y\": " << format_float(j.anchor_y)
+        << ", \"axis_x\": " << format_float(j.axis_x) << ", \"axis_y\": " << format_float(j.axis_y)
+        << ", \"limits\": " << (j.limits ? "true" : "false") << ", \"min\": " << format_float(j.min)
+        << ", \"max\": " << format_float(j.max) << "}";
   }
   if (e.particles) {
     out << ",\n      \"particles\": {";

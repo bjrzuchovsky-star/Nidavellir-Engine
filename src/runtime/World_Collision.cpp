@@ -27,6 +27,75 @@ Aabb collider_box(const Entity2D& e, float x, float y) {
   return Aabb{x0, y0, x0 + c.w, y0 + c.h};
 }
 
+bool turned(const Entity2D& e) {
+  const float r = std::fmod(e.rotation, 360.0f);
+  return std::isfinite(r) && r != 0.0f;
+}
+
+Obb collider_obb(const Entity2D& e, float x, float y) {
+  const Aabb a = collider_box(e, x, y);
+  Obb b;
+  b.hx = (a.x1 - a.x0) * 0.5f;
+  b.hy = (a.y1 - a.y0) * 0.5f;
+  const float px = x + e.w * 0.5f;  // pivot: entity centre
+  const float py = y + e.h * 0.5f;
+  const float dx = (a.x0 + a.x1) * 0.5f - px;
+  const float dy = (a.y0 + a.y1) * 0.5f - py;
+  if (!turned(e)) {
+    b.cx = px + dx;
+    b.cy = py + dy;
+    return b;
+  }
+  const double rad = static_cast<double>(e.rotation) * 3.14159265358979323846 / 180.0;
+  b.c = static_cast<float>(std::cos(rad));
+  b.s = static_cast<float>(std::sin(rad));
+  // y down: (c, -s; s, c) turns clockwise on screen.
+  b.cx = px + dx * b.c - dy * b.s;
+  b.cy = py + dx * b.s + dy * b.c;
+  return b;
+}
+
+Aabb bounds(const Obb& b) {
+  const float ex = b.hx * std::fabs(b.c) + b.hy * std::fabs(b.s);
+  const float ey = b.hx * std::fabs(b.s) + b.hy * std::fabs(b.c);
+  return Aabb{b.cx - ex, b.cy - ey, b.cx + ex, b.cy + ey};
+}
+
+bool overlap_shifts(const Aabb& a, const Obb& b, int axis, float* lo,
+                    float* hi) {
+  const float ax = (a.x0 + a.x1) * 0.5f, ay = (a.y0 + a.y1) * 0.5f;
+  const float ahx = (a.x1 - a.x0) * 0.5f, ahy = (a.y1 - a.y0) * 0.5f;
+  const float axes[4][2] = {{1.0f, 0.0f}, {0.0f, 1.0f}, {b.c, b.s}, {-b.s, b.c}};
+  float l = std::numeric_limits<float>::lowest();
+  float h = std::numeric_limits<float>::max();
+  for (const auto& n : axes) {
+    const float ra = ahx * std::fabs(n[0]) + ahy * std::fabs(n[1]);
+    const float rb = b.hx * std::fabs(n[0] * b.c + n[1] * b.s) +
+                     b.hy * std::fabs(-n[0] * b.s + n[1] * b.c);
+    const float reach = ra + rb - kContactSlop;
+    if (reach <= 0.0f) return false;
+    const float d = (n[0] * b.cx + n[1] * b.cy) - (n[0] * ax + n[1] * ay);
+    const float k = n[axis];  // how a shift along `axis` moves the projection
+    if (std::fabs(k) < 1.0e-6f) {
+      if (std::fabs(d) >= reach) return false;  // this axis separates for any t
+      continue;
+    }
+    float t0 = (d - reach) / k, t1 = (d + reach) / k;
+    if (t0 > t1) std::swap(t0, t1);
+    l = std::max(l, t0);
+    h = std::min(h, t1);
+    if (l >= h) return false;
+  }
+  *lo = l;
+  *hi = h;
+  return true;
+}
+
+bool overlaps(const Aabb& a, const Obb& b) {
+  float lo = 0.0f, hi = 0.0f;
+  return overlap_shifts(a, b, 0, &lo, &hi) && lo < 0.0f && hi > 0.0f;
+}
+
 namespace {
 
 bool in_view(const Aabb& b, const WorldRect& view) {
@@ -93,15 +162,27 @@ void append_overlay(const Entity2D& e, float x, float y,
       }
     }
   }
-  if (e.collider) {
+  if (e.collider || e.body) {
     const Aabb a = collider_box(e, x, y);
-    if (in_view(a, view)) {
+    const Obb o = collider_obb(e, x, y);
+    if (in_view(bounds(o), view)) {
       OverlayBox b;
       b.x0 = a.x0;
       b.y0 = a.y0;
       b.x1 = a.x1;
       b.y1 = a.y1;
-      b.kind = kind_of(*e.collider);
+      // Turned boxes keep their size and move their centre to the pivot.
+      b.x0 = o.cx - o.hx;
+      b.x1 = o.cx + o.hx;
+      b.y0 = o.cy - o.hy;
+      b.y1 = o.cy + o.hy;
+      (void)a;
+      b.rotation = turned(e) ? e.rotation : 0.0f;
+      b.kind = e.collider ? kind_of(*e.collider)
+               : e.body->motion == RigidBody2DData::Motion::Dynamic
+                   ? OverlayKind::DynamicSolid
+                   : OverlayKind::StaticSolid;
+      b.body = e.body.has_value();
       b.entity = e.id;
       out->push_back(b);
     }
@@ -115,6 +196,7 @@ void World::setup_collision() {
   static_solids_.clear();
   dynamics_.clear();
   triggers_.clear();
+  body_blockers_.clear();
   inside_.clear();
   events_.clear();
   last_event_.reset();
@@ -134,6 +216,17 @@ void World::setup_collision() {
         grids_.push_back(std::move(g));
       }
     }
+    if (e.body) {
+      // Box2D owns it (setup_physics2d); static / kinematic ones still
+      // block riders.
+      if (e.body->motion != RigidBody2DData::Motion::Dynamic &&
+          !(e.collider && e.collider->trigger)) {
+        body_blockers_.push_back(i);
+        const Aabb a = collider_box(e);
+        thinnest = std::min(thinnest, std::min(a.x1 - a.x0, a.y1 - a.y0));
+      }
+      continue;
+    }
     if (!e.collider) {
       continue;
     }
@@ -149,6 +242,7 @@ void World::setup_collision() {
   step_limit_ = thinnest < std::numeric_limits<float>::max()
                     ? std::max(0.25f, thinnest * 0.5f)
                     : 1.0e9f;
+  setup_physics2d();
 }
 
 void World::move_body(Actor& a, float dx, float dy) {
@@ -228,9 +322,37 @@ void World::resolve_axis(Actor& a, int axis, float delta) {
       }
     }
   }
+  // Turned boxes: the shift that backs out of each one (the SAT interval
+  // of shifts along this axis that still overlap).
+  float shift = 0.0f;
+  auto consider_obb = [&](const Obb& o) {
+    float lo = 0.0f, hi = 0.0f;
+    if (!overlap_shifts(now, o, axis, &lo, &hi) || !(lo < 0.0f && hi > 0.0f)) {
+      return;  // not overlapping now
+    }
+    // Already inside before this move (by more than float noise: a rider
+    // left flush last substep sits right on the interval's edge).
+    if (lo + kContactSlop < -delta && -delta < hi - kContactSlop) {
+      return;
+    }
+    hit = true;
+    shift = delta > 0.0f ? std::min(shift, lo) : std::max(shift, hi);
+  };
+  auto consider_entity = [&](const Entity2D& e) {
+    if (turned(e)) {
+      consider_obb(collider_obb(e));
+    } else {
+      consider(collider_box(e));
+    }
+  };
   for (std::size_t idx : static_solids_) {
     if (&actors_[idx] != &a) {
-      consider(collider_box(actors_[idx].data));
+      consider_entity(actors_[idx].data);
+    }
+  }
+  for (std::size_t idx : body_blockers_) {
+    if (&actors_[idx] != &a) {
+      consider_entity(actors_[idx].data);
     }
   }
   if (ext_ && !ext_->blockers.empty()) {
@@ -248,10 +370,18 @@ void World::resolve_axis(Actor& a, int axis, float delta) {
     return;
   }
   // Back out along this axis only: flush against the nearest face.
+  float back = shift;
+  const bool box_hit = delta > 0.0f ? edge < std::numeric_limits<float>::max()
+                                    : edge > std::numeric_limits<float>::lowest();
+  if (box_hit) {
+    const float b = axis == 0 ? (delta > 0.0f ? edge - now.x1 : edge - now.x0)
+                              : (delta > 0.0f ? edge - now.y1 : edge - now.y0);
+    back = delta > 0.0f ? std::min(back, b) : std::max(back, b);
+  }
   if (axis == 0) {
-    a.data.x += delta > 0.0f ? edge - now.x1 : edge - now.x0;
+    a.data.x += back;
   } else {
-    a.data.y += delta > 0.0f ? edge - now.y1 : edge - now.y0;
+    a.data.y += back;
   }
 }
 
@@ -306,15 +436,22 @@ void World::update_triggers() {
   for (std::size_t t : triggers_) {
     const Actor& trig = actors_[t];
     const Aabb tb = collider_box(trig.data);
+    const bool tturn = turned(trig.data);
+    const Obb tob = collider_obb(trig.data);
     for (const Actor& o : actors_) {
       if (&o == &trig) {
         continue;
       }
       // Riders and other moving solid bodies set triggers off.
+      // Riders, moving solid bodies and dynamic rigid bodies set triggers off.
       const bool mover =
           o.data.player.has_value() ||
-          (solid_body(o.data) && o.data.collider->dynamic);
-      if (mover && overlaps(tb, collider_box(o.data))) {
+          (o.data.body ? o.data.body->motion != RigidBody2DData::Motion::Static
+                       : solid_body(o.data) && o.data.collider->dynamic);
+      if (!mover || (o.data.collider && o.data.collider->trigger)) continue;
+      const Aabb ob = o.data.body && turned(o.data) ? bounds(collider_obb(o.data))
+                                                    : collider_box(o.data);
+      if (tturn ? overlaps(ob, tob) : overlaps(tb, ob)) {
         now.emplace_back(trig.data.id, o.data.id);
       }
     }
