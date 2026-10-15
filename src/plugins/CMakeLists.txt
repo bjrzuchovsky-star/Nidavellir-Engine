@@ -16,6 +16,7 @@ add_library(ts_plugins_builtin
   shipyard/ShipSim.cpp
   shipyard/ShipyardPlugin.cpp
   shipyard/Sample.cpp
+  ai/AiPlugin.cpp
 )
 
 target_include_directories(ts_plugins_builtin
@@ -32,6 +33,7 @@ target_link_libraries(ts_plugins_builtin
     ts_runtime
     ts_scene
     ts_ui
+    ts_ai
 )
 
 target_compile_features(ts_plugins_builtin PUBLIC cxx_std_20)

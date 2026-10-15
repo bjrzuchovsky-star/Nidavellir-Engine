@@ -6,6 +6,7 @@ add_library(ts_ai
   AiJson.cpp
   GridPath.cpp
   Steering.cpp
+  AgentBrain.cpp
   BehaviorTree.cpp
   Perception.cpp
   NavMesh.cpp

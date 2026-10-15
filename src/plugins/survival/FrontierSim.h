@@ -21,6 +21,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <set>
 #include <string>
 #include <utility>
@@ -145,6 +146,15 @@ class FrontierSim {
   std::uint64_t edits_sent() const { return edits_sent_; }
   std::uint64_t edits_received() const { return edits_received_; }
   bool data_mismatch() const { return data_mismatch_; }
+
+  // Optional chase pathing (ts.ai): a unit heading from (x, y) toward the
+  // target around walls; false = fall back to the straight chase.
+  using MobSteer = std::function<bool(const runtime::World& w, std::uint32_t mob, float x, float y,
+                                      float tx, float ty, float half,
+                                      const std::function<bool(float, float)>& walkable,
+                                      float* dx, float* dy)>;
+  static void set_mob_steer(MobSteer steer);
+  bool tile_walkable_px(float x, float y, float half) const { return walkable_px(x, y, half); }
 
   // Wire helpers (also used by the smokes).
   std::vector<std::uint8_t> encode_state() const;

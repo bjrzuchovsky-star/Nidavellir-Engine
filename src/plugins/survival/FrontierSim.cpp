@@ -799,6 +799,15 @@ void FrontierSim::spawn_near(World& w, int slot) {
   }
 }
 
+namespace {
+FrontierSim::MobSteer& mob_steer() {
+  static FrontierSim::MobSteer s;
+  return s;
+}
+}  // namespace
+
+void FrontierSim::set_mob_steer(MobSteer steer) { mob_steer() = std::move(steer); }
+
 void FrontierSim::step_mobs(World& w) {
   const float dt = static_cast<float>(kDt);
   const bool dark = night();
@@ -840,8 +849,13 @@ void FrontierSim::step_mobs(World& w) {
       m.state = 1;
       const float reach = half + 18.0f;
       if (best > reach) {
-        vx = (tx - m.x) / best * c.speed;
-        vy = (ty - m.y) / best * c.speed;
+        float hx = (tx - m.x) / best, hy = (ty - m.y) / best;
+        if (mob_steer()) {
+          const auto walk = [this, half](float px, float py) { return walkable_px(px, py, half); };
+          mob_steer()(w, m.id, m.x, m.y, tx, ty, half, walk, &hx, &hy);
+        }
+        vx = hx * c.speed;
+        vy = hy * c.speed;
       } else if (m.cd <= 0.0f) {
         m.cd = 1.0f;
         Player& p = players_[static_cast<std::size_t>(target)];

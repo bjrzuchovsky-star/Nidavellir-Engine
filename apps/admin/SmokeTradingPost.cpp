@@ -256,16 +256,17 @@ int run_trading_post_smoke() {
 
   store::TradingPost post(cache.string());
   post.refresh(&known);
-  for (const char* id : {"ts.posse", "ts.tumbleweed", "ts.frontier", "ts.shipyard"}) {
+  for (const char* id : {"ts.posse", "ts.tumbleweed", "ts.frontier", "ts.shipyard", "ts.ai"}) {
     const store::StoreEntry* e = post.find(id);
     if (!e || e->source != store::Source::BuiltIn || !e->installed) {
       return fail(std::string("built-in listed: ") + id);
     }
   }
-  if (!post.find("ts.frontier")->optional || post.find("ts.posse")->optional) {
+  if (!post.find("ts.frontier")->optional || post.find("ts.posse")->optional ||
+      !post.find("ts.ai")->optional) {
     return fail("optional = off by default (ships only when a project enables it)");
   }
-  for (const char* id : {"ts.quests", "ts.dialogue", "ts.steam", "ts.ai", "ts.profiler"}) {
+  for (const char* id : {"ts.quests", "ts.dialogue", "ts.steam", "ts.profiler"}) {
     const store::StoreEntry* e = post.find(id);
     if (!e || e->source != store::Source::ComingSoon || e->installable()) {
       return fail(std::string("coming soon: ") + id);
@@ -276,7 +277,7 @@ int run_trading_post_smoke() {
     return fail("coming soon cannot be installed");
   }
   if (post.uninstall("ts.posse", &err)) return fail("built-ins cannot be uninstalled");
-  if (post.search("", "Coming Soon").size() != 5 || post.search("survival", "").empty() ||
+  if (post.search("", "Coming Soon").size() != 4 || post.search("survival", "").empty() ||
       post.search("", "Gameplay").empty() || !post.search("zzzz-nothing", "").empty() ||
       post.search("steam", "").empty() || post.search("steam", "").front()->id != "ts.steam") {
     return fail("search / categories");
@@ -527,7 +528,7 @@ int run_trading_post_smoke() {
 
   fs::remove_all(root, ec);
   std::cout << "[smoke] trading post OK (sha256 + Ed25519 RFC 8032 vectors, json, urls; "
-            << post.search("", "").size() << " goods: built-ins, 5 coming soon; local folder "
+            << post.search("", "").size() << " goods: built-ins, 4 coming soon; local folder "
                "install / enable with deps / uninstall via the plugin cache; signed index over file:// and "
                "http:// (" << served << " requests, redirect, 404), update offered; hash / size / "
                "untrusted key / tampered index / mislabelled library refused)\n";
