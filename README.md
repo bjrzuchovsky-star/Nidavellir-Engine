@@ -976,3 +976,53 @@ Each project is a folder under `projects_root` with a `project.json` (and, for 2
 `scene.json` stores the Editor2D workspace (entity list + view). On first run (empty `projects_root`), Admin seeds one sample 2D project. Changing `projects_root` in Settings reloads the project list from the new folder. Local `TombStoneProjects/` and `TombStoneConfig/` are gitignored.
 
 Configure with CMake 3.20+ and a C++20 toolchain. Toggle `TS_BUILD_ADMIN`, `TS_BUILD_CLIENT`, and `TS_BUILD_GAME` as needed. See **Building admin with ImGui** above when enabling Admin.
+
+## Ship It: build & export (Freight Office)
+
+Package a project into a standalone game folder, from the editor
+(**File > Export... (Freight Office)** in 2D, **Claim > Export...** in 3D/VR)
+or headless:
+
+```
+ts_admin --export <project dir | sample:<id>> --out <dir>
+         [--profile shipping|dev] [--server] [--zip] [--runtime <ts_game>]
+         [--name N] [--version V]
+ts_admin --smoke-export     # exports all 5 samples, rides each from its pak
+```
+
+Samples: `sample-2d-platformer`, `ghost-town-3d`, `haunted-saloon-vr`,
+`frontier-survival`, `sky-pirates`. Build Release first (VS2022:
+`cmake --build build --config Release`); the exporter ships the `ts_game`
+next to the running `ts_admin` and warns when it is a Debug build.
+
+Output (`<out>/<slug>/`):
+
+| File | What |
+|---|---|
+| `<slug>.exe` / `<slug>` | `ts_game`, renamed; on Windows the project's `icon.png` is stamped in as the exe icon |
+| `game.json` | manifest: name, version, icon, window size, start scene, dimension, profile, pak |
+| `game.tspak` | cooked content: scenes, scripts, assets, ui, project.json (editor-only data stripped) |
+| `plugins/` | dynamic plugin DLLs the project enables (built-ins need none) |
+| `lib/` | Linux: OpenXR loader `.so` (static on MSVC); `<slug>.sh` sets `LD_LIBRARY_PATH` |
+| `server/` | `--server`: `ts_server` + loose content + `run_server` script |
+| `README.txt`, `export_report.txt` | how to run (MSVC runtime note: VC++ 2015-2022 x64 redistributable) and the validation report |
+
+`ts_game` with no `--project` (or `--project <export dir>`) reads `game.json`
+next to it, mounts `game.tspak` through **ts_vfs** and runs. Profiles:
+**shipping** (script errors / missing scene / missing plugin stop the export;
+editor tool state stripped from project.json + 2D scene) and **dev**
+(warnings only, keeps `.pdb`, launcher writes `telegraph.log`). `--zip` writes
+`<out>/<slug>-<version>.zip`.
+
+Validation report: scene present, every `.lua` compiles, asset paths named in
+the JSON data exist, enabled plugins resolve (built-in or DLL).
+
+**.tspak** (`src/vfs/Pak.h`): header `TSPAK\0\0\1`, version, count, index
+offset, content hash; file blobs; index of (path, offset, size, stored size,
+flags, FNV-1a 64 hash). Reads are hash-checked. `ts_vfs::Vfs` mounts paks
+over loose roots (pak first, loose fallback). The runtime mounts a pak by
+laying it out once in a per-content-hash cache (`$TS_PAK_CACHE`, else
+`%LOCALAPPDATA%\TombStone\paks` / `~/.cache/tombstone/paks`), so every
+loader (scene, scripts, UI, audio, textures, glTF, plugin data) reads packed
+content without per-loader hooks. Entries are stored uncompressed (the
+flags field reserves compression).
