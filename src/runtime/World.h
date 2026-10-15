@@ -316,6 +316,7 @@ class World final : public ScriptWorld {
                     std::uint64_t from) override;
   void script_log(LogEntry entry) override;
   void script_open_extensions(lua_State* L, int sandbox) override;
+  void open_physics_lua(lua_State* L, int sandbox);  // World_PhysicsLua.cpp
   void script_sound(SoundEvent event) override;
   void script_ui(UiCommand command) override;
   void script_fx(FxEvent event) override;
@@ -432,6 +433,20 @@ class World final : public ScriptWorld {
   // Body hits during the latest tick (approach speed in px / s).
   const std::vector<physics2d::Contact>& contacts2d() const { return contacts2d_; }
   std::size_t rigid_body_count() const;
+  // Script calls (the Lua `physics` table, graphs, C++ and C#). Units: px,
+  // px / s, degrees. `what`: "force" (kg px / s^2), "impulse" (kg px / s),
+  // "torque". False when the entity has no dynamic body.
+  bool phys2d_apply(std::uint64_t id, const char* what, float x, float y);
+  bool phys2d_set_velocity(std::uint64_t id, float vx, float vy);
+  bool phys2d_velocity(std::uint64_t id, float* vx, float* vy) const;
+  bool phys2d_raycast(float x, float y, float dx, float dy, float dist,
+                      physics2d::RayHit* hit) const;
+  // Join entity b's body to a's (0 = the world); the anchor is relative to
+  // b's centre. Returns the joint handle or 0.
+  std::uint32_t phys2d_joint(const Joint2DData& j, std::uint64_t a, std::uint64_t b,
+                             std::string* error = nullptr);
+  void phys2d_unjoint(std::uint32_t joint);
+  float phys2d_joint_value(std::uint32_t joint) const;
 
  private:
   struct CameraRig {

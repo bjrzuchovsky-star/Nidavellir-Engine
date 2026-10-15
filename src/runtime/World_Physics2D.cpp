@@ -68,6 +68,79 @@ std::size_t World::rigid_body_count() const {
   return n;
 }
 
+bool World::phys2d_apply(std::uint64_t id, const char* what, float x, float y) {
+  const std::uint32_t b = body2d_of(id);
+  if (!b || bodies2d_.at(id).proxy || phys2d_->motion(b) != p2::Motion::Dynamic) return false;
+  const std::string w = what ? what : "";
+  if (w == "force") {
+    phys2d_->add_force(b, {x, y});
+  } else if (w == "impulse") {
+    phys2d_->add_impulse(b, {x, y});
+  } else if (w == "torque") {
+    phys2d_->add_torque(b, x);
+  } else {
+    return false;
+  }
+  return true;
+}
+
+bool World::phys2d_set_velocity(std::uint64_t id, float vx, float vy) {
+  const std::uint32_t b = body2d_of(id);
+  if (!b || bodies2d_.at(id).proxy || phys2d_->motion(b) == p2::Motion::Static) return false;
+  phys2d_->set_velocity(b, {vx, vy});
+  return true;
+}
+
+bool World::phys2d_velocity(std::uint64_t id, float* vx, float* vy) const {
+  const std::uint32_t b = body2d_of(id);
+  if (!b) return false;
+  const p2::Vec2 v = phys2d_->velocity(b);
+  *vx = v.x;
+  *vy = v.y;
+  return true;
+}
+
+bool World::phys2d_raycast(float x, float y, float dx, float dy, float dist,
+                           p2::RayHit* hit) const {
+  return phys2d_ && phys2d_->raycast({x, y}, {dx, dy}, dist, hit);
+}
+
+std::uint32_t World::phys2d_joint(const Joint2DData& j, std::uint64_t a, std::uint64_t b,
+                                  std::string* error) {
+  const std::uint32_t ba = a ? body2d_of(a) : 0;
+  const std::uint32_t bb = body2d_of(b);
+  const Actor* eb = find(b);
+  if (!phys2d_ || (a && !ba) || !bb || !eb) {
+    if (error) *error = "both ends need a rigid body";
+    return 0;
+  }
+  p2::JointDesc jd;
+  jd.type = static_cast<p2::JointType>(j.type);
+  jd.a = ba;
+  jd.b = bb;
+  const p2::Vec2 centre{eb->data.x + eb->data.w * 0.5f, eb->data.y + eb->data.h * 0.5f};
+  jd.anchor = {centre.x + j.anchor_x, centre.y + j.anchor_y};
+  if (j.type == Joint2DData::Type::Distance) {
+    // From a's centre (or, pinned to the world, the anchor point) to b's.
+    const Actor* t = a ? find(a) : nullptr;
+    if (t) jd.anchor = {t->data.x + t->data.w * 0.5f, t->data.y + t->data.h * 0.5f};
+    jd.anchor_b = centre;
+  }
+  jd.axis = {j.axis_x, j.axis_y};
+  jd.limits = j.limits;
+  jd.min = j.min;
+  jd.max = j.max;
+  return phys2d_->add_joint(jd, error);
+}
+
+void World::phys2d_unjoint(std::uint32_t joint) {
+  if (phys2d_ && joint) phys2d_->remove_joint(joint);
+}
+
+float World::phys2d_joint_value(std::uint32_t joint) const {
+  return phys2d_ && joint ? phys2d_->joint_value(joint) : 0.0f;
+}
+
 void World::setup_physics2d() {
   bool any = false;
   for (const Actor& a : actors_) any = any || (!a.dead && a.data.body);
@@ -195,26 +268,8 @@ void World::setup_physics2d() {
     const std::uint32_t mine = body2d_of(e.id);
     const std::uint32_t other = e.joint->target ? body2d_of(e.joint->target) : 0;
     if (!mine || (e.joint->target && !other)) continue;
-    const Joint2DData& j = *e.joint;
-    p2::JointDesc jd;
-    jd.type = static_cast<p2::JointType>(j.type);
-    jd.a = other;
-    jd.b = mine;
-    const p2::Vec2 centre{e.x + e.w * 0.5f, e.y + e.h * 0.5f};
-    jd.anchor = {centre.x + j.anchor_x, centre.y + j.anchor_y};
-    if (j.type == Joint2DData::Type::Distance) {
-      // From the target's centre (the anchor point for the world) to ours.
-      const Actor* t = e.joint->target ? find(e.joint->target) : nullptr;
-      jd.anchor = t ? p2::Vec2{t->data.x + t->data.w * 0.5f, t->data.y + t->data.h * 0.5f}
-                    : jd.anchor;
-      jd.anchor_b = centre;
-    }
-    jd.axis = {j.axis_x, j.axis_y};
-    jd.limits = j.limits;
-    jd.min = j.min;
-    jd.max = j.max;
     std::string err;
-    const p2::JointId jid = phys2d_->add_joint(jd, &err);
+    const p2::JointId jid = phys2d_joint(*e.joint, e.joint->target, e.id, &err);
     if (jid) {
       joints2d_[e.id] = jid;
     } else {

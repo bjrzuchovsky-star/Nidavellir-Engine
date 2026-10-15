@@ -54,6 +54,7 @@ std::size_t World::extension_systems_live() const {
 }
 
 void World::script_open_extensions(lua_State* L, int sandbox) {
+  open_physics_lua(L, sandbox);
   if (!ext_) return;
   for (const WorldExtensions::LuaApi& api : ext_->lua) {
     if (api.name.empty() || !api.push) continue;

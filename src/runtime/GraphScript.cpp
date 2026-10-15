@@ -138,6 +138,24 @@ std::vector<GraphNodeDef> build_catalog() {
       "behaviour tree blackboard");
   act("AI", "ai.get_bb", "Get Blackboard", {{"id", N(0)}, {"key", T("")}}, {"value"}, "blackboard value");
   act("AI", "ai.state", "AI State", {{"id", N(0)}}, {"value"}, "running branch of the tree");
+  // Physics (the physics table through the plugin bridge; 0 = self). 2D:
+  // px, px / s (z unused); 3D: metres, y up.
+  act("Physics", "phys.apply_force", "Apply Force", {{"id", N(0)}, {"x", N(0)}, {"y", N(0)}, {"z", N(0)}},
+      {"value"}, "push a rigid body (every tick)");
+  act("Physics", "phys.apply_impulse", "Apply Impulse", {{"id", N(0)}, {"x", N(0)}, {"y", N(0)}, {"z", N(0)}},
+      {"value"}, "one kick (kg * speed)");
+  act("Physics", "phys.set_velocity", "Set Velocity", {{"id", N(0)}, {"x", N(0)}, {"y", N(0)}, {"z", N(0)}},
+      {"value"}, "rigid body velocity");
+  act("Physics", "phys.velocity_axis", "Get Velocity", {{"id", N(0)}, {"axis", N(0)}}, {"value"},
+      "velocity along x (0), y (1) or z (2)");
+  act("Physics", "phys.speed", "Get Speed", {{"id", N(0)}}, {"value"}, "how fast it moves");
+  act("Physics", "phys.raycast_xyz", "Raycast",
+      {{"x", N(0)}, {"y", N(0)}, {"z", N(0)}, {"dx", N(1)}, {"dy", N(0)}, {"dz", N(0)}, {"dist", N(100)}},
+      {"value"}, "first entity hit (false = none)");
+  act("Physics", "phys.joint_xyz", "Add Joint",
+      {{"a", N(0)}, {"b", N(0)}, {"type", T("hinge")}, {"ax", N(0)}, {"ay", N(0)}, {"az", N(0)}}, {"value"},
+      "join b to a (0 = the world); joint handle");
+  act("Physics", "phys.unjoint", "Remove Joint", {{"joint", N(0)}}, {}, "break a joint");
   act("Plugins", "plugin.call", "Plugin Call",
       {{"table", T("")}, {"fn", T("")}, {"a", N(0)}, {"b", N(0)}, {"c", N(0)}}, {"value"},
       "table.fn(a, b, c) on a plugin's Lua table");
@@ -488,7 +506,7 @@ struct GraphScriptHost::Impl {
     auto I = [&](const char* p) { return input(in, n, p, depth); };
     const auto stored = in.outs.find({node_id, pin});
     if (t.rfind("event.", 0) == 0 || t == "flow.for" || t == "var.set" || t == "var.add" || t == "plugin.call" ||
-        t == "entity.spawn" || t.rfind("ai.", 0) == 0) {
+        t == "entity.spawn" || t.rfind("ai.", 0) == 0 || t.rfind("phys.", 0) == 0) {
       return stored == in.outs.end() ? N(0) : stored->second;
     }
     if (t.rfind("math.", 0) == 0) {
@@ -673,6 +691,32 @@ struct GraphScriptHost::Impl {
         ScriptValue r;
         std::string err;
         if (world->script_plugin_call("ai", t.substr(3), args, &r, &err)) {
+          in.outs[{n.id, "value"}] = r;
+        } else {
+          in.outs[{n.id, "value"}] = B(false);
+          log(LogLevel::Error, err, &in, 0);
+        }
+      } else if (t.rfind("phys.", 0) == 0) {
+        const std::string fn = t.substr(5);
+        std::vector<ScriptValue> args;
+        auto self_or = [&](const char* pin) {
+          const std::uint64_t e = id_of(I(pin));
+          return N(static_cast<double>(e ? e : in.entity));
+        };
+        if (fn == "raycast_xyz") {
+          args = {I("x"), I("y"), I("z"), I("dx"), I("dy"), I("dz"), I("dist")};
+        } else if (fn == "joint_xyz") {
+          args = {N(static_cast<double>(id_of(I("a")))), self_or("b"), I("type"), I("ax"), I("ay"), I("az")};
+        } else if (fn == "unjoint") {
+          args = {I("joint")};
+        } else {
+          args = {self_or("id")};
+          if (fn == "velocity_axis") args.push_back(I("axis"));
+          else if (fn != "speed") args.insert(args.end(), {I("x"), I("y"), I("z")});
+        }
+        ScriptValue r;
+        std::string err;
+        if (world->script_plugin_call("physics", fn, args, &r, &err)) {
           in.outs[{n.id, "value"}] = r;
         } else {
           in.outs[{n.id, "value"}] = B(false);

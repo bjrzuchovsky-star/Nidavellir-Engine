@@ -183,6 +183,7 @@ void World3D::script_open_extensions(lua_State* L, int sandbox) {
     luaL_setfuncs(L, vr_fns, 1);
     lua_setfield(L, sb, "vr");
     anim_open_lua(L, sb);
+    open_physics_lua(L, sb);
     for (const auto& x : exts_) x->open_lua(*this, L, sb);
   }
   if (luaL_getmetatable(L, kEntityMeta) != LUA_TTABLE) {

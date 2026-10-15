@@ -5,6 +5,7 @@
 // trip, and two identical runs hash the same.
 
 #include "runtime/Collision.h"
+#include "runtime/GraphScript.h"
 #include "runtime/World.h"
 #include "scene/SceneData.h"
 #include "scene/SceneJson.h"
@@ -13,6 +14,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <iostream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -200,6 +202,71 @@ int round_trip() {
   return 0;
 }
 
+// The physics API from Lua, a graph and the plugin bridge (what C++ / C#
+// call): impulse, set_velocity, velocity, raycast, joint + unjoint.
+int script_api(std::string* report) {
+  runtime::World w;
+  w.script_library().put("scripts/kick.lua",
+                         "function on_start()\n"
+                         "  physics.apply_impulse(self, 300, 0)\n"
+                         "  local hit, d = physics.raycast(10, 116, 1, 0, 1000)\n"
+                         "  log('ray=' .. tostring(hit) .. ' d=' .. math.floor(d or -1))\n"
+                         "  j = physics.joint(0, find('Pendulum'), 'revolute', 0, -24)\n"
+                         "  log('joint=' .. tostring(j ~= false) .. ' bodies=' .. physics.bodies())\n"
+                         "end\n"
+                         "function on_tick(dt)\n"
+                         "  if tick() == 30 then local vx = physics.velocity(self); log('vx=' .. math.floor(vx)) end\n"
+                         "end\n");
+  runtime::Graph g;
+  auto node = [&g](const std::string& type, std::map<std::string, ScriptValue> in) {
+    runtime::GraphNode n;
+    n.id = g.next_id();
+    n.type = type;
+    n.inputs = std::move(in);
+    g.nodes.push_back(n);
+    return n.id;
+  };
+  const int start = node("event.start", {});
+  const int vel = node("phys.set_velocity", {{"x", ScriptValue::of_number(0)}, {"y", ScriptValue::of_number(-200)}});
+  g.links.push_back({start, "out", vel, "in"});
+  w.script_library().put("scripts/lift.graph.json", runtime::write_graph(g));
+  Entity2D kick = body(box(2, "Kicked", 100.0f, 100.0f, 32.0f, 32.0f), RigidBody2DData::Motion::Dynamic, 0.0f);
+  kick.script = ScriptData{};
+  kick.script->path = "scripts/kick.lua";
+  Entity2D lift = body(box(3, "Lifted", 300.0f, 300.0f, 32.0f, 32.0f), RigidBody2DData::Motion::Dynamic, 0.0f);
+  lift.script = ScriptData{};
+  lift.script->path = "scripts/lift.graph.json";
+  Entity2D pend = body(box(4, "Pendulum", 500.0f, 100.0f, 16.0f, 48.0f), RigidBody2DData::Motion::Dynamic);
+  std::string err;
+  if (!w.build({kick, lift, pend}, "", &err)) return fail("script world: " + err);
+  for (int i = 0; i < 60; ++i) w.step(ride(0.0f, 0.0f));
+  std::string logs;
+  for (const auto& l : w.take_logs()) logs += l.text + "\n";
+  if (logs.find("ray=2 d=90") == std::string::npos) return fail("Lua physics.raycast: " + logs);
+  if (logs.find("joint=true bodies=3") == std::string::npos) return fail("Lua physics.joint: " + logs);
+  if (logs.find("vx=") == std::string::npos || w.find(2)->data.x < 150.0f) {
+    return fail("Lua apply_impulse moved it to x " + f2(w.find(2)->data.x) + " / " + logs);
+  }
+  if (w.find(3)->data.y > 280.0f) return fail("graph Set Velocity: y " + f2(w.find(3)->data.y));
+  // Pinned 24 px above its centre: the pendulum hangs, it doesn't fall.
+  if (w.find(4)->data.y > 140.0f) return fail("Lua joint should hold the pendulum: y " + f2(w.find(4)->data.y));
+  // Bridge (C++ / C# go this way).
+  ScriptValue r;
+  if (!w.script_plugin_call("physics", "speed", {ScriptValue::of_number(2)}, &r, &err) || r.number < 1.0) {
+    return fail("bridge physics.speed: " + err);
+  }
+  if (!w.script_plugin_call("physics", "ray_distance_xyz",
+                            {ScriptValue::of_number(2000), ScriptValue::of_number(116), ScriptValue::of_number(0),
+                             ScriptValue::of_number(-1), ScriptValue::of_number(0), ScriptValue::of_number(0),
+                             ScriptValue::of_number(5000)},
+                            &r, &err) ||
+      r.number < 100.0) {
+    return fail("bridge ray_distance_xyz: " + err + " " + std::to_string(r.number));
+  }
+  *report += ", Lua / graph / bridge physics calls";
+  return 0;
+}
+
 }  // namespace
 
 int run_physics2d_smoke() {
@@ -213,6 +280,7 @@ int run_physics2d_smoke() {
   if (joint_limit(&report) != 0) return 1;
   if (push_and_trigger(&report) != 0) return 1;
   if (round_trip() != 0) return 1;
+  if (script_api(&report) != 0) return 1;
   char hx[24];
   std::snprintf(hx, sizeof hx, "%016llx", static_cast<unsigned long long>(h1));
   std::cout << "[smoke] physics2d ok: " << report << ", hash " << hx << '\n';

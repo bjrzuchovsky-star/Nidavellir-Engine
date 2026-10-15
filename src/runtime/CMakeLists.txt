@@ -6,6 +6,7 @@ add_library(ts_runtime
   World.cpp
   World_Collision.cpp
   World_Physics2D.cpp
+  World_PhysicsLua.cpp
   World_Anim.cpp
   World_Script.cpp
   World_Plugins.cpp

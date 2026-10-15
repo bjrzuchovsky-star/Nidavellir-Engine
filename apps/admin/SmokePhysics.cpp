@@ -647,6 +647,43 @@ int run_physics_core_smoke() {
   return 0;
 }
 
+// The 3D physics API through the plugin bridge (the Lua physics table that
+// graphs, C++ and C# call): impulse, velocity, raycast, joint.
+int script_api3d(const fs::path& dir, std::string* report) {
+  s3::Scene3D s;
+  std::string err;
+  if (!s3::load_file(s3::scene_path(dir.string()), &s, &err)) return fail("load saloon: " + err);
+  w3::World3D w;
+  if (!w.start(s, dir.string(), &err)) return fail("start: " + err);
+  for (int i = 0; i < 10; ++i) w.step(w3::Input3D{});
+  const std::uint64_t can = named(s, "Tin Can 6");
+  const r3::Vec3 p = w.find(can)->transform.position;
+  using SV = ts::tombstone::ScriptValue;
+  auto call = [&](const char* fn, std::vector<SV> args, SV* r) {
+    return w.script_plugin_call("physics", fn, args, r, &err);
+  };
+  auto n = [](double v) { return SV::of_number(v); };
+  SV r;
+  if (!call("raycast_xyz", {n(p.x), n(p.y + 2), n(p.z), n(0), n(-1), n(0), n(5)}, &r) ||
+      static_cast<std::uint64_t>(r.number) != can) {
+    return fail("bridge raycast_xyz onto the top can: " + err + " got " + std::to_string(r.number));
+  }
+  if (!call("apply_impulse", {n(static_cast<double>(can)), n(0), n(1.5), n(0)}, &r) || !r.flag) {
+    return fail("bridge apply_impulse: " + err);
+  }
+  w.step(w3::Input3D{});
+  if (!call("velocity_axis", {n(static_cast<double>(can)), n(1)}, &r) || r.number < 1.0) {
+    return fail("impulse should launch the can upward (vy " + std::to_string(r.number) + ")");
+  }
+  if (!call("joint_xyz", {n(0), n(static_cast<double>(named(s, "Tin Can 1"))), SV::of_text("ball"), n(0), n(0.1),
+                          n(0)}, &r) || r.number <= 0) {
+    return fail("bridge joint_xyz: " + err);
+  }
+  if (!call("unjoint", {r}, &r)) return fail("bridge unjoint: " + err);
+  *report = "bridge raycast / impulse / velocity / joint";
+  return 0;
+}
+
 int run_physics_world_smoke() {
   const fs::path dir = fs::path("./TombStoneProjects") / "_physics_saloon_smoke";
   std::error_code ec;
@@ -655,10 +692,13 @@ int run_physics_world_smoke() {
   if (!s3::write_haunted_saloon_sample(dir.string(), "Haunted Saloon VR", &err)) {
     return fail("write sample: " + err);
   }
-  std::string knock, toss, carry;
-  if (vr_knock(dir, &knock) != 0 || vr_throw(dir, &toss) != 0 || desktop_carry(&carry) != 0) return 1;
+  std::string knock, toss, carry, api;
+  if (vr_knock(dir, &knock) != 0 || vr_throw(dir, &toss) != 0 || desktop_carry(&carry) != 0 ||
+      script_api3d(dir, &api) != 0) {
+    return 1;
+  }
   fs::remove_all(dir, ec);
-  std::cout << "[smoke] physics world OK (VR saloon: " << knock << "; " << toss << "; " << carry << ")\n";
+  std::cout << "[smoke] physics world OK (VR saloon: " << knock << "; " << toss << "; " << carry << "; " << api << ")\n";
   return 0;
 }
 

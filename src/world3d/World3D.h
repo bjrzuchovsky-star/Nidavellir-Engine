@@ -206,6 +206,7 @@ class World3D final : public runtime::ScriptWorld {
                     std::uint64_t from) override;
   void script_log(runtime::LogEntry entry) override;
   void script_open_extensions(lua_State* L, int sandbox) override;
+  void open_physics_lua(lua_State* L, int sandbox);  // World3D_PhysicsLua.cpp
   void script_sound(runtime::SoundEvent event) override;
   void script_ui(runtime::UiCommand command) override;
   void script_fx(runtime::FxEvent event) override;
