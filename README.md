@@ -1248,6 +1248,10 @@ The editor panels appear in the 2D and 3D View menus, including during Play. The
 
 Turn on `ts.profiler` for a project and Play records every frame: named CPU scopes per system, script language and plugin; GPU pass times from timer queries (3D); draw calls, triangles, asset counts and memory; and posse net stats. The 2D and 3D View menus get **Assay Office** (frame bars, timeline / flame view, scope table, capture and load), **Render & Memory** and **Net**. The Telegraph gets a console command line. In game (and in editor Play), **F3** shows the debug overlay and **`** opens the console (`help`, `fps`, `scopes`, `counters`, `gpu`, `mem`, `capture`). Captures go to `<project>/captures/*.tsprof.json` (Chrome trace JSON: open them in Perfetto too). Lua gets `profiler` and `console`. Smoke: `ts_admin --smoke-profiler`. Docs: `docs/profiler.md`.
 
+### Persistent world: the Town Hall (ts_mmo)
+
+`ts_server --mmo --project <dir>` runs a dedicated, persistent world on the posse's ENet transport. It has accounts with salted Argon2i password hashes (Monocypher); SQLite persistence for riders, inventory, positions and quest/story state, bridged to Strongbox save slots; zones with interest management (only nearby entities replicate); server-checked movement with corrections and cheat kicks; chat channels (say, zone, world, custom, whispers, admin); link-dead resume with rotating tokens; and an admin console on stdin. `ts_server --mmo-loadtest N` floods it with simulated bots. In the 2D editor (with `ts.posse` on), **View > Town Hall** runs the server in-process with a live map, riders, chat, console and bots, or launches `ts_server --mmo`. Smoke: `ts_admin --smoke-mmo`. Docs: `docs/mmo.md`.
+
 ## Ship It: build & export (Freight Office)
 
 Package a project into a standalone game folder, from the editor

@@ -23,6 +23,7 @@ These pages are written from the source in this repository (`src/`, `apps/`, `sd
 | [Dialogue: Parley](dialogue.md) | Optional `ts.dialogue`: branching `.dlg.json`, conditions / actions, Lua `dialogue` / `story`, the Parley panel |
 | [Saves: Strongbox](saves.md) | Optional `ts.saves`: slots, autosave, `story.json`, Lua `saves` |
 | [Profiler and debug tools: Assay Office](profiler.md) | Optional `ts.profiler`: CPU scopes, timeline, GPU timers, draws / memory / assets, net stats, F3 overlay, console, captures |
+| [Persistent world: Town Hall](mmo.md) | `ts_server --mmo`: accounts (Argon2i), SQLite riders + Strongbox bridge, zones + interest, anti-cheat movement, chat, resume, admin console, bot load test, editor panel |
 | [Multiplayer (the posse)](multiplayer.md) | `ts_server`, `ts_client`, protocol, prediction, Play with Posse |
 
 ## Coming soon
