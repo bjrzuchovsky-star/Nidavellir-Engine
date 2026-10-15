@@ -5,6 +5,7 @@
 #include "export/Zip.h"
 
 #include "core/JsonMini.h"
+#include "runtime/CSharpScript.h"
 #include "runtime/NativeScript.h"
 #include "scene/SceneJson.h"
 #include "vfs/Pak.h"
@@ -220,7 +221,27 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
     if (!pak.add_file("native/" + runtime::native_scripts::module_file_name(), b.module, &err)) return fail(err);
     r.report.notes.push_back("C++ scripts: shipped native/" + runtime::native_scripts::module_file_name());
   }
+  // C# scripts: build the project assembly and ship it with the binding
+  // (the player needs the .NET 8+ runtime, not the SDK).
+  if (runtime::csharp_scripts::has_sources(proj.string())) {
+    say("Compiling C# scripts");
+    const runtime::ScriptBuildResult b = runtime::csharp_scripts::build(proj.string());
+    for (const runtime::LogEntry& p : b.problems) {
+      r.report.errors.push_back("C# " + p.file + ":" + std::to_string(p.line) + ": " + p.text);
+    }
+    if (!b.ok) return fail(b.error.empty() ? "C# scripts did not build" : b.error);
+    const fs::path bin = fs::path(b.module).parent_path();
+    const fs::path binding = bin.parent_path() / "binding" / "bin" / "Release" / "net8.0";
+    if (!pak.add_file("dotnet/ProjectScripts.dll", b.module, &err)) return fail(err);
+    for (const std::string& f : runtime::csharp_scripts::shipped_files(proj.string())) {
+      if (!pak.add_file("dotnet/" + f, (binding / f).string(), &err)) return fail(err);
+    }
+    r.report.notes.push_back("C# scripts: shipped dotnet/ProjectScripts.dll + TombStone.Scripting (needs the .NET 8+ runtime)");
+  }
   for (const std::string& rel : content_files(proj.string())) {
+    if (!dev && rel.rfind("scripts/", 0) == 0 && rel.size() > 3 && rel.compare(rel.size() - 3, 3, ".cs") == 0) {
+      continue;  // compiled into dotnet/
+    }
     if (!dev && (rel.size() > 4 && (rel.compare(rel.size() - 4, 4, ".cpp") == 0 ||
                                     rel.compare(rel.size() - 2, 2, ".h") == 0) &&
                  rel.rfind("scripts/", 0) == 0)) {

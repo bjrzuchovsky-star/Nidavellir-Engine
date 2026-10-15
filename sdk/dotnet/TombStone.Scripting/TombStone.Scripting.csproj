@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- TombStone C# script binding. Built per project by the engine
+       (<project>/.tombstone/dotnet); hosts the runtime side of the C ABI
+       (sdk/include/tombstone/script_abi.h) and loads the project's
+       scripts/*.cs assembly into a collectible AssemblyLoadContext. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <RollForward>LatestMajor</RollForward>
+    <AssemblyName>TombStone.Scripting</AssemblyName>
+    <RootNamespace>TombStone</RootNamespace>
+  </PropertyGroup>
+</Project>

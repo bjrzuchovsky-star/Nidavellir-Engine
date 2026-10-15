@@ -18,6 +18,8 @@ add_library(ts_runtime
   GraphScript.cpp
   ScriptAbi.cpp
   PluginBridge.cpp
+  CompiledScript.cpp
+  CSharpScript.cpp
   NativeScript.cpp
   Sound.cpp
 )
@@ -40,6 +42,7 @@ target_link_libraries(ts_runtime
 # C++ scripts: the module build runs this cmake against the bundled SDK.
 target_compile_definitions(ts_runtime PRIVATE
   TS_CMAKE_COMMAND="${CMAKE_COMMAND}"
-  TS_SCRIPT_SDK_DIR="${PROJECT_SOURCE_DIR}/sdk/include")
+  TS_SCRIPT_SDK_DIR="${PROJECT_SOURCE_DIR}/sdk/include"
+  TS_DOTNET_SDK_DIR="${PROJECT_SOURCE_DIR}/sdk/dotnet")
 
 target_compile_features(ts_runtime PUBLIC cxx_std_20)

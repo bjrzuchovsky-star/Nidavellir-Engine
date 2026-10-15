@@ -1,6 +1,7 @@
 #include "runtime/ScriptAbi.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -251,7 +252,7 @@ void* SharedLib::symbol(const char* name) const {
 
 int run_command(const std::string& command, std::string* output) {
   std::error_code ec;
-  static int counter = 0;
+  static std::atomic<int> counter{0};  // builds run on worker threads
   const fs::path log = fs::temp_directory_path(ec) /
                        ("ts_cmd_" + std::to_string(reinterpret_cast<std::uintptr_t>(&counter)) + "_" +
                         std::to_string(++counter) + ".log");

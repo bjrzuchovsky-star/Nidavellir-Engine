@@ -14,7 +14,7 @@
 // file is never locked) -> load() -> on_reload(). Build errors go to the
 // Telegraph with file:line; a failed build keeps the old module riding.
 
-#include "runtime/Script.h"
+#include "runtime/CompiledScript.h"
 
 #include <memory>
 #include <string>
@@ -34,14 +34,7 @@ bool has_sources(const std::string& project_dir);
 // add / remove).
 std::int64_t sources_stamp(const std::string& project_dir);
 
-struct BuildResult {
-  bool ok = false;
-  bool skipped = false;          // no sources, or nothing changed
-  std::string module;            // built file
-  std::string output;            // raw cmake / compiler output
-  std::vector<LogEntry> problems;
-  std::string error;             // why it failed (summary)
-};
+using BuildResult = ScriptBuildResult;
 // Writes <project>/.tombstone/native/{CMakeLists.txt, module_main.cpp,
 // sdk/...} and builds with cmake (Release). force = even when up to date.
 BuildResult build(const std::string& project_dir, bool force = false);
@@ -55,40 +48,9 @@ bool blocking_builds();
 
 }  // namespace native_scripts
 
-class NativeScriptHost final : public ScriptLanguageHost {
+class NativeScriptHost final : public CompiledScriptHost {
  public:
   NativeScriptHost(ScriptWorld& world, ScriptLibrary& library, std::string project_dir);
-  ~NativeScriptHost() override;
-
-  const char* language() const override { return "cpp"; }
-  bool attach(const Entity2D& e) override;
-  void detach(std::uint64_t entity) override;
-  bool has(std::uint64_t entity) const override;
-  bool running(std::uint64_t entity) const override;
-  bool has_hook(std::uint64_t entity, const char* hook) override;
-  std::size_t instance_count() const override;
-  void start_pending() override;
-  void trigger(bool enter, std::uint64_t trigger, std::uint64_t other) override;
-  void interact(std::uint64_t target, std::uint64_t rider) override;
-  void hand_event(std::uint64_t target, const char* hook, const std::string& text,
-                  double number) override;
-  void ui_event(const std::string& widget, bool change, double value,
-                const std::string& text) override;
-  void tick(double dt) override;
-  // Rebuilds + reloads when scripts/*.cpp changed. 1 when it reloaded.
-  int reload_changed() override;
-  bool reload(const std::string& rel) override;
-  bool uses(const std::string& rel) const override;
-
-  bool module_loaded() const;
-  bool building() const;      // a background build is running
-  bool wait_build();          // block until it lands; module loaded?
-  const std::string& module_path() const;
-
-  struct Impl;
-
- private:
-  std::unique_ptr<Impl> m_;
 };
 
 }  // namespace runtime

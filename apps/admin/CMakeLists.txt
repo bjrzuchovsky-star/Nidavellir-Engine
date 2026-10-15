@@ -23,6 +23,7 @@ add_executable(ts_admin
   SmokeNative.cpp
   SmokeTemplates.cpp
   SmokeTradingPost.cpp
+  SmokeCSharp.cpp
 )
 
 target_link_libraries(ts_admin

@@ -6,7 +6,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
-#include <future>
 #include <atomic>
 #include <fstream>
 #include <sstream>
@@ -61,11 +60,8 @@ fs::path sdk_dir() {
 }
 }  // namespace
 
-namespace {
-std::atomic<bool> g_blocking{false};
-}
-void set_blocking_builds(bool on) { g_blocking = on; }
-bool blocking_builds() { return g_blocking; }
+void set_blocking_builds(bool on) { set_compiled_scripts_blocking(on); }
+bool blocking_builds() { return compiled_scripts_blocking(); }
 
 std::string module_file_name() { return std::string("ts_scripts") + SharedLib::extension(); }
 std::string prebuilt_module(const std::string& p) { return (fs::path(p) / "native" / module_file_name()).string(); }
@@ -199,359 +195,80 @@ namespace {
 using FnAbi = int (*)();
 using FnCreate = void* (*)(const char*, const TsScriptApi*, uint64_t, const char*);
 using FnDestroy = void (*)(void*);
-using FnHas = int (*)(void*, int);
 using FnCall = void (*)(void*, int, uint64_t, double, const char*);
 using FnSave = int (*)(void*, char*, int);
 using FnLoad = void (*)(void*, const char*, int);
 
-struct Module {
+struct NativeModule final : CompiledModule {
   SharedLib lib;
-  std::string path;
-  FnCreate create = nullptr;
-  FnDestroy destroy = nullptr;
-  FnHas has = nullptr;
-  FnCall call = nullptr;
-  FnSave save = nullptr;
-  FnLoad load = nullptr;
+  FnCreate fc = nullptr;
+  FnDestroy fd = nullptr;
+  FnCall fcall = nullptr;
+  FnSave fsave = nullptr;
+  FnLoad fload = nullptr;
+  void* create(const char* c, const TsScriptApi* a, std::uint64_t s, const char* p) override { return fc(c, a, s, p); }
+  void destroy(void* o) override { fd(o); }
+  void call(void* o, int h, std::uint64_t e, double n, const char* t) override { fcall(o, h, e, n, t); }
+  int save(void* o, char* b, int c) override { return fsave ? fsave(o, b, c) : 0; }
+  void load(void* o, const char* d, int l) override {
+    if (fload) fload(o, d, l);
+  }
 };
 
-struct Inst {
-  std::uint64_t entity = 0;
-  std::string path, stem, name;
-  std::vector<ScriptProp> props;
-  void* obj = nullptr;
-  bool started = false, enabled = true;
-};
+// Loads a copy of `file` (so a rebuild can overwrite the original).
+std::unique_ptr<CompiledModule> open_native(const std::string& file, bool prebuilt, int generation,
+                                            std::string* err) {
+  std::error_code ec;
+  fs::path live = file;
+  if (!prebuilt) {
+    const fs::path dir = fs::path(file).parent_path().parent_path() / "live";
+    fs::create_directories(dir, ec);
+    static std::atomic<int> serial{0};
+    live = dir / ("ts_scripts-" + std::to_string(generation) + "-" + std::to_string(++serial) +
+                  SharedLib::extension());
+    fs::copy_file(file, live, fs::copy_options::overwrite_existing, ec);
+    if (ec) {
+      *err = "could not stage " + file + ": " + ec.message();
+      return nullptr;
+    }
+  }
+  auto m = std::make_unique<NativeModule>();
+  if (!m->lib.open(live.string(), err)) return nullptr;
+  m->path = live.string();
+  auto abi = reinterpret_cast<FnAbi>(m->lib.symbol("ts_script_abi"));
+  m->fc = reinterpret_cast<FnCreate>(m->lib.symbol("ts_script_create"));
+  m->fd = reinterpret_cast<FnDestroy>(m->lib.symbol("ts_script_destroy"));
+  m->fcall = reinterpret_cast<FnCall>(m->lib.symbol("ts_script_call"));
+  m->fsave = reinterpret_cast<FnSave>(m->lib.symbol("ts_script_save"));
+  m->fload = reinterpret_cast<FnLoad>(m->lib.symbol("ts_script_load"));
+  if (!abi || !m->fc || !m->fd || !m->fcall) {
+    *err = file + " is not a TombStone script module (missing ts_script_* exports)";
+    return nullptr;
+  }
+  if (abi() != TS_SCRIPT_ABI) {
+    *err = file + ": script ABI " + std::to_string(abi()) + ", engine wants " + std::to_string(TS_SCRIPT_ABI) +
+           " (rebuild the module)";
+    return nullptr;
+  }
+  return m;
+}
 
-std::string stem_of(const std::string& rel) {
-  return fs::path(rel).stem().string();
+CompiledBackend native_backend() {
+  CompiledBackend b;
+  b.lang = "cpp";
+  b.label = "C++";
+  b.stamp = [](const std::string& p) { return native_scripts::sources_stamp(p); };
+  b.build = [](const std::string& p, bool force) { return native_scripts::build(p, force); };
+  b.prebuilt = [](const std::string& p) { return native_scripts::prebuilt_module(p); };
+  b.open = &open_native;
+  b.class_hint = [](const std::string& stem) { return "TS_SCRIPT(Class, \"" + stem + "\")"; };
+  return b;
 }
 
 }  // namespace
 
-struct NativeScriptHost::Impl {
-  ScriptWorld* world = nullptr;
-  std::string project_dir;
-  TsScriptApi api{};
-  std::unique_ptr<Module> mod;
-  std::vector<std::unique_ptr<Inst>> insts;
-  bool tried = false;
-  bool prebuilt = false;
-  std::int64_t stamp = 0;
-  int generation = 0;
-  // Background build (off the game tick); swapped in by poll().
-  std::future<native_scripts::BuildResult> pending;
-  std::int64_t pending_stamp = 0;
-
-  bool building() const { return pending.valid(); }
-  void start_build(bool force) {
-    if (building()) return;
-    pending_stamp = native_scripts::sources_stamp(project_dir);
-    const std::string dir = project_dir;
-    pending = std::async(std::launch::async, [dir, force] { return native_scripts::build(dir, force); });
-  }
-
-  void log(LogLevel lv, const std::string& text, const std::string& file = {}, int line = 0,
-           std::uint64_t entity = 0) {
-    LogEntry e;
-    e.level = lv;
-    e.channel = "script";
-    e.text = text;
-    e.file = file;
-    e.line = line;
-    e.entity = entity;
-    e.tick = world->script_tick();
-    world->script_log(std::move(e));
-  }
-
-  // Loads a copy of `file` (so a rebuild can overwrite the original).
-  std::unique_ptr<Module> open_module(const std::string& file, std::string* err) {
-    std::error_code ec;
-    fs::path live = file;
-    if (!prebuilt) {
-      const fs::path dir = fs::path(project_dir) / ".tombstone" / "native" / "live";
-      fs::create_directories(dir, ec);
-      live = dir / ("ts_scripts-" + std::to_string(++generation) + "-" +
-                    std::to_string(reinterpret_cast<std::uintptr_t>(this) & 0xFFFFFF) +
-                    SharedLib::extension());
-      fs::copy_file(file, live, fs::copy_options::overwrite_existing, ec);
-      if (ec) {
-        *err = "could not stage " + file + ": " + ec.message();
-        return nullptr;
-      }
-    }
-    auto m = std::make_unique<Module>();
-    if (!m->lib.open(live.string(), err)) return nullptr;
-    m->path = live.string();
-    auto abi = reinterpret_cast<FnAbi>(m->lib.symbol("ts_script_abi"));
-    m->create = reinterpret_cast<FnCreate>(m->lib.symbol("ts_script_create"));
-    m->destroy = reinterpret_cast<FnDestroy>(m->lib.symbol("ts_script_destroy"));
-    m->has = reinterpret_cast<FnHas>(m->lib.symbol("ts_script_has"));
-    m->call = reinterpret_cast<FnCall>(m->lib.symbol("ts_script_call"));
-    m->save = reinterpret_cast<FnSave>(m->lib.symbol("ts_script_save"));
-    m->load = reinterpret_cast<FnLoad>(m->lib.symbol("ts_script_load"));
-    if (!abi || !m->create || !m->destroy || !m->call) {
-      *err = file + " is not a TombStone script module (missing ts_script_* exports)";
-      return nullptr;
-    }
-    if (abi() != TS_SCRIPT_ABI) {
-      *err = file + ": script ABI " + std::to_string(abi()) + ", engine wants " + std::to_string(TS_SCRIPT_ABI);
-      return nullptr;
-    }
-    return m;
-  }
-
-  void report(const native_scripts::BuildResult& b) {
-    for (const LogEntry& p : b.problems) log(p.level, p.text, p.file, p.line);
-    if (!b.ok) {
-      std::string tail = b.output.size() > 1500 ? b.output.substr(b.output.size() - 1500) : b.output;
-      log(LogLevel::Error, b.error + (b.problems.empty() && !tail.empty() ? ":\n" + tail : ""));
-    }
-  }
-
-  bool ensure_module() {
-    if (mod || tried) return mod != nullptr;
-    tried = true;
-    std::error_code ec;
-    std::string err;
-    const std::string pre = native_scripts::prebuilt_module(project_dir);
-    if (fs::exists(pre, ec)) {
-      prebuilt = true;
-      mod = open_module(pre, &err);
-      if (!mod) log(LogLevel::Error, "C++ scripts: " + err);
-      return mod != nullptr;
-    }
-    if (!native_scripts::blocking_builds()) {
-      log(LogLevel::Info, "C++ scripts: building the project module in the background");
-      start_build(false);
-      return false;
-    }
-    log(LogLevel::Info, "C++ scripts: building the project module");
-    const native_scripts::BuildResult b = native_scripts::build(project_dir);
-    stamp = native_scripts::sources_stamp(project_dir);
-    return install(b) >= 0 && mod != nullptr;
-  }
-
-  // A finished build: report it, then load the module (first time: create
-  // every waiting instance; later: hot swap). -1 failed, 0 nothing, 1 swapped.
-  int install(const native_scripts::BuildResult& b) {
-    report(b);
-    if (!b.ok) {
-      if (mod) log(LogLevel::Error, "C++ reload skipped, the previous module keeps riding");
-      return -1;
-    }
-    std::string err;
-    auto next = open_module(b.module, &err);
-    if (!next) {
-      log(LogLevel::Error, std::string(mod ? "C++ reload: " : "C++ scripts: ") + err);
-      return -1;
-    }
-    if (!mod) {
-      mod = std::move(next);
-      log(LogLevel::Info, "C++ scripts: module loaded (" + fs::path(b.module).filename().string() + ")");
-      for (auto& in : insts) if (!in->obj) create(*in);
-      return 0;
-    }
-    swap(std::move(next));
-    return 1;
-  }
-
-  // Save every instance with the old code, swap, restore with the new.
-  void swap(std::unique_ptr<Module> next) {
-    std::vector<std::string> saved(insts.size());
-    for (std::size_t i = 0; i < insts.size(); ++i) {
-      Inst& in = *insts[i];
-      if (!in.obj || !mod) continue;
-      if (mod->save) {
-        const int need = mod->save(in.obj, nullptr, 0);
-        saved[i].resize(static_cast<std::size_t>(std::max(0, need)));
-        if (need > 0) mod->save(in.obj, saved[i].data(), need);
-      }
-      mod->destroy(in.obj);
-      in.obj = nullptr;
-    }
-    const std::string old_path = mod ? mod->path : std::string();
-    mod = std::move(next);
-    std::error_code ec;
-    if (!old_path.empty()) fs::remove(old_path, ec);  // best effort (Windows may hold it briefly)
-    int good = 0;
-    for (std::size_t i = 0; i < insts.size(); ++i) {
-      Inst& in = *insts[i];
-      if (!create(in)) continue;
-      if (mod->load) mod->load(in.obj, saved[i].data(), static_cast<int>(saved[i].size()));
-      ++good;
-      if (in.started) call(in, TS_HOOK_RELOAD, 0, 0, "");
-    }
-    log(LogLevel::Info, "Reloaded C++ scripts (" + std::to_string(good) + " of " +
-                            std::to_string(insts.size()) + " running)");
-  }
-
-  // Background build done? Install it. 1 when it hot-swapped.
-  int poll(bool wait = false) {
-    if (!building()) return 0;
-    if (!wait && pending.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return 0;
-    const native_scripts::BuildResult b = pending.get();
-    stamp = pending_stamp;
-    return install(b) == 1 ? 1 : 0;
-  }
-
-  bool create(Inst& in) {
-    if (!mod) return false;
-    const std::string props = encode_script_props(in.props);
-    in.obj = mod->create(in.stem.c_str(), &api, in.entity, props.c_str());
-    if (!in.obj) {
-      log(LogLevel::Error, "no C++ script class registered as \"" + in.stem + "\" (TS_SCRIPT(Class, \"" +
-                               in.stem + "\")) for " + in.name, in.path, 0, in.entity);
-    }
-    return in.obj != nullptr;
-  }
-
-  Inst* find(std::uint64_t e) const {
-    for (const auto& i : insts) if (i->entity == e) return i.get();
-    return nullptr;
-  }
-
-  void call(Inst& in, int hook, std::uint64_t e, double n, const std::string& text) {
-    if (!in.obj || !in.enabled || !mod) return;
-    mod->call(in.obj, hook, e, n, text.c_str());
-  }
-};
-
 NativeScriptHost::NativeScriptHost(ScriptWorld& world, ScriptLibrary&, std::string project_dir)
-    : m_(std::make_unique<Impl>()) {
-  m_->world = &world;
-  m_->project_dir = std::move(project_dir);
-  m_->api = make_script_api(&world);
-}
-
-NativeScriptHost::~NativeScriptHost() {
-  if (m_->building()) m_->pending.wait();
-  if (m_->mod) {
-    for (auto& i : m_->insts) {
-      if (i->obj) m_->mod->destroy(i->obj);
-    }
-  }
-  m_->insts.clear();
-  m_->mod.reset();
-}
-
-bool NativeScriptHost::attach(const Entity2D& e) {
-  if (!e.script || m_->find(e.id)) return false;
-  auto in = std::make_unique<Inst>();
-  in->entity = e.id;
-  in->path = e.script->path;
-  in->stem = stem_of(e.script->path);
-  in->name = e.name;
-  in->props = e.script->props;
-  Inst& ref = *in;
-  m_->insts.push_back(std::move(in));
-  if (m_->project_dir.empty()) {
-    m_->log(LogLevel::Error, "C++ scripts need a project folder (" + e.name + ")", ref.path, 0, e.id);
-    return false;
-  }
-  if (!m_->ensure_module()) return m_->building();  // waits for the background build
-  return m_->create(ref);
-}
-
-void NativeScriptHost::detach(std::uint64_t entity) {
-  for (auto it = m_->insts.begin(); it != m_->insts.end(); ++it) {
-    if ((*it)->entity != entity) continue;
-    Inst& in = **it;
-    if (in.obj && m_->mod) {
-      if (in.started) m_->call(in, TS_HOOK_DESTROY, 0, 0, "");
-      m_->mod->destroy(in.obj);
-    }
-    m_->insts.erase(it);
-    return;
-  }
-}
-
-bool NativeScriptHost::has(std::uint64_t e) const { return m_->find(e) != nullptr; }
-bool NativeScriptHost::running(std::uint64_t e) const {
-  const Inst* i = m_->find(e);
-  return i && i->obj && i->enabled;
-}
-bool NativeScriptHost::has_hook(std::uint64_t e, const char* hook) {
-  const Inst* i = m_->find(e);
-  if (!i || !i->obj) return false;
-  const std::string h = hook;
-  return h == "on_start" || h == "on_tick" || h == "on_interact" || h == "on_trigger_enter" ||
-         h == "on_trigger_exit" || h == "on_reload" || h.rfind("on_", 0) == 0;
-}
-std::size_t NativeScriptHost::instance_count() const { return m_->insts.size(); }
-
-void NativeScriptHost::start_pending() {
-  for (std::size_t i = 0; i < m_->insts.size(); ++i) {
-    Inst& in = *m_->insts[i];
-    if (in.started || !in.obj) continue;
-    in.started = true;
-    m_->call(in, TS_HOOK_START, 0, 0, "");
-  }
-}
-
-void NativeScriptHost::trigger(bool enter, std::uint64_t t, std::uint64_t other) {
-  if (Inst* in = m_->find(t); in && in->started) {
-    m_->call(*in, enter ? TS_HOOK_TRIGGER_ENTER : TS_HOOK_TRIGGER_EXIT, other, 0, "");
-  }
-}
-void NativeScriptHost::interact(std::uint64_t t, std::uint64_t rider) {
-  if (Inst* in = m_->find(t); in && in->started) m_->call(*in, TS_HOOK_INTERACT, rider, 0, "");
-}
-void NativeScriptHost::hand_event(std::uint64_t t, const char* hook, const std::string& text, double n) {
-  if (Inst* in = m_->find(t); in && in->started) {
-    m_->call(*in, TS_HOOK_HAND, 0, n, std::string(hook) + "\t" + text);
-  }
-}
-void NativeScriptHost::ui_event(const std::string& widget, bool change, double value, const std::string& text) {
-  for (std::size_t i = 0; i < m_->insts.size(); ++i) {
-    Inst& in = *m_->insts[i];
-    if (in.started) m_->call(in, TS_HOOK_UI, change ? 1 : 0, value, widget + "\t" + text);
-  }
-}
-void NativeScriptHost::tick(double dt) {
-  m_->poll();
-  const std::size_t n = m_->insts.size();
-  for (std::size_t i = 0; i < n && i < m_->insts.size(); ++i) {
-    Inst& in = *m_->insts[i];
-    if (in.started) m_->call(in, TS_HOOK_TICK, 0, dt, "");
-  }
-}
-
-bool NativeScriptHost::uses(const std::string& rel) const {
-  for (const auto& i : m_->insts) if (i->path == rel) return true;
-  return false;
-}
-
-int NativeScriptHost::reload_changed() {
-  if (m_->prebuilt || m_->insts.empty() || m_->project_dir.empty()) return 0;
-  if (m_->building()) return m_->poll();
-  const std::int64_t now = native_scripts::sources_stamp(m_->project_dir);
-  if (now == m_->stamp && m_->mod) return 0;
-  m_->stamp = now;
-  if (!native_scripts::blocking_builds()) {
-    m_->log(LogLevel::Info, "C++ scripts changed: rebuilding in the background");
-    m_->start_build(true);
-    return 0;
-  }
-  return reload("") ? 1 : 0;
-}
-
-bool NativeScriptHost::reload(const std::string&) {
-  Impl& m = *m_;
-  if (m.building()) m.poll(true);
-  const native_scripts::BuildResult b = native_scripts::build(m.project_dir, true);
-  const int r = m.install(b);
-  return r == 1 || (r == 0 && m.mod);
-}
-
-bool NativeScriptHost::building() const { return m_->building(); }
-bool NativeScriptHost::wait_build() { return m_->poll(true) == 1 || m_->mod != nullptr; }
-
-bool NativeScriptHost::module_loaded() const { return m_->mod != nullptr; }
-const std::string& NativeScriptHost::module_path() const {
-  static const std::string none;
-  return m_->mod ? m_->mod->path : none;
-}
+    : CompiledScriptHost(world, std::move(project_dir), native_backend()) {}
 
 }  // namespace runtime
 }  // namespace tombstone

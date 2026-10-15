@@ -1,3 +1,4 @@
+#include "runtime/CSharpScript.h"
 #include "runtime/GraphScript.h"
 #include "runtime/NativeScript.h"
 #include "runtime/ScriptHost.h"
@@ -14,6 +15,9 @@ void register_builtin_script_languages() {
   });
   register_script_language("cpp", [](ScriptWorld& w, ScriptLibrary& l, const std::string& dir) {
     return std::make_unique<NativeScriptHost>(w, l, dir);
+  });
+  register_script_language("cs", [](ScriptWorld& w, ScriptLibrary& l, const std::string& dir) {
+    return std::make_unique<CSharpScriptHost>(w, l, dir);
   });
 }
 
