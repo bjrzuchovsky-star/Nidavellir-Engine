@@ -1,11 +1,13 @@
 #include "plugins/shipyard/ShipSim.h"
 
+#include "physics2d/Physics2D.h"
 #include "scene/JsonTree.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <map>
 
 namespace ts {
 namespace tombstone {
@@ -116,6 +118,7 @@ bool SkySettings::parse(const std::string& text, std::string* error) {
   crew = root.flag("crew", crew);
   respawn = std::max(0.5f, root.flt("respawn_seconds", respawn));
   reinforce = std::max(0.0f, root.flt("reinforce_seconds", reinforce));
+  box2d_hulls = root.str("hull_physics", box2d_hulls ? "box2d" : "builtin") == "box2d";
   enemies.clear();
   for (const json::Value& e : root["enemies"].items()) {
     EnemySpawn s;
@@ -465,6 +468,10 @@ void ShipSim::allocate_thrust(Ship& s, float* fx, float* fy, float* torque) cons
 }
 
 void ShipSim::physics() {
+  if (sky_.box2d_hulls) {
+    physics_box2d();
+    return;
+  }
   for (Ship& s : ships_) {
     apply_power(s);
     float fx = 0, fy = 0, tq = 0;
@@ -487,6 +494,110 @@ void ShipSim::physics() {
     for (const LivePart& p : s.parts) {
       const PartDef* d = lib_.get(p.def);
       if (d && p.powered) regen += d->shield_regen;
+    }
+    s.shield = std::min(s.shield_max, s.shield + regen * kDt);
+    s.hit_flash = std::max(0.0f, s.hit_flash - kDt);
+  }
+}
+
+// --- Box2D hulls (opt-in) ---------------------------------------------------------------
+// One dynamic body per ship, origin at its centre of mass, one box per part.
+// Mass and inertia are the ship's own (relayout()), so the thrust tuning is
+// unchanged; Box2D adds hull-on-hull contact. A changed layout (damage,
+// split) rebuilds the body in place keeping its velocity.
+
+struct ShipSim::Hulls {
+  physics2d::World world{{0.0f, 0.0f}, 32.0f};
+  struct Entry {
+    physics2d::BodyId body = 0;
+    std::uint64_t sig = 0;
+  };
+  std::map<std::uint32_t, Entry> bodies;
+};
+
+std::size_t ShipSim::hull_bodies() const { return hulls_ ? hulls_->bodies.size() : 0; }
+
+void ShipSim::physics_box2d() {
+  if (!hulls_) hulls_ = std::make_shared<Hulls>();
+  physics2d::World& w = hulls_->world;
+  constexpr float kRad = 180.0f / kPi;
+  // Drop bodies of ships that are gone.
+  for (auto it = hulls_->bodies.begin(); it != hulls_->bodies.end();) {
+    if (!find(it->first)) {
+      w.destroy(it->second.body);
+      it = hulls_->bodies.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  for (Ship& s : ships_) {
+    apply_power(s);
+    std::uint64_t sig = 1469598103934665603ull;
+    for (const LivePart& p : s.parts) {
+      const int v[4] = {p.def, p.x, p.y, p.rot};
+      fnv(&sig, v, sizeof(v));
+    }
+    fnv(&sig, &s.cx, sizeof(s.cx));
+    fnv(&sig, &s.cy, sizeof(s.cy));
+    Hulls::Entry& e = hulls_->bodies[s.id];
+    if (e.body == 0 || e.sig != sig || !w.exists(e.body)) {
+      if (e.body) w.destroy(e.body);
+      physics2d::BodyDesc bd;
+      bd.user = s.id;
+      bd.position = {s.x, s.y};
+      bd.angle = s.angle * kRad;
+      bd.friction = 0.4f;
+      bd.restitution = 0.2f;
+      bd.linear_damping = kLinearDamping;
+      bd.angular_damping = kAngularDamping;
+      bd.gravity_scale = 0.0f;
+      for (const LivePart& p : s.parts) {
+        const PartDef* d = lib_.get(p.def);
+        if (!d) continue;
+        int fw = 1, fh = 1;
+        footprint(*d, p.rot, &fw, &fh);
+        physics2d::ShapeDesc sh;
+        sh.w = fw * kCell;
+        sh.h = fh * kCell;
+        sh.offset = {(p.x + fw * 0.5f) * kCell - s.cx, (p.y + fh * 0.5f) * kCell - s.cy};
+        bd.shapes.push_back(sh);
+      }
+      e.body = bd.shapes.empty() ? 0 : w.create(bd);
+      e.sig = sig;
+      if (e.body) {
+        w.set_mass(e.body, s.mass, s.inertia);
+        w.set_velocity(e.body, {s.vx, s.vy});
+        w.set_angular_velocity(e.body, s.spin * kRad);
+      }
+    }
+    if (!e.body) continue;
+    float fx = 0, fy = 0, tq = 0;
+    allocate_thrust(s, &fx, &fy, &tq);
+    const float c = std::cos(s.angle), sn = std::sin(s.angle);
+    w.add_force(e.body, {c * fx - sn * fy, sn * fx + c * fy});
+    w.add_torque(e.body, tq);
+  }
+  w.step(kDt, 4);
+  for (const physics2d::Contact& ct : w.contacts()) {
+    if (ct.a != ct.b) ++hull_contacts_;
+  }
+  for (Ship& s : ships_) {
+    auto it = hulls_->bodies.find(s.id);
+    if (it == hulls_->bodies.end() || !it->second.body) continue;
+    const physics2d::BodyId b = it->second.body;
+    s.prev_x = s.x;
+    s.prev_y = s.y;
+    const physics2d::Vec2 p = w.position(b), v = w.velocity(b);
+    s.x = p.x;
+    s.y = p.y;
+    s.vx = v.x;
+    s.vy = v.y;
+    s.angle = wrap(w.angle(b) / kRad);
+    s.spin = w.angular_velocity(b) / kRad;
+    float regen = 0.0f;
+    for (const LivePart& lp : s.parts) {
+      const PartDef* d = lib_.get(lp.def);
+      if (d && lp.powered) regen += d->shield_regen;
     }
     s.shield = std::min(s.shield_max, s.shield + regen * kDt);
     s.hit_flash = std::max(0.0f, s.hit_flash - kDt);

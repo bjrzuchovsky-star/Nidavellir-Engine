@@ -157,6 +157,52 @@ int smoke_design() {
   return 0;
 }
 
+// --- 2b. Box2D hulls (sky "hull_physics": "box2d", opt-in) -------------------------------
+int smoke_box2d_hulls() {
+  SkySettings def, on;
+  if (!def.parse("{}", nullptr) || def.box2d_hulls) return fail("box2d hulls must default off");
+  if (!on.parse("{\"hull_physics\": \"box2d\"}", nullptr) || !on.box2d_hulls) {
+    return fail("sky hull_physics box2d not parsed");
+  }
+  // Built-in: two sloops driven into each other pass through.
+  auto ram = [&](bool box2d, float* gap, std::uint64_t* hash) {
+    SkySettings sky;
+    sky.crew = false;
+    sky.enemies.clear();
+    sky.reinforce = 0.0f;
+    sky.box2d_hulls = box2d;
+    ShipSim sim;
+    sim.begin(nullptr, "", PartLibrary::defaults(), sky);
+    const std::uint32_t a = sim.spawn(ShipSim::sloop_design(), 0, 0, Team::Posse, false, -1);
+    const std::uint32_t b = sim.spawn(ShipSim::sloop_design(), 0, -200, Team::Posse, false, -1);
+    for (int i = 0; i < 240; ++i) {
+      sim.set_helm(a, 0.0f, -1.0f, 0, false);
+      sim.step_bare();
+    }
+    *gap = sim.find(a)->y - sim.find(b)->y;  // > 0: a is still behind b
+    *hash = sim.hash();
+    return sim;
+  };
+  float gap_builtin = 0, gap_b2 = 0, gap_b2b = 0;
+  std::uint64_t h0 = 0, h1 = 0, h2 = 0;
+  ShipSim s0 = ram(false, &gap_builtin, &h0);
+  ShipSim s1 = ram(true, &gap_b2, &h1);
+  ram(true, &gap_b2b, &h2);
+  if (gap_builtin > 0.0f) return fail("built-in integrator unexpectedly blocked (gap " + std::to_string(gap_builtin) + ")");
+  if (gap_b2 < 40.0f) return fail("box2d hulls should collide (gap " + std::to_string(gap_b2) + ")");
+  if (s1.hull_bodies() != 2 || s1.hull_contacts() == 0) return fail("box2d hull bodies / contacts");
+  if (s0.hull_bodies() != 0) return fail("built-in run made box2d bodies");
+  if (h1 != h2) return fail("box2d hulls not deterministic");
+  // Damage rebuilds the body; the hull keeps moving.
+  s1.damage_part(s1.ships().front().id, 0, 9999);
+  for (int i = 0; i < 10; ++i) s1.step_bare();
+  if (s1.hull_bodies() != s1.ships().size()) return fail("box2d hulls after a split");
+  std::cout << "[smoke] shipyard box2d hulls OK (opt-in, default off; built-in rams through (gap "
+            << gap_builtin << " px), box2d hulls stop (gap " << gap_b2 << " px, "
+            << s1.hull_contacts() << " contacts), deterministic, rebuilt after damage)\n";
+  return 0;
+}
+
 // --- 2. Mass and thrust ----------------------------------------------------------------------
 int smoke_physics() {
   const PartLibrary lib = PartLibrary::defaults();
@@ -543,6 +589,7 @@ int run_shipyard_smoke() {
   std::cout << "[smoke] Airship Works (ts.shipyard)\n";
   if (smoke_design() != 0) return 1;
   if (smoke_physics() != 0) return 1;
+  if (smoke_box2d_hulls() != 0) return 1;
   if (smoke_damage() != 0) return 1;
   if (smoke_determinism() != 0) return 1;
   if (smoke_ride() != 0) return 1;

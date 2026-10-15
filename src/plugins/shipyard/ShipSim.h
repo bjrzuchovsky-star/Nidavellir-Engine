@@ -18,6 +18,7 @@
 #include "runtime/World.h"
 
 #include <array>
+#include <memory>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -97,6 +98,10 @@ struct SkySettings {
   bool crew = true;            // parts need hands from bunks
   float respawn = 4.0f;        // s after a rider's ship is lost
   float reinforce = 25.0f;     // s after the last pirate falls (0 = never)
+  // "hull_physics": "box2d" (opt-in) moves hulls on Box2D bodies built from
+  // the part boxes, so ships and wrecks collide. Default: the built-in
+  // integrator (no hull contact), exactly as before.
+  bool box2d_hulls = false;
   bool parse(const std::string& text, std::string* error);
 };
 
@@ -146,6 +151,9 @@ class ShipSim {
   std::uint64_t splits() const { return splits_; }
   std::uint64_t shots_fired() const { return shots_fired_; }
   std::uint64_t states_received() const { return states_received_; }
+  // Box2D hulls (sky box2d_hulls): bodies alive and hull contacts so far.
+  std::size_t hull_bodies() const;
+  std::uint64_t hull_contacts() const { return hull_contacts_; }
   const std::vector<std::string>& warnings() const { return warnings_; }
   // FNV-1a over every body, part and shot (determinism checks).
   std::uint64_t hash() const;
@@ -169,6 +177,7 @@ class ShipSim {
   void riders(runtime::World& w);
   void captains();
   void physics();
+  void physics_box2d();
   void guns();
   void step_shots();
   void break_up(std::size_t index);
@@ -203,6 +212,9 @@ class ShipSim {
   bool active_ = false;
   bool mirror_ = false;
   bool full_all_ = false;  // resend every layout next tick
+  struct Hulls;                   // Box2D hull bodies (ShipSim.cpp)
+  std::shared_ptr<Hulls> hulls_;  // only with sky_.box2d_hulls
+  std::uint64_t hull_contacts_ = 0;
 };
 
 }  // namespace shipyard

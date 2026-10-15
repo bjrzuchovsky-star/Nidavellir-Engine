@@ -36,6 +36,7 @@ target_link_libraries(ts_plugins_builtin
     ts_scene
     ts_ui
     ts_ai
+    ts_physics2d
   PUBLIC
     ts_story
     ts_profiler_lua
