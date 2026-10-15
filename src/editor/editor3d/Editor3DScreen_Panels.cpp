@@ -198,6 +198,17 @@ void Editor3DScreen::draw_inspector() {
     ImGui::DragFloat("Cam height", &p.camera_height, 0.05f, 0.0f, 50.0f);
     t.after("Camera");
   }
+  if (component("Animator", e.animator.has_value(),
+                [&] { e.animator = scene3d::default_locomotion_animator(); },
+                [&] { e.animator.reset(); })) {
+    const char* step = nullptr;
+    draw_animator_fields(*e.animator, entity_model(e), [&](const char* l) { t.after(l); }, &step);
+    if (step) {
+      t.activated = true;
+      t.commit = step;
+    }
+    if (ImGui::SmallButton("Preview clips...")) anim_preview_.open = true;
+  }
   if (component("VR Rig", e.vr_rig.has_value(), [&] { e.vr_rig = scene3d::VrRig3D{}; },
                 [&] { e.vr_rig.reset(); })) {
     scene3d::VrRig3D& r = *e.vr_rig;
@@ -221,6 +232,9 @@ void Editor3DScreen::draw_inspector() {
     t.after("Seated");
     ImGui::DragFloat("Seated lift", &r.seated_offset, 0.01f, 0.0f, 1.5f, "%.2f m");
     t.after("Seated lift");
+    edit_text("Hand model", &r.hand_model);
+    t.after("Hand model");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Skinned glTF (right hand; mirrored for the left). Empty = controllers");
   }
   if (component("Grabbable", e.grabbable.has_value(), [&] { e.grabbable = scene3d::Grabbable3D{}; },
                 [&] { e.grabbable.reset(); })) {

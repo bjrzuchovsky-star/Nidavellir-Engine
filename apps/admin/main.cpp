@@ -27,6 +27,7 @@
 #include "SmokeShipyard.h"
 #include "SmokeSurvival.h"
 #include "SmokeRuntime.h"
+#include "SmokeAnim3D.h"
 #include "SmokeTemplates.h"
 #include "SmokeTradingPost.h"
 #include "store/TradingPost.h"
@@ -1204,6 +1205,10 @@ int run_console_smoke() {
   }
   // 3D: scene v8, glTF, play runtime, GL offscreen render, 3D editor
   // (see Smoke3D.cpp / Smoke3DEditor.cpp).
+  if (run_anim3d_smoke() != 0) {
+    std::cerr << "TombStone Admin smoke FAILED (3D animation)\n";
+    return 1;
+  }
   if (run_3d_smoke() != 0) {
     return 1;
   }
@@ -1458,6 +1463,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-export") == 0) {
       return ts::tombstone::run_export_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-anim3d") == 0) {
+      return run_anim3d_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-3d") == 0) {
       // Just the 3D checks (quick loop while working on the 3D side).

@@ -43,6 +43,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -206,6 +207,23 @@ class Editor3DScreen final : public IScreen {
   const std::vector<AssetEntry>& assets() const { return assets_; }
   void rescan_assets();
 
+  // Animation preview panel (Editor3DScreen_Anim.cpp): one clip of the
+  // selected skinned entity, scrubbed or playing, posed in the edit view.
+  struct AnimPreview {
+    bool open = false;
+    bool playing = true;
+    float speed = 1.0f;
+    float time = 0.0f;
+    std::string clip;
+  };
+  AnimPreview& anim_preview() { return anim_preview_; }
+  void anim_preview_tick(float dt);
+  // The selected entity posed at the preview time (sets skin_palette);
+  // false when nothing to preview.
+  bool anim_preview_pose(scene3d::Entity3D* e);
+  // The skinned model an entity animates (its animator's model or mesh).
+  const render3d::Model* entity_model(const scene3d::Entity3D& e);
+
   const std::deque<runtime::LogEntry>& log() const { return log_; }
   void note(const std::string& text, runtime::LogLevel level = runtime::LogLevel::Info);
 
@@ -232,6 +250,7 @@ class Editor3DScreen final : public IScreen {
   void draw_inspector();
   void draw_assets();
   void draw_environment();
+  void draw_anim_preview();
   void draw_telegraph();
   void handle_shortcuts();
   world3d::Input3D poll_play_input() const;
@@ -262,6 +281,7 @@ class Editor3DScreen final : public IScreen {
   std::vector<std::string> scripts_;
   std::vector<std::string> sounds_;  // project sounds (Audio Source picker)
   bool show_mixer_ = false;
+  AnimPreview anim_preview_;
   // Sound while riding (Play or VR preview); null otherwise.
   std::unique_ptr<audio::SoundStage> sound_stage_;
   std::unique_ptr<audio::SoundStage3D> sound3d_;
@@ -299,6 +319,13 @@ class Editor3DScreen final : public IScreen {
   // Last member: unhitched first.
   EditorPlugins plugins_;
 };
+
+// Animator inspector body (Editor3DScreen_Anim.cpp): params, layers with
+// masks, states (clip / blend space), transitions, events, root motion.
+// `after(label)` follows each drag/text widget; discrete edits set
+// *commit. `model` (may be null) lists clip and bone names.
+void draw_animator_fields(scene3d::Animator3D& a, const render3d::Model* model,
+                          const std::function<void(const char*)>& after, const char** commit);
 
 }  // namespace editor
 }  // namespace tombstone

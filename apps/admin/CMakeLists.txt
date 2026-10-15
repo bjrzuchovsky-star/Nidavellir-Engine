@@ -14,6 +14,7 @@ add_executable(ts_admin
   SmokeAudio.cpp
   Smoke3D.cpp
   Smoke3DEditor.cpp
+  SmokeAnim3D.cpp
   SmokeVR.cpp
   SmokeTools.cpp
   SmokeUi.cpp

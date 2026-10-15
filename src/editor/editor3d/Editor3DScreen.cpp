@@ -140,6 +140,7 @@ AppState Editor3DScreen::on_update(float delta_seconds) {
     ui::apply_ui_commands(play_ui_.system(), world_.take_ui_commands());
     for (const world3d::Toast3D& t : world_.take_toasts()) toasts_.push_back({t.text, t.seconds});
   }
+  if (!playing()) anim_preview_tick(delta_seconds);
   update_sound(delta_seconds);
   for (auto& t : toasts_) t.second -= delta_seconds;
   while (!toasts_.empty() && toasts_.front().second <= 0) toasts_.pop_front();
@@ -586,11 +587,15 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
     opt.highlight = scene_.selection;
     const bool any_hidden = std::any_of(scene_.entities.begin(), scene_.entities.end(),
                                         [](const Entity3D& e) { return e.editor_hidden; });
-    if (any_hidden) {
+    const bool posing = anim_preview_.open && find(primary()) != nullptr;
+    if (any_hidden || posing) {
       // Eye toggled off in the hierarchy: not drawn in the editor only.
+      // The animation preview poses the selection in this copy only.
       std::vector<Entity3D> shown;
       for (const Entity3D& e : scene_.entities) {
-        if (!effectively_hidden(e)) shown.push_back(e);
+        if (effectively_hidden(e)) continue;
+        shown.push_back(e);
+        if (posing && e.id == primary()) anim_preview_pose(&shown.back());
       }
       view_->begin(scene_.environment, shown, cam, width, height, opt);
     } else {
