@@ -9,7 +9,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
+#include <chrono>
 #include <set>
+#include <thread>
 
 namespace ts {
 namespace tombstone {
@@ -582,10 +584,35 @@ bool TradingPost::install(const std::string& id, std::string* error) {
         return false;
       }
     }
-    fs::rename(stage, final_dir, ec);
-    if (ec) {
+    // Windows: a scanner or indexer can hold a freshly written file for a
+    // moment, so the rename fails transiently (sometimes with a bogus
+    // "completed successfully" message). Retry with backoff, then fall
+    // back to copy + remove.
+    std::error_code mv;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+      mv.clear();
+      fs::rename(stage, final_dir, mv);
+      if (!mv && fs::exists(final_dir / "installed.json", ec)) break;
+      if (!mv) mv = std::make_error_code(std::errc::io_error);
+      std::this_thread::sleep_for(std::chrono::milliseconds(25 << std::min(attempt, 4)));
+    }
+    if (mv) {
+      std::error_code cp;
+      fs::remove_all(final_dir, ec);
+      fs::copy(stage, final_dir, fs::copy_options::recursive | fs::copy_options::overwrite_existing, cp);
+      if (!cp && fs::exists(final_dir / "installed.json", ec)) {
+        fs::remove_all(stage, ec);
+        mv.clear();
+      } else {
+        fs::remove_all(final_dir, ec);
+      }
+    }
+    if (mv) {
       fs::remove_all(stage, ec);
-      if (error) *error = "could not move the package into the cache: " + ec.message();
+      if (error) {
+        *error = "could not move the package into the cache (after retries): " + mv.message() + " [" +
+                 std::to_string(mv.value()) + "]";
+      }
       return false;
     }
     notes_.push_back("Installed " + entry.name + " " + loaded_version);
