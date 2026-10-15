@@ -28,6 +28,7 @@
 #include "audio/SoundStage.h"
 #include "audio/SoundStage3D.h"
 #include "editor/AppState.h"
+#include "editor/assets/PrefabLibrary.h"
 #include "editor/ProjectInfo.h"
 #include "editor/editor3d/Gizmo3D.h"
 #include "editor/plugins/EditorPlugins.h"
@@ -226,6 +227,27 @@ class Editor3DScreen final : public IScreen {
   // The skinned model an entity animates (its animator's model or mesh).
   const render3d::Model* entity_model(const scene3d::Entity3D& e);
 
+  // ---- Prefabs (Editor3DScreen_Prefabs.cpp) ---------------------------------
+  // Each is one undo step + autosave (asset files written by Make / Apply /
+  // Edit are restored by undo too). See docs/prefabs.md.
+  // Selection (with subtrees) -> prefabs/<name>.prefab.json; the selection
+  // becomes the first instance. Returns the asset path ("" on failure).
+  std::string save_selection_as_prefab(const std::string& name, std::string* error = nullptr);
+  // New instance with its first root at pos; selected. Returns that id.
+  std::uint64_t place_prefab(const std::string& rel, const render3d::Vec3& pos);
+  // key "" = every override of the entity; whole_instance = every entity
+  // of its instance. Apply writes the asset and updates all instances.
+  bool prefab_apply(std::uint64_t id, const std::string& key = {}, bool whole_instance = false);
+  bool prefab_revert(std::uint64_t id, const std::string& key = {}, bool whole_instance = false);
+  bool prefab_unpack(std::uint64_t id);
+  // Replace an asset (the prefab editor / tools) and update every instance.
+  bool prefab_edit_asset(const std::string& rel, const prefab::Asset& asset);
+  // Assets changed on disk -> instances update (one undo step). Entities.
+  std::size_t prefab_poll();
+  // Entity ids of the instance `id` belongs to (empty when not an instance).
+  std::vector<std::uint64_t> prefab_instance_members(std::uint64_t id) const;
+  PrefabLibrary& prefabs() { return prefabs_; }
+
   const std::deque<runtime::LogEntry>& log() const { return log_; }
   void note(const std::string& text, runtime::LogLevel level = runtime::LogLevel::Info);
 
@@ -238,6 +260,12 @@ class Editor3DScreen final : public IScreen {
   void autosave();
   std::uint64_t add_entity(scene3d::Entity3D e, const std::string& label);
   void ensure_renderer();
+  void draw_prefabs_panel();
+  void draw_prefab_inspector(const scene3d::Entity3D& e);
+  bool refresh_prefab_overrides();
+  bool prefab_set_entities(const std::vector<json::Value>& js, const std::string& label,
+                           const scene3d::Scene3D& before);
+  void prefab_sync_all_on_load();
   void collect_problems();
 
   // UI (Editor3DScreen_UI.cpp / _Panels.cpp).
@@ -268,6 +296,10 @@ class Editor3DScreen final : public IScreen {
   bool back_requested_ = false;
   bool quit_requested_ = false;
   scene3d::Scene3D scene_;
+  PrefabLibrary prefabs_;
+  bool show_prefabs_ = true;
+  char prefab_name_[64] = "Prefab";
+  double prefab_poll_clock_ = 0.0;
   std::vector<Step> undo_;
   std::vector<Step> redo_;
   std::unique_ptr<render3d::Renderer3D> renderer_;

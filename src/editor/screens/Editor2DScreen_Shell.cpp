@@ -62,6 +62,7 @@ void Editor2DScreen::setup_default_dock_layout(unsigned int dockspace_id) {
   ImGui::DockBuilderDockWindow("Hierarchy", dock_left);
   ImGui::DockBuilderDockWindow("Supply Wagon", dock_left_bottom);
   ImGui::DockBuilderDockWindow("Scripts", dock_left_bottom);
+  ImGui::DockBuilderDockWindow("Prefabs", dock_left_bottom);
   ImGui::DockBuilderDockWindow("Plugins", dock_left_bottom);
   ImGui::DockBuilderDockWindow("Telegraph", dock_bottom);
   ImGui::DockBuilderDockWindow("Viewport2D", dock_center);
@@ -260,6 +261,7 @@ void Editor2DScreen::draw_menu_bar() {
     ImGui::MenuItem("Inspector", nullptr, &show_inspector_);
     ImGui::MenuItem("Tile Palette", nullptr, &show_tile_palette_);
     ImGui::MenuItem("Supply Wagon", nullptr, &show_supply_wagon_);
+    ImGui::MenuItem("Prefabs", nullptr, &show_prefabs_);
     ImGui::MenuItem("Stable (Animation)", nullptr, &show_stable_);
     ImGui::MenuItem("UI Preview", nullptr, &show_ui_preview_);
     ImGui::MenuItem("Lighting", nullptr, &show_lighting_);
@@ -828,6 +830,9 @@ void Editor2DScreen::draw_ui() {
   if (show_inspector_) {
     if (ImGui::Begin("Inspector", &show_inspector_)) {
       ImGui::BeginDisabled(locked);
+      if (const Entity2D* pe = workspace_.selected(); pe && pe->prefab) {
+        draw_prefab_inspector(pe->id);
+      }
       draw_inspector();
       ImGui::EndDisabled();
     }
@@ -847,6 +852,15 @@ void Editor2DScreen::draw_ui() {
     if (ImGui::Begin("Supply Wagon", &show_supply_wagon_)) {
       ImGui::BeginDisabled(locked);
       draw_supply_wagon();
+      ImGui::EndDisabled();
+    }
+    ImGui::End();
+  }
+  if (show_prefabs_) {
+    ImGui::SetNextWindowSize(ImVec2(300, 260), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Prefabs", &show_prefabs_)) {
+      ImGui::BeginDisabled(locked);
+      draw_prefabs_panel();
       ImGui::EndDisabled();
     }
     ImGui::End();

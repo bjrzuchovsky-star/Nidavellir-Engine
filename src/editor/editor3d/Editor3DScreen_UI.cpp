@@ -33,6 +33,7 @@ constexpr const char* kAssets = "Assets###Assets3D";
 constexpr const char* kEnvironment = "Environment###Environment3D";
 constexpr const char* kTelegraph = "Telegraph###Telegraph3D";
 constexpr const char* kPlugins = "Plugins###Plugins3D";
+constexpr const char* kPrefabs = "Prefabs###Prefabs3D";
 constexpr const char* kDragPayload = "TS_ASSET3D";
 
 ImU32 axis_color(int axis, float alpha = 1.0f) {
@@ -59,6 +60,7 @@ void Editor3DScreen::setup_dock_layout(unsigned int dockspace_id) {
   ImGui::DockBuilderDockWindow(kHierarchy, left);
   ImGui::DockBuilderDockWindow(kAssets, left_bottom);
   ImGui::DockBuilderDockWindow(kPlugins, left_bottom);
+  ImGui::DockBuilderDockWindow(kPrefabs, left_bottom);
   ImGui::DockBuilderDockWindow(kViewport, center);
   ImGui::DockBuilderDockWindow(kTelegraph, bottom);
   ImGui::DockBuilderDockWindow(kInspector, right);
@@ -99,6 +101,14 @@ void Editor3DScreen::draw_ui() {
   ImGui::End();
   if (ImGui::Begin(kAssets)) draw_assets();
   ImGui::End();
+  if (show_prefabs_) {
+    if (ImGui::Begin(kPrefabs, &show_prefabs_)) {
+      ImGui::BeginDisabled(locked);
+      draw_prefabs_panel();
+      ImGui::EndDisabled();
+    }
+    ImGui::End();
+  }
   if (ImGui::Begin(kPlugins)) {
     const PluginsPanelResult r = draw_plugins_panel(plugins_, plugins_panel_, playing());
     if (r.changed && plugins_.pending() && !playing()) plugins_.apply();
@@ -217,6 +227,7 @@ void Editor3DScreen::draw_menu_bar() {
     ImGui::MenuItem("Saloon Band (Mixer)", nullptr, &show_mixer_);
     ImGui::MenuItem("UI Preview", nullptr, &show_ui_preview_);
     ImGui::MenuItem("Animation Preview", nullptr, &anim_preview_.open);
+    ImGui::MenuItem("Prefabs", nullptr, &show_prefabs_);
     if (plugins_.is_open() && !plugins_.manager().editor_panels().empty()) {
       ImGui::Separator();
       draw_plugin_panel_menu_items(plugins_, plugin_panel_open_);

@@ -6,6 +6,7 @@
 
 #include "fx/Light2D.h"
 #include "fx/Particles.h"
+#include "scene/Prefab.h"
 #include "scene/TileMap.h"
 
 #include <cstddef>
@@ -241,6 +242,9 @@ struct Entity2D {
   // Box2D rigid body and joint (scene.json v10).
   std::optional<RigidBody2DData> body;
   std::optional<Joint2DData> joint;
+  // Prefab instance link (scene.json v11): which .prefab.json asset, which
+  // instance, which asset entity, and the overridden fields.
+  std::optional<prefab::Link> prefab;
 
   float center_x() const { return x + w * 0.5f; }
   float center_y() const { return y + h * 0.5f; }

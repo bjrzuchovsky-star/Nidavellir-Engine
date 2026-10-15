@@ -13,6 +13,7 @@
 #include "gfx/GlTextureUploader.h"
 
 #include "Smoke3D.h"
+#include "SmokePrefab.h"
 #include "SmokeTools.h"
 #include "SmokeVR.h"
 #include "SmokePlugins.h"
@@ -1241,6 +1242,10 @@ int run_console_smoke() {
   if (run_tools_smoke() != 0) {
     return 1;
   }
+  // Prefabs in the 2D and 3D editors (see SmokePrefab.cpp).
+  if (run_prefab_smoke() != 0) {
+    return 1;
+  }
   // Airship Works plugin (see SmokeShipyard.cpp).
   if (run_shipyard_smoke() != 0) {
     return 1;
@@ -1643,6 +1648,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-vr") == 0) {
       // Just the VR checks.
       return run_vr_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-prefab") == 0) {
+      // Just the prefab checks (2D + 3D).
+      return run_prefab_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-tools") == 0) {
       // Just the editor tools checks (2D + 3D).

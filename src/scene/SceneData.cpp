@@ -19,7 +19,8 @@ bool operator==(const Entity2D& a, const Entity2D& b) {
          a.collider == b.collider && a.animator == b.animator &&
          a.script == b.script && a.rotation == b.rotation &&
          a.parent == b.parent && a.locked == b.locked && a.hidden == b.hidden &&
-         a.audio == b.audio && a.body == b.body && a.joint == b.joint;
+         a.audio == b.audio && a.body == b.body && a.joint == b.joint &&
+         a.prefab == b.prefab;
 }
 
 ScriptValue ScriptValue::of_bool(bool v) {

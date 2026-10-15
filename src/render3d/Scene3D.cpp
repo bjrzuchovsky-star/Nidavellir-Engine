@@ -121,6 +121,7 @@ Value entity_json(const Entity3D& e) {
   }
   if (e.rigid_body) o.set("rigid_body", physics_json::rigid_body(*e.rigid_body));
   if (e.joint) o.set("joint", physics_json::joint(*e.joint));
+  if (e.prefab) o.set("prefab", prefab::link_to_json(*e.prefab));
   if (e.script) {
     Value s = Value::object();
     s.set("path", Value::string(e.script->path));
@@ -327,11 +328,55 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     l.bidirectional = v.flag("bidirectional", l.bidirectional);
     e.nav_link = l;
   }
+  if (o.has("prefab")) {
+    prefab::Link link;
+    if (!prefab::link_from_json(o["prefab"], &link)) {
+      *why = "entity " + e.name + ": bad prefab link";
+      return false;
+    }
+    e.prefab = std::move(link);
+  }
   *out = std::move(e);
   return true;
 }
 
 }  // namespace
+
+Value entity_to_json(const Entity3D& e) { return entity_json(e); }
+
+bool entity_from_json(const Value& v, Entity3D* out, std::string* error) {
+  std::string why;
+  if (!entity_from(v, out, &why)) {
+    if (error) *error = why;
+    return false;
+  }
+  return true;
+}
+
+std::vector<Value> entities_to_json(const std::vector<Entity3D>& entities) {
+  std::vector<Value> out;
+  out.reserve(entities.size());
+  for (const Entity3D& e : entities) out.push_back(entity_json(e));
+  return out;
+}
+
+bool entities_from_json(const std::vector<Value>& values, std::vector<Entity3D>* out,
+                        std::string* error) {
+  std::vector<Entity3D> list;
+  list.reserve(values.size());
+  for (const Value& v : values) {
+    Entity3D e;
+    std::string why;
+    if (!entity_from(v, &e, &why)) {
+      if (error) *error = why;
+      return false;
+    }
+    list.push_back(std::move(e));
+  }
+  repair_parents(&list);
+  *out = std::move(list);
+  return true;
+}
 
 AudioSourceData audio_3d() {
   AudioSourceData a;

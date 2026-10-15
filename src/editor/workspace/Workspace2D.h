@@ -60,6 +60,10 @@ class Workspace2D {
   // Topmost entity (highest layer, then latest id) under a world point.
   std::optional<std::uint64_t> pick(float wx, float wy) const;
 
+  // Swap in a whole entity list (prefab sync): selection pruned, id
+  // counter caught up. Not an undo step by itself.
+  void replace_entities(std::vector<Entity2D> entities);
+  std::uint64_t peek_next_id() const;
   Entity2D* find(std::uint64_t id);
   const Entity2D* find(std::uint64_t id) const;
   Entity2D* selected();

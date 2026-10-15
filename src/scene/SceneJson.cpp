@@ -285,6 +285,15 @@ bool apply_components(Entity2D& e, const FlatMap& nested, std::string* why) {
   } else if (nested.count("audio")) {
     return bad("bad audio object");
   }
+  if (const auto pf = nested.find("prefab"); pf != nested.end()) {
+    json::Value v;
+    std::string err;
+    prefab::Link link;
+    if (!json::parse(pf->second, &v, &err) || !prefab::link_from_json(v, &link)) {
+      return bad("bad prefab link");
+    }
+    e.prefab = std::move(link);
+  }
   if (auto pa = parse_nested(nested, "particles")) {
     e.particles = fx::from_fields([&](const std::string& k) -> std::optional<std::string> {
       auto it = pa->find(k);
@@ -572,6 +581,17 @@ void write_entity(std::ostringstream& out, const Entity2D& e) {
         << ", \"shadows\": " << (l.shadows ? "true" : "false")
         << ", \"flicker\": " << format_float(l.flicker) << "}";
   }
+  if (e.prefab) {
+    const prefab::Link& pl = *e.prefab;
+    out << ",\n      \"prefab\": {\"asset\": \"" << escape_string(pl.asset)
+        << "\", \"instance\": " << static_cast<unsigned long long>(pl.instance)
+        << ", \"source\": " << static_cast<unsigned long long>(pl.source)
+        << ", \"overrides\": [";
+    for (std::size_t k = 0; k < pl.overrides.size(); ++k) {
+      out << (k ? ", " : "") << "\"" << escape_string(pl.overrides[k]) << "\"";
+    }
+    out << "]}";
+  }
   out << "\n";
   out << "    }";
 }
@@ -820,6 +840,7 @@ bool parse(const std::string& text, SceneDoc* doc, std::string* error_out,
 std::string write(const SceneDoc& doc) {
   std::ostringstream out;
   out << "{\n";
+  // v11: optional per-entity "prefab" link; v10 files load as-is.
   // v9: optional per-entity "particles" / "light" and the scene
   // "lighting" block; v8 files load as-is.
   // v8: optional per-entity "audio" (sound source); v7 files load as-is.
@@ -945,6 +966,59 @@ bool save_file(const std::string& path, const SceneDoc& doc,
     if (error_out) *error_out = "Failed while writing " + path;
     return false;
   }
+  return true;
+}
+
+json::Value entity_to_json(const Entity2D& e) {
+  std::ostringstream out;
+  write_entity(out, e);
+  json::Value v;
+  std::string err;
+  if (!json::parse(out.str(), &v, &err)) return json::Value::object();
+  return v;
+}
+
+bool entity_from_json(const json::Value& v, Entity2D* out, std::string* error_out) {
+  const std::string text = json::write(v);
+  std::size_t i = 0;
+  FlatMap nested;
+  auto obj = parse_flat_object(text, i, &nested);
+  if (!obj) {
+    if (error_out) *error_out = "bad entity object";
+    return false;
+  }
+  Entity2D e = entity_from_map(*obj);
+  if (e.id == 0 || e.name.empty()) {
+    if (error_out) *error_out = "entity missing id/name";
+    return false;
+  }
+  std::string why;
+  if (!apply_components(e, nested, &why)) {
+    if (error_out) *error_out = "entity " + e.name + ": " + why;
+    return false;
+  }
+  *out = std::move(e);
+  return true;
+}
+
+std::vector<json::Value> entities_to_json(const std::vector<Entity2D>& entities) {
+  std::vector<json::Value> out;
+  out.reserve(entities.size());
+  for (const Entity2D& e : entities) out.push_back(entity_to_json(e));
+  return out;
+}
+
+bool entities_from_json(const std::vector<json::Value>& values,
+                        std::vector<Entity2D>* out, std::string* error_out) {
+  std::vector<Entity2D> list;
+  list.reserve(values.size());
+  for (const json::Value& v : values) {
+    Entity2D e;
+    if (!entity_from_json(v, &e, error_out)) return false;
+    list.push_back(std::move(e));
+  }
+  repair_parents(list);
+  *out = std::move(list);
   return true;
 }
 

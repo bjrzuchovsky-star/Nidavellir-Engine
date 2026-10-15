@@ -3,6 +3,7 @@
 // scene.json reader / writer shared by the editor (scene_io) and the
 // runtime (ts_game, Play mode). Text in, text out; no UI.
 
+#include "scene/JsonTree.h"
 #include "scene/SceneData.h"
 
 #include <cstdint>
@@ -18,10 +19,11 @@ namespace scene_json {
 // "tilemap" / "sprite" objects; 3 = optional "player" / "camera" / "spawn";
 // 4 = optional "collider" plus the scene-level "tile_solidity" table;
 // 5 = optional "animator"; 6 = optional "script"; 7 = optional editor
-// "rotation" / "parent" / "locked" / "hidden". Older files still load
+// "rotation" / "parent" / "locked" / "hidden"; 8 = "audio"; 9 =
+// "particles" / "light" / "lighting"; 10 = optional Box2D "body" / "joint"
+// and collider "shape"; 11 = optional "prefab" link. Older files still load
 // (see upgrade notes in SceneJson.cpp).
-// 10 = optional Box2D "body" / "joint" and collider "shape".
-inline constexpr int kSceneVersion = 10;
+inline constexpr int kSceneVersion = 11;
 
 // Whole file: entities plus the editor's view state. The runtime only
 // reads `entities`; the rest round-trips untouched.
@@ -54,6 +56,16 @@ void repair_parents(std::vector<Entity2D>& entities);
 // Serialise (always the current version). Deterministic: same doc, same
 // bytes.
 std::string write(const SceneDoc& doc);
+
+// One entity as a JSON object (the scene.json entity text, parsed) and
+// back (false + error on a malformed entity). Prefab tools use these.
+json::Value entity_to_json(const Entity2D& e);
+bool entity_from_json(const json::Value& v, Entity2D* out,
+                      std::string* error_out = nullptr);
+std::vector<json::Value> entities_to_json(const std::vector<Entity2D>& entities);
+bool entities_from_json(const std::vector<json::Value>& values,
+                        std::vector<Entity2D>* out,
+                        std::string* error_out = nullptr);
 
 bool load_file(const std::string& path, SceneDoc* doc,
                std::string* error_out = nullptr);

@@ -191,6 +191,18 @@ bool Workspace2D::set_collider(std::uint64_t id,
   return e->collider != before;
 }
 
+void Workspace2D::replace_entities(std::vector<Entity2D> entities) {
+  entities_ = std::move(entities);
+  prune_selection();
+  sync_next_id_from_entities();
+}
+
+std::uint64_t Workspace2D::peek_next_id() const {
+  std::uint64_t m = next_id_;
+  for (const Entity2D& e : entities_) m = std::max(m, e.id + 1);
+  return m;
+}
+
 void Workspace2D::sync_next_id_from_entities() {
   std::uint64_t max_id = 0;
   for (const auto& e : entities_) {

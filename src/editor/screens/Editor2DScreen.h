@@ -2,6 +2,7 @@
 
 #include "audio/SoundStage.h"
 #include "editor/ProjectInfo.h"
+#include "editor/assets/PrefabLibrary.h"
 #include "editor/assets/TextureCache.h"
 #include "editor/console/TelegraphLog.h"
 #include "editor/plugins/EditorPlugins.h"
@@ -101,6 +102,19 @@ class Editor2DScreen final : public IScreen {
   std::uint64_t create_entity(std::string name = "Entity");
   bool snap_selected_to_grid();
   void reset_scene_placeholders();
+
+  // --- Prefabs (Editor2DScreen_Prefabs.cpp) ---------------------------------
+  // Same model as the 3D editor (docs/prefabs.md). Each is one undo step +
+  // autosave; asset files written by Make / Apply / Edit follow undo.
+  std::string save_selection_as_prefab(const std::string& name, std::string* error = nullptr);
+  std::uint64_t place_prefab(const std::string& rel, float x, float y);
+  bool prefab_apply(std::uint64_t id, const std::string& key = {}, bool whole_instance = false);
+  bool prefab_revert(std::uint64_t id, const std::string& key = {}, bool whole_instance = false);
+  bool prefab_unpack(std::uint64_t id);
+  bool prefab_edit_asset(const std::string& rel, const prefab::Asset& asset);
+  std::size_t prefab_poll();
+  std::vector<std::uint64_t> prefab_instance_members(std::uint64_t id) const;
+  PrefabLibrary& prefabs() { return prefabs_; }
 
   // Undo / redo (Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z, Edit menu, toolbar). Each
   // restores entities + selection, autosaves scene.json and notes the step.
@@ -451,6 +465,16 @@ class Editor2DScreen final : public IScreen {
   void cancel_rename();
 
   void mark_dirty();
+  void draw_prefabs_panel();
+  void draw_prefab_inspector(std::uint64_t id);
+  bool refresh_prefab_overrides();
+  bool prefab_set_entities(const std::vector<json::Value>& js, const std::string& label,
+                           Workspace2D::Snapshot before);
+  void prefab_sync_all_on_load();
+  PrefabLibrary prefabs_;
+  bool show_prefabs_ = true;
+  char prefab_name_[64] = "Prefab";
+  double prefab_poll_time_ = 0.0;
   void mark_dirty_and_autosave();
   // Discrete edit: commit + autosave + note when something changed.
   bool commit_discrete(Workspace2D::Snapshot before, const std::string& label,

@@ -50,6 +50,11 @@ void Editor3DScreen::draw_inspector() {
   scene3d::Entity3D e = *cur;
   Tracker t;
 
+  if (e.prefab) {
+    draw_prefab_inspector(e);
+    // An Apply / Revert above may have replaced the entity.
+    if (const scene3d::Entity3D* again = find(primary())) e = *again; else return;
+  }
   ImGui::PushID(static_cast<int>(e.id));
   edit_text("Name", &e.name);
   t.after("Rename");

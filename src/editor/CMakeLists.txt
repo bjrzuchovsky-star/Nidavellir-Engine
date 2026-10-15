@@ -11,6 +11,9 @@ add_library(ts_editor
   workspace/SceneIO_Load.cpp
   workspace/SceneIO_Save.cpp
   assets/AssetLibrary.cpp
+  assets/PrefabLibrary.cpp
+  screens/Editor2DScreen_Prefabs.cpp
+  editor3d/Editor3DScreen_Prefabs.cpp
   ui/FolderBrowser.cpp
   ui/Theme.cpp
   ui/PlayUi.cpp

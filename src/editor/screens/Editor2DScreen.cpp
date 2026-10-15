@@ -98,6 +98,8 @@ void Editor2DScreen::on_enter() {
   }
 
   workspace_.clear_history();  // history is per open project, in memory only
+  prefabs_.set_project(project_.path);
+  prefab_sync_all_on_load();
 
   // Supply Wagon: make sure <project>/assets exists and list it.
   stroke_id_ = 0;
@@ -177,6 +179,7 @@ bool Editor2DScreen::save_scene(std::string* error_out) {
   if (scene_path_.empty()) {
     scene_path_ = scene_io::scene_path_for_project(project_.path);
   }
+  refresh_prefab_overrides();
   std::string err;
   if (!scene_io::save(workspace_, scene_path_, &err)) {
     if (error_out) {
@@ -442,6 +445,9 @@ bool Editor2DScreen::undo() {
     end_paint_stroke();
   }
   flush_pending_edit();
+  if (workspace_.can_undo()) {
+    prefabs_.on_undo(workspace_.undo_count(), workspace_.undo_label());
+  }
   std::string label;
   if (!workspace_.undo(&label)) {
     note("Nothing to undo. Trail's clean.");
@@ -472,6 +478,7 @@ bool Editor2DScreen::redo() {
     note("Nothing to redo. End of the trail.");
     return false;
   }
+  prefabs_.on_redo(workspace_.undo_count(), label);
   has_range_anchor_ = false;
   insp_drag_slot_ = -1;
   nudge_pending_save_ = false;
@@ -523,6 +530,10 @@ AppState Editor2DScreen::on_update(float /*delta_seconds*/) {
       } else if (!save_scene(&err) && !err.empty()) {
         std::cout << "[Editor2D] save failed: " << err << '\n';
       }
+    }
+    if (!is_playing() && ImGui::GetTime() - prefab_poll_time_ > 1.0) {
+      prefab_poll_time_ = ImGui::GetTime();
+      prefab_poll();
     }
     draw_ui();
   }

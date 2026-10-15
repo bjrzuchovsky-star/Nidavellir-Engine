@@ -8,6 +8,8 @@
 #include "fx/Particles.h"
 #include "render3d/Math3D.h"
 #include "render3d/Renderer3D.h"
+#include "scene/JsonTree.h"
+#include "scene/Prefab.h"
 #include "scene/SceneData.h"
 
 #include <cstdint>
@@ -32,8 +34,10 @@ using render3d::Vec3;
 // link from the entity to `to`).
 // v14 adds physics: rigid_body, joint, sphere / convex / mesh collider
 // shapes, compound parts, collision layers and the scene "physics" block.
-// v7 .. v13 files still load.
-inline constexpr int kScene3DVersion = 14;
+// v15 adds the prefab instance link ("prefab": asset, instance, source,
+// overrides; see scene/Prefab.h).
+// v7 .. v14 files still load.
+inline constexpr int kScene3DVersion = 15;
 
 // ts.ai navmesh agent (v13): walks the baked navmesh with crowd avoidance,
 // optionally driven by a behaviour tree (*.bt.json).
@@ -313,6 +317,7 @@ struct Entity3D {
   std::shared_ptr<const std::vector<render3d::Mat4>> skin_palette;
   std::optional<RigidBody3D> rigid_body;     // v14
   std::optional<Joint3D> joint;              // v14
+  std::optional<prefab::Link> prefab;        // v15
   bool operator==(const Entity3D& o) const = default;
 };
 
@@ -367,6 +372,13 @@ int depth_of(const std::vector<Entity3D>& entities, std::uint64_t id);
 bool load_file(const std::string& path, Scene3D* out, std::string* error);
 bool save_file(const std::string& path, const Scene3D& scene,
                std::string* error);
+
+// One entity as its scene.json object and back (prefab tools).
+json::Value entity_to_json(const Entity3D& e);
+bool entity_from_json(const json::Value& v, Entity3D* out, std::string* error);
+std::vector<json::Value> entities_to_json(const std::vector<Entity3D>& entities);
+bool entities_from_json(const std::vector<json::Value>& values,
+                        std::vector<Entity3D>* out, std::string* error);
 
 // True when the text is a 3D scene ("dimension": "3d").
 bool is_3d_scene_text(const std::string& text);

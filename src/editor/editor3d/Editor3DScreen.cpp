@@ -74,6 +74,8 @@ void Editor3DScreen::on_enter() {
   }
   undo_.clear();
   redo_.clear();
+  prefabs_.set_project(project_.path);
+  prefab_sync_all_on_load();
   rescan_assets();
   ensure_renderer();
   note("Telegraph open for " + project_.name + " (" + std::to_string(scene_.entities.size()) +
@@ -145,6 +147,11 @@ AppState Editor3DScreen::on_update(float delta_seconds) {
     for (const world3d::Toast3D& t : world_.take_toasts()) toasts_.push_back({t.text, t.seconds});
   }
   if (!playing()) anim_preview_tick(delta_seconds);
+  prefab_poll_clock_ += delta_seconds;
+  if (prefab_poll_clock_ > 1.0 && !playing()) {
+    prefab_poll_clock_ = 0.0;
+    prefab_poll();
+  }
   update_sound(delta_seconds);
   for (auto& t : toasts_) t.second -= delta_seconds;
   while (!toasts_.empty() && toasts_.front().second <= 0) toasts_.pop_front();
@@ -202,6 +209,7 @@ const std::string& Editor3DScreen::redo_label() const {
 bool Editor3DScreen::undo() {
   if (undo_.empty() || playing()) return false;
   gizmo_cancel();
+  prefabs_.on_undo(undo_.size(), undo_.back().label);
   Step s = std::move(undo_.back());
   undo_.pop_back();
   redo_.push_back({s.label, scene_});
@@ -217,6 +225,7 @@ bool Editor3DScreen::redo() {
   Step s = std::move(redo_.back());
   redo_.pop_back();
   undo_.push_back({s.label, scene_});
+  prefabs_.on_redo(undo_.size(), s.label);
   scene_ = std::move(s.scene);
   autosave();
   note("Redo " + undo_.back().label);
@@ -224,6 +233,7 @@ bool Editor3DScreen::redo() {
 }
 
 bool Editor3DScreen::save_scene(std::string* error) {
+  refresh_prefab_overrides();
   return scene3d::save_file(scene3d::scene_path(project_.path), scene_, error);
 }
 
@@ -306,6 +316,7 @@ std::uint64_t Editor3DScreen::create_empty(const Vec3& pos) {
 std::uint64_t Editor3DScreen::drop_asset(const std::string& rel, const Vec3& pos,
                                          std::uint64_t target) {
   if (rel.rfind("primitive:", 0) == 0) return create_primitive(rel, pos);
+  if (rel.rfind("prefab:", 0) == 0) return place_prefab(rel.substr(7), pos);
   std::string ext = fs::path(rel).extension().string();
   std::transform(ext.begin(), ext.end(), ext.begin(),
                  [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
