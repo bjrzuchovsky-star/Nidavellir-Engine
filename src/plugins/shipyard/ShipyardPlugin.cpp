@@ -271,6 +271,36 @@ void ShipyardPlugin::on_register(plugin::Registrar& reg) {
   reg.add_system("shipyard.sim", [this](runtime::World& w, double) {
     if (w.net_role() != runtime::NetRole::Client) sim_.step(w);
   });
+  // Thruster plumes: every peer puffs its own from the (mirrored) engines.
+  reg.add_system("shipyard.thrusters", [this](runtime::World& w, double) {
+    if (w.tick() % 3 != 0) return;
+    for (const Ship& s : sim_.ships()) {
+      const float c = std::cos(s.angle), sn = std::sin(s.angle);
+      for (const LivePart& p : s.parts) {
+        if (!p.firing) continue;
+        const PartDef* d = sim_.lib().get(p.def);
+        if (!d || d->kind != PartKind::Engine) continue;
+        int fw = 1, fh = 1;
+        footprint(*d, p.rot, &fw, &fh);
+        float gx = 0, gy = 0, wx = 0, wy = 0;
+        part_center(*d, PartPose{p.def, p.x, p.y, p.rot}, &gx, &gy);
+        s.to_world(gx, gy, &wx, &wy);
+        float ex = 0, ey = 0;
+        engine_dir(p.rot, &ex, &ey);
+        const float bx = c * -ex - sn * -ey, by = sn * -ex + c * -ey;
+        const float len = (ex != 0.0f ? fw * kCell : fh * kCell) * 0.5f;
+        runtime::FxEvent ev;
+        ev.preset = "thruster";
+        ev.local = true;
+        ev.count = 2;
+        ev.x = wx + bx * (len + 4);
+        ev.y = wy + by * (len + 4);
+        // The preset points down (+y on screen); turn it onto the nozzle.
+        ev.dir = std::atan2(by, bx) * 57.2957795f - 90.0f;
+        w.fx(std::move(ev));
+      }
+    }
+  });
   reg.add_draw_layer("shipyard.sky", false,
                      [this](const runtime::World& w, const runtime::WorldRect& view, float,
                             std::vector<runtime::DrawQuad>* out) { draw_sky(w, view, out); });

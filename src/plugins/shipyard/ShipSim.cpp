@@ -565,6 +565,16 @@ void ShipSim::sound(const char* clip, float x, float y, float volume, float pitc
   sounds_.push_back(std::move(ev));
 }
 
+void ShipSim::effect(const char* preset, float x, float y, float dir) {
+  if (effects_.size() >= 16) return;
+  runtime::FxEvent ev;
+  ev.preset = preset;
+  ev.x = x;
+  ev.y = y;
+  ev.dir = dir;
+  effects_.push_back(std::move(ev));
+}
+
 void ShipSim::guns() {
   for (Ship& s : ships_) {
     const std::uint32_t tid = pick_target(s, std::max(1.0f, s.gun_range + 40.0f));
@@ -607,6 +617,7 @@ void ShipSim::guns() {
       shots_.push_back(sh);
       ++shots_fired_;
       sound("builtin:gunshot", sh.x, sh.y, 0.55f, 0.8f);
+      effect("muzzle_flash", sh.x, sh.y, std::atan2(ay, ax) * 57.2957795f);
     }
   }
 }
@@ -667,6 +678,7 @@ void ShipSim::break_up(std::size_t index) {
     else ++parts_destroyed_;
   }
   sound("builtin:boom", old.x, old.y, alive.empty() ? 1.0f : 0.7f, alive.empty() ? 0.8f : 1.1f);
+  effect("explosion", old.x, old.y);
   if (alive.empty()) {
     if (old.owner >= 0 && old.owner < kSlots) {
       respawn_at_[static_cast<std::size_t>(old.owner)] =
@@ -804,8 +816,11 @@ void ShipSim::tick(runtime::World* w) {
   reinforce();
   std::vector<runtime::SoundEvent> made;
   made.swap(sounds_);
+  std::vector<runtime::FxEvent> effects;
+  effects.swap(effects_);
   if (!w) return;
   for (runtime::SoundEvent& ev : made) w->play_sound(std::move(ev));
+  for (runtime::FxEvent& ev : effects) w->fx(std::move(ev));
   // Pin each rider to its ship (the camera follows riders).
   for (int slot = 0; slot < kSlots; ++slot) {
     const runtime::Actor* cur = w->player(slot);

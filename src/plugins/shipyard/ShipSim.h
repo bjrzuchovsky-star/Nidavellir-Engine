@@ -194,6 +194,8 @@ class ShipSim {
   std::uint64_t shots_fired_ = 0;
   // Sounds made this tick (guns, breakups); tick() hands them to the world.
   std::vector<runtime::SoundEvent> sounds_;
+  std::vector<runtime::FxEvent> effects_;  // muzzle flashes, explosions
+  void effect(const char* preset, float x, float y, float dir = 0.0f);
   void sound(const char* clip, float x, float y, float volume, float pitch);
   std::uint64_t states_received_ = 0;
   double reinforce_at_ = -1.0;
