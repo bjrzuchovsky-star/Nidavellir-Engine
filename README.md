@@ -1252,6 +1252,10 @@ Turn on `ts.profiler` for a project and Play records every frame: named CPU scop
 
 `ts_server --mmo --project <dir>` runs a dedicated, persistent world on the posse's ENet transport. It has accounts with salted Argon2i password hashes (Monocypher); SQLite persistence for riders, inventory, positions and quest/story state, bridged to Strongbox save slots; zones with interest management (only nearby entities replicate); server-checked movement with corrections and cheat kicks; chat channels (say, zone, world, custom, whispers, admin); link-dead resume with rotating tokens; and an admin console on stdin. `ts_server --mmo-loadtest N` floods it with simulated bots. In the 2D editor (with `ts.posse` on), **View > Town Hall** runs the server in-process with a live map, riders, chat, console and bots, or launches `ts_server --mmo`. Smoke: `ts_admin --smoke-mmo`. Docs: `docs/mmo.md`.
 
+### Terrain, foliage and weather (3D)
+
+**Create > Terrain (hills)** in the 3D editor adds a heightmap terrain. **View > Terrain + Foliage** has brushes to sculpt (raise, lower, smooth, flatten, noise), to paint four splat texture layers, and to paint or erase instanced grass, trees and rocks. Plants sway in the wind and fade out with distance. Chunks switch LOD with distance, and Play adds a Jolt heightfield collider. Strokes undo, and data is saved to `terrain/*.tsterrain` (Scene3D v16). The optional **Weather** plugin (`ts.weather`) adds rain, snow, dust storms, fog and lightning storms in 2D and 3D, wind that moves foliage and particles, and a time-of-day link (`weather.json`, the Weather panel, Lua `weather`). Smokes: `ts_admin --smoke-terrain`, `--smoke-weather`. Docs: `docs/terrain-and-foliage.md`, `docs/weather.md`.
+
 ## Ship It: build & export (Freight Office)
 
 Package a project into a standalone game folder, from the editor
