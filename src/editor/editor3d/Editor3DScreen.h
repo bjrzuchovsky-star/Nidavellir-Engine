@@ -1,5 +1,7 @@
 #pragma once
 #include <map>
+#include "debugtools/DebugTools.h"
+#include "editor/plugins/ProfilerPanels.h"
 
 // The 3D editor ("dimension": "3d" claims). Docked panels in the Dusk
 // theme:
@@ -324,6 +326,10 @@ class Editor3DScreen final : public IScreen {
   std::deque<runtime::LogEntry> log_;
   std::deque<std::pair<std::string, double>> toasts_;
   PlayUi play_ui_;
+  // ts.profiler: in-game overlay (F3) + console (backtick) over the Play UI.
+  profiler::DebugTools debug_tools_;
+  ConsoleLineState telegraph_console_;
+  bool debug_tools_on_ = false;
   UiPreview ui_preview_;
   bool show_ui_preview_ = false;  // the project's ui/ documents over the Play view
   render3d::FrameStats last_stats_;

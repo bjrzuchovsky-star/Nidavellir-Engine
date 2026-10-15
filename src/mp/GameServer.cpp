@@ -1,4 +1,5 @@
 #include "mp/GameServer.h"
+#include "profiler/Profiler.h"
 
 #include "core/JsonMini.h"
 #include "net/Net.h"
@@ -436,6 +437,22 @@ int GameServer::update(double real_seconds) {
 
 void GameServer::measure(double real_seconds) {
   measure_window_ += real_seconds;
+  if (profiler::Profiler::get().enabled()) {
+    profiler::Profiler& pr = profiler::Profiler::get();
+    double rtt = 0.0;
+    int n = 0;
+    for (const auto& [id, peer] : peers_) {
+      if (!peer.seated) continue;
+      rtt += peer.rtt_ms;
+      ++n;
+    }
+    pr.counter("net.server.riders", static_cast<double>(n));
+    pr.counter("net.server.rtt_ms", n ? rtt / n : 0.0);
+    pr.counter("net.server.kbps_out", stats_.kbps_out);
+    pr.counter("net.server.kbps_in", stats_.kbps_in);
+    pr.counter("net.server.snapshot_hz", stats_.snapshot_hz);
+    pr.counter("net.server.snapshot_bytes", static_cast<double>(stats_.last_snapshot_bytes));
+  }
   if (measure_window_ < 1.0) return;
   double out = 0.0;
   double in = 0.0;

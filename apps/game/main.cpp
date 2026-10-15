@@ -11,6 +11,8 @@
 //   ts_game --xr-probe                 OpenXR runtime / headset / session check
 
 #include "audio/GameAudio.h"
+#include "profiler/Profiler.h"
+#include "plugins/profiler/ProfilerPlugin.h"
 #include "Game3D.h"
 #include "GameRenderer.h"
 #include "GameUi.h"
@@ -604,6 +606,8 @@ int run_window(const Options& opt, Telegraph& telegraph) {
       GameUi gui;
       gui.load(opt.project);
       gui.attach(win);
+      gui.enable_debug_tools(
+          plugins::profiler_enabled(plugins::read_project_plugins(opt.project).ids));
       g.ui = &gui;
       bool menu_paused = false;  // the pause menu holds the session
       glfwSetWindowUserPointer(win, &g);
@@ -620,6 +624,7 @@ int run_window(const Options& opt, Telegraph& telegraph) {
       double scripts_at = last;
       long frames = 0;
       while (!glfwWindowShouldClose(win)) {
+        profiler::Profiler::get().begin_frame();
         glfwPollEvents();
         if (g.reload) {
           g.reload = false;
@@ -650,8 +655,11 @@ int run_window(const Options& opt, Telegraph& telegraph) {
           }
           ui::forward_ui_events(g.session.world(), uf.events);
         }
-        g.session.update(now - last,
-                         gui.wants_input() ? runtime::InputFrame{} : poll_input(win));
+        {
+          TS_PROFILE_SCOPE("game.update");
+          g.session.update(now - last,
+                           gui.wants_input() ? runtime::InputFrame{} : poll_input(win));
+        }
         ui::apply_ui_commands(gui.system(), g.session.world().take_ui_commands());
         {
           // Ears on the camera centre.
@@ -686,7 +694,9 @@ int run_window(const Options& opt, Telegraph& telegraph) {
                 return renderer.image_size(rel, w, h);
               },
               &quads);
+          TS_PROFILE_SCOPE("game.render");
           renderer.render(view, fw, fh, quads);
+          profiler::Profiler::get().counter("render.quads", static_cast<double>(quads.size()));
           if (g.show_collision) {
             world.build_overlay(view, alpha, &boxes);
             renderer.render_overlay(boxes);
@@ -717,6 +727,10 @@ int run_window(const Options& opt, Telegraph& telegraph) {
                         event.c_str());
           glfwSetWindowTitle(win, title);
         }
+        if (profiler::Profiler::get().enabled() && frames % 15 == 0) {
+          profiler::Profiler::get().counter("mem.process_mb", profiler::process_memory_mb());
+        }
+        profiler::Profiler::get().end_frame();
         if (opt.frames >= 0 && ++frames >= opt.frames) {
           break;
         }

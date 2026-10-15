@@ -1,3 +1,4 @@
+#include "profiler/Profiler.h"
 #include "runtime/World.h"
 
 #include "scene/SceneJson.h"
@@ -340,6 +341,7 @@ void World::step(const InputFrame& input) {
   if (actors_.empty()) {
     return;
   }
+  TS_PROFILE_SCOPE("world.step");
   events_.clear();
   input_ = input;
   in_step_ = true;
@@ -348,21 +350,42 @@ void World::step(const InputFrame& input) {
     scripts_->start_pending();
   }
   apply_changes();
-  step_players(input);
-  separate_dynamics();
-  step_physics2d();
-  update_triggers();
+  {
+    TS_PROFILE_SCOPE("world.physics");
+    step_players(input);
+    separate_dynamics();
+    step_physics2d();
+    update_triggers();
+  }
   for (const TriggerEvent& ev : events_) {
     post(LogLevel::Info, "trigger", describe(ev), ev.trigger);
   }
-  step_scripts(input);
-  step_extensions();
+  {
+    TS_PROFILE_SCOPE("world.scripts");
+    step_scripts(input);
+  }
+  {
+    TS_PROFILE_SCOPE("world.plugins");
+    step_extensions();
+  }
   follow_parents();
-  step_animation();
+  {
+    TS_PROFILE_SCOPE("world.animation");
+    step_animation();
+  }
   step_camera();
-  step_fx();
+  {
+    TS_PROFILE_SCOPE("world.fx");
+    step_fx();
+  }
   in_step_ = false;
   ++tick_;
+  if (profiler::Profiler::get().enabled()) {
+    profiler::Profiler& prof = profiler::Profiler::get();
+    prof.counter("world.entities", static_cast<double>(actors_.size()));
+    if (scripts_) prof.counter("mem.lua_kb", static_cast<double>(scripts_->memory_used()) / 1024.0);
+    prof.add("world.ticks", 1);
+  }
   // A toast shows through its `until` tick.
   toasts_.erase(std::remove_if(toasts_.begin(), toasts_.end(),
                                [&](const Toast& t) { return t.until < tick_; }),

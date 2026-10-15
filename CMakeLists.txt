@@ -14,6 +14,8 @@ add_subdirectory(src/render)
 add_subdirectory(src/input)
 add_subdirectory(src/physics)
 add_subdirectory(src/scene)
+# Assay Office core (ts_profiler): frame profiler + console commands.
+add_subdirectory(src/profiler)
 add_subdirectory(src/fx)
 # Virtual filesystem + .tspak archives (runtime mount, export cooking).
 add_subdirectory(src/vfs)
@@ -68,6 +70,8 @@ if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
     add_subdirectory(src/world3d)
     add_subdirectory(src/ai3d)
     add_subdirectory(src/story3d)
+    # In-game debug overlay + console, profiler 3D extension.
+    add_subdirectory(src/debugtools)
   endif()
 endif()
 

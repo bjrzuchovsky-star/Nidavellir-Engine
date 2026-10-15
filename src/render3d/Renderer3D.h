@@ -26,6 +26,12 @@ struct FrameStats {
   std::size_t shadow_casters = 0;
   std::size_t lines = 0;
   std::size_t skinned = 0;  // draws posed by a bone palette
+  // Live resources (profiler / Assay Office): meshes, materials, textures
+  // and an estimate of their GPU memory.
+  std::size_t meshes = 0;
+  std::size_t materials = 0;
+  std::size_t textures = 0;
+  std::size_t gpu_bytes = 0;
 };
 
 // Sky, ambient and sun for a frame.
@@ -117,6 +123,10 @@ class Renderer3D {
 };
 
 std::unique_ptr<Renderer3D> make_null_renderer3d();
+
+// Hand a frame's stats to the profiler (render.* / assets.* / mem.gpu_mb
+// counters); no-op while it is off.
+void report_frame_stats(const FrameStats& stats);
 
 }  // namespace render3d
 }  // namespace tombstone

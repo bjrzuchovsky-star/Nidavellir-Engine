@@ -1,4 +1,5 @@
 #include "core/Engine.h"
+#include "profiler/Profiler.h"
 #include "editor/audio/EditorAudio.h"
 #include "editor/AppFlow.h"
 #include "editor/AppState.h"
@@ -31,6 +32,7 @@
 #include "SmokeSurvival.h"
 #include "SmokeRuntime.h"
 #include "SmokeAI.h"
+#include "SmokeProfiler.h"
 #include "SmokeStory.h"
 #include "SmokeAnim3D.h"
 #include "SmokeTemplates.h"
@@ -1220,6 +1222,11 @@ int run_console_smoke() {
     std::cerr << "TombStone Admin smoke FAILED (story)\n";
     return 1;
   }
+  // Profiler + debug tools (see SmokeProfiler.cpp).
+  if (run_profiler_smoke() != 0) {
+    std::cerr << "TombStone Admin smoke FAILED (profiler)\n";
+    return 1;
+  }
   if (run_anim3d_smoke() != 0) {
     std::cerr << "TombStone Admin smoke FAILED (3D animation)\n";
     return 1;
@@ -1532,7 +1539,9 @@ int run_imgui_app() {
   std::string last_theme = flow.settings().theme;
   std::string last_title = editor::brand::kWindowTitle;
 
+  long admin_frames = 0;
   while (!glfwWindowShouldClose(window) && flow.is_running()) {
+    profiler::Profiler::get().begin_frame();
     glfwPollEvents();
 
     ImGui_ImplOpenGL3_NewFrame();
@@ -1541,7 +1550,10 @@ int run_imgui_app() {
 
     const float dt = io.DeltaTime > 0.0f ? io.DeltaTime : (1.0f / 60.0f);
     engine.tick(dt);
-    flow.tick(dt);
+    {
+      TS_PROFILE_SCOPE("editor.frame");
+      flow.tick(dt);
+    }
     editor::EditorAudio::get().tick(dt);
 
     if (flow.settings().theme != last_theme) {
@@ -1560,6 +1572,7 @@ int run_imgui_app() {
       last_title = title;
     }
 
+    profiler::Profiler::get().begin("editor.imgui_render");
     ImGui::Render();
     int display_w = 0;
     int display_h = 0;
@@ -1576,7 +1589,13 @@ int run_imgui_app() {
       ImGui::RenderPlatformWindowsDefault();
       glfwMakeContextCurrent(backup_current_context);
     }
+    profiler::Profiler::get().end();
     glfwSwapBuffers(window);
+    if (profiler::Profiler::get().enabled() && admin_frames % 15 == 0) {
+      profiler::Profiler::get().counter("mem.process_mb", profiler::process_memory_mb());
+    }
+    ++admin_frames;
+    profiler::Profiler::get().end_frame();
   }
 
   editor::EditorAudio::get().shutdown();
@@ -1634,6 +1653,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-ai") == 0) {
       return run_ai_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-profiler") == 0) {
+      return run_profiler_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-story") == 0) {
       return run_story_smoke();

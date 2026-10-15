@@ -1,4 +1,5 @@
 #include "editor/plugins/PluginPanelHost.h"
+#include "editor/plugins/ProfilerPanels.h"
 #include "editor/fx/FxInspector.h"
 #include "editor/export/FreightOffice.h"
 #include "editor/scripting/BrandBook.h"
@@ -520,8 +521,17 @@ void Editor3DScreen::draw_viewport() {
   // In-game UI (ui/*.ui.json, Lua ui.*) over the Play view.
   ImDrawList* dl = ImGui::GetWindowDrawList();
   if (playing() && !vr_previewing()) {
-    ui::forward_ui_events(world_, play_ui_.update(origin, ImVec2(vw, vh), viewport_hovered_,
-                                                  viewport_focused_, io.DeltaTime));
+    if (debug_tools_on_ && (viewport_focused_ || viewport_hovered_)) {
+      if (ImGui::IsKeyPressed(ImGuiKey_F3, false)) debug_tools_.toggle_overlay();
+      if (ImGui::IsKeyPressed(ImGuiKey_GraveAccent, false)) debug_tools_.toggle_console();
+    }
+    std::vector<ui::UiEvent> events =
+        play_ui_.update(origin, ImVec2(vw, vh), viewport_hovered_, viewport_focused_, io.DeltaTime);
+    if (debug_tools_on_) {
+      events = debug_tools_.filter(std::move(events));
+      debug_tools_.update(io.DeltaTime);
+    }
+    ui::forward_ui_events(world_, events);
     play_ui_.draw(dl, origin);
   }
   // Toasts.
@@ -853,6 +863,13 @@ void Editor3DScreen::draw_telegraph() {
     ImGui::PopStyleColor();
   }
   if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f) ImGui::SetScrollHereY(1.0f);
+  if (plugins_.loaded("ts.profiler")) {
+    std::string echo, out;
+    if (draw_console_line(telegraph_console_, &echo, &out)) {
+      log_.push_back(runtime::LogEntry{runtime::LogLevel::Info, "console", echo});
+      if (!out.empty()) log_.push_back(runtime::LogEntry{runtime::LogLevel::Info, "console", out});
+    }
+  }
 }
 
 }  // namespace editor

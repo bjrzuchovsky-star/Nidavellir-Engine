@@ -33,6 +33,7 @@ target_link_libraries(ts_client
     ts_runtime
     ts_net
     ts_mp
+    ts_debugtools
     ts_plugin
     ts_plugins_builtin
     ts_gfx

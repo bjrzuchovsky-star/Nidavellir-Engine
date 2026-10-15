@@ -1,3 +1,4 @@
+#include "profiler/Profiler.h"
 #include "runtime/ScriptHost.h"
 
 #include "runtime/GraphScript.h"
@@ -156,8 +157,23 @@ void ScriptHost::run_timers(std::uint64_t tick) {
   for (auto& h : hosts_) if (h) h->run_timers(tick);
 }
 
+namespace {
+const char* tick_scope(const char* lang) {
+  const std::string l = lang ? lang : "";
+  if (l == "lua") return "scripts.lua";
+  if (l == "graph") return "scripts.graph";
+  if (l == "cpp" || l == "c++") return "scripts.cpp";
+  if (l == "cs" || l == "c#" || l == "csharp") return "scripts.cs";
+  return "scripts.other";
+}
+}  // namespace
+
 void ScriptHost::tick(double dt) {
-  for (auto& h : hosts_) if (h) h->tick(dt);
+  for (auto& h : hosts_) {
+    if (!h) continue;
+    TS_PROFILE_SCOPE(tick_scope(h->language()));
+    h->tick(dt);
+  }
 }
 
 int ScriptHost::reload_changed() {

@@ -37,6 +37,7 @@ target_link_libraries(ts_runtime
     ts_scene
     ts_fx
     ts_physics2d
+    ts_profiler
   PRIVATE
     ts_lua
     ${CMAKE_DL_LIBS}

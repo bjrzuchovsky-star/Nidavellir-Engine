@@ -177,7 +177,25 @@ struct Gl33 {
   void(TS_GLAPI* BindBufferBase)(GLenum, GLuint, GLuint);
   void(TS_GLAPI* BlitFramebuffer)(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint,
                                   GLbitfield, GLenum);
+  // Timer queries (GL 3.3 core / ARB_timer_query); optional: null when the
+  // driver lacks them and GPU timings are simply not reported.
+  void(TS_GLAPI* GenQueries)(GLsizei, GLuint*);
+  void(TS_GLAPI* DeleteQueries)(GLsizei, const GLuint*);
+  void(TS_GLAPI* BeginQuery)(GLenum, GLuint);
+  void(TS_GLAPI* EndQuery)(GLenum);
+  void(TS_GLAPI* GetQueryObjectiv)(GLuint, GLenum, GLint*);
+  void(TS_GLAPI* GetQueryObjectui64v)(GLuint, GLenum, unsigned long long*);
 };
+
+#ifndef GL_TIME_ELAPSED
+#define GL_TIME_ELAPSED 0x88BF
+#endif
+#ifndef GL_QUERY_RESULT
+#define GL_QUERY_RESULT 0x8866
+#endif
+#ifndef GL_QUERY_RESULT_AVAILABLE
+#define GL_QUERY_RESULT_AVAILABLE 0x8867
+#endif
 
 // Load once per process (needs a current GL 3.3 context). False with the
 // first missing entry point.

@@ -1,4 +1,5 @@
 #include "mp/GameClient.h"
+#include "profiler/Profiler.h"
 
 #include "scene/SceneJson.h"
 
@@ -491,6 +492,17 @@ void GameClient::pose() {
 
 void GameClient::measure(double real_seconds) {
   measure_window_ += real_seconds;
+  if (profiler::Profiler::get().enabled()) {
+    profiler::Profiler& p = profiler::Profiler::get();
+    p.counter("net.rtt_ms", stats_.rtt_ms);
+    p.counter("net.kbps_in", stats_.kbps_in);
+    p.counter("net.kbps_out", stats_.kbps_out);
+    p.counter("net.snapshot_hz", stats_.snapshot_hz);
+    p.counter("net.corrections", static_cast<double>(stats_.corrections));
+    p.counter("net.pending_inputs", static_cast<double>(stats_.pending_inputs));
+    p.counter("net.interp_ms", stats_.interp_ms);
+    p.counter("net.stale_snapshots", static_cast<double>(stats_.stale_snapshots));
+  }
   if (measure_window_ < 1.0 || !transport_) return;
   const net::LinkStats s = transport_->stats(server_);
   stats_.kbps_in = static_cast<double>(s.bytes_received - std::min(s.bytes_received, bytes_in_mark_)) /

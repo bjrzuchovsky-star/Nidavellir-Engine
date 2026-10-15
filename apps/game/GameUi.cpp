@@ -62,6 +62,7 @@ void GameUi::load(const std::string& project_dir) {
   if (!errors.empty()) std::cerr << "[ui] " << errors;
   if (n > 0) std::cout << "[ui] " << n << " document(s) from ui/\n";
   ui::PauseMenu::install(ui_);
+  if (debug_on_) debug_.attach(ui_);
 }
 
 void GameUi::attach(GLFWwindow* win) {
@@ -136,6 +137,17 @@ GameUi::Frame GameUi::update(GLFWwindow* win, double dt, ts::audio::Engine* a) {
     prev_[i] = now[i];
   }
 
+  if (debug_on_) {
+    const bool f3 = key(GLFW_KEY_F3), grave = key(GLFW_KEY_GRAVE_ACCENT);
+    if (f3 && !prev_f3_) debug_.toggle_overlay();
+    if (grave && !prev_grave_) {
+      debug_.toggle_console();
+      typed_.erase(std::remove(typed_.begin(), typed_.end(), '`'), typed_.end());
+    }
+    prev_f3_ = f3;
+    prev_grave_ = grave;
+  }
+
   ui::UiInput in;
   in.dt = dt;
   double mx = 0, my = 0;
@@ -181,6 +193,10 @@ GameUi::Frame GameUi::update(GLFWwindow* win, double dt, ts::audio::Engine* a) {
   }
 
   f.events = ui_.update(in, width_, height_);
+  if (debug_on_) {
+    f.events = debug_.filter(std::move(f.events));
+    debug_.update(dt);
+  }
   for (const ui::UiEvent& e : f.events) {
     std::string bus;
     float v = 0;
@@ -205,6 +221,12 @@ GameUi::Frame GameUi::update(GLFWwindow* win, double dt, ts::audio::Engine* a) {
     }
   }
   return f;
+}
+
+void GameUi::enable_debug_tools(bool on) {
+  debug_on_ = on;
+  if (on) debug_.attach(ui_);
+  else if (debug_.attached()) debug_.detach();
 }
 
 bool GameUi::anything_visible() const {

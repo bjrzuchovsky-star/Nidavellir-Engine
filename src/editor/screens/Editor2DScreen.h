@@ -1,6 +1,8 @@
 #pragma once
 
 #include "audio/SoundStage.h"
+#include "debugtools/DebugTools.h"
+#include "editor/plugins/ProfilerPanels.h"
 #include "editor/ProjectInfo.h"
 #include "editor/assets/PrefabLibrary.h"
 #include "editor/assets/TextureCache.h"
@@ -600,6 +602,9 @@ class Editor2DScreen final : public IScreen {
   float play_cam_zoom_ = 1.0f;
   std::vector<runtime::DrawQuad> play_quads_;
   PlayUi play_ui_;  // the project's ui/ documents over the Play view
+  profiler::DebugTools debug_tools_;  // ts.profiler overlay (F3) + console (backtick)
+  bool debug_tools_on_ = false;
+  ConsoleLineState telegraph_console_;
 
   // Animation: sets for previews / the Stable, and the Stable's open set.
   AnimLibrary anim_lib_;

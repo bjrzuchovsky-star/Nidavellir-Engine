@@ -376,9 +376,6 @@ std::vector<StoreEntry> TradingPost::coming_soon() {
       make("ts.steam", "Steam Hitch", "Platform",
            "Steamworks: achievements, stats, cloud saves, rich presence and lobbies for the posse.",
            {"steam", "platform", "multiplayer"}),
-      make("ts.profiler", "Assay Office (Profiler)", "Tools",
-           "Frame profiler: CPU scopes per system, script and plugin costs, memory and a timeline panel.",
-           {"profiler", "performance", "tools"}),
   };
 }
 

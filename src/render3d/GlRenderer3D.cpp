@@ -2,6 +2,7 @@
 
 #include "render3d/GlApi.h"
 #include "render3d/Skeleton.h"
+#include "profiler/Profiler.h"
 
 #include <algorithm>
 #include <cmath>
@@ -236,11 +237,72 @@ void main() { o_color = v_col; }
 struct GpuMesh {
   GLuint vao = 0, vbo = 0, ibo = 0, skin_vbo = 0;
   GLsizei count = 0;
+  std::size_t bytes = 0;
 };
 
 struct GpuMaterial {
   MaterialDesc desc;
   GLuint albedo = 0, normal = 0, mr = 0;  // 0 = default texture
+  std::size_t bytes = 0;
+  std::size_t textures = 0;
+};
+
+// GPU pass timers (GL_TIME_ELAPSED), read back a few frames late so the
+// CPU never waits. Only while the profiler is on.
+struct GpuTimers {
+  static constexpr int kFrames = 4;
+  static constexpr int kPasses = 4;
+  static constexpr const char* kNames[kPasses] = {"gpu.shadow", "gpu.opaque", "gpu.transparent", "gpu.overlay"};
+  GLuint q[kFrames][kPasses] = {};
+  bool issued[kFrames][kPasses] = {};
+  int frame = 0;
+  int open = -1;
+  bool ok = false;
+
+  bool available() const {
+    const Gl33& g = gl33();
+    return g.GenQueries && g.BeginQuery && g.EndQuery && g.GetQueryObjectiv && g.GetQueryObjectui64v;
+  }
+  void begin_frame() {
+    ok = profiler::Profiler::get().enabled() && available();
+    if (!ok) return;
+    const Gl33& g = gl33();
+    if (!q[0][0]) g.GenQueries(kFrames * kPasses, &q[0][0]);
+    // Collect the oldest frame's results (written kFrames - 1 frames ago).
+    const int slot = frame % kFrames;
+    for (int p = 0; p < kPasses; ++p) {
+      if (!issued[slot][p]) continue;
+      GLint ready = 0;
+      g.GetQueryObjectiv(q[slot][p], GL_QUERY_RESULT_AVAILABLE, &ready);
+      if (ready) {
+        unsigned long long ns = 0;
+        g.GetQueryObjectui64v(q[slot][p], GL_QUERY_RESULT, &ns);
+        profiler::Profiler::get().gpu(kNames[p] + 4, static_cast<double>(ns) / 1.0e6);
+      }
+      issued[slot][p] = false;
+    }
+  }
+  void begin(int pass) {
+    if (!ok) return;
+    end();
+    gl33().BeginQuery(GL_TIME_ELAPSED, q[frame % kFrames][pass]);
+    open = pass;
+  }
+  void end() {
+    if (!ok || open < 0) return;
+    gl33().EndQuery(GL_TIME_ELAPSED);
+    issued[frame % kFrames][open] = true;
+    open = -1;
+  }
+  void end_frame() {
+    end();
+    if (ok) ++frame;
+  }
+  void release() {
+    if (q[0][0] && gl33().DeleteQueries) gl33().DeleteQueries(kFrames * kPasses, &q[0][0]);
+    for (auto& row : q) for (GLuint& x : row) x = 0;
+    for (auto& row : issued) for (bool& x : row) x = false;
+  }
 };
 
 struct DrawItem {
@@ -451,6 +513,7 @@ class GlRenderer3D final : public Renderer3D {
     if (!line_prog_ && !mesh_prog_ && !ready_) return;
     const Gl33& g = gl33();
     if (g.DeleteBuffers) {
+      timers_.release();
       for (auto& [id, m] : meshes_) free_mesh(m);
       meshes_.clear();
       for (auto& [id, m] : materials_) free_material(m);
@@ -525,6 +588,8 @@ class GlRenderer3D final : public Renderer3D {
     }
     g.BindVertexArray(static_cast<GLuint>(prev_vao));
     m.count = static_cast<GLsizei>(mesh.indices.size());
+    m.bytes = mesh.vertices.size() * sizeof(Vertex3D) + mesh.indices.size() * sizeof(std::uint32_t) +
+              (mesh.skinned() ? mesh.skin.size() * sizeof(SkinVertex) : 0);
     const std::uint32_t id = ++next_;
     meshes_[id] = m;
     tri_counts_[id] = mesh.indices.size() / 3;
@@ -535,8 +600,10 @@ class GlRenderer3D final : public Renderer3D {
     if (!ready_) return {};
     GpuMaterial m;
     m.desc = d;
-    auto upload = [](const std::shared_ptr<const Image>& img) -> GLuint {
+    auto upload = [&m](const std::shared_ptr<const Image>& img) -> GLuint {
       if (!img || !img->valid()) return 0;
+      m.bytes += static_cast<std::size_t>(img->width) * static_cast<std::size_t>(img->height) * 4u * 4u / 3u;
+      ++m.textures;
       return make_texture(img->rgba.data(), img->width, img->height, true);
     };
     m.albedo = upload(d.base_color_image);
@@ -640,8 +707,11 @@ class GlRenderer3D final : public Renderer3D {
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_BLEND);
     glDepthMask(GL_TRUE);
+    TS_PROFILE_SCOPE("render3d.submit");
+    timers_.begin_frame();
 
     // Sun shadow pass.
+    timers_.begin(0);
     const Vec3 sun = normalize(env_.sun_direction);
     const Vec3 focus = camera_.target;
     const float sd = env_.shadow_distance;
@@ -676,6 +746,7 @@ class GlRenderer3D final : public Renderer3D {
     }
 
     // Main target.
+    timers_.begin(1);
     if (offscreen_) {
       ensure_target(width_, height_);
       g.BindFramebuffer(GL_FRAMEBUFFER, target_fbo_);
@@ -781,6 +852,7 @@ class GlRenderer3D final : public Renderer3D {
     }
 
     // Lines.
+    timers_.begin(2);
     glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -848,6 +920,7 @@ class GlRenderer3D final : public Renderer3D {
     draw_lines(lines_top_);
 
     // UI overlay over everything.
+    timers_.begin(3);
     if (overlay_on_ && overlay_tex_ && overlay_prog_) {
       g.UseProgram(overlay_prog_);
       g.Uniform1i(g.GetUniformLocation(overlay_prog_, "u_tex"), 0);
@@ -855,6 +928,17 @@ class GlRenderer3D final : public Renderer3D {
       glBindTexture(GL_TEXTURE_2D, overlay_tex_);
       g.BindVertexArray(empty_vao_);
       glDrawArrays(GL_TRIANGLES, 0, 3);
+    }
+
+    timers_.end_frame();
+    stats_.meshes = meshes_.size();
+    stats_.materials = materials_.size();
+    stats_.textures = 0;
+    stats_.gpu_bytes = 0;
+    for (const auto& [id, mm] : meshes_) stats_.gpu_bytes += mm.bytes;
+    for (const auto& [id, mt] : materials_) {
+      stats_.gpu_bytes += mt.bytes;
+      stats_.textures += mt.textures;
     }
 
     // Restore.
@@ -997,6 +1081,7 @@ class GlRenderer3D final : public Renderer3D {
   std::vector<PointLight> points_;
   std::vector<LineVertex> lines_depth_, lines_top_;
   FrameStats stats_;
+  GpuTimers timers_;
 };
 
 }  // namespace

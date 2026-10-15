@@ -4,6 +4,7 @@
 // auto-scroll, click-to-select and a status-bar badge.
 
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/plugins/ProfilerPanels.h"
 
 #include "editor/ui/Theme.h"
 
@@ -98,7 +99,10 @@ void Editor2DScreen::draw_console() {
 
   ImGui::Separator();
   const std::vector<std::size_t> rows = log.visible();
-  ImGui::BeginChild("##tg_lines", ImVec2(0, 0), ImGuiChildFlags_None,
+  const bool cmd_line = plugins_.loaded("ts.profiler");
+  ImGui::BeginChild("##tg_lines",
+                    ImVec2(0, cmd_line ? -ImGui::GetFrameHeightWithSpacing() : 0.0f),
+                    ImGuiChildFlags_None,
                     ImGuiWindowFlags_HorizontalScrollbar);
   if (rows.empty()) {
     ImGui::TextDisabled(log.size() == 0
@@ -136,6 +140,13 @@ void Editor2DScreen::draw_console() {
   }
   telegraph_seen_total_ = log.total();
   ImGui::EndChild();
+  if (cmd_line) {
+    std::string echo, out;
+    if (draw_console_line(telegraph_console_, &echo, &out)) {
+      log.add(runtime::LogLevel::Info, "console", echo);
+      if (!out.empty()) log.add(runtime::LogLevel::Info, "console", out);
+    }
+  }
   log.mark_seen();  // the panel is on screen: the badge resets
 }
 

@@ -1,6 +1,7 @@
 // World hooks for plugins: extension systems on the fixed tick and Lua
 // globals in every script sandbox (see WorldExtensions.h).
 
+#include "profiler/Profiler.h"
 #include "runtime/ScriptState.h"
 #include "runtime/World.h"
 
@@ -189,6 +190,7 @@ void World::step_extensions() {
     const WorldExtensions::System& sys = ext_->systems[i];
     if (ext_dead_[i] || !sys.run) continue;
     try {
+      TS_PROFILE_SCOPE(sys.name.c_str());
       sys.run(*this, kTickSeconds);
     } catch (const std::exception& e) {
       ext_dead_[i] = true;

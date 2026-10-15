@@ -18,6 +18,7 @@ add_executable(ts_admin
   SmokeAI.cpp
   SmokeAIWorld.cpp
   SmokeAIMenu.cpp
+  SmokeProfiler.cpp
   SmokeStory.cpp
   SmokeVR.cpp
   SmokeTools.cpp

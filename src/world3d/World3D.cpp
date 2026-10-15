@@ -1,3 +1,4 @@
+#include "profiler/Profiler.h"
 #include "world3d/World3D.h"
 
 #include <algorithm>
@@ -441,6 +442,7 @@ void World3D::follow_parents(const std::vector<std::pair<std::uint64_t, Transfor
 
 void World3D::step(const Input3D& input0) {
   if (!running_) return;
+  TS_PROFILE_SCOPE("world3d.step");
   Input3D input = input0;
   input.jump = input.jump || jump_latched_;
   input.action = input.action || action_latched_;
@@ -452,31 +454,50 @@ void World3D::step(const Input3D& input0) {
     for (const Entity3D& e : ents_) before.emplace_back(e.id, e.transform);
   }
   const float dt = static_cast<float>(kTickSeconds);
-  phys_pre(dt);
-  if (vr_) {
-    vr_step();
-  } else {
-    move_player(input);
-    phys_carry(input, dt);
+  {
+    TS_PROFILE_SCOPE("world3d.physics");
+    phys_pre(dt);
+    if (vr_) {
+      vr_step();
+    } else {
+      move_player(input);
+      phys_carry(input, dt);
+    }
+    phys_step(dt);
+    phys_post();
+    if (!vr_) update_triggers();
   }
-  phys_step(dt);
-  phys_post();
-  if (!vr_) update_triggers();
   if (host_) {
+    TS_PROFILE_SCOPE("world3d.scripts");
     host_->start_pending();
     if (input.action && !jump_held_) interact();
     host_->run_timers(script_tick());
     host_->tick(kTickSeconds);
   }
-  for (const auto& x : exts_) x->on_tick(*this, kTickSeconds);
-  anim_step();
+  for (const auto& x : exts_) {
+    TS_PROFILE_SCOPE(x->name());
+    x->on_tick(*this, kTickSeconds);
+  }
+  {
+    TS_PROFILE_SCOPE("world3d.animation");
+    anim_step();
+  }
   jump_held_ = input.action;
   ++tick_;
   in_step_ = false;
   if (has_parents_) follow_parents(before);
-  step_fx();
+  {
+    TS_PROFILE_SCOPE("world3d.fx");
+    step_fx();
+  }
   // Scripts may have moved or switched colliders.
   rebuild_statics();
+  if (profiler::Profiler::get().enabled()) {
+    profiler::Profiler& prof = profiler::Profiler::get();
+    prof.counter("world.entities", static_cast<double>(ents_.size()));
+    if (host_) prof.counter("mem.lua_kb", static_cast<double>(host_->memory_used()) / 1024.0);
+    prof.add("world.ticks", 1);
+  }
   if (!vr_) follow_camera(false);
 }
 

@@ -7,6 +7,7 @@
 // keeps 3D toasts, and hands the result to a renderer: fixed-function GL
 // quads (2D) or an RGBA raster for Renderer3D::set_overlay (3D).
 
+#include "debugtools/DebugTools.h"
 #include "runtime/World.h"
 #include "ui/Ui.h"
 
@@ -70,6 +71,11 @@ class GameUi {
   void open_pause(ts::audio::Engine* audio);
   void close_pause(ts::audio::Engine* audio);
 
+  // ts.profiler: the debug overlay (F3) and console (backtick). Off
+  // unless the project enables the plugin.
+  void enable_debug_tools(bool on);
+  profiler::DebugTools* debug_tools() { return debug_on_ ? &debug_ : nullptr; }
+
   // Toasts drawn as text cards (the 3D game; 2D keeps HudText).
   void toast(const std::string& text, double seconds);
 
@@ -96,6 +102,9 @@ class GameUi {
   float vx_ = -1.0f, vy_ = -1.0f;
   // Key / pad edges.
   bool prev_[16] = {};
+  profiler::DebugTools debug_;
+  bool debug_on_ = false;
+  bool prev_f3_ = false, prev_grave_ = false;
   std::string typed_;
   // Draw conversion / raster caches.
   std::deque<std::string> images_;

@@ -1,4 +1,7 @@
 #include "editor/editor3d/Editor3DScreen.h"
+#include "plugins/profiler/ProfilerPlugin.h"
+#include "profiler/Profiler.h"
+#include "debugtools/ProfilerWorld3D.h"
 
 #include "ai3d/AiWorld3D.h"
 #include "plugins/story/StoryPlugins.h"
@@ -646,11 +649,18 @@ bool Editor3DScreen::play_start() {
   story.dialogue = plugins_.loaded("ts.dialogue");
   story.saves = plugins_.loaded("ts.saves");
   story3d::attach(world_, story);
+  // ts.profiler: record while riding, profiler / console Lua tables.
+  debug_tools_on_ = plugins_.loaded("ts.profiler");
+  if (debug_tools_on_) {
+    profiler::attach_profiler(world_);
+    profiler::Profiler::get().set_capture_dir(plugins::capture_dir_for(project_.path));
+  }
   if (!world_.start(scene_, project_.path, &err)) {
     note("Play failed: " + err, LogLevel::Error);
     return false;
   }
   play_ui_.load(project_.path);
+  if (debug_tools_on_) debug_tools_.attach(play_ui_.system());
   note("Riding \"" + project_.name + "\" (Stop puts everything back)");
   return true;
 }
@@ -666,6 +676,8 @@ void Editor3DScreen::play_stop() {
   if (!playing()) return;
   world_.stop();
   toasts_.clear();
+  if (debug_tools_.attached()) debug_tools_.detach();
+  debug_tools_on_ = false;
   play_ui_.clear();
   note("Reined in; the scene is as you left it");
   if (plugins_.pending()) plugins_.apply();

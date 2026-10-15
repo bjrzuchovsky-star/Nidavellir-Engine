@@ -1,4 +1,6 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "plugins/profiler/ProfilerPlugin.h"
+#include "profiler/Profiler.h"
 #include "ui/UiScript.h"
 #include "editor/audio/EditorAudio.h"
 
@@ -102,6 +104,11 @@ bool Editor2DScreen::start_play() {
   plugins_.manager().play_begin(play_.world());
   begin_sound_ride();
   play_ui_.load(project_.path);
+  debug_tools_on_ = plugins_.loaded("ts.profiler");
+  if (debug_tools_on_) {
+    profiler::Profiler::get().set_capture_dir(plugins::capture_dir_for(project_.path));
+    debug_tools_.attach(play_ui_.system());
+  }
   // The edit scene waits here, untouched, until Stop.
   play_backup_ = workspace_;
   play_free_cam_ = false;
@@ -130,6 +137,8 @@ void Editor2DScreen::stop_play() {
   pump_play_logs();  // the last words of the ride
   plugins_.manager().play_end();
   end_sound_ride();
+  if (debug_tools_.attached()) debug_tools_.detach();
+  debug_tools_on_ = false;
   play_ui_.clear();
   play_.stop();
   play_.world().set_extensions(nullptr);
@@ -612,8 +621,17 @@ void Editor2DScreen::draw_play_viewport() {
   }
   draw_play_toasts(draw, canvas_pos, canvas_size);
   // In-game UI (ui/*.ui.json, Lua ui.*) over the view.
-  ui::forward_ui_events(world, play_ui_.update(canvas_pos, canvas_size, hovered,
-                                               viewport_focused_, io.DeltaTime));
+  if (debug_tools_on_ && (viewport_focused_ || hovered)) {
+    if (ImGui::IsKeyPressed(ImGuiKey_F3, false)) debug_tools_.toggle_overlay();
+    if (ImGui::IsKeyPressed(ImGuiKey_GraveAccent, false)) debug_tools_.toggle_console();
+  }
+  std::vector<ui::UiEvent> ui_events =
+      play_ui_.update(canvas_pos, canvas_size, hovered, viewport_focused_, io.DeltaTime);
+  if (debug_tools_on_) {
+    ui_events = debug_tools_.filter(std::move(ui_events));
+    debug_tools_.update(io.DeltaTime);
+  }
+  ui::forward_ui_events(world, ui_events);
   play_ui_.draw(draw, canvas_pos);
   if (is_paused()) {
     draw->AddRectFilled(canvas_pos, canvas_end,

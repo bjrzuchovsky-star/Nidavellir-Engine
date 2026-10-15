@@ -1,4 +1,5 @@
 #include "render3d/Renderer3D.h"
+#include "profiler/Profiler.h"
 
 #include <unordered_map>
 
@@ -63,7 +64,11 @@ class NullRenderer3D final : public Renderer3D {
     ++frame_.draws;
     frame_.triangles += it->second;
   }
-  FrameStats end_frame() override { return frame_; }
+  FrameStats end_frame() override {
+    frame_.meshes = meshes_.size();
+    frame_.materials = materials_.size();
+    return frame_;
+  }
 
  private:
   bool ready_ = false;
@@ -77,6 +82,21 @@ class NullRenderer3D final : public Renderer3D {
 
 std::unique_ptr<Renderer3D> make_null_renderer3d() {
   return std::make_unique<NullRenderer3D>();
+}
+
+void report_frame_stats(const FrameStats& st) {
+  profiler::Profiler& p = profiler::Profiler::get();
+  if (!p.enabled()) return;
+  p.counter("render.draws", static_cast<double>(st.draws));
+  p.counter("render.triangles", static_cast<double>(st.triangles));
+  p.counter("render.lights", static_cast<double>(st.lights));
+  p.counter("render.shadow_casters", static_cast<double>(st.shadow_casters));
+  p.counter("render.lines", static_cast<double>(st.lines));
+  p.counter("render.skinned", static_cast<double>(st.skinned));
+  p.counter("assets.meshes", static_cast<double>(st.meshes));
+  p.counter("assets.materials", static_cast<double>(st.materials));
+  p.counter("assets.textures", static_cast<double>(st.textures));
+  p.counter("mem.gpu_mb", static_cast<double>(st.gpu_bytes) / (1024.0 * 1024.0));
 }
 
 }  // namespace render3d

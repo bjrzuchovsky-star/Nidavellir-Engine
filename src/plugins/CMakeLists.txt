@@ -18,6 +18,7 @@ add_library(ts_plugins_builtin
   shipyard/Sample.cpp
   ai/AiPlugin.cpp
   story/StoryPlugins.cpp
+  profiler/ProfilerPlugin.cpp
 )
 
 target_include_directories(ts_plugins_builtin
@@ -37,6 +38,7 @@ target_link_libraries(ts_plugins_builtin
     ts_ai
   PUBLIC
     ts_story
+    ts_profiler_lua
 )
 
 target_compile_features(ts_plugins_builtin PUBLIC cxx_std_20)

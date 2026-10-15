@@ -41,6 +41,17 @@ bool load_gl33(std::string* error) {
   TS_GL(GenerateMipmap); TS_GL(BlitFramebuffer); TS_GL(GetUniformBlockIndex);
   TS_GL(UniformBlockBinding); TS_GL(BindBufferBase);
 #undef TS_GL
+  {
+    // Optional: timer queries.
+    const char* keep = missing;
+    load(g_gl.GenQueries, "glGenQueries");
+    load(g_gl.DeleteQueries, "glDeleteQueries");
+    load(g_gl.BeginQuery, "glBeginQuery");
+    load(g_gl.EndQuery, "glEndQuery");
+    load(g_gl.GetQueryObjectiv, "glGetQueryObjectiv");
+    load(g_gl.GetQueryObjectui64v, "glGetQueryObjectui64v");
+    missing = keep;
+  }
   if (missing) {
     if (error) *error = std::string("OpenGL 3.3 entry point missing: ") + missing;
     return false;

@@ -1,4 +1,5 @@
 #include "render3d/SceneView.h"
+#include "profiler/Profiler.h"
 
 #include "core/MemImages.h"
 
@@ -308,7 +309,10 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
 }
 
 FrameStats SceneView::end() {
-  return r_ ? r_->end_frame() : FrameStats{};
+  TS_PROFILE_SCOPE("render3d.frame");
+  const FrameStats st = r_ ? r_->end_frame() : FrameStats{};
+  report_frame_stats(st);
+  return st;
 }
 
 }  // namespace render3d

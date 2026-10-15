@@ -1,4 +1,7 @@
 #include "audio/GameAudio.h"
+#include "debugtools/ProfilerWorld3D.h"
+#include "profiler/Profiler.h"
+#include "plugins/profiler/ProfilerPlugin.h"
 #include "audio/SoundStage3D.h"
 #include "Game3D.h"
 #include "GameManifest.h"
@@ -184,6 +187,11 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
     world3d::World3D world;
     ai3d::attach(world, ai_enabled(dir));
     story3d::attach(world, story_enabled(dir));
+    const bool prof = plugins::profiler_enabled(plugins::read_project_plugins(dir).ids);
+    if (prof) {
+      profiler::attach_profiler(world);
+      profiler::Profiler::get().set_capture_dir(plugins::capture_dir_for(dir));
+    }
     if (!renderer->init(&err) || !world.start(scene, dir, &err)) {
       std::cerr << "[ts_game] " << err << '\n';
       code = 1;
@@ -205,9 +213,11 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
       GameUi gui;
       gui.load(dir);
       gui.attach(win);
+      gui.enable_debug_tools(prof);
       bool menu_paused = false;
       double ui_last = glfwGetTime();
       while (!glfwWindowShouldClose(win)) {
+        profiler::Profiler::get().begin_frame();
         glfwPollEvents();
         {
           // In-game UI: Esc / pad Start pause menu, Lua ui.* both ways.
@@ -258,7 +268,10 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
           }
         }
         const double now = glfwGetTime();
-        world.update(now - last, in);
+        {
+          TS_PROFILE_SCOPE("game.update");
+          world.update(now - last, in);
+        }
         sound3d.update(world, now - last);
         sound.tick(now - last);
         last = now;
@@ -286,6 +299,10 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
           for (const std::string& p : view.take_problems()) std::cerr << "[ts_game] " << p << '\n';
           glfwSwapBuffers(win);
         }
+        if (profiler::Profiler::get().enabled() && n % 15 == 0) {
+          profiler::Profiler::get().counter("mem.process_mb", profiler::process_memory_mb());
+        }
+        profiler::Profiler::get().end_frame();
         if (frames >= 0 && ++n >= frames) break;
       }
       gui.detach(win);

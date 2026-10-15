@@ -21,6 +21,7 @@ target_link_libraries(ts_render3d
   PUBLIC
     ts_core
     ts_scene
+    ts_profiler
     glfw
     OpenGL::GL
   PRIVATE

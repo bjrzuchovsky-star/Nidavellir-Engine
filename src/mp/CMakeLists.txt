@@ -21,6 +21,7 @@ target_link_libraries(ts_mp
     ts_scene
     ts_runtime
     ts_net
+    ts_profiler
 )
 
 target_compile_features(ts_mp PUBLIC cxx_std_20)
