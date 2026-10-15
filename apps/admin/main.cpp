@@ -27,6 +27,7 @@
 #include "SmokeShipyard.h"
 #include "SmokeSurvival.h"
 #include "SmokeRuntime.h"
+#include "SmokeAI.h"
 #include "SmokeAnim3D.h"
 #include "SmokeTemplates.h"
 #include "SmokeTradingPost.h"
@@ -1205,6 +1206,11 @@ int run_console_smoke() {
   }
   // 3D: scene v8, glTF, play runtime, GL offscreen render, 3D editor
   // (see Smoke3D.cpp / Smoke3DEditor.cpp).
+  // AI toolkit + the ts.ai plugin (see SmokeAI.cpp / SmokeAIWorld.cpp).
+  if (run_ai_smoke() != 0) {
+    std::cerr << "TombStone Admin smoke FAILED (AI)\n";
+    return 1;
+  }
   if (run_anim3d_smoke() != 0) {
     std::cerr << "TombStone Admin smoke FAILED (3D animation)\n";
     return 1;
@@ -1463,6 +1469,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-export") == 0) {
       return ts::tombstone::run_export_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-ai") == 0) {
+      return run_ai_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-anim3d") == 0) {
       return run_anim3d_smoke();
