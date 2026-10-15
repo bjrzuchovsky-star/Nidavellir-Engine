@@ -38,6 +38,7 @@ target_link_libraries(ts_admin
     ts_editor
     ts_plugin
     ts_plugins_builtin
+    ts_lua
     ts_render3d
     ts_world3d
     ts_xr

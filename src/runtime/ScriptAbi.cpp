@@ -126,6 +126,42 @@ void a_ui(void* w, int kind, const char* target, const char* text, double value)
   W(w)->script_ui(std::move(c));
 }
 uint32_t a_buttons(void* w, int slot) { return W(w)->script_buttons(slot); }
+int a_plugin_call(void* w, const char* table, const char* fn, const char* args, char* out, int cap) {
+  std::vector<ScriptValue> vals;
+  const char* p = args ? args : "";
+  while (*p) {
+    const char* end = std::strchr(p, '\n');
+    const std::string line(p, end ? static_cast<std::size_t>(end - p) : std::strlen(p));
+    p = end ? end + 1 : p + line.size();
+    if (line.size() < 2 || line[1] != '\t') continue;
+    const std::string v = line.substr(2);
+    vals.push_back(line[0] == 'b' ? ScriptValue::of_bool(v == "1" || v == "true")
+                   : line[0] == 't' ? ScriptValue::of_text(v)
+                                    : ScriptValue::of_number(std::atof(v.c_str())));
+  }
+  ScriptValue r;
+  std::string err;
+  if (!W(w)->script_plugin_call(table ? table : "", fn ? fn : "", vals, &r, &err)) {
+    LogEntry e;
+    e.level = LogLevel::Error;
+    e.channel = "plugin";
+    e.text = err;
+    e.tick = W(w)->script_tick();
+    W(w)->script_log(std::move(e));
+    return -1;
+  }
+  char num[64];
+  std::string s;
+  if (r.type == ScriptValue::Type::Bool) s = std::string("b\t") + (r.flag ? "1" : "0");
+  else if (r.type == ScriptValue::Type::Text) s = "t\t" + r.text;
+  else {
+    std::snprintf(num, sizeof(num), "%.17g", r.number);
+    s = std::string("n\t") + num;
+  }
+  const int need = static_cast<int>(s.size());
+  if (out && cap >= need) std::memcpy(out, s.data(), s.size());
+  return need;
+}
 }  // namespace
 
 TsScriptApi make_script_api(ScriptWorld* world) {
@@ -153,6 +189,7 @@ TsScriptApi make_script_api(ScriptWorld* world) {
   a.fx_burst = a_fx;
   a.ui = a_ui;
   a.buttons = a_buttons;
+  a.plugin_call = a_plugin_call;
   return a;
 }
 

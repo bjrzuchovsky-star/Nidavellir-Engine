@@ -1,4 +1,5 @@
 #include "SmokeNative.h"
+#include "SmokeGraph.h"
 
 #include "ExportCli.h"
 #include "editor/launch/GameLauncher.h"
@@ -35,6 +36,7 @@ struct Door : ts::Script {
   void on_start() override {
     log("door v1 ready, reach " + std::to_string(static_cast<int>(prop("reach", 24.0))));
     set("gold", 3.0);
+    if (prop("bridge", 0.0) > 0) log("plugin says " + plugin("frontier", "greet", {ts::arg("pardner")}).text);
   }
   void on_tick(double) override {
     if (tick() % 30 == 0) { ++opened; set("opened", static_cast<double>(opened)); }
@@ -133,12 +135,14 @@ int run_native_smoke() {
   native_scripts::set_blocking_builds(true);
   struct Unblock { ~Unblock() { native_scripts::set_blocking_builds(false); } } unblock;
   World w;
+  w.set_extensions(smoke_plugin_extensions());
   Entity2D door;
   door.id = 2;
   door.name = "Door";
   door.script = ScriptData{};
   door.script->path = "scripts/door.cpp";
   door.script->set("reach", ScriptValue::of_number(40));
+  door.script->set("bridge", ScriptValue::of_number(1));
   std::string err;
   const auto t0 = std::chrono::steady_clock::now();
   if (!w.build({door}, proj.string(), &err)) {
@@ -153,6 +157,7 @@ int run_native_smoke() {
   std::vector<LogEntry> logs = w.take_logs();
   for (LogEntry& e : ride(w, 60)) logs.push_back(std::move(e));
   if (!has(logs, "door v1 ready, reach 40")) return fail("on_start / props:" + dump(logs));
+  if (!has(logs, "plugin says howdy pardner")) return fail("plugin call bridge from C++:" + dump(logs));
   const ScriptValue* opened = w.script_get(2, "opened");
   if (!opened || opened->number != 2) return fail("on_tick + state set (opened)" + dump(logs));
 
@@ -198,7 +203,7 @@ int run_native_smoke() {
   native_scripts::set_blocking_builds(true);
   if (int r = check_export()) return r;
   std::cout << "[smoke] C++ scripts OK (module built in " << static_cast<int>(build_s)
-            << " s, hooks + props + state, hot reload kept state, compile error at "
+            << " s, hooks + props + state + plugin bridge, hot reload kept state, compile error at "
                "scripts/door.cpp:line kept the old module, background rebuild swapped in after " << bg_ticks
             << " live ticks, exported game ran the module from its pak)\n";
   return 0;

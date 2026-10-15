@@ -2,6 +2,10 @@
 
 #include "runtime/GraphScript.h"
 #include "runtime/World.h"
+#include "runtime/WorldExtensions.h"
+
+#include "lauxlib.h"
+#include "lua.h"
 
 #include <iostream>
 #include <sstream>
@@ -173,6 +177,52 @@ int check_mixed() {
   return 0;
 }
 
+}  // namespace
+// Also used by the C++ / C# smokes: a plugin Lua table "frontier" with
+// double(x) and greet(name).
+std::shared_ptr<const WorldExtensions> smoke_plugin_extensions() {
+  auto ext = std::make_shared<WorldExtensions>();
+  ext->lua.push_back({"frontier", "smoke.plugin", [](lua_State* L) {
+                        luaL_dostring(L, "return { double = function(x) return x * 2 end,"
+                                         " greet = function(n) return 'howdy ' .. n end }");
+                      }});
+  return ext;
+}
+namespace {
+
+// Graph -> plugin Lua table through the bridge.
+int check_plugin_bridge() {
+  World w;
+  w.set_extensions(smoke_plugin_extensions());
+  G b;
+  const int start = b.add("event.start");
+  const int call = b.add("plugin.call", {{"table", T("frontier")}, {"fn", T("double")}, {"a", N(21)}});
+  const int join = b.add("text.join", {{"a", T("plugin says ")}});
+  const int log = b.add("log");
+  const int bad = b.add("plugin.call", {{"table", T("nope")}, {"fn", T("x")}});
+  b.link(call, "value", join, "b");
+  b.link(join, "value", log, "text");
+  b.flow(start, call);
+  b.flow(call, log);
+  b.flow(log, bad);
+  w.script_library().put("scripts/bridge.graph.json", write_graph(b.g));
+  std::string err;
+  if (!w.build({scripted(2, "Bridge", "scripts/bridge.graph.json")}, "", &err)) return fail("bridge build: " + err);
+  w.take_logs();
+  const std::vector<std::string> t = ride(w, 1, false);
+  bool said = false, missing = false;
+  for (const std::string& s : t) {
+    said = said || s.find("plugin says 42") != std::string::npos;
+    missing = missing || s.find("no plugin table 'nope'") != std::string::npos;
+  }
+  if (!said || !missing) {
+    std::string d;
+    for (const std::string& s : t) d += "\n  " + s;
+    return fail("plugin call bridge:" + d);
+  }
+  return 0;
+}
+
 int check_budget_and_reload() {
   World w;
   G b;
@@ -244,9 +294,10 @@ int run_graph_smoke() {
   if (a != b) return fail("two runs of the same graph differ (not deterministic)");
   if (int r = check_mixed()) return r;
   if (int r = check_budget_and_reload()) return r;
+  if (int r = check_plugin_bridge()) return r;
   std::cout << "[smoke] graph OK (" << graph_node_catalog().size()
             << " node types, round trip, events / flow / delay / for / button edge, "
                "variables, budget stop, reload keeps vars, deterministic x2 ("
-            << a.size() << " trace lines), mixed Lua + graph)\n";
+            << a.size() << " trace lines), mixed Lua + graph, plugin call bridge)\n";
   return 0;
 }

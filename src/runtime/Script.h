@@ -132,6 +132,21 @@ class ScriptWorld {
   // Buttons (runtime::kButton* bits) the rider in `slot` holds this tick;
   // graphs' Key event and compiled scripts read it. Default: none.
   virtual std::uint32_t script_buttons(int /*slot*/) const { return 0; }
+
+  // Plugin call bridge: table.fn(args...) on a plugin's Lua table (the ones
+  // script_open_extensions hands Lua scripts), for graphs, C++ and C#. One
+  // value back (nil = false). False + *error when there is no such table /
+  // function or it raised.
+  bool script_plugin_call(const std::string& table, const std::string& fn,
+                          const std::vector<ScriptValue>& args, ScriptValue* result,
+                          std::string* error);
+
+ private:
+  struct PluginBridge;
+  struct PluginBridgeDeleter {
+    void operator()(PluginBridge* b) const;
+  };
+  std::unique_ptr<PluginBridge, PluginBridgeDeleter> plugin_bridge_;
 };
 
 // One scripting language's host (Lua, graphs, C++ modules, C#). The world

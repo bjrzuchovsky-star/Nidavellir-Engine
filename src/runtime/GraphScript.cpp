@@ -116,6 +116,9 @@ std::vector<GraphNodeDef> build_catalog() {
   act("UI", "toast", "Toast", {{"text", T("Howdy")}, {"slot", N(0)}, {"seconds", N(2)}}, {},
       "message to rider slot (0 = all)");
   act("UI", "log", "Log", {{"text", T("")}}, {}, "a Telegraph line");
+  act("Plugins", "plugin.call", "Plugin Call",
+      {{"table", T("")}, {"fn", T("")}, {"a", N(0)}, {"b", N(0)}, {"c", N(0)}}, {"value"},
+      "table.fn(a, b, c) on a plugin's Lua table");
   return c;
 }
 
@@ -462,7 +465,7 @@ struct GraphScriptHost::Impl {
     const std::string& t = n.type;
     auto I = [&](const char* p) { return input(in, n, p, depth); };
     const auto stored = in.outs.find({node_id, pin});
-    if (t.rfind("event.", 0) == 0 || t == "flow.for" || t == "var.set" || t == "var.add" ||
+    if (t.rfind("event.", 0) == 0 || t == "flow.for" || t == "var.set" || t == "var.add" || t == "plugin.call" ||
         t == "entity.spawn") {
       return stored == in.outs.end() ? N(0) : stored->second;
     }
@@ -627,6 +630,15 @@ struct GraphScriptHost::Impl {
       } else if (t == "toast") {
         const int slot = static_cast<int>(num(I("slot")));
         world->script_toast(slot <= 0 ? -1 : slot - 1, text(I("text")), num(I("seconds")), in.entity);
+      } else if (t == "plugin.call") {
+        ScriptValue r;
+        std::string err;
+        if (world->script_plugin_call(text(I("table")), text(I("fn")), {I("a"), I("b"), I("c")}, &r, &err)) {
+          in.outs[{n.id, "value"}] = r;
+        } else {
+          in.outs[{n.id, "value"}] = B(false);
+          log(LogLevel::Error, err, &in, 0);
+        }
       } else if (t == "log") {
         log(LogLevel::Info, text(I("text")), &in, 0);
       } else if (t.rfind("event.", 0) == 0) {

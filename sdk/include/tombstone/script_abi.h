@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 
-#define TS_SCRIPT_ABI 1
+#define TS_SCRIPT_ABI 2
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,6 +54,12 @@ typedef struct TsScriptApi {
   void (*fx_burst)(void* w, const char* preset, uint64_t entity);
   void (*ui)(void* w, int kind, const char* target, const char* text, double value);
   uint32_t (*buttons)(void* w, int slot);                /* 0-based, kButton* bits */
+  /* ABI 2: plugin call bridge, table.fn(args...) on a plugin's Lua table.
+   * args: "type\tvalue\n" lines (n / b / t); the result "type\tvalue" into
+   * out. Returns the bytes the result needs (call again with more room),
+   * -1 on error (logged to the Telegraph). */
+  int (*plugin_call)(void* w, const char* table, const char* fn, const char* args, char* out,
+                     int cap);
 } TsScriptApi;
 
 /* Module exports (one module per project holds every script class).

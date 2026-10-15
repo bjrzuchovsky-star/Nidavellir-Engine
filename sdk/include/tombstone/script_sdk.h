@@ -55,6 +55,11 @@ struct PropValue {
   std::string text;
 };
 
+inline PropValue arg(double v) { PropValue p; p.type = 'n'; p.number = v; return p; }
+inline PropValue arg(bool v) { PropValue p; p.type = 'b'; p.number = v ? 1 : 0; return p; }
+inline PropValue arg(const std::string& v) { PropValue p; p.type = 't'; p.text = v; return p; }
+inline PropValue arg(const char* v) { return arg(std::string(v)); }
+
 class Script {
  public:
   virtual ~Script() = default;
@@ -123,6 +128,34 @@ class Script {
   void ui_hide(const std::string& doc) { api_->ui(api_->world, TS_UI_HIDE, doc.c_str(), "", 0); }
   void ui_text(const std::string& id, const std::string& t) {
     api_->ui(api_->world, TS_UI_SET_TEXT, id.c_str(), t.c_str(), 0);
+  }
+  // Plugin call bridge: table.fn(args...) on a plugin's Lua table, e.g.
+  //   ts::PropValue n = plugin("tumbleweed", "count", {ts::arg(3.0), ts::arg("west")});
+  // .type 'x' when the call failed (the error is in the Telegraph).
+  PropValue plugin(const std::string& table, const std::string& fn,
+                   const std::vector<PropValue>& args = {}) {
+    std::string enc;
+    for (const PropValue& a : args) {
+      enc += a.type;
+      enc += '\t';
+      enc += a.type == 't' ? a.text : a.type == 'b' ? (a.number != 0 ? "1" : "0") : std::to_string(a.number);
+      enc += '\n';
+    }
+    PropValue r;
+    r.type = 'x';
+    if (!api_->plugin_call) return r;
+    std::string buf(256, '\0');
+    int n = api_->plugin_call(api_->world, table.c_str(), fn.c_str(), enc.c_str(), buf.data(), 256);
+    if (n > 256) {
+      buf.assign(static_cast<std::size_t>(n), '\0');
+      n = api_->plugin_call(api_->world, table.c_str(), fn.c_str(), enc.c_str(), buf.data(), n);
+    }
+    if (n < 2) return r;
+    buf.resize(static_cast<std::size_t>(n));
+    r.type = buf[0];
+    r.text = buf.substr(2);
+    r.number = r.type == 'b' ? (r.text == "1" ? 1.0 : 0.0) : r.type == 'n' ? std::atof(r.text.c_str()) : 0.0;
+    return r;
   }
   bool held(Button b, int slot1 = 1) const { return (api_->buttons(api_->world, slot1 - 1) & b) != 0; }
   // Props (scene overrides of the defaults you pass).

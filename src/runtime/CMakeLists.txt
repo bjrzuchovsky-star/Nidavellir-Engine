@@ -17,6 +17,7 @@ add_library(ts_runtime
   ScriptLanguages.cpp
   GraphScript.cpp
   ScriptAbi.cpp
+  PluginBridge.cpp
   NativeScript.cpp
   Sound.cpp
 )
