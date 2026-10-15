@@ -18,6 +18,7 @@ add_executable(ts_admin
   SmokeTools.cpp
   SmokeUi.cpp
   SmokeFx.cpp
+  ExportCli.cpp
 )
 
 target_link_libraries(ts_admin
@@ -43,6 +44,8 @@ target_link_libraries(ts_admin
     ts_audio3d
     ts_ui
     ts_fx
+    ts_export
+    ts_vfs
 )
 
 target_compile_features(ts_admin PRIVATE cxx_std_20)

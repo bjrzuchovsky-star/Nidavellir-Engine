@@ -17,6 +17,7 @@
 #include "SmokeVR.h"
 #include "SmokePlugins.h"
 #include "SmokeAudio.h"
+#include "ExportCli.h"
 #include "SmokeFx.h"
 #include "SmokeUi.h"
 #include "SmokeShipyard.h"
@@ -1333,6 +1334,13 @@ int run_imgui_app() {
 int main(int argc, char** argv) {
   bool smoke = false;
   for (int i = 1; i < argc; ++i) {
+    if (std::strcmp(argv[i], "--export") == 0) {
+      // Headless Ship It: ts_admin --export <project> --out <dir> [...]
+      return ts::tombstone::run_export_cli(argc, argv);
+    }
+    if (std::strcmp(argv[i], "--smoke-export") == 0) {
+      return ts::tombstone::run_export_smoke();
+    }
     if (std::strcmp(argv[i], "--smoke-3d") == 0) {
       // Just the 3D checks (quick loop while working on the 3D side).
       return run_3d_smoke();

@@ -68,6 +68,8 @@ endif()
 
 # Editor / Admin UI module (screens + AppFlow). Admin-only.
 if(TS_BUILD_ADMIN)
+  # Ship It: export pipeline (ts_export) used by the Freight Office + CLI.
+  add_subdirectory(src/export)
   add_subdirectory(src/editor)
   add_subdirectory(apps/admin)
 endif()
