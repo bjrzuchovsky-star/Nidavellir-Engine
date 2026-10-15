@@ -1,5 +1,5 @@
 {
-  "version": 12,
+  "version": 13,
   "dimension": "3d",
   "environment": {
     "sky_top": [0.13, 0.16, 0.3],
@@ -562,6 +562,14 @@
             "name": "footstep"
           }
         ]
+      },
+      "agent": {
+        "speed": 1.2,
+        "radius": 0.35,
+        "height": 1.8,
+        "avoidance": true,
+        "bt": "ai/hank.bt.json",
+        "wander_radius": 5
       }
     }
   ],

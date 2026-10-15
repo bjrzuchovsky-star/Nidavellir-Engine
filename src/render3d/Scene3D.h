@@ -28,8 +28,31 @@ using render3d::Vec3;
 // and the editor-only locked / editor_hidden flags; v10 the sound source
 // (audio, distances in metres). v11 adds "particles" (emitters), v12 the
 // skeletal "animator" and the VR rig's skinned "hand_model".
-// v7 .. v11 files still load.
-inline constexpr int kScene3DVersion = 12;
+// v13 adds the AI "agent" (ts.ai navmesh agent) and "nav_link" (off-mesh
+// link from the entity to `to`).
+// v7 .. v12 files still load.
+inline constexpr int kScene3DVersion = 13;
+
+// ts.ai navmesh agent (v13): walks the baked navmesh with crowd avoidance,
+// optionally driven by a behaviour tree (*.bt.json).
+struct Agent3D {
+  float speed = 2.0f;     // m/s
+  float radius = 0.4f;    // m
+  float height = 1.8f;    // m
+  bool avoidance = true;  // crowd separation + obstacle avoidance
+  std::string bt;         // project-relative .bt.json ("" = scripted only)
+  float wander_radius = 6.0f;
+  bool operator==(const Agent3D& o) const = default;
+};
+
+// Off-mesh link (v13): agents may jump / climb from the entity to `to`
+// (world position). Baked into the navmesh.
+struct NavLink3D {
+  Vec3 to;
+  float radius = 0.5f;
+  bool bidirectional = true;
+  bool operator==(const NavLink3D& o) const = default;
+};
 
 // What to draw: "primitive:cube|plane|sphere|capsule" or a project-relative
 // .gltf / .glb path.
@@ -217,6 +240,8 @@ struct Entity3D {
   std::optional<AudioSourceData> audio;  // v10, 3D defaults: audio_3d()
   std::optional<fx::EmitterDesc> particles;  // v11, metres, y up
   std::optional<Animator3D> animator;        // v12
+  std::optional<Agent3D> agent;              // v13
+  std::optional<NavLink3D> nav_link;         // v13
   // Runtime only (never saved): the skinning palette the animator posed
   // this tick; SceneView draws the skinned mesh with it (rest pose when
   // null). Shared so world copies stay cheap.

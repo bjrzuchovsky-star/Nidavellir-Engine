@@ -146,6 +146,7 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
                                              std::cos(yaw) * std::cos(pitch) * d};
   }
   running_ = true;
+  for (const auto& x : exts_) x->on_start(*this);
   // Scripts.
   bool any_script = false;
   for (const Entity3D& e : ents_) any_script = any_script || e.script.has_value();
@@ -166,6 +167,9 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
 
 void World3D::stop() {
   host_.reset();
+  if (running_) {
+    for (const auto& x : exts_) x->on_stop(*this);
+  }
   anim_.reset();
   particles_.clear();
   running_ = false;
@@ -428,6 +432,7 @@ void World3D::step(const Input3D& input0) {
     host_->run_timers(script_tick());
     host_->tick(kTickSeconds);
   }
+  for (const auto& x : exts_) x->on_tick(*this, kTickSeconds);
   anim_step();
   jump_held_ = input.action;
   ++tick_;
@@ -706,8 +711,31 @@ void World3D::play_sound(runtime::SoundEvent event) {
       event.z = e->transform.position.z;
     }
   }
+  for (const auto& x : exts_) x->on_sound(*this, event);
   if (sounds_.size() >= kMaxSounds) sounds_.erase(sounds_.begin());
   sounds_.push_back(std::move(event));
+}
+
+void World3D::add_extension(std::shared_ptr<World3DExtension> ext) {
+  if (ext) exts_.push_back(std::move(ext));
+}
+
+World3DExtension* World3D::extension(const std::string& name) const {
+  for (const auto& x : exts_) {
+    if (name == x->name()) return x.get();
+  }
+  return nullptr;
+}
+
+void World3D::clear_extensions() {
+  if (running_) {
+    for (const auto& x : exts_) x->on_stop(*this);
+  }
+  exts_.clear();
+}
+
+void World3D::debug_lines(std::vector<World3DExtension::Line>* out) const {
+  for (const auto& x : exts_) x->debug_lines(*this, out);
 }
 
 std::vector<runtime::SoundEvent> World3D::take_sounds() {

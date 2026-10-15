@@ -84,6 +84,7 @@ target_link_libraries(ts_editor
     ts_plugins_builtin
     ts_render3d
     ts_world3d
+    ts_ai3d
     ts_xr
     ts_gfx
     ts_imgui

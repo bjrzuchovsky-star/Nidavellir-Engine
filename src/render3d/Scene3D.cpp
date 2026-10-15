@@ -164,6 +164,23 @@ Value entity_json(const Entity3D& e) {
     o.set("particles", std::move(v));
   }
   if (e.animator) o.set("animator", render3d::animator_to_json(*e.animator));
+  if (e.agent) {
+    Value v = Value::object();
+    v.set("speed", Value::number(e.agent->speed));
+    v.set("radius", Value::number(e.agent->radius));
+    v.set("height", Value::number(e.agent->height));
+    v.set("avoidance", Value::boolean(e.agent->avoidance));
+    if (!e.agent->bt.empty()) v.set("bt", Value::string(e.agent->bt));
+    v.set("wander_radius", Value::number(e.agent->wander_radius));
+    o.set("agent", std::move(v));
+  }
+  if (e.nav_link) {
+    Value v = Value::object();
+    v.set("to", vec3(e.nav_link->to));
+    v.set("radius", Value::number(e.nav_link->radius));
+    v.set("bidirectional", Value::boolean(e.nav_link->bidirectional));
+    o.set("nav_link", std::move(v));
+  }
   return o;
 }
 
@@ -301,6 +318,25 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     });
   }
   if (o["animator"].is_object()) e.animator = render3d::animator_from_json(o["animator"]);
+  if (o["agent"].is_object()) {
+    const Value& v = o["agent"];
+    Agent3D a;
+    a.speed = std::clamp(v.flt("speed", a.speed), 0.0f, 50.0f);
+    a.radius = std::clamp(v.flt("radius", a.radius), 0.05f, 5.0f);
+    a.height = std::clamp(v.flt("height", a.height), 0.1f, 10.0f);
+    a.avoidance = v.flag("avoidance", a.avoidance);
+    a.bt = v.str("bt");
+    a.wander_radius = std::clamp(v.flt("wander_radius", a.wander_radius), 0.0f, 500.0f);
+    e.agent = a;
+  }
+  if (o["nav_link"].is_object()) {
+    const Value& v = o["nav_link"];
+    NavLink3D l;
+    read_vec3(v, "to", &l.to);
+    l.radius = std::clamp(v.flt("radius", l.radius), 0.05f, 5.0f);
+    l.bidirectional = v.flag("bidirectional", l.bidirectional);
+    e.nav_link = l;
+  }
   *out = std::move(e);
   return true;
 }
@@ -866,6 +902,23 @@ function on_trigger_enter(other)
 end
 )lua";
 
+// Old Hank's stroll (ts.ai): greets riders he can see, else wanders the
+// street between short rests. Inert unless the project enables ts.ai.
+constexpr const char* kHankBt = R"json({
+  "name": "Old Hank",
+  "blackboard": {"target": 0},
+  "root": {"type": "selector", "reactive": true, "children": [
+    {"type": "sequence", "name": "greet", "children": [
+      {"type": "can_see", "target": "any"},
+      {"type": "stop"},
+      {"type": "face", "key": "target"},
+      {"type": "wait", "seconds": 1.0}]},
+    {"type": "sequence", "name": "stroll", "children": [
+      {"type": "wander", "radius": 5},
+      {"type": "wait", "seconds": 1.5, "max": 3.5}]}]}
+}
+)json";
+
 constexpr const char* kRiderLua = R"lua(-- The rider: the Drifter's animator follows the controller (speed,
 -- grounded, jump). Clip events arrive as on_anim_event(name).
 function on_anim_event(name)
@@ -909,6 +962,8 @@ bool write_ghost_town_sample(const std::string& project_dir,
   if (!write_text(dir / "scripts" / "town.lua", kTownLua, error)) return false;
   if (!write_text(dir / "scripts" / "hank.lua", kHankLua, error)) return false;
   if (!write_text(dir / "scripts" / "rider.lua", kRiderLua, error)) return false;
+  fs::create_directories(dir / "ai", ec);
+  if (!write_text(dir / "ai" / "hank.bt.json", kHankBt, error)) return false;
   if (!render3d::write_sample_character_gltf((dir / "assets" / "drifter.gltf").string(), error)) {
     return false;
   }
@@ -1010,14 +1065,22 @@ bool write_ghost_town_sample(const std::string& project_dir,
   hank.collider = hz;
   hank.script = ScriptData{};
   hank.script->path = "scripts/hank.lua";
+  scene3d::Agent3D stroll;
+  stroll.speed = 1.2f;
+  stroll.radius = 0.35f;
+  stroll.bt = "ai/hank.bt.json";
+  stroll.wander_radius = 5.0f;
+  hank.agent = stroll;
   s.entities.push_back(hank);
   s.editor_camera.target = {0, 1, 0};
   s.editor_camera.distance = 26.0f;
   if (!save_file(scene_path(project_dir), s, error)) return false;
 
+  // ts.ai on: Old Hank strolls the street (navmesh agent + ai/hank.bt.json).
   const std::string pj = json_mini::write_object({{"name", display_name},
                                                   {"dimension", "3d"},
-                                                  {"created", "sample"}});
+                                                  {"created", "sample"},
+                                                  {"plugins", "ts.ai"}});
   return write_text(dir / "project.json", pj, error);
 }
 

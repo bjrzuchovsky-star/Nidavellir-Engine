@@ -46,6 +46,7 @@ target_link_libraries(ts_admin
     ts_plugin
     ts_plugins_builtin
     ts_ai
+    ts_ai3d
     ts_lua
     ts_render3d
     ts_world3d

@@ -52,6 +52,29 @@ using render3d::Vec3;
 using scene3d::Entity3D;
 using render3d::Transform;
 
+class World3D;
+
+// Optional systems a host attaches to a World3D before start() (ts.ai's
+// navmesh agents). on_start runs after the statics are built and before
+// scripts start; on_tick after the scripts each tick (before animation);
+// open_lua adds globals to every script sandbox; debug_lines feeds the
+// editor's overlay.
+class World3DExtension {
+ public:
+  struct Line {
+    Vec3 a, b;
+    float rgba[4] = {1, 1, 1, 1};
+  };
+  virtual ~World3DExtension() = default;
+  virtual const char* name() const = 0;
+  virtual void on_start(World3D& /*world*/) {}
+  virtual void on_tick(World3D& /*world*/, double /*dt*/) {}
+  virtual void on_stop(World3D& /*world*/) {}
+  virtual void on_sound(World3D& /*world*/, const runtime::SoundEvent& /*ev*/) {}
+  virtual void open_lua(World3D& /*world*/, lua_State* /*L*/, int /*sandbox*/) {}
+  virtual void debug_lines(const World3D& /*world*/, std::vector<Line>* /*out*/) const {}
+};
+
 struct Input3D {
   float move_right = 0.0f;    // -1 .. 1
   float move_forward = 0.0f;  // -1 .. 1 (away from the camera)
@@ -114,6 +137,11 @@ class World3D final : public runtime::ScriptWorld {
   World3D& operator=(const World3D&) = delete;
 
   void set_log_sink(LogSink sink) { sink_ = std::move(sink); }
+  // Extensions (see World3DExtension); kept across start / stop.
+  void add_extension(std::shared_ptr<World3DExtension> ext);
+  World3DExtension* extension(const std::string& name) const;
+  void clear_extensions();
+  void debug_lines(std::vector<World3DExtension::Line>* out) const;
   // Pin a script source (tests, unsaved editor buffers).
   runtime::ScriptLibrary& scripts() { return lib_; }
 
@@ -121,6 +149,7 @@ class World3D final : public runtime::ScriptWorld {
              std::string* error = nullptr);
   void stop();
   bool running() const { return running_; }
+  const std::string& project_dir() const { return project_dir_; }
   bool paused() const { return paused_; }
   void set_paused(bool p) { paused_ = p; }
 
@@ -310,6 +339,7 @@ class World3D final : public runtime::ScriptWorld {
   std::string project_dir_;
   runtime::ScriptLibrary lib_;
   std::unique_ptr<runtime::ScriptHost> host_;
+  std::vector<std::shared_ptr<World3DExtension>> exts_;
   LogSink sink_;
   std::deque<runtime::LogEntry> log_;
   std::vector<Toast3D> toasts_;

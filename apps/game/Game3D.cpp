@@ -11,6 +11,8 @@
 #include "runtime/Log.h"
 #include "ui/UiScript.h"
 #include "world3d/World3D.h"
+#include "ai3d/AiWorld3D.h"
+#include "plugins/RuntimePlugins.h"
 
 #include <GLFW/glfw3.h>
 
@@ -55,6 +57,14 @@ int fail(const std::string& what) {
 
 }  // namespace
 
+// ts.ai: the project lists it in project.json "plugins".
+bool ai_enabled(const std::string& dir) {
+  for (const std::string& id : plugins::read_project_plugins(dir).ids) {
+    if (id == "ts.ai") return true;
+  }
+  return false;
+}
+
 bool is_3d_project(const std::string& dir) {
   const fs::path scene = scene3d::scene_path(dir);
   std::error_code ec;
@@ -70,6 +80,7 @@ int run_smoke_3d(const std::string& dir, const std::string& name) {
   std::string err;
   if (!scene3d::load_file(path, &scene, &err)) return fail(err);
   world3d::World3D world;
+  ai3d::attach(world, ai_enabled(dir));
   if (!world.start(scene, dir, &err)) return fail("start: " + err);
   if (world.player_id() == 0) return fail("no rider (Player component) in the scene");
   const world3d::Entity3D* rider = world.find(world.player_id());
@@ -161,6 +172,7 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
   {
     auto renderer = render3d::make_gl_renderer3d();
     world3d::World3D world;
+    ai3d::attach(world, ai_enabled(dir));
     if (!renderer->init(&err) || !world.start(scene, dir, &err)) {
       std::cerr << "[ts_game] " << err << '\n';
       code = 1;

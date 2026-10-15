@@ -1,0 +1,13 @@
+{
+  "name": "Old Hank",
+  "blackboard": {"target": 0},
+  "root": {"type": "selector", "reactive": true, "children": [
+    {"type": "sequence", "name": "greet", "children": [
+      {"type": "can_see", "target": "any"},
+      {"type": "stop"},
+      {"type": "face", "key": "target"},
+      {"type": "wait", "seconds": 1.0}]},
+    {"type": "sequence", "name": "stroll", "children": [
+      {"type": "wander", "radius": 5},
+      {"type": "wait", "seconds": 1.5, "max": 3.5}]}]}
+}

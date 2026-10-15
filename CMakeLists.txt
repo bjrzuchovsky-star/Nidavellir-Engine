@@ -57,6 +57,7 @@ if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
   # 3D play runtime (needs ts_render3d, so windowed apps only).
   if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT)
     add_subdirectory(src/world3d)
+    add_subdirectory(src/ai3d)
   endif()
 endif()
 

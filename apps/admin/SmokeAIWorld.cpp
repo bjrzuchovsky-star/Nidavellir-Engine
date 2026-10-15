@@ -8,7 +8,10 @@
 #include "plugin/PluginManager.h"
 #include "plugins/Builtins.h"
 #include "plugins/ai/AiPlugin.h"
+#include "ai3d/AiWorld3D.h"
+#include "render3d/Scene3D.h"
 #include "runtime/World.h"
+#include "world3d/World3D.h"
 
 #include <cmath>
 #include <filesystem>
@@ -203,5 +206,155 @@ int run_ai_world_smoke() {
   return run_ai3d_smoke();
 }
 
-int run_ai3d_smoke() { return 0; }
+namespace {
+
+namespace s3 = ts::tombstone::scene3d;
+
+s3::Entity3D cube(std::uint64_t id, const char* name, s3::Vec3 pos, s3::Vec3 size) {
+  s3::Entity3D e;
+  e.id = id;
+  e.name = name;
+  e.transform.position = pos;
+  e.transform.scale = size;
+  e.mesh = s3::MeshRef{"primitive:cube", true};
+  s3::Collider3D c;
+  e.collider = c;
+  return e;
+}
+
+int fail3(const std::string& why) {
+  std::cerr << "[smoke] ai 3D FAILED: " << why << "\n";
+  return 1;
+}
+
+}  // namespace
+
+int run_ai3d_smoke() {
+  namespace fs = std::filesystem;
+  const fs::path dir = fs::temp_directory_path() / "ts_ai3d_smoke";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  std::string err;
+
+  // 1. Scene v13 round trip: agent + nav_link.
+  s3::Scene3D s;
+  s.entities.push_back(cube(1, "Ground", {0, -0.25f, 0}, {24, 0.5f, 24}));
+  s.entities.push_back(cube(2, "Wall", {0, 1, 0}, {0.5f, 2, 16}));
+  s.entities.push_back(cube(3, "Ledge", {-5, 0.75f, -10.5f}, {4, 1.5f, 3}));
+  // The ledge (1.5 m up) is reachable only through the link.
+  s3::Entity3D link;
+  link.id = 4;
+  link.name = "Ladder";
+  link.transform.position = {-5, 0, -8.4f};
+  s3::NavLink3D nl;
+  nl.to = {-5, 1.5f, -9.6f};
+  link.nav_link = nl;
+  s.entities.push_back(link);
+  for (int i = 0; i < 6; ++i) {
+    s3::Entity3D a;
+    a.id = 10 + static_cast<std::uint64_t>(i);
+    a.name = "Walker " + std::to_string(i);
+    a.transform.position = {-6.0f, 0, -3.0f + i * 1.2f};
+    s3::Agent3D ag;
+    ag.speed = 3.0f;
+    a.agent = ag;
+    s.entities.push_back(a);
+  }
+  s3::Entity3D climber;
+  climber.id = 20;
+  climber.name = "Climber";
+  climber.transform.position = {-4, 0, -6};
+  climber.agent = s3::Agent3D{};
+  s.entities.push_back(climber);
+  const std::string text = s3::write(s);
+  s3::Scene3D back;
+  if (!s3::parse(text, &back, &err) || !(back.entities == s.entities)) return fail3("scene v13 agent / nav_link round trip " + err);
+
+  world3d::World3D w;
+  auto ai = ai3d::attach(w, true);
+  if (!ai) return fail3("attach");
+  if (!w.start(s, dir.string(), &err)) return fail3("start: " + err);
+  if (!ai->navmesh().ready()) return fail3("navmesh bake: " + ai->build_error());
+  if (ai->agent_ids().size() != 7) return fail3("agents from components: " + std::to_string(ai->agent_ids().size()));
+  if (ai->navmesh().stats().offmesh != 1) return fail3("nav_link baked as off-mesh link");
+  // Path round the wall, and onto the ledge via the link.
+  const ai::NavPath round = ai->find_path({-6, 0, 0}, {6, 0, 0});
+  if (!round.found || round.partial || round.length() < 17.0f) return fail3("path round the wall");
+  const ai::NavPath up = ai->find_path({-4, 0, -6}, {-5, 1.5f, -11});
+  bool via = false;
+  for (auto f : up.offmesh) via |= f != 0;
+  if (!up.found || up.partial || !via) return fail3("path onto the ledge via the nav_link");
+  // Six walkers cross to the far side of the wall in a column (crowd).
+  for (int i = 0; i < 6; ++i) ai->move_to(10 + static_cast<std::uint64_t>(i), {6.0f, 0, -3.0f + (5 - i) * 1.2f});
+  ai->move_to(20, {-5, 1.5f, -11});
+  float worst = 1e9f;
+  for (int t = 0; t < 60 * 20; ++t) {
+    w.step(world3d::Input3D{});
+    if (ai->crowd()) worst = std::min(worst, ai->crowd()->min_clearance());
+  }
+  for (int i = 0; i < 6; ++i) {
+    const auto* e = w.find(10 + static_cast<std::uint64_t>(i));
+    if (!e || e->transform.position.x < 5.0f) {
+      return fail3("walker " + std::to_string(i) + " should cross (x=" + std::to_string(e ? e->transform.position.x : -99.f) + ")");
+    }
+  }
+  if (worst < -0.1f) return fail3("crowd overlap " + std::to_string(worst));
+  const auto* cl = w.find(20);
+  if (!cl || cl->transform.position.y < 1.2f) {
+    return fail3("climber should take the link onto the ledge (y=" + std::to_string(cl ? cl->transform.position.y : -1.f) + ")");
+  }
+  w.stop();
+
+  // 2. Ghost town: Old Hank wanders (navmesh agent + ai/hank.bt.json), hears a shot.
+  if (!s3::write_ghost_town_sample(dir.string(), "AI Town", &err)) return fail3(err);
+  s3::Scene3D town;
+  if (!s3::load_file(s3::scene_path(dir.string()), &town, &err)) return fail3(err);
+  const s3::Entity3D* hank0 = town.find_named("Old Hank");
+  if (!hank0 || !hank0->agent || hank0->agent->bt != "ai/hank.bt.json") return fail3("Old Hank agent component");
+  // Park the rider far away so Hank strolls instead of greeting.
+  for (auto& e : town.entities) {
+    if (e.player) e.transform.position = {40, 0, 40};
+  }
+  world3d::World3D tw;
+  auto tai = ai3d::attach(tw, true);
+  tw.scripts().put("scripts/probe.lua", "");
+  if (!tw.start(town, dir.string(), &err)) return fail3(err);
+  if (!tai->navmesh().ready()) return fail3("town navmesh: " + tai->build_error());
+  const std::uint64_t hid = hank0->id;
+  if (!tai->brain(hid) || !tai->brain(hid)->tree()) return fail3("Hank's tree");
+  const render3d::Vec3 start = hank0->transform.position;
+  float far = 0.0f, top_speed = 0.0f;
+  bool heard = false;
+  for (int t = 0; t < 60 * 25; ++t) {
+    tw.step(world3d::Input3D{});
+    const auto* h = tw.find(hid);
+    far = std::max(far, std::hypot(h->transform.position.x - start.x, h->transform.position.z - start.z));
+    if (auto* an = tw.animator(hid)) top_speed = std::max(top_speed, an->param("speed"));
+    if (t == 100) {
+      runtime::SoundEvent shot;
+      shot.clip = "builtin:gunshot";
+      shot.positional = true;
+      shot.x = start.x + 3;
+      shot.z = start.z;
+      tw.play_sound(shot);
+      heard = tai->brain(hid)->blackboard().text("noise") == "builtin:gunshot";
+    }
+  }
+  if (far < 1.0f) return fail3("Old Hank should wander (max " + std::to_string(far) + " m)");
+  if (top_speed < 0.3f) return fail3("Hank's animator speed param should follow the crowd");
+  if (!heard) return fail3("Hank should hear the shot");
+  const std::string live = tai->brain(hid)->tree()->running_path();
+  tai->set_debug(true);
+  std::vector<world3d::World3DExtension::Line> lines;
+  tw.debug_lines(&lines);
+  if (lines.size() < 20) return fail3("debug lines (navmesh, path, BT state)");
+  tw.stop();
+  fs::remove_all(dir, ec);
+  std::cout << "[smoke] ai 3D OK (scene v" << s3::kScene3DVersion << " agent + nav_link; navmesh "
+            << ai->navmesh().stats().polys << " polys + 1 link; 6-agent crowd crossed, worst gap " << worst
+            << " m; climber took the link; Old Hank wandered " << far << " m, heard a shot, BT \"" << live
+            << "\"; " << lines.size() << " debug lines)\n";
+  return 0;
+}
 

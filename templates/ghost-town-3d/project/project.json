@@ -1,4 +1,5 @@
 {
   "name": "Ghost Town 3D",
-  "dimension": "3d"
+  "dimension": "3d",
+  "plugins": "ts.ai"
 }

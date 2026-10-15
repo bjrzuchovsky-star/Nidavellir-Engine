@@ -1,5 +1,7 @@
 #include "editor/editor3d/Editor3DScreen.h"
 
+#include "ai3d/AiWorld3D.h"
+
 #include "ui/UiScript.h"
 #include "editor/assets/AssetLibrary.h"
 #include "editor/audio/EditorAudio.h"
@@ -579,6 +581,11 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
     std::vector<render3d::Renderer3D::Billboard> bills;
     world_.billboards(&bills);
     view_->billboards(bills);
+    // ts.ai debug (navmesh, paths, BT state, sight cones) when ai.debug(true)
+    // or the BT panel's Debug toggle is on.
+    std::vector<world3d::World3DExtension::Line> lines;
+    world_.debug_lines(&lines);
+    for (const auto& l : lines) renderer_->draw_line(l.a, l.b, l.rgba, false);
   } else {
     cam = editor_camera();
     opt.grid = scene_.show_grid;
@@ -617,6 +624,9 @@ bool Editor3DScreen::play_start() {
     while (log_.size() > 400) log_.pop_front();
   });
   std::string err;
+  // ts.ai: navmesh agents ride along when the project enables the plugin.
+  world_.clear_extensions();
+  ai3d::attach(world_, plugins_.loaded("ts.ai"));
   if (!world_.start(scene_, project_.path, &err)) {
     note("Play failed: " + err, LogLevel::Error);
     return false;

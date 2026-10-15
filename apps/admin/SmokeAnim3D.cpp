@@ -361,17 +361,17 @@ int scene_roundtrip() {
   std::string err;
   if (!s3::parse(text, &back, &err)) return fail("v12 parse: " + err);
   if (!(back.entities == s.entities)) return fail("animator / hand_model round trip");
-  if (text.find("\"version\": 12") == std::string::npos) return fail("written as v12");
-  // A v11 scene (no animator) still loads; a v13 one is refused.
+  if (text.find("\"version\": " + std::to_string(s3::kScene3DVersion)) == std::string::npos) return fail("written as the current version");
+  // A v11 scene (no animator) still loads; a newer one is refused.
   const std::string v11 =
       R"({"version": 11, "dimension": "3d", "entities": [{"id": 1, "name": "Crate", "position": [0,0,0],
       "rotation": [0,0,0,1], "scale": [1,1,1], "mesh": {"source": "primitive:cube"}}]})";
   if (!s3::parse(v11, &back, &err) || back.entities.size() != 1 || back.entities[0].animator) {
     return fail("v11 scene loads: " + err);
   }
-  std::string v13 = v11;
-  v13.replace(v13.find("11"), 2, "13");
-  if (s3::parse(v13, &back, &err)) return fail("v13 scene should be refused");
+  std::string newer = v11;
+  newer.replace(newer.find("11"), 2, std::to_string(s3::kScene3DVersion + 1));
+  if (s3::parse(newer, &back, &err)) return fail("a newer scene version should be refused");
   // Runtime palettes never reach the file.
   s.entities[0].skin_palette = std::make_shared<std::vector<r3::Mat4>>(3);
   if (s3::write(s) != text) return fail("skin_palette leaked into scene.json");
