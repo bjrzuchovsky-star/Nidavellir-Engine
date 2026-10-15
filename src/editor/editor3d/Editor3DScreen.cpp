@@ -575,6 +575,9 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
     } else {
       view_->begin(world_.authored().environment, world_.entities(), cam, width, height, opt);
     }
+    std::vector<render3d::Renderer3D::Billboard> bills;
+    world_.billboards(&bills);
+    view_->billboards(bills);
   } else {
     cam = editor_camera();
     opt.grid = scene_.show_grid;

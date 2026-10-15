@@ -165,6 +165,7 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
     } else {
       renderer->set_offscreen(false);
       render3d::SceneView view(renderer.get());
+      std::vector<render3d::Renderer3D::Billboard> bills;
       view.set_project_dir(dir);
       std::cout << "[ts_game] riding \"" << name << "\" in 3D: " << world.entities().size()
                 << " entities\n";
@@ -253,6 +254,9 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
           const std::vector<unsigned char>& overlay = gui.raster(fw, fh, &version);
           renderer->set_overlay(overlay.empty() ? nullptr : overlay.data(), fw, fh, version);
           view.begin(world.authored().environment, world.entities(), world.camera(), fw, fh);
+          bills.clear();
+          world.billboards(&bills);
+          view.billboards(bills);
           view.end();
           for (const std::string& p : view.take_problems()) std::cerr << "[ts_game] " << p << '\n';
           glfwSwapBuffers(win);

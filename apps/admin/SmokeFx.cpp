@@ -11,6 +11,7 @@
 #include "fx/Particles.h"
 #include "render3d/Scene3D.h"
 #include "runtime/World.h"
+#include "world3d/World3D.h"
 #include "scene/SceneJson.h"
 
 namespace {
@@ -446,6 +447,33 @@ void world() {
   check(!rt::decode_fx(junk, &tmp) && !rt::decode_fx({}, &tmp), "bad fx bytes refused");
 }
 
+// 3D: entity emitters + bursts become camera-facing billboards.
+void world3d() {
+  namespace s3 = ts::tombstone::scene3d;
+  namespace w3 = ts::tombstone::world3d;
+  namespace rt = ts::tombstone::runtime;
+  s3::Scene3D s = s3::make_starter_scene();
+  s.entities[0].particles = *fx::preset("campfire", fx::Space::ThreeD);
+  w3::World3D w;
+  std::string err;
+  check(w.start(s, "", &err), "3D world starts: " + err);
+  for (int i = 0; i < 30; ++i) w.step(w3::Input3D{});
+  rt::FxEvent ev;
+  ev.preset = "explosion";
+  ev.y = 2;
+  w.fx(ev);
+  std::vector<ts::tombstone::render3d::Renderer3D::Billboard> b;
+  w.billboards(&b);
+  bool additive = false, high = false;
+  for (const auto& x : b) {
+    additive |= x.additive;
+    high |= x.position.y > 1.5f;
+  }
+  check(b.size() > 60 && additive && high, "3D billboards from emitter + burst");
+  w.stop();
+  check(w.particles().alive() == 0, "3D stop clears particles");
+}
+
 }  // namespace
 
 int run_fx_smoke() {
@@ -454,11 +482,12 @@ int run_fx_smoke() {
   lighting();
   scenes();
   world();
+  world3d();
   if (g_fail) return 1;
   std::cout << "[smoke] fx OK (10 presets x 2D/3D, field round trip, burst / continuous / "
                "duration / cap, gravity + drag, curves, local space, deterministic seed, "
                "one-shots, sprite sheet, lightmap falloff / spot / tile shadows / soft / "
                "day-night, 2D v9 / 3D v11 scenes, World emitters + lights, Lua particles.*, "
-               "footstep dust, draw order, replicated bursts)\n";
+               "footstep dust, draw order, replicated bursts, 3D billboards)\n";
   return 0;
 }

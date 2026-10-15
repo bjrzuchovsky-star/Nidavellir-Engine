@@ -35,6 +35,8 @@ void VrPresenter::render_eyes(XrSession& session, const world3d::World3D& world,
   std::vector<scene3d::Entity3D> ents = world.entities();
   // Hide the rig's own mesh (if any) from the inside.
   world3d::vr_overlay_entities(world, true, &ents);
+  std::vector<render3d::Renderer3D::Billboard> bills;
+  world.billboards(&bills);
   ents.insert(ents.end(), extra_.begin(), extra_.end());
   const int w = session.eye_width(), h = session.eye_height();
   GLint prev_fbo = 0, prev_vp[4] = {0, 0, 0, 0};
@@ -53,6 +55,7 @@ void VrPresenter::render_eyes(XrSession& session, const world3d::World3D& world,
       continue;
     }
     view_->begin(world.authored().environment, ents, cam, w, h);
+    view_->billboards(bills);
     world3d::vr_overlay_lines(world, r_);
     const render3d::FrameStats st = view_->end();
     if (out) out->eyes[e] = st;
