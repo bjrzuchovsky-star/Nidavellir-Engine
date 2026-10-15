@@ -139,7 +139,11 @@ void timeline(AssayPanelState& s) {
   ImGui::Text("Frame %llu  %.2f ms", static_cast<unsigned long long>(f.index), f.cpu_ms);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(160);
-  ImGui::SliderFloat("Zoom", &s.zoom, 1.0f, 20.0f, "%.1fx", ImGuiSliderFlags_Logarithmic);
+  ImGui::SliderFloat("Zoom", &s.zoom, 1.0f, kMaxTimelineZoom, "%.1fx", ImGuiSliderFlags_Logarithmic);
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Fit")) s.zoom = 1.0f;
+  ImGui::SameLine();
+  ImGui::TextDisabled("click a zone to zoom to it");
   int max_depth = 0;
   for (const auto& z : f.zones) max_depth = std::max(max_depth, static_cast<int>(z.depth));
   const float row = 20.0f;
@@ -151,10 +155,13 @@ void timeline(AssayPanelState& s) {
   ImDrawList* dl = ImGui::GetWindowDrawList();
   const double span = std::max(0.001, f.cpu_ms);
   const ImVec2 mouse = ImGui::GetIO().MousePos;
+  // Short zones (a 0.1 ms world tick in a 40 ms editor frame) keep a
+  // visible, hoverable sliver instead of vanishing.
+  const float min_w = 3.0f;
   for (const auto& z : f.zones) {
     if (z.thread != 0) continue;
     const float x0 = p0.x + static_cast<float>(z.start_ms / span) * w;
-    const float x1 = std::max(x0 + 1.0f, p0.x + static_cast<float>((z.start_ms + z.dur_ms) / span) * w);
+    const float x1 = std::max(x0 + min_w, p0.x + static_cast<float>((z.start_ms + z.dur_ms) / span) * w);
     const float y0 = p0.y + row * z.depth + 2;
     const ImVec2 a(x0, y0), b(x1, y0 + row - 2);
     dl->AddRectFilled(a, b, zone_color(z.name), 3.0f);
@@ -167,7 +174,16 @@ void timeline(AssayPanelState& s) {
     }
     if (ImGui::IsItemHovered() && mouse.x >= a.x && mouse.x < b.x && mouse.y >= a.y && mouse.y < b.y) {
       ImGui::SetTooltip("%s\n%.3f ms (starts at %.3f ms)", z.name.c_str(), z.dur_ms, z.start_ms);
+      if (ImGui::IsMouseClicked(0)) {
+        s.zoom = timeline_zoom_for(span, z.dur_ms);
+        s.scroll_to_ms = z.start_ms;
+      }
     }
+  }
+  if (s.scroll_to_ms >= 0.0) {
+    const float view = ImGui::GetWindowWidth();
+    ImGui::SetScrollX(std::max(0.0f, static_cast<float>(s.scroll_to_ms / span) * w - view * 0.1f));
+    s.scroll_to_ms = -1.0;
   }
   ImGui::EndChild();
 }
@@ -214,6 +230,11 @@ void counter_rows(const std::vector<FrameRecord>& frames, const std::string& pre
 }
 
 }  // namespace
+
+float timeline_zoom_for(double frame_ms, double zone_ms) {
+  if (zone_ms <= 0.0 || frame_ms <= 0.0) return kMaxTimelineZoom;
+  return static_cast<float>(std::clamp(frame_ms / zone_ms * 0.6, 1.0, static_cast<double>(kMaxTimelineZoom)));
+}
 
 double counter_series(const std::vector<FrameRecord>& frames, const std::string& name,
                       std::vector<float>* out) {

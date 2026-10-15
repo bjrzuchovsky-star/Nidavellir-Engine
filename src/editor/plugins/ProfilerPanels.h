@@ -25,6 +25,7 @@ struct AssayPanelState {
   std::string loaded_path;
   int selected = -1;                      // index into frames
   float zoom = 1.0f;
+  double scroll_to_ms = -1.0;  // pending scroll after a zone click
   std::string capture_name;
   std::string status;
   std::vector<std::string> captures;      // files in the capture dir
@@ -46,6 +47,9 @@ struct ConsoleLineState {
 bool draw_console_line(ConsoleLineState& s, std::string* echo, std::string* output);
 
 // Pure helpers (smoke-tested).
+inline constexpr float kMaxTimelineZoom = 400.0f;
+// Zoom that makes a zone of zone_ms fill ~60% of a frame_ms timeline.
+float timeline_zoom_for(double frame_ms, double zone_ms);
 // Sum of counter `name` over the frames that have it, and how many did.
 double counter_series(const std::vector<profiler::FrameRecord>& frames, const std::string& name,
                       std::vector<float>* out);

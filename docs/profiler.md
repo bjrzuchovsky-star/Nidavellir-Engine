@@ -50,7 +50,7 @@ All three panels are listed in the 2D and 3D View menus, including during Play:
   - **Capture**, with an optional name.
   - **Load capture...**, which lists the project's `captures/` folder.
   - A frame-time bar chart with a 16.7 ms line. Bars turn amber, then red, as frames get slower. Click a bar to freeze and inspect that frame.
-  - A **timeline (flame) view** of the selected frame, with one row per nesting depth and a zoom slider. Hover a zone for its exact times.
+  - A **timeline (flame) view** of the selected frame, with one row per nesting depth and a zoom slider (up to 400x, **Fit** resets it). Short zones, such as a 0.1 ms world tick inside a 40 ms editor frame, keep a 3 px sliver. Hover a zone for its exact times, or click it to zoom to it.
   - A **scope table** with calls, avg, self, max and total over the last N frames.
 - **Render & Memory**: GPU passes as shares of the GPU total, and sparklines for every `render.*`, `assets.*`, `mem.*` and `world.*` counter.
 - **Net**: sparklines for the client and server `net.*` counters while riding with a posse.

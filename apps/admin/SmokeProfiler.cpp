@@ -138,6 +138,9 @@ int capture_checks(const fs::path& dir) {
   if (editor::counter_series(back, "render.draws", &series) != 28 || series.size() != 4)
     return fail("counter_series");
   if (editor::counter_names(back, "render.").size() != 1) return fail("counter_names");
+  // A 0.1 ms tick inside a 40 ms frame zooms far enough to read.
+  if (editor::timeline_zoom_for(40.0, 0.1) < 200.0f || editor::timeline_zoom_for(40.0, 40.0) != 1.0f)
+    return fail("timeline_zoom_for");
   std::cout << "[smoke] profiler capture OK (" << fs::path(path).filename().string() << ", 4 frames round trip)\n";
   return 0;
 }
