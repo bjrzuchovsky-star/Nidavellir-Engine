@@ -18,6 +18,7 @@ add_executable(ts_admin
   SmokeAI.cpp
   SmokeAIWorld.cpp
   SmokeAIMenu.cpp
+  SmokeStory.cpp
   SmokeVR.cpp
   SmokeTools.cpp
   SmokeUi.cpp
@@ -49,6 +50,7 @@ target_link_libraries(ts_admin
     ts_plugins_builtin
     ts_ai
     ts_ai3d
+    ts_story3d
     ts_lua
     ts_render3d
     ts_world3d

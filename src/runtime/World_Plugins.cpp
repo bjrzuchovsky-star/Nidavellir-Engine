@@ -119,7 +119,26 @@ std::vector<UiCommand> World::take_ui_commands() {
 
 void World::ui_event(const std::string& widget, bool change, double value,
                      const std::string& text) {
+  const auto taps = ui_taps_;  // a tap may replace taps
+  for (const auto& t : taps) {
+    if (t.second && t.second(widget, change, value, text)) return;
+  }
   if (scripts_) scripts_->ui_event(widget, change, value, text);
+}
+
+void World::set_ui_tap(const std::string& owner, UiTap tap) {
+  for (auto it = ui_taps_.begin(); it != ui_taps_.end(); ++it) {
+    if (it->first == owner) {
+      if (tap) it->second = std::move(tap);
+      else ui_taps_.erase(it);
+      return;
+    }
+  }
+  if (tap) ui_taps_.emplace_back(owner, std::move(tap));
+}
+
+void World::script_broadcast(const char* hook, const std::string& text, double number) {
+  if (scripts_) scripts_->broadcast(hook, text, number);
 }
 
 bool World::net_deliver(const std::string& channel, int from_slot,

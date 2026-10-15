@@ -346,6 +346,13 @@ class World final : public ScriptWorld {
   std::vector<UiCommand> take_ui_commands();
   void ui_event(const std::string& widget, bool change, double value,
                 const std::string& text);
+  // Plugins see widget events before the scripts (by owner; one each). A
+  // tap returning true consumes the event.
+  using UiTap = std::function<bool(const std::string& widget, bool change, double value,
+                                   const std::string& text)>;
+  void set_ui_tap(const std::string& owner, UiTap tap);
+  // Call hook(text, number) on every running script that defines it.
+  void script_broadcast(const char* hook, const std::string& text, double number);
 
   // --- Sound (World_Plugins.cpp) -----------------------------------------------
   // Queue a sound for the host to play (see runtime/Sound.h). On a server
@@ -509,6 +516,7 @@ class World final : public ScriptWorld {
   std::vector<NetPost> net_posts_;
   std::vector<SoundEvent> sounds_;
   std::vector<UiCommand> ui_commands_;
+  std::vector<std::pair<std::string, UiTap>> ui_taps_;
   fx::ParticleWorld particles_{fx::Space::TwoD};
   fx::Lighting2D lighting_;
   std::uint64_t fx_total_ = 0;

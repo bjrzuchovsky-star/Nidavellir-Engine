@@ -35,6 +35,7 @@ target_link_libraries(ts_game
     ts_render3d
     ts_world3d
     ts_ai3d
+    ts_story3d
     ts_audio
     ts_audio3d
     ts_xr

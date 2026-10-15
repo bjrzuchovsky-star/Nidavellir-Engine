@@ -217,6 +217,17 @@ class World3D final : public runtime::ScriptWorld {
   // In-game UI: Lua ui.* requests for the host, widget events back.
   std::vector<runtime::UiCommand> take_ui_commands();
   void ui_event(const std::string& widget, bool change, double value, const std::string& text);
+  // Plugins see widget events before the scripts (by owner; one each). A
+  // tap returning true consumes the event.
+  using UiTap = std::function<bool(const std::string& widget, bool change, double value,
+                                   const std::string& text)>;
+  void set_ui_tap(const std::string& owner, UiTap tap);
+  // Call hook(text, number) on every running script that defines it.
+  void script_broadcast(const char* hook, const std::string& text, double number);
+  // Story plugins: the rider's position (saves) without touching physics
+  // internals; false when there is no rider.
+  bool rider_position(Vec3* out) const;
+  bool set_rider_position(const Vec3& p);
 
   // Sound (see runtime/Sound.h): queued for the host, metres. A positional
   // event naming an entity plays from its position.
@@ -394,6 +405,7 @@ class World3D final : public runtime::ScriptWorld {
   std::vector<Toast3D> toasts_;
   std::vector<runtime::SoundEvent> sounds_;
   std::vector<runtime::UiCommand> ui_commands_;
+  std::vector<std::pair<std::string, UiTap>> ui_taps_;
   fx::ParticleWorld particles_{fx::Space::ThreeD};
   void step_fx();
   render3d::Camera3D camera_;

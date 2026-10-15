@@ -12,6 +12,10 @@ TS_PLUGIN_DECLARE(tumbleweed);
 TS_PLUGIN_DECLARE(frontier);
 TS_PLUGIN_DECLARE(shipyard);
 TS_PLUGIN_DECLARE(ai);
+TS_PLUGIN_DECLARE(story);
+TS_PLUGIN_DECLARE(quests);
+TS_PLUGIN_DECLARE(dialogue);
+TS_PLUGIN_DECLARE(saves);
 
 namespace ts {
 namespace tombstone {
@@ -35,6 +39,15 @@ void register_builtin_plugins(plugin::Catalog& catalog,
   if (!TS_PLUGIN_LINK(ai, catalog, &err) && errors) {
     errors->push_back(err);
   }
+  // Story: the core first (the three features depend on it).
+  err.clear();
+  if (!TS_PLUGIN_LINK(story, catalog, &err) && errors) errors->push_back(err);
+  err.clear();
+  if (!TS_PLUGIN_LINK(quests, catalog, &err) && errors) errors->push_back(err);
+  err.clear();
+  if (!TS_PLUGIN_LINK(dialogue, catalog, &err) && errors) errors->push_back(err);
+  err.clear();
+  if (!TS_PLUGIN_LINK(saves, catalog, &err) && errors) errors->push_back(err);
 }
 
 std::vector<std::string> plugin_search_dirs(const std::string& project_dir) {

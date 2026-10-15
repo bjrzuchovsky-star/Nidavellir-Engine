@@ -60,6 +60,8 @@ class ScriptHost {
   void hand_event(std::uint64_t target, const char* hook, const std::string& text,
                   double number);
   void run_timers(std::uint64_t tick);
+  // hook(text, number) on every running script that has it, every language.
+  void broadcast(const char* hook, const std::string& text, double number);
   void tick(double dt);
   int reload_changed();
   bool reload(const std::string& rel);

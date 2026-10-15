@@ -140,8 +140,7 @@ class TradingPost {
   // plugin search, and cleaned on the next refresh.
   bool uninstall(const std::string& id, std::string* error);
 
-  // The announced-but-not-built plugins (quests, dialogue, Steam, AI
-  // toolkit, profiler).
+  // The announced-but-not-built plugins (Steam, profiler).
   static std::vector<StoreEntry> coming_soon();
 
   // Index helpers (tools + smokes): parse an index's entries (no fetch).

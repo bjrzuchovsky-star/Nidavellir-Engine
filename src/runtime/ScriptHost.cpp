@@ -148,6 +148,10 @@ void ScriptHost::hand_event(std::uint64_t target, const char* hook, const std::s
   if (ScriptLanguageHost* h = owner(target)) h->hand_event(target, hook, text, number);
 }
 
+void ScriptHost::broadcast(const char* hook, const std::string& text, double number) {
+  for (auto& h : hosts_) if (h) h->broadcast(hook, text, number);
+}
+
 void ScriptHost::run_timers(std::uint64_t tick) {
   for (auto& h : hosts_) if (h) h->run_timers(tick);
 }

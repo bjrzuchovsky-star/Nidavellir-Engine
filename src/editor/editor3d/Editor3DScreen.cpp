@@ -1,6 +1,8 @@
 #include "editor/editor3d/Editor3DScreen.h"
 
 #include "ai3d/AiWorld3D.h"
+#include "plugins/story/StoryPlugins.h"
+#include "story3d/StoryWorld3D.h"
 
 #include "ui/UiScript.h"
 #include "editor/assets/AssetLibrary.h"
@@ -627,6 +629,12 @@ bool Editor3DScreen::play_start() {
   // ts.ai: navmesh agents ride along when the project enables the plugin.
   world_.clear_extensions();
   ai3d::attach(world_, plugins_.loaded("ts.ai"));
+  // ts.quests / ts.dialogue / ts.saves: the story runtime (UI, hooks, Lua).
+  story::StoryFeatures story;
+  story.quests = plugins_.loaded("ts.quests");
+  story.dialogue = plugins_.loaded("ts.dialogue");
+  story.saves = plugins_.loaded("ts.saves");
+  story3d::attach(world_, story);
   if (!world_.start(scene_, project_.path, &err)) {
     note("Play failed: " + err, LogLevel::Error);
     return false;

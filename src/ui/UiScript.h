@@ -23,6 +23,37 @@ inline void apply_ui_commands(UiSystem& ui, const std::vector<runtime::UiCommand
       case K::SetText: ui.set_text(c.target, c.text); break;
       case K::SetValue: ui.set_value(c.target, static_cast<float>(c.value)); break;
       case K::SetVisible: ui.set_visible(c.target, c.value != 0.0); break;
+      case K::AddDocument: {
+        if (ui.has(c.target)) break;
+        Document d;
+        if (parse_document(c.text, &d, nullptr)) {
+          d.name = c.target;
+          const bool show = d.visible;
+          ui.add(std::move(d));
+          if (show) ui.show(c.target);
+        }
+        break;
+      }
+      case K::SetItems: {
+        if (Widget* w = ui.find(c.target)) {
+          w->items.clear();
+          std::size_t start = 0;
+          while (start <= c.text.size() && !c.text.empty()) {
+            const std::size_t nl = c.text.find('\n', start);
+            w->items.push_back(c.text.substr(start, nl == std::string::npos ? std::string::npos : nl - start));
+            if (nl == std::string::npos) break;
+            start = nl + 1;
+          }
+          if (w->selected >= static_cast<int>(w->items.size())) w->selected = static_cast<int>(w->items.size()) - 1;
+          if (w->selected < 0 && !w->items.empty()) w->selected = 0;
+        }
+        break;
+      }
+      case K::Focus: {
+        const std::size_t dot = c.target.find('.');
+        if (dot != std::string::npos) ui.set_focus(c.target.substr(0, dot), c.target.substr(dot + 1));
+        break;
+      }
     }
   }
 }

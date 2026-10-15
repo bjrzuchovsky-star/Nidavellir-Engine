@@ -54,6 +54,8 @@ if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
   # AI toolkit (ts_ai): Recast / Detour fetched by hash.
   include(FetchRecast)
   add_subdirectory(src/ai)
+  # Story pieces (ts_story) behind the optional quests / dialogue / saves plugins.
+  add_subdirectory(src/story)
   # Plugins: interface, catalog, manager (ts_plugin) and the built-ins.
   add_subdirectory(src/plugin)
   add_subdirectory(src/plugins)
@@ -61,6 +63,7 @@ if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
   if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT)
     add_subdirectory(src/world3d)
     add_subdirectory(src/ai3d)
+    add_subdirectory(src/story3d)
   endif()
 endif()
 

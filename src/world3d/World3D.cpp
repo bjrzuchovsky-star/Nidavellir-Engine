@@ -735,7 +735,42 @@ std::vector<runtime::UiCommand> World3D::take_ui_commands() {
 
 void World3D::ui_event(const std::string& widget, bool change, double value,
                        const std::string& text) {
+  const auto taps = ui_taps_;
+  for (const auto& t : taps) {
+    if (t.second && t.second(widget, change, value, text)) return;
+  }
   if (host_) host_->ui_event(widget, change, value, text);
+}
+
+void World3D::set_ui_tap(const std::string& owner, UiTap tap) {
+  for (auto it = ui_taps_.begin(); it != ui_taps_.end(); ++it) {
+    if (it->first == owner) {
+      if (tap) it->second = std::move(tap);
+      else ui_taps_.erase(it);
+      return;
+    }
+  }
+  if (tap) ui_taps_.emplace_back(owner, std::move(tap));
+}
+
+void World3D::script_broadcast(const char* hook, const std::string& text, double number) {
+  if (host_) host_->broadcast(hook, text, number);
+}
+
+bool World3D::rider_position(Vec3* out) const {
+  const Entity3D* e = find(player_);
+  if (!e) return false;
+  *out = e->transform.position;
+  return true;
+}
+
+bool World3D::set_rider_position(const Vec3& p) {
+  Entity3D* e = live(player_);
+  if (!e) return false;
+  // The physics step sees the transform moved and puts the character there.
+  e->transform.position = p;
+  vel_ = Vec3{};
+  return true;
 }
 
 void World3D::play_sound(runtime::SoundEvent event) {

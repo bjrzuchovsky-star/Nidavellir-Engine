@@ -34,7 +34,11 @@ namespace runtime {
 // A script's request to the in-game UI (Lua ui.*): queued by the world and
 // applied by the host's ui::UiSystem (see ui/UiScript.h).
 struct UiCommand {
-  enum class Kind { Show, Hide, SetText, SetValue, SetVisible };
+  // AddDocument: text is a *.ui.json document, added unless the host
+  // already has one named `target` (a project's own ui/<name>.ui.json
+  // wins). SetItems: a list widget's items, '\n'-separated in text.
+  // Focus: target is "doc.widget".
+  enum class Kind { Show, Hide, SetText, SetValue, SetVisible, AddDocument, SetItems, Focus };
   Kind kind = Kind::Show;
   std::string target;  // document name, or widget id ("doc.widget" or "widget")
   std::string text;
@@ -170,6 +174,9 @@ class ScriptLanguageHost {
   virtual void ui_event(const std::string& /*widget*/, bool /*change*/, double /*value*/,
                         const std::string& /*text*/) {}
   virtual void run_timers(std::uint64_t /*tick*/) {}
+  // Call `hook(text, number)` on every running instance that defines it
+  // (plugin events such as on_quest_completed); entity id order.
+  virtual void broadcast(const char* /*hook*/, const std::string& /*text*/, double /*number*/) {}
   virtual void tick(double dt) = 0;
   virtual int reload_changed() = 0;
   virtual bool reload(const std::string& /*rel*/) { return false; }
@@ -215,6 +222,7 @@ class LuaScriptHost final : public ScriptLanguageHost {
   // The host's UI reports a widget event: every ui.on_click(id, fn) /
   // ui.on_change(id, fn) handler for that widget id runs fn(id, value, text).
   void ui_event(const std::string& widget, bool change, double value, const std::string& text) override;
+  void broadcast(const char* hook, const std::string& text, double number) override;
   std::size_t ui_handler_count() const;
   void hand_event(std::uint64_t target, const char* hook, const std::string& text,
                   double number) override;

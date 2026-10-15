@@ -47,6 +47,7 @@ add_library(ts_editor
   plugins/ShipyardPanels.cpp
   plugins/PluginsPanel.cpp
   plugins/PluginPanelHost.cpp
+  plugins/StoryPanels.cpp
   screens/Editor2DScreen_Posse.cpp
   screens/Editor2DScreen_Audio.cpp
   console/TelegraphLog.cpp
@@ -87,6 +88,7 @@ target_link_libraries(ts_editor
     ts_render3d
     ts_world3d
     ts_ai3d
+    ts_story3d
     ts_xr
     ts_gfx
     ts_imgui

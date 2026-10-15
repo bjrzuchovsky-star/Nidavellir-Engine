@@ -373,12 +373,6 @@ std::vector<StoreEntry> TradingPost::coming_soon() {
     return e;
   };
   return {
-      make("ts.quests", "Bounty Board (Quests)", "Gameplay",
-           "Quests and bounties: objectives, chains, rewards, a journal UI and Lua / graph hooks.",
-           {"quests", "rpg"}),
-      make("ts.dialogue", "Parley (Dialogue)", "Gameplay",
-           "Branching dialogue trees with conditions, variables, portraits and a node editor panel.",
-           {"dialogue", "story", "npc"}),
       make("ts.steam", "Steam Hitch", "Platform",
            "Steamworks: achievements, stats, cloud saves, rich presence and lobbies for the posse.",
            {"steam", "platform", "multiplayer"}),

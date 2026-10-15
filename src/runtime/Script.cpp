@@ -733,6 +733,25 @@ void LuaScriptHost::ui_event(const std::string& widget, bool change, double valu
   });
 }
 
+void LuaScriptHost::broadcast(const char* hook, const std::string& text, double number) {
+  guarded(*s_, [&] {
+    State& s = *s_;
+    std::vector<std::uint64_t> ids;
+    for (const auto& in : s.instances) {
+      if (in && in->started) ids.push_back(in->entity);
+    }
+    std::sort(ids.begin(), ids.end());
+    for (std::uint64_t id : ids) {
+      ScriptInstance* in = s.find(id);
+      if (!in || !in->started || !s.push_hook(*in, hook)) continue;
+      lua_pushlstring(s.L, text.data(), text.size());
+      lua_pushnumber(s.L, number);
+      s.call(in, 2);
+    }
+    s.sweep();
+  });
+}
+
 std::size_t LuaScriptHost::ui_handler_count() const { return s_->ui_handlers.size(); }
 
 void LuaScriptHost::run_timers(std::uint64_t tick) {
