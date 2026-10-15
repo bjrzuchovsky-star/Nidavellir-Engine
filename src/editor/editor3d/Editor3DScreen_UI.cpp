@@ -1,3 +1,4 @@
+#include "editor/fx/FxInspector.h"
 #include "editor/editor3d/Editor3DScreen.h"
 
 #include "ui/UiScript.h"
@@ -770,6 +771,7 @@ void Editor3DScreen::draw_context_menu(std::uint64_t clicked) {
     if (ImGui::MenuItem("Collider", nullptr, false, !e->collider)) { c.collider = scene3d::Collider3D{}; add = true; }
     if (ImGui::MenuItem("Grabbable", nullptr, false, !e->grabbable)) { c.grabbable = scene3d::Grabbable3D{}; add = true; }
     if (ImGui::MenuItem("Audio Source", nullptr, false, !e->audio)) { c.audio = scene3d::audio_3d(); add = true; }
+    if (ImGui::MenuItem("Particles", nullptr, false, !e->particles)) { c.particles = fx::preset("campfire", fx::Space::ThreeD); add = true; }
     if (add) replace_entity(c, "Add component " + c.name);
     ImGui::EndMenu();
   }

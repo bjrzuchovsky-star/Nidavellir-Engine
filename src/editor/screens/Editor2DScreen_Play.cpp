@@ -846,6 +846,8 @@ void Editor2DScreen::draw_inspector_gameplay(std::uint64_t id) {
   draw_inspector_script(id);
   // Audio Source: clip, bus, autoplay / loop, positional.
   draw_inspector_audio(id);
+  // Particles + Light.
+  draw_inspector_fx(id);
 }
 
 }  // namespace editor

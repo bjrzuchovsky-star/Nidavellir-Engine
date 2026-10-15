@@ -1,5 +1,6 @@
 // Inspector + Environment panels. Widgets edit a copy that is applied live;
 // one undo step is pushed when a widget is released after an edit.
+#include "editor/fx/FxInspector.h"
 #include "editor/editor3d/Editor3DScreen.h"
 
 #include "editor/audio/EditorAudio.h"
@@ -256,6 +257,18 @@ void Editor3DScreen::draw_inspector() {
       t.commit = step;
     }
     if (e.audio) normalize_audio(*e.audio);
+  }
+  if (component("Particles", e.particles.has_value(),
+                [&] { e.particles = fx::preset("campfire", fx::Space::ThreeD); },
+                [&] { e.particles.reset(); })) {
+    const FxEdit r = draw_particle_fields(*e.particles, fx::Space::ThreeD);
+    if (r == FxEdit::Commit || r == FxEdit::Remove) {
+      if (r == FxEdit::Remove) e.particles.reset();
+      t.activated = true;
+      t.commit = "Particles";
+    } else if (r == FxEdit::Live) {
+      t.activated = true;
+    }
   }
   ImGui::PopID();
 

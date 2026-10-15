@@ -391,6 +391,9 @@ class Editor2DScreen final : public IScreen {
   // status-bar badge.
   void draw_inspector_script(std::uint64_t id);
   void draw_inspector_audio(std::uint64_t id);
+  void draw_inspector_fx(std::uint64_t id);
+  void draw_lighting_panel();
+  bool show_lighting_ = false;
   void draw_wagon_sounds();
   bool set_audio_source(std::uint64_t id, const std::optional<AudioSourceData>& audio,
                         const char* label);

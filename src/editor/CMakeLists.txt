@@ -50,6 +50,8 @@ add_library(ts_editor
   launch/GameLauncher.cpp
   launch/OpenWithOs.cpp
   audio/EditorAudio.cpp
+  fx/FxInspector.cpp
+  screens/Editor2DScreen_Fx.cpp
   audio/MixerPanel.cpp
   audio/AudioWidgets.cpp
 )

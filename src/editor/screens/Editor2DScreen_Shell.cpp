@@ -254,6 +254,7 @@ void Editor2DScreen::draw_menu_bar() {
     ImGui::MenuItem("Supply Wagon", nullptr, &show_supply_wagon_);
     ImGui::MenuItem("Stable (Animation)", nullptr, &show_stable_);
     ImGui::MenuItem("UI Preview", nullptr, &show_ui_preview_);
+    ImGui::MenuItem("Lighting", nullptr, &show_lighting_);
     ImGui::MenuItem("Scripts", nullptr, &show_scripts_);
     ImGui::MenuItem("Telegraph (Console)", nullptr, &show_console_);
     ImGui::MenuItem("Saloon Band (Mixer)", nullptr, &show_mixer_);
@@ -843,6 +844,7 @@ void Editor2DScreen::draw_ui() {
     ImGui::End();
   }
   ui_preview_.draw(&show_ui_preview_, project_.path);
+  draw_lighting_panel();
   if (show_stable_) {
     ImGui::SetNextWindowSize(ImVec2(320, 460), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Stable", &show_stable_)) {
