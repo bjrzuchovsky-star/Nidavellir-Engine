@@ -22,6 +22,14 @@
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
+#include <windows.h>
+#include <knownfolders.h>
+#include <shlobj.h>
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "ole32.lib")
+#endif
+
 namespace ts {
 namespace tombstone {
 
@@ -279,6 +287,17 @@ std::string slurp(const fs::path& p) {
 
 }  // namespace
 
+#if defined(_WIN32)
+// The shell's real folder (OneDrive-redirected Desktop included).
+fs::path known_folder(REFKNOWNFOLDERID id) {
+  PWSTR p = nullptr;
+  fs::path out;
+  if (SUCCEEDED(SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, nullptr, &p)) && p) out = fs::path(p);
+  CoTaskMemFree(p);
+  return out;
+}
+#endif
+
 int run_installer_smoke() {
   int failures = 0;
   auto fail = [&](const std::string& what) {
@@ -404,12 +423,11 @@ int run_installer_smoke() {
   if (irc != 0 || !fs::exists(inst / exe_name, ec)) fail("silent install (see " + (out / "setup.log").string() + ")");
   const std::string game_name = "Ghost Town 3D";
   fs::path start_lnk, desk_lnk;
-  if (const char* a = std::getenv("APPDATA")) start_lnk = fs::path(a) / "Microsoft/Windows/Start Menu/Programs" / (game_name + ".lnk");
-  if (const char* u = std::getenv("USERPROFILE")) desk_lnk = fs::path(u) / "Desktop" / (game_name + ".lnk");
-  if (!start_lnk.empty() && !fs::exists(start_lnk, ec)) fail("Start menu shortcut missing: " + start_lnk.string());
-  if (!fs::exists(desk_lnk, ec)) {
-    std::cout << "[smoke-installer] note: no desktop shortcut at " << desk_lnk.string() << " (redirected Desktop?)\n";
-  }
+  if (const fs::path p = known_folder(FOLDERID_Programs); !p.empty()) start_lnk = p / (game_name + ".lnk");
+  if (const fs::path d = known_folder(FOLDERID_Desktop); !d.empty()) desk_lnk = d / (game_name + ".lnk");
+  if (start_lnk.empty() || !fs::exists(start_lnk, ec)) fail("Start menu shortcut missing: " + start_lnk.string());
+  if (desk_lnk.empty() || !fs::exists(desk_lnk, ec)) fail("desktop shortcut missing: " + desk_lnk.string());
+  std::cout << "[smoke-installer] shortcuts: " << start_lnk.string() << " + " << desk_lnk.string() << '\n';
   const int grc = run_clean("\"" + (inst / exe_name).string() + "\" --smoke", out.string(), (out / "installed.log").string());
   std::cout << "[smoke-installer] installed game --smoke rc=" << grc << '\n';
   if (grc != 0) fail("installed game --smoke: " + slurp(out / "installed.log"));
@@ -428,7 +446,7 @@ int run_installer_smoke() {
   std::cout << "[smoke-installer] uninstall rc=" << urc << (gone ? ", files removed" : ", files LEFT") << '\n';
   if (!gone) fail("uninstall left files in " + inst.string());
   if (!start_lnk.empty() && fs::exists(start_lnk, ec)) fail("uninstall left the Start menu shortcut");
-  if (fs::exists(desk_lnk, ec)) fail("uninstall left the desktop shortcut");
+  if (!desk_lnk.empty() && fs::exists(desk_lnk, ec)) fail("uninstall left the desktop shortcut");
 #endif
   std::cout << (failures ? "[smoke-installer] FAILED\n"
                          : "[smoke-installer] OK (settings, script, zip, deps, clean run, install / --smoke / uninstall)\n");
