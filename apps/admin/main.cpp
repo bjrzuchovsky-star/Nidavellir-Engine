@@ -18,6 +18,7 @@
 #include "gfx/GlTextureUploader.h"
 
 #include "Smoke3D.h"
+#include "SmokeAssets.h"
 #include "SmokePrefab.h"
 #include "SmokeTools.h"
 #include "SmokeVR.h"
@@ -1261,6 +1262,10 @@ int run_console_smoke() {
   if (run_tools_smoke() != 0) {
     return 1;
   }
+  // Asset database, importers, Asset Browser (see SmokeAssets.cpp).
+  if (run_assets_smoke() != 0) {
+    return 1;
+  }
   // Prefabs in the 2D and 3D editors (see SmokePrefab.cpp).
   if (run_prefab_smoke() != 0) {
     return 1;
@@ -1807,6 +1812,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-vr") == 0) {
       // Just the VR checks.
       return run_vr_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-assets") == 0) {
+      // Just the asset pipeline checks (database, importers, browser ops).
+      return run_assets_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-prefab") == 0) {
       // Just the prefab checks (2D + 3D).

@@ -66,6 +66,7 @@ void Editor3DScreen::setup_dock_layout(unsigned int dockspace_id) {
   ImGui::DockBuilderDockWindow(kPrefabs, left_bottom);
   ImGui::DockBuilderDockWindow(kViewport, center);
   ImGui::DockBuilderDockWindow(kTelegraph, bottom);
+  ImGui::DockBuilderDockWindow("Asset Browser###AssetBrowser3D", bottom);
   ImGui::DockBuilderDockWindow(kInspector, right);
   ImGui::DockBuilderDockWindow(kEnvironment, right_bottom);
   ImGui::DockBuilderFinish(dockspace_id);
@@ -104,6 +105,14 @@ void Editor3DScreen::draw_ui() {
   ImGui::End();
   if (ImGui::Begin(kAssets)) draw_assets();
   ImGui::End();
+  if (show_asset_browser_) {
+    if (ImGui::Begin("Asset Browser###AssetBrowser3D", &show_asset_browser_)) {
+      ImGui::BeginDisabled(locked);
+      asset_browser_.draw();
+      ImGui::EndDisabled();
+    }
+    ImGui::End();
+  }
   if (show_prefabs_) {
     if (ImGui::Begin(kPrefabs, &show_prefabs_)) {
       ImGui::BeginDisabled(locked);
@@ -250,6 +259,7 @@ void Editor3DScreen::draw_menu_bar() {
     ImGui::MenuItem("UI Preview", nullptr, &show_ui_preview_);
     ImGui::MenuItem("Animation Preview", nullptr, &anim_preview_.open);
     ImGui::MenuItem("Prefabs", nullptr, &show_prefabs_);
+    ImGui::MenuItem("Asset Browser", nullptr, &show_asset_browser_);
     if (plugins_.is_open() && !plugins_.manager().editor_panels().empty()) {
       ImGui::Separator();
       draw_plugin_panel_menu_items(plugins_, plugin_panel_open_);

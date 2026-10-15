@@ -24,6 +24,7 @@ add_executable(ts_admin
   SmokeVR.cpp
   SmokeTools.cpp
   SmokePrefab.cpp
+  SmokeAssets.cpp
   SmokeUi.cpp
   SmokeFx.cpp
   ExportCli.cpp

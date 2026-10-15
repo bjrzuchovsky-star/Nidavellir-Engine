@@ -79,6 +79,7 @@ void Editor3DScreen::on_enter() {
   redo_.clear();
   prefabs_.set_project(project_.path);
   prefab_sync_all_on_load();
+  open_asset_browser();
   rescan_assets();
   ensure_renderer();
   note("Telegraph open for " + project_.name + " (" + std::to_string(scene_.entities.size()) +
@@ -154,6 +155,11 @@ AppState Editor3DScreen::on_update(float delta_seconds) {
   if (prefab_poll_clock_ > 1.0 && !playing()) {
     prefab_poll_clock_ = 0.0;
     prefab_poll();
+  }
+  asset_poll_clock_ += delta_seconds;
+  if (asset_poll_clock_ > 1.5 && !playing()) {
+    asset_poll_clock_ = 0.0;
+    asset_browser_.rescan();
   }
   update_sound(delta_seconds);
   for (auto& t : toasts_) t.second -= delta_seconds;
@@ -333,8 +339,16 @@ std::uint64_t Editor3DScreen::drop_asset(const std::string& rel, const Vec3& pos
     e.name = fs::path(rel).stem().string();
     e.transform.position = pos;
     e.mesh = scene3d::MeshRef{rel, true};
+    // Import settings from the .meta (Asset Browser).
+    float scale = 1.0f;
+    bool collider = true;
+    if (const auto* a = asset_browser_.db().by_path(rel)) {
+      scale = std::max(0.001f, a->meta.settings.flt("scale", 1.0f));
+      collider = a->meta.settings.flag("generate_collider", true);
+    }
+    e.transform.scale = {scale, scale, scale};
     // Collider hugging the model's bounds.
-    if (view_) {
+    if (view_ && collider) {
       const render3d::Aabb b = view_->mesh_bounds(rel);
       scene3d::Collider3D c;
       c.size = b.extent();
@@ -356,7 +370,30 @@ std::uint64_t Editor3DScreen::drop_asset(const std::string& rel, const Vec3& pos
     replace_entity(e, "Texture " + e.name);
     return e.id;
   }
-  note("Can't place " + rel + " (models: .gltf / .glb)", LogLevel::Warn);
+  if (ext == ".wav" || ext == ".ogg" || ext == ".mp3" || ext == ".flac") {
+    // A sound: onto an entity sets its Audio Source, elsewhere makes an
+    // emitter. Bus / volume / loop come from the asset's import settings.
+    AudioSourceData src = scene3d::audio_3d();
+    src.clip = rel;
+    if (const auto* a = asset_browser_.db().by_path(rel)) {
+      src.bus = a->meta.settings.str("bus", src.bus);
+      src.volume = a->meta.settings.flt("volume", src.volume);
+      src.loop = a->meta.settings.flag("loop", src.loop);
+    }
+    if (const Entity3D* t = scene_.find(target)) {
+      Entity3D e = *t;
+      e.audio = src;
+      replace_entity(e, "Sound " + e.name);
+      return e.id;
+    }
+    Entity3D e;
+    e.name = fs::path(rel).stem().string();
+    e.transform.position = pos;
+    e.audio = src;
+    return add_entity(std::move(e), "Place " + fs::path(rel).filename().string());
+  }
+  note("Can't place " + rel + " (models: .gltf / .glb, sounds, or images onto an entity)",
+       LogLevel::Warn);
   return 0;
 }
 

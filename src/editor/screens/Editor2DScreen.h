@@ -4,6 +4,7 @@
 #include "debugtools/DebugTools.h"
 #include "editor/plugins/ProfilerPanels.h"
 #include "editor/ProjectInfo.h"
+#include "editor/assets/AssetBrowser.h"
 #include "editor/assets/PrefabLibrary.h"
 #include "editor/assets/TextureCache.h"
 #include "editor/console/TelegraphLog.h"
@@ -117,6 +118,10 @@ class Editor2DScreen final : public IScreen {
   std::size_t prefab_poll();
   std::vector<std::uint64_t> prefab_instance_members(std::uint64_t id) const;
   PrefabLibrary& prefabs() { return prefabs_; }
+  // Asset Browser (shared with the 3D editor; docs/assets.md).
+  AssetBrowser& asset_browser() { return asset_browser_; }
+  // Reload scene.json from disk (after the browser rewrote references).
+  bool reload_scene_from_disk();
 
   // Undo / redo (Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z, Edit menu, toolbar). Each
   // restores entities + selection, autosaves scene.json and notes the step.
@@ -475,6 +480,9 @@ class Editor2DScreen final : public IScreen {
                            Workspace2D::Snapshot before);
   void prefab_sync_all_on_load();
   PrefabLibrary prefabs_;
+  AssetBrowser asset_browser_;
+  bool show_asset_browser_ = true;
+  void open_asset_browser();
   bool show_prefabs_ = true;
   char prefab_name_[64] = "Prefab";
   double prefab_poll_time_ = 0.0;

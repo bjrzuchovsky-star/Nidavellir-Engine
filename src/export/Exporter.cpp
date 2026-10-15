@@ -256,6 +256,7 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
     r.report.notes.push_back("C# scripts: shipped dotnet/ProjectScripts.dll + TombStone.Scripting (needs the .NET 8+ runtime)");
   }
   for (const std::string& rel : content_files(proj.string())) {
+    if (rel.size() > 5 && rel.compare(rel.size() - 5, 5, ".meta") == 0) continue;  // editor import settings
     if (!dev && rel.rfind("scripts/", 0) == 0 && rel.size() > 3 && rel.compare(rel.size() - 3, 3, ".cs") == 0) {
       continue;  // compiled into dotnet/
     }

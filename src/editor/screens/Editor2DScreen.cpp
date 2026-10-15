@@ -100,6 +100,7 @@ void Editor2DScreen::on_enter() {
   workspace_.clear_history();  // history is per open project, in memory only
   prefabs_.set_project(project_.path);
   prefab_sync_all_on_load();
+  open_asset_browser();
 
   // Supply Wagon: make sure <project>/assets exists and list it.
   stroke_id_ = 0;
@@ -535,6 +536,7 @@ AppState Editor2DScreen::on_update(float /*delta_seconds*/) {
       prefab_poll_time_ = ImGui::GetTime();
       prefab_poll();
     }
+    if (!is_playing()) asset_browser_.poll(ImGui::GetTime());
     draw_ui();
   }
 

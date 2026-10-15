@@ -66,7 +66,7 @@ With the Visual Studio generator, binaries go under `build/apps/<app>/<Config>/`
 
 `ts_admin --smoke` runs the whole headless suite. Single areas, from the flags parsed in `apps/admin/main.cpp`:
 
-`--smoke-3d`, `--smoke-anim3d`, `--smoke-vr`, `--smoke-audio`, `--smoke-ui`, `--smoke-fx`, `--smoke-tools`, `--smoke-prefab`, `--smoke-graph`, `--smoke-cpp`, `--smoke-cs`, `--smoke-export`, `--smoke-templates`, `--smoke-store`, `--smoke-survival`, `--smoke-shipyard`
+`--smoke-3d`, `--smoke-anim3d`, `--smoke-vr`, `--smoke-audio`, `--smoke-ui`, `--smoke-fx`, `--smoke-tools`, `--smoke-prefab`, `--smoke-assets`, `--smoke-graph`, `--smoke-cpp`, `--smoke-cs`, `--smoke-export`, `--smoke-templates`, `--smoke-store`, `--smoke-survival`, `--smoke-shipyard`
 
 Also: `ts_game --smoke --project <dir>`, `ts_server --smoke` and `ts_client --smoke`.
 
@@ -96,4 +96,4 @@ Without a display, the editors and smokes fall back to the null renderer. `xvfb-
 - `windows-latest`: MSVC x64, Release, with the newest Visual Studio on the runner (no pinned generator, so image updates do not break configure).
 - `ubuntu-latest`: GCC + Ninja, Release.
 
-Each job builds every app, then runs `ts_server --smoke`, `ts_client --smoke`, `ts_admin --smoke-prefab` and the full `ts_admin --smoke` with `TS_AUDIO=null`. The runners have no GPU and `TS_SMOKE_REQUIRE_GL` is left unset, so the GL-only checks are skipped instead of failing.
+Each job builds every app, then runs `ts_server --smoke`, `ts_client --smoke`, `ts_admin --smoke-prefab` and the full `ts_admin --smoke` with `TS_AUDIO=null`. The runners have no GPU and `TS_SMOKE_REQUIRE_GL` is left unset, so the GL-only checks are skipped instead of failing. CI cancels superseded runs on other refs but never on `main`, so every push to main gets a finished run.

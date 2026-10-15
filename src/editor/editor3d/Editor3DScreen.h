@@ -30,6 +30,7 @@
 #include "audio/SoundStage.h"
 #include "audio/SoundStage3D.h"
 #include "editor/AppState.h"
+#include "editor/assets/AssetBrowser.h"
 #include "editor/assets/PrefabLibrary.h"
 #include "editor/ProjectInfo.h"
 #include "editor/editor3d/Gizmo3D.h"
@@ -250,6 +251,7 @@ class Editor3DScreen final : public IScreen {
   // Entity ids of the instance `id` belongs to (empty when not an instance).
   std::vector<std::uint64_t> prefab_instance_members(std::uint64_t id) const;
   PrefabLibrary& prefabs() { return prefabs_; }
+  AssetBrowser& asset_browser() { return asset_browser_; }
 
   const std::deque<runtime::LogEntry>& log() const { return log_; }
   void note(const std::string& text, runtime::LogLevel level = runtime::LogLevel::Info);
@@ -300,6 +302,10 @@ class Editor3DScreen final : public IScreen {
   bool quit_requested_ = false;
   scene3d::Scene3D scene_;
   PrefabLibrary prefabs_;
+  AssetBrowser asset_browser_;
+  bool show_asset_browser_ = true;
+  double asset_poll_clock_ = 0.0;
+  void open_asset_browser();
   bool show_prefabs_ = true;
   char prefab_name_[64] = "Prefab";
   double prefab_poll_clock_ = 0.0;
