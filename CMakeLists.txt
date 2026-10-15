@@ -62,6 +62,8 @@ if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
   add_subdirectory(src/ai)
   # Story pieces (ts_story) behind the optional quests / dialogue / saves plugins.
   add_subdirectory(src/story)
+  # Weather (ts_weather core; ts_weather3d when the 3D runtime is built).
+  add_subdirectory(src/weather)
   # Plugins: interface, catalog, manager (ts_plugin) and the built-ins.
   add_subdirectory(src/plugin)
   add_subdirectory(src/plugins)

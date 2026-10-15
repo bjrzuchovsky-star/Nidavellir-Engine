@@ -48,6 +48,7 @@ add_library(ts_editor
   editor3d/Editor3DScreen_VR.cpp
   editor3d/Editor3DScreen_Anim.cpp
   editor3d/Editor3DScreen_Tools.cpp
+  editor3d/Editor3DScreen_Terrain.cpp
   plugins/EditorPlugins.cpp
   plugins/EditorBuiltinPlugins.cpp
   plugins/FrontierPanels.cpp
@@ -56,6 +57,7 @@ add_library(ts_editor
   plugins/PluginsPanel.cpp
   plugins/PluginPanelHost.cpp
   plugins/StoryPanels.cpp
+  plugins/WeatherPanels.cpp
   plugins/ProfilerPanels.cpp
   plugins/TownHallPanel.cpp
   screens/Editor2DScreen_Posse.cpp
@@ -102,6 +104,7 @@ target_link_libraries(ts_editor
     ts_render3d
     ts_world3d
     ts_ai3d
+    ts_weather3d
     ts_story3d
     ts_debugtools
     ts_xr

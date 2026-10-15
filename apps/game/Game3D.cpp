@@ -18,6 +18,7 @@
 #include "ai3d/AiWorld3D.h"
 #include "plugins/story/StoryPlugins.h"
 #include "story3d/StoryWorld3D.h"
+#include "weather/Weather3D.h"
 #include "plugins/RuntimePlugins.h"
 
 #include <GLFW/glfw3.h>
@@ -69,6 +70,13 @@ story::StoryFeatures story_enabled(const std::string& dir) {
   return plugins::story_features(plugins::read_project_plugins(dir).ids);
 }
 
+bool weather_enabled(const std::string& dir) {
+  for (const std::string& id : plugins::read_project_plugins(dir).ids) {
+    if (id == "ts.weather") return true;
+  }
+  return false;
+}
+
 bool ai_enabled(const std::string& dir) {
   for (const std::string& id : plugins::read_project_plugins(dir).ids) {
     if (id == "ts.ai") return true;
@@ -93,6 +101,7 @@ int run_smoke_3d(const std::string& dir, const std::string& name) {
   world3d::World3D world;
   ai3d::attach(world, ai_enabled(dir));
   story3d::attach(world, story_enabled(dir));
+  weather::attach(world, weather_enabled(dir));
   if (!world.start(scene, dir, &err)) return fail("start: " + err);
   if (world.player_id() == 0) return fail("no rider (Player component) in the scene");
   const world3d::Entity3D* rider = world.find(world.player_id());
@@ -124,7 +133,7 @@ int run_smoke_3d(const std::string& dir, const std::string& name) {
     {
       render3d::SceneView view(r.get());
       view.set_project_dir(dir);
-      view.begin(world.authored().environment, world.entities(), world.camera(), W, H);
+      view.begin(world.environment(), world.entities(), world.camera(), W, H);
       st = view.end();
       for (const std::string& p : view.take_problems()) return fail("render: " + p);
     }
@@ -187,6 +196,7 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
     world3d::World3D world;
     ai3d::attach(world, ai_enabled(dir));
     story3d::attach(world, story_enabled(dir));
+    weather::attach(world, weather_enabled(dir));
     const bool prof = plugins::profiler_enabled(plugins::read_project_plugins(dir).ids);
     if (prof) {
       profiler::attach_profiler(world);
@@ -297,7 +307,7 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
           std::uint64_t version = 0;
           const std::vector<unsigned char>& overlay = gui.raster(fw, fh, &version);
           renderer->set_overlay(overlay.empty() ? nullptr : overlay.data(), fw, fh, version);
-          view.begin(world.authored().environment, world.entities(), world.camera(), fw, fh);
+          view.begin(world.environment(), world.entities(), world.camera(), fw, fh);
           bills.clear();
           world.billboards(&bills);
           view.billboards(bills);

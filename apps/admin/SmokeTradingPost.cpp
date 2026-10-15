@@ -257,7 +257,7 @@ int run_trading_post_smoke() {
   store::TradingPost post(cache.string());
   post.refresh(&known);
   for (const char* id : {"ts.posse", "ts.tumbleweed", "ts.frontier", "ts.shipyard", "ts.ai",
-                         "ts.story", "ts.quests", "ts.dialogue", "ts.saves", "ts.profiler"}) {
+                         "ts.story", "ts.quests", "ts.dialogue", "ts.saves", "ts.profiler", "ts.weather"}) {
     const store::StoreEntry* e = post.find(id);
     if (!e || e->source != store::Source::BuiltIn || !e->installed) {
       return fail(std::string("built-in listed: ") + id);
@@ -265,7 +265,8 @@ int run_trading_post_smoke() {
   }
   if (!post.find("ts.frontier")->optional || post.find("ts.posse")->optional ||
       !post.find("ts.ai")->optional || !post.find("ts.quests")->optional || !post.find("ts.dialogue")->optional ||
-      !post.find("ts.saves")->optional || !post.find("ts.story")->optional || !post.find("ts.profiler")->optional) {
+      !post.find("ts.saves")->optional || !post.find("ts.story")->optional || !post.find("ts.profiler")->optional ||
+      !post.find("ts.weather")->optional) {
     return fail("optional = off by default (ships only when a project enables it)");
   }
   for (const char* id : {"ts.steam"}) {

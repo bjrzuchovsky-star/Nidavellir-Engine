@@ -17,6 +17,7 @@
 #include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/HeightFieldShape.h>
 #include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
@@ -173,6 +174,36 @@ JPH::RefConst<JPH::Shape> make_shape(const ShapeDesc& d, bool dynamic, std::stri
       base = r.Get();
       break;
     }
+    case ShapeType::HeightField: {
+      if (dynamic) {
+        if (error) *error = "a height field collider can only be static";
+        return nullptr;
+      }
+      const int n = d.samples;
+      if (n < 2 || d.heights.size() != static_cast<std::size_t>(n) * n) {
+        if (error) *error = "height field: bad sample grid";
+        return nullptr;
+      }
+      // Jolt wants the sample count to be a multiple of its block size (2):
+      // pad an odd grid with one no-collision row / column.
+      const int padded = (n % 2 == 0) ? n : n + 1;
+      std::vector<float> samples(static_cast<std::size_t>(padded) * padded, JPH::HeightFieldShapeConstants::cNoCollisionValue);
+      for (int z = 0; z < n; ++z)
+        for (int x = 0; x < n; ++x)
+          samples[static_cast<std::size_t>(z) * padded + x] = d.heights[static_cast<std::size_t>(z) * n + x];
+      const float cell = safe(d.size.x, 0.001f);
+      const float half = cell * static_cast<float>(n - 1) * 0.5f;
+      JPH::HeightFieldShapeSettings s(samples.data(), JPH::Vec3(-half, 0.0f, -half), JPH::Vec3(cell, 1.0f, cell),
+                                      static_cast<JPH::uint32>(padded));
+      s.mBitsPerSample = s.CalculateBitsPerSampleForError(0.01f);
+      JPH::ShapeSettings::ShapeResult r = s.Create();
+      if (!r.IsValid()) {
+        if (error) *error = std::string("height field: ") + r.GetError().c_str();
+        return nullptr;
+      }
+      base = r.Get();
+      break;
+    }
     case ShapeType::Mesh: {
       if (dynamic) {
         if (error) *error = "a triangle mesh collider can only be static (use a convex hull)";
@@ -226,6 +257,7 @@ const char* shape_name(ShapeType s) {
     case ShapeType::Capsule: return "capsule";
     case ShapeType::ConvexHull: return "convex";
     case ShapeType::Mesh: return "mesh";
+    case ShapeType::HeightField: return "heightfield";
   }
   return "box";
 }

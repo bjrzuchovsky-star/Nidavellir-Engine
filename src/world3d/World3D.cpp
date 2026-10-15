@@ -96,6 +96,7 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
   loc::load_project(project_dir);  // tr() / lang.* in 3D scripts
   stop();
   authored_ = scene;
+  env_ = scene.environment;
   ents_ = scene.entities;
   has_parents_ = std::any_of(ents_.begin(), ents_.end(),
                              [](const Entity3D& e) { return e.parent != 0; });
@@ -728,6 +729,18 @@ void World3D::step_fx() {
     particles_.sync(e.id, *e.particles, pos);
   }
   particles_.prune();
+  {
+    // Wind pushes particles (m/s^2), gusting deterministically by tick.
+    float dx = env_.wind_dir[0], dz = env_.wind_dir[1];
+    const float l = std::sqrt(dx * dx + dz * dz);
+    if (l > 1e-5f) {
+      dx /= l;
+      dz /= l;
+    }
+    const float gust = 1.0f + env_.wind_gust * 0.5f * std::sin(static_cast<float>(tick_) * 0.045f);
+    const float a = env_.wind_strength * 4.0f * gust;
+    particles_.set_wind(dx * a, 0.0f, dz * a);
+  }
   particles_.update(static_cast<float>(kTickSeconds));
 }
 
@@ -743,6 +756,7 @@ void World3D::billboards(std::vector<render3d::Renderer3D::Billboard>* out) cons
     b.additive = s.additive;
     out->push_back(b);
   }
+  for (const auto& x : exts_) x->billboards(*this, out);
 }
 
 void World3D::script_ui(runtime::UiCommand command) {

@@ -3,6 +3,7 @@
 
 #include "core/MemImages.h"
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <algorithm>
@@ -15,7 +16,22 @@ namespace render3d {
 
 namespace fs = std::filesystem;
 
-SceneView::~SceneView() { clear(); }
+SceneView::SceneView(Renderer3D* renderer) : r_(renderer) {
+  terrain_ = std::make_unique<terrain::TerrainView>(renderer);
+  terrain_->set_sources([this](const std::string& rel) { return image(rel); },
+                        [this](const std::string& src) { return model(src); });
+}
+
+SceneView::~SceneView() {
+  clear();
+  terrain_.reset();
+}
+
+float SceneView::time() const {
+  if (fixed_time_) return time_;
+  static const auto start = std::chrono::steady_clock::now();
+  return std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count();
+}
 
 void SceneView::set_project_dir(const std::string& dir) {
   if (dir == dir_) return;
@@ -31,6 +47,7 @@ void SceneView::clear() {
     }
     for (auto& [k, m] : materials_) r_->destroy_material(m.handle);
   }
+  if (terrain_) terrain_->clear();
   models_.clear();
   materials_.clear();
   images_.clear();
@@ -93,6 +110,23 @@ Aabb SceneView::mesh_bounds(const std::string& source) {
 }
 
 Aabb SceneView::local_bounds(const scene3d::Entity3D& e) {
+  if (e.terrain) {
+    // Terrain: its heightfield box (cached per data revision).
+    std::shared_ptr<terrain::TerrainData> d = terrain::acquire(dir_, *e.terrain);
+    if (d && d->valid()) {
+      auto& slot = terrain_bounds_[d.get()];
+      if (slot.first != d->revision + 1) {
+        float lo = 1e30f, hi = -1e30f;
+        for (float h : d->heights) {
+          lo = std::min(lo, h);
+          hi = std::max(hi, h);
+        }
+        if (hi - lo < 0.02f) { lo -= 0.01f; hi += 0.01f; }
+        slot = {d->revision + 1, Aabb{{-d->size * 0.5f, lo, -d->size * 0.5f}, {d->size * 0.5f, hi, d->size * 0.5f}}};
+      }
+      return slot.second;
+    }
+  }
   if (!e.mesh) return {{-0.25f, -0.25f, -0.25f}, {0.25f, 0.25f, 0.25f}};
   return mesh_bounds(e.mesh->source);
 }
@@ -298,6 +332,7 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
   if (!r_) return;
   r_->set_environment(env);
   r_->begin_frame(camera, width, height);
+  terrain_->reset_stats();
   // Nearest point lights first when there are more than the shader takes.
   std::vector<std::pair<float, PointLight>> points;
   for (const scene3d::Entity3D& e : entities) {
@@ -327,6 +362,9 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
       env2.sun_intensity = e.light->intensity;
       r_->set_environment(env2);
     }
+    if (e.terrain) {
+      terrain_->draw(e.id, *e.terrain, dir_, e.transform.position, camera.position, time());
+    }
     if (!e.mesh) continue;
     ModelEntry& m = entry(e.mesh->source);
     if (!m.model) continue;
@@ -352,6 +390,7 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
       }
     }
   }
+  terrain_->prune();
   if (opt.grid) {
     const float ext = opt.grid_extent, step = opt.grid_step > 0 ? opt.grid_step : 1.0f;
     const int n = static_cast<int>(ext / step);

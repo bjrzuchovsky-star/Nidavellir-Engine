@@ -160,6 +160,9 @@ struct Gl33 {
   void(TS_GLAPI* DeleteBuffers)(GLsizei, const GLuint*);
   void(TS_GLAPI* VertexAttribPointer)(GLuint, GLint, GLenum, GLboolean, GLsizei, const void*);
   void(TS_GLAPI* EnableVertexAttribArray)(GLuint);
+  // Instancing (GL 3.3 core): foliage.
+  void(TS_GLAPI* VertexAttribDivisor)(GLuint, GLuint);
+  void(TS_GLAPI* DrawElementsInstanced)(GLenum, GLsizei, GLenum, const void*, GLsizei);
   void(TS_GLAPI* GenFramebuffers)(GLsizei, GLuint*);
   void(TS_GLAPI* BindFramebuffer)(GLenum, GLuint);
   void(TS_GLAPI* FramebufferTexture2D)(GLenum, GLenum, GLenum, GLuint, GLint);

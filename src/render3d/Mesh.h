@@ -73,6 +73,14 @@ struct MaterialDesc {
   std::shared_ptr<const Image> metal_rough_image;
   bool double_sided = false;
   bool unlit = false;  // albedo straight out (UI panels)
+  // Terrain splat (terrain/, render3d/GlTerrainFoliage): the RGBA weights
+  // image blends four layer textures tiled in world space (metres per
+  // repeat), each tinted. No splat image = an ordinary material.
+  std::shared_ptr<const Image> splat_image;
+  std::shared_ptr<const Image> layer_images[4];
+  float layer_tint[4][4] = {{1, 1, 1, 1}, {1, 1, 1, 1}, {1, 1, 1, 1}, {1, 1, 1, 1}};
+  float layer_tiling[4] = {4, 4, 4, 4};
+  bool terrain() const { return splat_image != nullptr; }
 };
 
 // Opaque handles a renderer hands out (0 = none).

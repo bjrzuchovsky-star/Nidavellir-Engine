@@ -45,6 +45,96 @@ Value script_value(const ScriptValue& v) {
   }
 }
 
+Value terrain_json(const terrain::Terrain3D& t) {
+  Value v = Value::object();
+  if (!t.data.empty()) v.set("data", Value::string(t.data));
+  v.set("resolution", Value::number(t.resolution));
+  v.set("size", Value::number(t.size));
+  v.set("chunk", Value::number(t.chunk));
+  v.set("lod_distance", Value::number(t.lod_distance));
+  v.set("skirt", Value::number(t.skirt));
+  v.set("roughness", Value::number(t.roughness));
+  Value layers = Value::array();
+  for (const terrain::TerrainLayer& l : t.layers) {
+    Value lv = Value::object();
+    lv.set("texture", Value::string(l.texture));
+    lv.set("tint", json::floats(l.tint, 3));
+    lv.set("tiling", Value::number(l.tiling));
+    layers.push(std::move(lv));
+  }
+  v.set("layers", std::move(layers));
+  Value fol = Value::array();
+  for (const terrain::FoliageType& f : t.foliage) {
+    Value fv = Value::object();
+    fv.set("name", Value::string(f.name));
+    fv.set("mesh", Value::string(f.mesh));
+    fv.set("density", Value::number(f.density));
+    fv.set("scale_min", Value::number(f.scale_min));
+    fv.set("scale_max", Value::number(f.scale_max));
+    fv.set("sway", Value::number(f.sway));
+    fv.set("fade_start", Value::number(f.fade_start));
+    fv.set("fade_end", Value::number(f.fade_end));
+    fv.set("color_a", json::floats(f.color_a, 3));
+    fv.set("color_b", json::floats(f.color_b, 3));
+    fv.set("slope_max", Value::number(f.slope_max));
+    fv.set("layer", Value::number(f.layer));
+    fv.set("cast_shadows", Value::boolean(f.cast_shadows));
+    fv.set("collide", Value::boolean(f.collide));
+    fv.set("collide_radius", Value::number(f.collide_radius));
+    fv.set("collide_height", Value::number(f.collide_height));
+    fol.push(std::move(fv));
+  }
+  v.set("foliage", std::move(fol));
+  v.set("foliage_distance", Value::number(t.foliage_distance));
+  v.set("collider", Value::boolean(t.collider));
+  v.set("friction", Value::number(t.friction));
+  return v;
+}
+
+terrain::Terrain3D terrain_from(const Value& v) {
+  terrain::Terrain3D t;
+  t.data = v.str("data");
+  t.resolution = static_cast<int>(v.num("resolution", t.resolution));
+  t.size = v.flt("size", t.size);
+  t.chunk = static_cast<int>(v.num("chunk", t.chunk));
+  t.lod_distance = v.flt("lod_distance", t.lod_distance);
+  t.skirt = v.flt("skirt", t.skirt);
+  t.roughness = v.flt("roughness", t.roughness);
+  int i = 0;
+  for (const Value& lv : v["layers"].items()) {
+    if (i >= terrain::kLayers) break;
+    terrain::TerrainLayer& l = t.layers[i++];
+    l.texture = lv.str("texture", l.texture);
+    lv.floats("tint", l.tint, 3);
+    l.tiling = lv.flt("tiling", l.tiling);
+  }
+  for (const Value& fv : v["foliage"].items()) {
+    terrain::FoliageType f;
+    f.name = fv.str("name", f.name);
+    f.mesh = fv.str("mesh", f.mesh);
+    f.density = fv.flt("density", f.density);
+    f.scale_min = fv.flt("scale_min", f.scale_min);
+    f.scale_max = fv.flt("scale_max", f.scale_max);
+    f.sway = fv.flt("sway", f.sway);
+    f.fade_start = fv.flt("fade_start", f.fade_start);
+    f.fade_end = fv.flt("fade_end", f.fade_end);
+    fv.floats("color_a", f.color_a, 3);
+    fv.floats("color_b", f.color_b, 3);
+    f.slope_max = fv.flt("slope_max", f.slope_max);
+    f.layer = static_cast<int>(fv.num("layer", f.layer));
+    f.cast_shadows = fv.flag("cast_shadows", f.cast_shadows);
+    f.collide = fv.flag("collide", f.collide);
+    f.collide_radius = fv.flt("collide_radius", f.collide_radius);
+    f.collide_height = fv.flt("collide_height", f.collide_height);
+    t.foliage.push_back(std::move(f));
+  }
+  t.foliage_distance = v.flt("foliage_distance", t.foliage_distance);
+  t.collider = v.flag("collider", t.collider);
+  t.friction = v.flt("friction", t.friction);
+  terrain::normalize(t);
+  return t;
+}
+
 Value entity_json(const Entity3D& e) {
   Value o = Value::object();
   o.set("id", Value::number(static_cast<double>(e.id)));
@@ -178,6 +268,7 @@ Value entity_json(const Entity3D& e) {
     v.set("bidirectional", Value::boolean(e.nav_link->bidirectional));
     o.set("nav_link", std::move(v));
   }
+  if (e.terrain) o.set("terrain", terrain_json(*e.terrain));
   return o;
 }
 
@@ -336,6 +427,7 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     }
     e.prefab = std::move(link);
   }
+  if (o["terrain"].is_object()) e.terrain = terrain_from(o["terrain"]);
   *out = std::move(e);
   return true;
 }
@@ -509,6 +601,15 @@ std::string write(const Scene3D& s) {
   e.set("sun_intensity", Value::number(env.sun_intensity));
   e.set("shadows", Value::boolean(env.shadows));
   e.set("shadow_distance", Value::number(env.shadow_distance));
+  if (env.fog_density > 0.0f) {
+    e.set("fog_color", json::floats(env.fog_color, 3));
+    e.set("fog_density", Value::number(env.fog_density));
+    e.set("fog_height", Value::number(env.fog_height));
+    e.set("fog_falloff", Value::number(env.fog_falloff));
+  }
+  e.set("wind_dir", json::floats(env.wind_dir, 2));
+  e.set("wind_strength", Value::number(env.wind_strength));
+  e.set("wind_gust", Value::number(env.wind_gust));
   root.set("environment", std::move(e));
   Value ents = Value::array();
   for (const Entity3D& en : s.entities) ents.push(entity_json(en));
@@ -573,6 +674,13 @@ bool parse(const std::string& text, Scene3D* out, std::string* error) {
     e.sun_intensity = std::max(0.0f, env.flt("sun_intensity", e.sun_intensity));
     e.shadows = env.flag("shadows", e.shadows);
     e.shadow_distance = std::clamp(env.flt("shadow_distance", e.shadow_distance), 2.0f, 500.0f);
+    env.floats("fog_color", e.fog_color, 3);
+    e.fog_density = std::clamp(env.flt("fog_density", e.fog_density), 0.0f, 1.0f);
+    e.fog_height = env.flt("fog_height", e.fog_height);
+    e.fog_falloff = std::clamp(env.flt("fog_falloff", e.fog_falloff), 0.0f, 10.0f);
+    env.floats("wind_dir", e.wind_dir, 2);
+    e.wind_strength = std::clamp(env.flt("wind_strength", e.wind_strength), 0.0f, 4.0f);
+    e.wind_gust = std::clamp(env.flt("wind_gust", e.wind_gust), 0.0f, 4.0f);
   }
   for (const Value& v : root["entities"].items()) {
     Entity3D en;

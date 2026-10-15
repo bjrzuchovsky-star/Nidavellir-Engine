@@ -26,6 +26,7 @@ struct FrameStats {
   std::size_t shadow_casters = 0;
   std::size_t lines = 0;
   std::size_t skinned = 0;  // draws posed by a bone palette
+  std::size_t foliage = 0;  // instanced foliage drawn (instances)
   // Live resources (profiler / Assay Office): meshes, materials, textures
   // and an estimate of their GPU memory.
   std::size_t meshes = 0;
@@ -45,6 +46,16 @@ struct Environment {
   float sun_intensity = 2.6f;
   bool shadows = true;
   float shadow_distance = 40.0f;  // half-size of the sun's shadow box
+  // Distance fog (display colour); density per metre, thinning above
+  // fog_height by fog_falloff per metre (0 = uniform). Weather drives these.
+  float fog_color[3] = {0.72f, 0.74f, 0.78f};
+  float fog_density = 0.0f;
+  float fog_height = 0.0f;
+  float fog_falloff = 0.0f;
+  // Wind for foliage sway and particles (xz direction, 0..1+ strength).
+  float wind_dir[2] = {1.0f, 0.0f};
+  float wind_strength = 0.0f;
+  float wind_gust = 0.0f;
   bool operator==(const Environment& o) const = default;
 };
 
@@ -53,6 +64,25 @@ struct PointLight {
   float color[3] = {1.0f, 0.75f, 0.45f};
   float intensity = 6.0f;
   float range = 8.0f;
+};
+
+// One instanced foliage batch (terrain/Foliage.h): a mesh repeated at
+// many ground points, wind-swayed and distance-faded on the GPU.
+struct FoliageInstance3D {
+  float x = 0, y = 0, z = 0, yaw = 0;  // world position, radians about +y
+  float scale = 1, fade = 1;            // fade 1 solid .. 0 gone (dithered)
+};
+struct FoliageBatch {
+  MeshHandle mesh;
+  float color_a[3] = {0.2f, 0.3f, 0.1f};  // built-in meshes: uv.x blends a -> b
+  float color_b[3] = {0.5f, 0.6f, 0.25f};
+  float sway = 1.0f;
+  float mesh_height = 0.0f;  // > 0: sway weight = y / height (project meshes), else uv.y
+  bool part_colors = true;   // false: flat color_b (project meshes)
+  bool cast_shadow = false;
+  float time = 0.0f;         // seconds (wind animation)
+  const FoliageInstance3D* instances = nullptr;
+  std::size_t count = 0;
 };
 
 class Renderer3D {
@@ -104,8 +134,14 @@ class Renderer3D {
     float rotation = 0.0f;  // degrees
     float rgba[4] = {1, 1, 1, 1};
     bool additive = false;
+    Vec3 stretch;           // non-zero: a streak from position along it (rain)
   };
   virtual void draw_billboards(const std::vector<Billboard>& /*billboards*/) {}
+  // Instanced foliage (copied; pointers need only live for the call).
+  // Backends without instancing draw each instance as a plain mesh.
+  virtual void draw_foliage(const FoliageBatch& batch);
+  // Replace a terrain material's splat weights (same size) after painting.
+  virtual void update_splat(MaterialHandle /*material*/, const Image& /*splat*/) {}
   virtual FrameStats end_frame() = 0;
   // Screen-space overlay (the in-game UI raster): RGBA8, top row first,
   // straight alpha, stretched over the whole frame after the scene. Kept

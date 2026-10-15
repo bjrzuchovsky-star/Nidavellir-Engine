@@ -2,6 +2,7 @@
 // headset" through OpenXR, and the Headset Mirror window (both eyes, the
 // session state, comfort settings, simulator keys).
 
+#include "weather/Weather3D.h"
 #include "editor/editor3d/Editor3DScreen.h"
 
 #include "editor/ui/Theme.h"
@@ -60,6 +61,7 @@ bool Editor3DScreen::vr_preview_start(bool simulator) {
     s = std::move(sim);
   }
   world_.set_vr(true);
+  if (!weather::Weather3D::of(world_)) weather::attach(world_, plugins_.loaded("ts.weather"));
   std::string err;
   if (!world_.start(scene_, project_.path, &err)) {
     s->end();

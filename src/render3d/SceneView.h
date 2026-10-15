@@ -12,6 +12,7 @@
 #include "render3d/Gltf.h"
 #include "render3d/Renderer3D.h"
 #include "render3d/Scene3D.h"
+#include "terrain/TerrainView.h"
 
 #include <map>
 #include <memory>
@@ -33,7 +34,7 @@ struct SceneViewOptions {
 
 class SceneView {
  public:
-  explicit SceneView(Renderer3D* renderer) : r_(renderer) {}
+  explicit SceneView(Renderer3D* renderer);
   ~SceneView();
   SceneView(const SceneView&) = delete;
   SceneView& operator=(const SceneView&) = delete;
@@ -59,6 +60,15 @@ class SceneView {
   FrameStats end();
 
   std::vector<std::string> take_problems();
+
+  // Seconds for wind animation (foliage sway). Unset: a steady clock.
+  void set_time(float seconds) {
+    time_ = seconds;
+    fixed_time_ = true;
+  }
+  float time() const;
+  // Terrain chunk / foliage cache (stats, editor picking).
+  terrain::TerrainView& terrain_view() { return *terrain_; }
 
   // World matrix of an entity.
   static Mat4 world_matrix(const scene3d::Entity3D& e) { return e.transform.matrix(); }
@@ -97,11 +107,15 @@ class SceneView {
 
   Renderer3D* r_;
   std::string dir_;
+  std::map<const void*, std::pair<std::uint64_t, Aabb>> terrain_bounds_;
   std::map<std::string, ModelEntry> models_;
   std::map<std::string, MaterialEntry> materials_;  // key = serialized material
   std::map<std::string, std::shared_ptr<const Image>> images_;
   std::map<std::string, bool> reported_;
   std::vector<std::string> problems_;
+  std::unique_ptr<terrain::TerrainView> terrain_;
+  float time_ = 0.0f;
+  bool fixed_time_ = false;
 };
 
 }  // namespace render3d

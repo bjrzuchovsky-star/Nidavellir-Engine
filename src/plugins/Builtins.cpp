@@ -17,6 +17,7 @@ TS_PLUGIN_DECLARE(quests);
 TS_PLUGIN_DECLARE(dialogue);
 TS_PLUGIN_DECLARE(saves);
 TS_PLUGIN_DECLARE(profiler);
+TS_PLUGIN_DECLARE(weather);
 
 namespace ts {
 namespace tombstone {
@@ -51,6 +52,8 @@ void register_builtin_plugins(plugin::Catalog& catalog,
   if (!TS_PLUGIN_LINK(saves, catalog, &err) && errors) errors->push_back(err);
   err.clear();
   if (!TS_PLUGIN_LINK(profiler, catalog, &err) && errors) errors->push_back(err);
+  err.clear();
+  if (!TS_PLUGIN_LINK(weather, catalog, &err) && errors) errors->push_back(err);
 }
 
 std::vector<std::string> plugin_search_dirs(const std::string& project_dir) {

@@ -473,6 +473,8 @@ bool Editor3DScreen::surface_point(float px, float py, float vw, float vh,
   float best = 1e30f;
   float t = 0.0f;
   if (render3d::ray_plane(ray, {0, 1, 0}, 0.0f, &t) && t > 0.0f && t < 1000.0f) best = t;
+  std::uint64_t tid = 0;
+  if (terrain_ray(ray, &t, &tid) && t < best) best = t;
   for (const Entity3D& o : scene_.entities) {
     if (contains(skip, o.id) || !o.visible || effectively_hidden(o) || !o.mesh) continue;
     const render3d::Aabb local =

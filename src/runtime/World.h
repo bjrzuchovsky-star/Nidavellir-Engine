@@ -329,6 +329,7 @@ class World final : public ScriptWorld {
   // e.g. footstep dust every peer makes for itself).
   void fx(FxEvent event);
   const fx::ParticleWorld& particles() const { return particles_; }
+  fx::ParticleWorld& particles_mut() { return particles_; }  // plugins (weather wind)
   std::uint64_t fx_total() const { return fx_total_; }
   bool footstep_dust = true;
   // Scene lighting (scene.json "lighting"); set after build().

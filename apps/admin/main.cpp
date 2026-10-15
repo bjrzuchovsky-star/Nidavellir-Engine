@@ -44,6 +44,8 @@
 #include "SmokeAnim3D.h"
 #include "SmokeTemplates.h"
 #include "SmokeTradingPost.h"
+#include "SmokeTerrain.h"
+int run_terrain_shot(const std::string& png);
 #include "store/TradingPost.h"
 
 #include <imgui.h>
@@ -1286,6 +1288,10 @@ int run_console_smoke() {
   if (run_loc_smoke() != 0 || run_tiles_smoke() != 0) {
     return 1;
   }
+  // Terrain + foliage, weather (see SmokeTerrain.cpp).
+  if (run_terrain_smoke() != 0 || run_weather_smoke() != 0) {
+    return 1;
+  }
   // Particles + 2D lighting (see SmokeFx.cpp).
   if (run_fx_smoke() != 0) {
     return 1;
@@ -1777,6 +1783,15 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-loc") == 0) {
       return run_loc_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-terrain") == 0) {
+      return run_terrain_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-weather") == 0) {
+      return run_weather_smoke();
+    }
+    if (std::strcmp(argv[i], "--terrain-shot") == 0 && i + 1 < argc) {
+      return run_terrain_shot(argv[i + 1]);
     }
     if (std::strcmp(argv[i], "--smoke-tiles") == 0) {
       return run_tiles_smoke();

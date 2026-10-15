@@ -44,7 +44,7 @@ const char* default_layer_name(int layer);
 enum class Motion : std::uint8_t { Static, Kinematic, Dynamic };
 const char* motion_name(Motion m);
 
-enum class ShapeType : std::uint8_t { Box, Sphere, Capsule, ConvexHull, Mesh };
+enum class ShapeType : std::uint8_t { Box, Sphere, Capsule, ConvexHull, Mesh, HeightField };
 const char* shape_name(ShapeType s);
 
 struct ShapeDesc {
@@ -57,6 +57,10 @@ struct ShapeDesc {
   // Convex hull / mesh: body-space points (and triangles for a mesh).
   std::vector<Vec3> points;
   std::vector<std::uint32_t> indices;
+  // Height field (static only, terrain/): samples x samples heights,
+  // row-major along +z, spaced size.x metres, centred on the body origin.
+  std::vector<float> heights;
+  int samples = 0;
 };
 
 struct BodyDesc {

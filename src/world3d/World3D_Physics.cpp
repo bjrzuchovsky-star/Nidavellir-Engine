@@ -7,6 +7,7 @@
 #include "render3d/Gltf.h"
 #include "render3d/Mesh.h"
 #include "runtime/ScriptHost.h"
+#include "terrain/TerrainView.h"
 
 #include <algorithm>
 #include <cmath>
@@ -90,6 +91,7 @@ std::uint64_t World3D::entity_of(p3::BodyId body) const {
 
 bool World3D::phys_wants_body(const Entity3D& e) const {
   if (e.player || e.vr_rig || dead_.count(e.id) || collider_off_.count(e.id)) return false;
+  if (e.terrain) return e.terrain->collider;
   if (e.collider) return true;
   // A grabbable without a collider uses its unit primitive's box.
   return e.grabbable.has_value() || e.rigid_body.has_value();
@@ -121,8 +123,51 @@ const render3d::MeshData* World3D::phys_mesh(const std::string& source) {
   return out;
 }
 
+// Terrain: a static Jolt height field (axis-aligned at the entity
+// position) plus capsules for colliding foliage (trees, cacti).
+static p3::BodyDesc terrain_body(const Entity3D& e, const terrain::TerrainData& t) {
+  p3::BodyDesc d;
+  d.user = e.id;
+  d.position = e.transform.position;
+  d.motion = p3::Motion::Static;
+  d.friction = e.terrain->friction;
+  d.layer = p3::kLayerStatic;
+  p3::ShapeDesc hf;
+  hf.type = p3::ShapeType::HeightField;
+  hf.samples = t.res;
+  hf.heights = t.heights;
+  hf.size = {t.cell(), 1.0f, t.cell()};
+  d.shapes.push_back(std::move(hf));
+  const auto& types = e.terrain->foliage;
+  for (const terrain::FoliageInstance& f : t.foliage) {
+    if (f.type >= types.size() || !types[f.type].collide) continue;
+    if (d.shapes.size() > 20000) break;
+    const terrain::FoliageType& ft = types[f.type];
+    p3::ShapeDesc c;
+    c.type = p3::ShapeType::Capsule;
+    c.size = {ft.collide_radius * f.scale, ft.collide_height * f.scale, 0.0f};
+    c.offset = {f.x, f.y + 0.5f * ft.collide_height * f.scale, f.z};
+    d.shapes.push_back(std::move(c));
+  }
+  return d;
+}
+
 void World3D::phys_add(const Entity3D& e) {
   if (!phys_ || body_ids_.count(e.id)) return;
+  if (e.terrain) {
+    std::shared_ptr<terrain::TerrainData> t = terrain::acquire(project_dir_, *e.terrain);
+    if (!t || !t->valid()) return;
+    std::string err;
+    const p3::BodyId id = phys_->create(terrain_body(e, *t), &err);
+    if (!id) {
+      post(LogLevel::Warn, "physics", e.name + ": no terrain collider (" + err + ")", e.id);
+      return;
+    }
+    body_ids_[e.id] = id;
+    body_owner_[id] = e.id;
+    synced_[e.id] = e.transform;
+    return;
+  }
   const scene3d::Collider3D c = e.collider ? *e.collider : scene3d::Collider3D{};
   p3::BodyDesc d;
   d.user = e.id;

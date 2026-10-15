@@ -41,6 +41,8 @@
 #include "render3d/Renderer3D.h"
 #include "render3d/Scene3D.h"
 #include "render3d/SceneView.h"
+#include "terrain/Terrain.h"
+#include "terrain/TerrainComponent.h"
 #include "runtime/Log.h"
 #include "world3d/World3D.h"
 #include "xr/VrPresenter.h"
@@ -81,6 +83,35 @@ class Editor3DScreen final : public IScreen {
   std::uint64_t primary() const;
   void select(std::uint64_t id, bool additive = false);
   void set_show_physics_settings(bool on) { show_physics_ = on; }
+
+  // ---- Terrain + foliage (Editor3DScreen_Terrain.cpp) ----
+  struct TerrainTool {
+    bool active = false;  // brushes on: the left button sculpts / paints in the viewport
+    int mode = 0;         // 0 sculpt, 1 paint layers, 2 foliage
+    terrain::BrushOp op = terrain::BrushOp::Raise;
+    float radius = 6.0f;
+    float strength = 6.0f;
+    float hardness = 0.4f;
+    float noise_scale = 4.0f;
+    int layer = 1;
+    int foliage_type = 0;
+    bool erase = false;
+    float fill = 0.6f;
+  };
+  TerrainTool& terrain_tool() { return terrain_tool_; }
+  void set_show_terrain(bool on) { show_terrain_ = on; }
+  // New terrain entity (res 2^n+1, size metres); look: meadow / desert / snowy.
+  std::uint64_t create_terrain(int resolution, float size, bool hills, const std::string& look);
+  // The selected terrain, else the first terrain in the scene (0 = none).
+  std::uint64_t terrain_target() const;
+  // Closest terrain hit along a world ray.
+  bool terrain_ray(const render3d::Ray& ray, float* t, std::uint64_t* id) const;
+  // Brush strokes (one undo step each). `world` is a point on the terrain.
+  bool terrain_stroke_begin(std::uint64_t id);
+  bool terrain_stroke(const render3d::Vec3& world, float dt, bool invert = false);
+  void terrain_stroke_end();
+  bool terrain_stroking() const { return stroke_.has_value(); }
+  bool save_terrains(std::string* error);
   void clear_selection();
 
   // ---- Edits (each one undo step + autosave) ------------------------------
@@ -257,10 +288,35 @@ class Editor3DScreen final : public IScreen {
   void note(const std::string& text, runtime::LogLevel level = runtime::LogLevel::Info);
 
  private:
+  struct TerrainSnap {
+    terrain::Terrain3D comp;
+    terrain::TerrainData data;
+  };
   struct Step {
     std::string label;
     scene3d::Scene3D scene;
+    std::vector<TerrainSnap> terrains;  // heightfield data changed by this step
   };
+  struct Stroke {
+    std::uint64_t id = 0;
+    terrain::Terrain3D comp;
+    terrain::TerrainData before;
+    std::uint32_t seed = 1;
+    float flatten_target = 0.0f;
+    bool has_target = false;
+  };
+  std::optional<Stroke> stroke_;
+  TerrainTool terrain_tool_;
+  bool show_terrain_ = false;
+  render3d::Vec3 brush_at_{0, 0, 0};
+  bool brush_hit_ = false;
+  std::optional<scene3d::Scene3D> terrain_edit_before_;
+  void draw_terrain_panel();
+  bool terrain_viewport(float mx, float my, float vw, float vh, float ox, float oy);
+  // Swap snapshots with the live data (undo / redo); returns the current state.
+  std::vector<TerrainSnap> swap_terrains(std::vector<TerrainSnap> snaps);
+  void push_terrain_undo(const std::string& label, const scene3d::Scene3D& before,
+                         std::vector<TerrainSnap> data);
   void push_undo(const std::string& label, const scene3d::Scene3D& before);
   void autosave();
   std::uint64_t add_entity(scene3d::Entity3D e, const std::string& label);

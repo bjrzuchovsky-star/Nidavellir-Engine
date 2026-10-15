@@ -7,6 +7,16 @@ namespace ts {
 namespace tombstone {
 namespace render3d {
 
+void Renderer3D::draw_foliage(const FoliageBatch& b) {
+  for (std::size_t i = 0; i < b.count && b.instances; ++i) {
+    const FoliageInstance3D& f = b.instances[i];
+    if (f.fade <= 0.0f) continue;
+    const Mat4 m = Mat4::trs({f.x, f.y, f.z}, Quat::from_euler_deg({0, degrees(f.yaw), 0}),
+                             {f.scale, f.scale, f.scale});
+    draw_matrix(b.mesh, MaterialHandle{}, m, b.cast_shadow);
+  }
+}
+
 namespace {
 
 class NullRenderer3D final : public Renderer3D {
@@ -51,6 +61,13 @@ class NullRenderer3D final : public Renderer3D {
     const std::size_t before = frame_.draws;
     count(mesh, material);
     if (frame_.draws != before && palette && bones > 0) ++frame_.skinned;
+  }
+  void draw_foliage(const FoliageBatch& b) override {
+    auto it = meshes_.find(b.mesh.id);
+    if (it == meshes_.end() || !b.instances || b.count == 0) return;
+    ++frame_.draws;
+    frame_.foliage += b.count;
+    frame_.triangles += it->second * b.count;
   }
   void add_point_light(const PointLight& /*light*/) override {
     if (frame_.lights < kMaxPointLights) ++frame_.lights;

@@ -9,6 +9,7 @@
 #include "editor/plugins/ProfilerPanels.h"
 #include "editor/plugins/StoryPanels.h"
 #include "editor/plugins/TownHallPanel.h"
+#include "editor/plugins/WeatherPanels.h"
 #include "editor/plugins/FrontierPanels.h"
 #include "editor/plugins/ShipyardPanels.h"
 #include "editor/screens/Editor2DScreen.h"
@@ -132,6 +133,7 @@ void register_editor_builtin_plugins(plugin::Catalog& catalog,
   install_frontier_panels();
   install_ai_panels();
   install_story_panels();
+  install_weather_panels();
   install_profiler_panels();
   install_shipyard_panels();
   std::string err;

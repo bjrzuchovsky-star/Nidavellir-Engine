@@ -34,7 +34,8 @@ bool load_gl33(std::string* error) {
   TS_GL(Uniform1fv); TS_GL(UniformMatrix4fv); TS_GL(GenVertexArrays); TS_GL(BindVertexArray);
   TS_GL(DeleteVertexArrays); TS_GL(GenBuffers); TS_GL(BindBuffer); TS_GL(BufferData);
   TS_GL(BufferSubData); TS_GL(DeleteBuffers); TS_GL(VertexAttribPointer);
-  TS_GL(EnableVertexAttribArray); TS_GL(GenFramebuffers); TS_GL(BindFramebuffer);
+  TS_GL(EnableVertexAttribArray); TS_GL(VertexAttribDivisor);
+  TS_GL(DrawElementsInstanced); TS_GL(GenFramebuffers); TS_GL(BindFramebuffer);
   TS_GL(FramebufferTexture2D); TS_GL(CheckFramebufferStatus); TS_GL(DeleteFramebuffers);
   TS_GL(GenRenderbuffers); TS_GL(BindRenderbuffer); TS_GL(RenderbufferStorage);
   TS_GL(FramebufferRenderbuffer); TS_GL(DeleteRenderbuffers); TS_GL(ActiveTexture);

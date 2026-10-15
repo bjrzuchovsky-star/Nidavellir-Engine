@@ -163,6 +163,16 @@ void Editor3DScreen::draw_ui() {
     }
     ImGui::End();
   }
+  if (show_terrain_) {
+    ImGui::SetNextWindowSize(ImVec2(400, 620), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Terrain + Foliage", &show_terrain_)) {
+      ImGui::BeginDisabled(locked);
+      draw_terrain_panel();
+      ImGui::EndDisabled();
+    }
+    ImGui::End();
+  }
+  if (!show_terrain_) terrain_tool_.active = false;
   if (anim_preview_.open) {
     ImGui::SetNextWindowSize(ImVec2(380, 420), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Animation Preview", &anim_preview_.open)) draw_anim_preview();
@@ -244,12 +254,18 @@ void Editor3DScreen::draw_menu_bar() {
     if (ImGui::MenuItem("Point light")) create_light(false, {at.x, 2.5f, at.z});
     if (ImGui::MenuItem("Sun (directional)")) create_light(true, {at.x, 8.0f, at.z});
     if (ImGui::MenuItem("Empty")) create_empty({at.x, 0.0f, at.z});
+    ImGui::Separator();
+    if (ImGui::MenuItem("Terrain (hills)", nullptr, false, !playing())) {
+      create_terrain(129, 128.0f, true, "meadow");
+      show_terrain_ = true;
+    }
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("View")) {
     ImGui::MenuItem("Grid", "G", &scene_.show_grid);
     ImGui::MenuItem("Colliders + joints", nullptr, &show_colliders_);
     ImGui::MenuItem("Physics Settings", nullptr, &show_physics_);
+    ImGui::MenuItem("Terrain + Foliage", nullptr, &show_terrain_);
     if (ImGui::MenuItem("Physics debug draw (Play)", nullptr, scene_.physics.debug_draw, !playing())) {
       const scene3d::Scene3D before = scene_;
       scene_.physics.debug_draw = !scene_.physics.debug_draw;
@@ -533,8 +549,12 @@ void Editor3DScreen::draw_viewport() {
     }
   }
 
+  // Terrain brushes (Terrain panel): the left button sculpts / paints instead of picking.
+  const bool terrain_brush =
+      !playing() && !dup_drag_ && terrain_viewport(mx, my, vw, vh, origin.x, origin.y);
+
   // Selection + gizmo (left button; Alt only while an Alt+drag copy runs).
-  if (!playing() && (!io.KeyAlt || dup_drag_)) {
+  if (!playing() && !terrain_brush && (!io.KeyAlt || dup_drag_)) {
     // Ctrl while dragging the move gizmo: stick to the surface under the mouse.
     set_surface_snap(io.KeyCtrl && gizmo_.active());
     if (viewport_hovered_ && !dup_drag_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
@@ -861,6 +881,11 @@ void Editor3DScreen::draw_context_menu(std::uint64_t clicked) {
       if (ImGui::MenuItem(p)) create_primitive(p, {at.x, 0.0f, at.z});
     if (ImGui::MenuItem("Point light")) create_light(false, {at.x, 2.5f, at.z});
     if (ImGui::MenuItem("Empty")) create_empty({at.x, 0.0f, at.z});
+    ImGui::Separator();
+    if (ImGui::MenuItem("Terrain (hills)", nullptr, false, !playing())) {
+      create_terrain(129, 128.0f, true, "meadow");
+      show_terrain_ = true;
+    }
     ImGui::EndMenu();
   }
 }

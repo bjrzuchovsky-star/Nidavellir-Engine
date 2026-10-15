@@ -1,4 +1,5 @@
 #include "editor/editor3d/Editor3DScreen.h"
+#include "terrain/TerrainView.h"
 #include "plugins/profiler/ProfilerPlugin.h"
 #include "profiler/Profiler.h"
 #include "debugtools/ProfilerWorld3D.h"
@@ -6,6 +7,7 @@
 #include "ai3d/AiWorld3D.h"
 #include "plugins/story/StoryPlugins.h"
 #include "story3d/StoryWorld3D.h"
+#include "weather/Weather3D.h"
 
 #include "ui/UiScript.h"
 #include "editor/assets/AssetLibrary.h"
@@ -195,7 +197,7 @@ void Editor3DScreen::clear_selection() { scene_.selection.clear(); }
 // ---- Undo ---------------------------------------------------------------------
 
 void Editor3DScreen::push_undo(const std::string& label, const scene3d::Scene3D& before) {
-  undo_.push_back({label, before});
+  undo_.push_back({label, before, {}});
   if (undo_.size() > 200) undo_.erase(undo_.begin());
   redo_.clear();
   autosave();
@@ -221,7 +223,7 @@ bool Editor3DScreen::undo() {
   prefabs_.on_undo(undo_.size(), undo_.back().label);
   Step s = std::move(undo_.back());
   undo_.pop_back();
-  redo_.push_back({s.label, scene_});
+  redo_.push_back({s.label, scene_, swap_terrains(std::move(s.terrains))});
   scene_ = std::move(s.scene);
   autosave();
   note("Undo " + redo_.back().label);
@@ -233,7 +235,7 @@ bool Editor3DScreen::redo() {
   gizmo_cancel();
   Step s = std::move(redo_.back());
   redo_.pop_back();
-  undo_.push_back({s.label, scene_});
+  undo_.push_back({s.label, scene_, swap_terrains(std::move(s.terrains))});
   prefabs_.on_redo(undo_.size(), s.label);
   scene_ = std::move(s.scene);
   autosave();
@@ -243,7 +245,8 @@ bool Editor3DScreen::redo() {
 
 bool Editor3DScreen::save_scene(std::string* error) {
   refresh_prefab_overrides();
-  return scene3d::save_file(scene3d::scene_path(project_.path), scene_, error);
+  if (!scene3d::save_file(scene3d::scene_path(project_.path), scene_, error)) return false;
+  return save_terrains(error);
 }
 
 bool Editor3DScreen::reload_scene(std::string* error) {
@@ -252,6 +255,7 @@ bool Editor3DScreen::reload_scene(std::string* error) {
   scene_ = std::move(s);
   undo_.clear();
   redo_.clear();
+  terrain::forget(project_.path);  // re-read heightfields from disk
   if (view_) view_->clear();
   return true;
 }
@@ -529,6 +533,16 @@ std::uint64_t Editor3DScreen::pick(float px, float py, float vw, float vh) {
   float best_t = 1e30f;
   for (const Entity3D& e : scene_.entities) {
     if (!e.visible || effectively_hidden(e) || effectively_locked(e)) continue;
+    if (e.terrain) {
+      // Terrains pick on the heightfield, so things standing on them win.
+      std::shared_ptr<terrain::TerrainData> d = terrain::acquire(project_.path, *e.terrain);
+      float t = 0.0f;
+      if (d && terrain::raycast(*d, ray.origin - e.transform.position, ray.dir, 2000.0f, &t) && t < best_t) {
+        best_t = t;
+        best = e.id;
+      }
+      continue;
+    }
     render3d::Aabb local = view_ ? view_->local_bounds(e) : render3d::Aabb{{-0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, 0.5f}};
     float t = 0.0f;
     if (render3d::ray_obb(ray, local, e.transform.matrix(), &t) && t < best_t) {
@@ -543,6 +557,11 @@ std::uint64_t Editor3DScreen::pick(float px, float py, float vw, float vh) {
 bool Editor3DScreen::ground_point(float px, float py, float vw, float vh, Vec3* out) const {
   const render3d::Ray ray = editor_camera().screen_ray(px, py, vw, vh);
   float t = 0.0f;
+  std::uint64_t tid = 0;
+  if (terrain_ray(ray, &t, &tid)) {
+    *out = ray.origin + ray.dir * t;
+    return true;
+  }
   if (!render3d::ray_plane(ray, {0, 1, 0}, 0.0f, &t) || t > 1000.0f) return false;
   *out = ray.origin + ray.dir * t;
   return true;
@@ -627,10 +646,10 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
       // VR preview: the head's view plus the hands, lasers and menu.
       std::vector<scene3d::Entity3D> ents = world_.entities();
       world3d::vr_overlay_entities(world_, false, &ents);
-      view_->begin(world_.authored().environment, ents, cam, width, height, opt);
+      view_->begin(world_.environment(), ents, cam, width, height, opt);
       world3d::vr_overlay_lines(world_, renderer_.get());
     } else {
-      view_->begin(world_.authored().environment, world_.entities(), cam, width, height, opt);
+      view_->begin(world_.environment(), world_.entities(), cam, width, height, opt);
     }
     std::vector<render3d::Renderer3D::Billboard> bills;
     world_.billboards(&bills);
@@ -687,6 +706,8 @@ bool Editor3DScreen::play_start() {
   story.dialogue = plugins_.loaded("ts.dialogue");
   story.saves = plugins_.loaded("ts.saves");
   story3d::attach(world_, story);
+  // ts.weather: sky, fog, wind and rain / snow / dust while riding.
+  weather::attach(world_, plugins_.loaded("ts.weather"));
   // ts.profiler: record while riding, profiler / console Lua tables.
   debug_tools_on_ = plugins_.loaded("ts.profiler");
   if (debug_tools_on_) {

@@ -37,6 +37,8 @@ add_executable(ts_admin
   SmokePhysics2D.cpp
   SmokePhysicsEditor.cpp
   SmokeLocTiles.cpp
+  SmokeTerrain.cpp
+  TerrainShot.cpp
 )
 
 target_link_libraries(ts_admin
@@ -57,6 +59,7 @@ target_link_libraries(ts_admin
     ts_plugins_builtin
     ts_ai
     ts_ai3d
+    ts_weather3d
     ts_story3d
     ts_lua
     ts_render3d

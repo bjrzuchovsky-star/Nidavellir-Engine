@@ -19,6 +19,7 @@ add_library(ts_plugins_builtin
   ai/AiPlugin.cpp
   story/StoryPlugins.cpp
   profiler/ProfilerPlugin.cpp
+  weather/WeatherPlugin.cpp
 )
 
 target_include_directories(ts_plugins_builtin
@@ -38,6 +39,7 @@ target_link_libraries(ts_plugins_builtin
     ts_ai
     ts_physics2d
   PUBLIC
+    ts_weather
     ts_story
     ts_profiler_lua
 )

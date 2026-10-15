@@ -555,7 +555,7 @@ void Emitter::update(float dt, const float origin[3]) {
     p.age += dt;
     if (p.age >= p.life) continue;
     for (int k = 0; k < 3; ++k) {
-      p.v[k] = (p.v[k] + desc_.gravity[k] * dt) * damp;
+      p.v[k] = (p.v[k] + (desc_.gravity[k] + wind_[k]) * dt) * damp;
       p.p[k] += p.v[k] * dt;
     }
     p.rot += p.spin * dt;
@@ -707,9 +707,13 @@ bool ParticleWorld::emit(std::uint64_t entity, int count) {
 void ParticleWorld::update(float dt) {
   for (std::uint64_t id : order_) {
     Entry& e = entities_[id];
+    e.em.set_wind(wind_);
     e.em.update(dt, e.pos);
   }
-  for (Entry& e : shots_) e.em.update(dt, e.pos);
+  for (Entry& e : shots_) {
+    e.em.set_wind(wind_);
+    e.em.update(dt, e.pos);
+  }
   shots_.erase(std::remove_if(shots_.begin(), shots_.end(),
                               [](const Entry& e) { return e.em.finished(); }),
                shots_.end());

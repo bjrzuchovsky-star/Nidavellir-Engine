@@ -54,7 +54,7 @@ void VrPresenter::render_eyes(XrSession& session, const world3d::World3D& world,
       all = false;
       continue;
     }
-    view_->begin(world.authored().environment, ents, cam, w, h);
+    view_->begin(world.environment(), ents, cam, w, h);
     view_->billboards(bills);
     world3d::vr_overlay_lines(world, r_);
     const render3d::FrameStats st = view_->end();

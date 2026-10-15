@@ -126,6 +126,10 @@ class Emitter {
   void sprites(std::vector<Sprite>* out) const;
   // Sum of positions (determinism checks).
   double checksum() const;
+  // Extra acceleration on every particle (wind), units / s^2.
+  void set_wind(const float a[3]) {
+    for (int i = 0; i < 3; ++i) wind_[i] = a[i];
+  }
 
  private:
   struct Particle {
@@ -142,6 +146,7 @@ class Emitter {
   float origin_[3] = {0, 0, 0};
   double time_ = 0.0;
   float accum_ = 0.0f;
+  float wind_[3] = {0, 0, 0};
   bool started_ = false;
   bool stopped_ = false;
 };
@@ -169,6 +174,13 @@ class ParticleWorld {
   void sprites(std::vector<Sprite>* out) const;
   int alive() const;
   int emitters() const { return static_cast<int>(entities_.size() + shots_.size()); }
+  // Wind / weather push on every particle (units / s^2; 0 = still air).
+  void set_wind(float x, float y, float z) {
+    wind_[0] = x;
+    wind_[1] = y;
+    wind_[2] = z;
+  }
+  const float* wind() const { return wind_; }
   double checksum() const;
 
  private:
@@ -182,6 +194,7 @@ class ParticleWorld {
   std::vector<std::uint64_t> order_;  // deterministic iteration
   std::vector<Entry> shots_;
   std::uint32_t shot_seed_ = 0x51ED27u;
+  float wind_[3] = {0, 0, 0};
 };
 
 }  // namespace fx

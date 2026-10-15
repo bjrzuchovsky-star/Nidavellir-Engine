@@ -1,6 +1,7 @@
 #include "render3d/GlRenderer3D.h"
 
 #include "render3d/GlApi.h"
+#include "render3d/GlTerrainFoliage.h"
 #include "render3d/Skeleton.h"
 #include "profiler/Profiler.h"
 
@@ -84,6 +85,7 @@ uniform vec3 u_point_pos[8];
 uniform vec3 u_point_color[8];
 uniform float u_point_range[8];
 const float PI = 3.14159265;
+//@ts:surface
 
 float shadow_term(vec3 n) {
   if (u_shadows == 0) return 1.0;
@@ -115,7 +117,7 @@ vec3 brdf(vec3 n, vec3 v, vec3 l, vec3 radiance, vec3 albedo, float metal, float
 }
 
 void main() {
-  vec4 base = u_albedo * texture(u_albedo_tex, v_uv);
+  vec4 base = ts_surface_albedo(u_albedo, v_uv, v_world);
   if (u_unlit != 0) {
     o_color = base;
     return;
@@ -149,7 +151,7 @@ void main() {
   color += u_ambient * sky * (albedo * (1.0 - metal) + f0 * (1.0 - rough) * 0.5);
   color += u_emissive;
   color = color / (color + vec3(1.0));
-  o_color = vec4(pow(color, vec3(1.0 / 2.2)), base.a);
+  o_color = vec4(ts_apply_fog(pow(color, vec3(1.0 / 2.2)), v_world), base.a);
 }
 )glsl";
 
@@ -207,6 +209,7 @@ uniform vec3 u_sky_horizon;
 uniform vec3 u_ground;
 uniform vec3 u_sun_dir;
 uniform vec3 u_sun_color;
+//@ts:sky
 void main() {
   vec4 a = u_inv_view_proj * vec4(v_ndc, -1.0, 1.0);
   vec4 b = u_inv_view_proj * vec4(v_ndc, 1.0, 1.0);
@@ -216,6 +219,7 @@ void main() {
   else c = mix(u_sky_horizon, u_ground, clamp(-d.y * 6.0, 0.0, 1.0));
   float s = max(dot(d, -u_sun_dir), 0.0);
   c += u_sun_color * (pow(s, 900.0) * 1.4 + pow(s, 12.0) * 0.18);
+  c = ts_sky_fog(c, d);
   o_color = vec4(c, 1.0);
 }
 )glsl";
@@ -243,6 +247,7 @@ struct GpuMesh {
 struct GpuMaterial {
   MaterialDesc desc;
   GLuint albedo = 0, normal = 0, mr = 0;  // 0 = default texture
+  gl_terrain::TerrainTextures terrain;     // splat materials only
   std::size_t bytes = 0;
   std::size_t textures = 0;
 };
@@ -427,9 +432,12 @@ class GlRenderer3D final : public Renderer3D {
     }
     const Gl33& g = gl33();
     std::string err;
-    mesh_prog_ = link(kMeshVS, kMeshFS, &err);
+    // TS_TERRAIN: the mesh and sky shaders get the terrain / fog modules.
+    const std::string mesh_fs = gl_terrain::mesh_fs(kMeshFS);
+    const std::string sky_fs = gl_terrain::sky_fs(kSkyFS);
+    mesh_prog_ = link(kMeshVS, mesh_fs.c_str(), &err);
     if (mesh_prog_) depth_prog_ = link(kDepthVS, kDepthFS, &err);
-    if (depth_prog_) sky_prog_ = link(kSkyVS, kSkyFS, &err);
+    if (depth_prog_) sky_prog_ = link(kSkyVS, sky_fs.c_str(), &err);
     if (sky_prog_) line_prog_ = link(kLineVS, kLineFS, &err);
     if (!line_prog_) {
       if (error) *error = "shader build failed: " + err;
@@ -450,6 +458,10 @@ class GlRenderer3D final : public Renderer3D {
     }
     g.BindBuffer(GL_UNIFORM_BUFFER, 0);
     g.BindBufferBase(GL_UNIFORM_BUFFER, 0, bones_ubo_);
+    {
+      std::string ferr;
+      foliage_ok_ = foliage_.init(&ferr);  // optional: per-instance fallback without it
+    }
     overlay_prog_ = link(kOverlayVS, kOverlayFS, &err);  // optional (UI)
     bill_prog_ = link(kBillVS, kBillFS, &err);           // optional (particles)
     g.GenVertexArrays(1, &bill_vao_);
@@ -514,6 +526,8 @@ class GlRenderer3D final : public Renderer3D {
     const Gl33& g = gl33();
     if (g.DeleteBuffers) {
       timers_.release();
+      foliage_.shutdown();
+      foliage_ok_ = false;
       for (auto& [id, m] : meshes_) free_mesh(m);
       meshes_.clear();
       for (auto& [id, m] : materials_) free_material(m);
@@ -609,6 +623,9 @@ class GlRenderer3D final : public Renderer3D {
     m.albedo = upload(d.base_color_image);
     m.normal = upload(d.normal_image);
     m.mr = upload(d.metal_rough_image);
+    m.terrain = gl_terrain::upload(d, &make_texture);  // TS_TERRAIN
+    m.bytes += m.terrain.bytes;
+    m.textures += m.terrain.count;
     const std::uint32_t id = ++next_;
     materials_[id] = m;
     return {id};
@@ -628,6 +645,24 @@ class GlRenderer3D final : public Renderer3D {
     materials_.erase(it);
   }
 
+  void update_splat(MaterialHandle h, const Image& splat) override {
+    auto it = materials_.find(h.id);
+    if (it != materials_.end()) gl_terrain::update_splat(it->second.terrain, splat);
+  }
+
+  void draw_foliage(const FoliageBatch& b) override {
+    auto it = meshes_.find(b.mesh.id);
+    if (it == meshes_.end() || !b.instances || b.count == 0) return;
+    if (!foliage_ok_) {
+      Renderer3D::draw_foliage(b);
+      return;
+    }
+    foliage_.add(b, it->second.vbo, it->second.ibo, it->second.count);
+    stats_.foliage += b.count;
+    ++stats_.draws;
+    stats_.triangles += static_cast<std::size_t>(it->second.count) / 3 * b.count;
+  }
+
   void set_offscreen(bool on) override { offscreen_ = on; }
   void set_environment(const Environment& env) override { env_ = env; }
 
@@ -641,6 +676,7 @@ class GlRenderer3D final : public Renderer3D {
     lines_depth_.clear();
     lines_top_.clear();
     billboards_.clear();
+    foliage_.begin_frame();
     stats_ = {};
   }
 
@@ -742,6 +778,7 @@ class GlRenderer3D final : public Renderer3D {
         glDrawElements(GL_TRIANGLES, m.count, GL_UNSIGNED_INT, nullptr);
         ++stats_.shadow_casters;
       }
+      if (foliage_ok_) stats_.shadow_casters += foliage_.draw_shadows(light_vp, env_);  // TS_TERRAIN
       glDisable(GL_POLYGON_OFFSET_FILL);
     }
 
@@ -771,6 +808,7 @@ class GlRenderer3D final : public Renderer3D {
     g.Uniform3fv(g.GetUniformLocation(sky_prog_, "u_ground"), 1, env_.ground);
     g.Uniform3f(g.GetUniformLocation(sky_prog_, "u_sun_dir"), sun.x, sun.y, sun.z);
     g.Uniform3fv(g.GetUniformLocation(sky_prog_, "u_sun_color"), 1, env_.sun_color);
+    gl_terrain::set_frame_uniforms(sky_prog_, env_, camera_.position);
     g.BindVertexArray(empty_vao_);
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
@@ -796,6 +834,7 @@ class GlRenderer3D final : public Renderer3D {
     g.Uniform1i(U("u_normal_tex"), 1);
     g.Uniform1i(U("u_mr_tex"), 2);
     g.Uniform1i(U("u_shadow"), 3);
+    gl_terrain::set_frame_uniforms(p, env_, camera_.position);  // TS_TERRAIN: fog + splat units
     const int np = static_cast<int>(points_.size());
     g.Uniform1i(U("u_point_count"), np);
     if (np > 0) {
@@ -839,6 +878,7 @@ class GlRenderer3D final : public Renderer3D {
       g.Uniform3f(u_emi, md.emissive[0], md.emissive[1], md.emissive[2]);
       g.Uniform1i(u_hn, mat && mat->normal ? 1 : 0);
       g.Uniform1i(u_unl, md.unlit ? 1 : 0);
+      gl_terrain::bind_material(p, md, mat ? &mat->terrain : nullptr, white_tex_);
       g.ActiveTexture(GL_TEXTURE0);
       glBindTexture(GL_TEXTURE_2D, mat && mat->albedo ? mat->albedo : white_tex_);
       g.ActiveTexture(GL_TEXTURE0 + 1);
@@ -849,6 +889,21 @@ class GlRenderer3D final : public Renderer3D {
       glDrawElements(GL_TRIANGLES, m.count, GL_UNSIGNED_INT, nullptr);
       ++stats_.draws;
       stats_.triangles += static_cast<std::size_t>(m.count) / 3;
+    }
+
+    // Foliage (instanced, after the opaque meshes). TS_TERRAIN
+    if (foliage_ok_ && !foliage_.empty()) {
+      gl_terrain::FrameContext fc;
+      fc.view_proj = view_proj;
+      fc.light_vp = light_vp;
+      fc.camera = camera_.position;
+      fc.env = env_;
+      fc.shadow_tex = shadow_tex_;
+      fc.shadows = shadows;
+      fc.shadow_texel = 1.0f / kShadowSize;
+      fc.width = width_;
+      fc.height = height_;
+      foliage_.draw(fc);
     }
 
     // Lines.
@@ -887,6 +942,21 @@ class GlRenderer3D final : public Renderer3D {
           const Vec3& p = b.position;
           const float corner[4][4] = {{-1, -1, 0, 0}, {1, -1, 1, 0}, {1, 1, 1, 1}, {-1, 1, 0, 1}};
           BillVertex q[4];
+          if (b.stretch.x != 0.0f || b.stretch.y != 0.0f || b.stretch.z != 0.0f) {
+            // Streak: a quad from p along stretch, b.size wide, facing the camera.
+            const Vec3 side = normalize(cross(b.stretch, camera_.position - p)) * h;
+            const Vec3 pts[4] = {p - side, p + side, p + b.stretch + side, p + b.stretch - side};
+            for (int k = 0; k < 4; ++k) {
+              q[k].p[0] = pts[k].x;
+              q[k].p[1] = pts[k].y;
+              q[k].p[2] = pts[k].z;
+              for (int i = 0; i < 4; ++i) q[k].c[i] = b.rgba[i];
+              q[k].uv[0] = corner[k][2];
+              q[k].uv[1] = corner[k][3];
+            }
+            for (int idx : {0, 1, 2, 0, 2, 3}) verts.push_back(q[idx]);
+            continue;
+          }
           for (int k = 0; k < 4; ++k) {
             q[k].p[0] = p.x + r.x * corner[k][0] + u.x * corner[k][1];
             q[k].p[1] = p.y + r.y * corner[k][0] + u.y * corner[k][1];
@@ -1005,6 +1075,7 @@ class GlRenderer3D final : public Renderer3D {
   }
   void free_mesh(GpuMesh& m) {
     const Gl33& g = gl33();
+    if (m.vbo) foliage_.forget_mesh(m.vbo);
     if (m.vbo) g.DeleteBuffers(1, &m.vbo);
     if (m.ibo) g.DeleteBuffers(1, &m.ibo);
     if (m.skin_vbo) g.DeleteBuffers(1, &m.skin_vbo);
@@ -1016,6 +1087,7 @@ class GlRenderer3D final : public Renderer3D {
       if (*t) glDeleteTextures(1, t);
       *t = 0;
     }
+    gl_terrain::release(m.terrain);
   }
   void shutdown_programs() {
     const Gl33& g = gl33();
@@ -1056,6 +1128,8 @@ class GlRenderer3D final : public Renderer3D {
   }
 
   bool ready_ = false;
+  gl_terrain::FoliagePass foliage_;
+  bool foliage_ok_ = false;
   bool offscreen_ = false;
   GLuint mesh_prog_ = 0, depth_prog_ = 0, sky_prog_ = 0, line_prog_ = 0;
   GLuint overlay_prog_ = 0, overlay_tex_ = 0;

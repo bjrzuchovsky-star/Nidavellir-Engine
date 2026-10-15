@@ -9,6 +9,7 @@ add_library(ts_world3d
   World3D_Anim.cpp
   World3D_Physics.cpp
   World3D_PhysicsLua.cpp
+  World3D_Terrain.cpp
   VrOverlay.cpp
 )
 target_include_directories(ts_world3d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)

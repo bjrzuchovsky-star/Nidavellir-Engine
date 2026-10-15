@@ -74,6 +74,9 @@ class World3DExtension {
   virtual void on_sound(World3D& /*world*/, const runtime::SoundEvent& /*ev*/) {}
   virtual void open_lua(World3D& /*world*/, lua_State* /*L*/, int /*sandbox*/) {}
   virtual void debug_lines(const World3D& /*world*/, std::vector<Line>* /*out*/) const {}
+  // Extra camera-facing particles for the frame (weather).
+  virtual void billboards(const World3D& /*world*/,
+                          std::vector<render3d::Renderer3D::Billboard>* /*out*/) const {}
 };
 
 struct Input3D {
@@ -214,6 +217,17 @@ class World3D final : public runtime::ScriptWorld {
   // Lua particles.* / gameplay (VR grab sparkle). fx() takes x, y, z.
   void fx(runtime::FxEvent event);
   const fx::ParticleWorld& particles() const { return particles_; }
+  fx::ParticleWorld& particles_mut() { return particles_; }
+
+  // Runtime sky / sun / fog / wind: starts as the scene's environment each
+  // ride; weather (ts.weather) and scripts change it. Hosts draw with it.
+  const render3d::Environment& environment() const { return env_; }
+  render3d::Environment& environment_mut() { return env_; }
+  // Terrain (World3D_Terrain.cpp): ground under world (x, z); false when no
+  // terrain covers it. layer = dominant splat layer (0..3) and its weight.
+  bool terrain_height(float x, float z, float* y, Vec3* normal = nullptr) const;
+  int terrain_layer(float x, float z, float* weight = nullptr) const;
+  void open_terrain_lua(lua_State* L, int sandbox);
   void billboards(std::vector<render3d::Renderer3D::Billboard>* out) const;
   // In-game UI: Lua ui.* requests for the host, widget events back.
   std::vector<runtime::UiCommand> take_ui_commands();
@@ -408,6 +422,7 @@ class World3D final : public runtime::ScriptWorld {
   std::vector<runtime::UiCommand> ui_commands_;
   std::vector<std::pair<std::string, UiTap>> ui_taps_;
   fx::ParticleWorld particles_{fx::Space::ThreeD};
+  render3d::Environment env_;
   void step_fx();
   render3d::Camera3D camera_;
   std::uint64_t player_ = 0;

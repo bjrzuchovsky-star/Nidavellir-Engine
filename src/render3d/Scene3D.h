@@ -11,6 +11,7 @@
 #include "scene/JsonTree.h"
 #include "scene/Prefab.h"
 #include "scene/SceneData.h"
+#include "terrain/TerrainComponent.h"
 
 #include <cstdint>
 #include <memory>
@@ -36,8 +37,10 @@ using render3d::Vec3;
 // shapes, compound parts, collision layers and the scene "physics" block.
 // v15 adds the prefab instance link ("prefab": asset, instance, source,
 // overrides; see scene/Prefab.h).
-// v7 .. v14 files still load.
-inline constexpr int kScene3DVersion = 15;
+// v16 adds the heightmap terrain component ("terrain": data file, size,
+// LOD, splat layers, foliage types, collider) and environment fog / wind.
+// v7 .. v15 files still load.
+inline constexpr int kScene3DVersion = 16;
 
 // ts.ai navmesh agent (v13): walks the baked navmesh with crowd avoidance,
 // optionally driven by a behaviour tree (*.bt.json).
@@ -318,6 +321,7 @@ struct Entity3D {
   std::optional<RigidBody3D> rigid_body;     // v14
   std::optional<Joint3D> joint;              // v14
   std::optional<prefab::Link> prefab;        // v15
+  std::optional<terrain::Terrain3D> terrain; // v16
   bool operator==(const Entity3D& o) const = default;
 };
 
