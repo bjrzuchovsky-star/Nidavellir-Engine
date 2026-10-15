@@ -355,6 +355,49 @@ runtime and the editor's Play view.
 - **Smoke:** `ts_admin --smoke-ui` covers the atlas, text measure, layout math,
   navigation, data round trips, the pause menu, the software raster and Lua `ui.*`.
 
+## Particles + 2D lighting (ts_fx)
+
+**Particles.** Any 2D or 3D entity can carry a `particles` component
+(scene.json v9, scene3d v11; older files load unchanged). An emitter has
+burst and continuous emission, point / circle (sphere) / box / line shapes,
+lifetime, speed + spread, gravity, drag, 3-key size and colour curves,
+spin, a texture or sprite sheet (frames over life or at an fps), alpha or
+additive blending, local or world space and a deterministic seed (0 = from
+the entity id). Presets: `dust`, `gun_smoke`, `muzzle_flash`, `sparks`,
+`campfire`, `rain`, `sand_storm`, `thruster`, `explosion`, `sparkle`
+(2D in pixels, 3D in metres). The editors have a Particles inspector with a
+live preview (click it to restart) in both 2D and 3D.
+
+Lua:
+
+```lua
+particles.burst("sparks", self, 20)          -- preset at an entity
+particles.burst("dust", {x = 100, y = 40})    -- preset at a point ({x,y,z} in 3D)
+particles.burst(self)                         -- the entity's own emitter, once
+particles.emit(self, 10)                      -- extra particles now
+particles.stop(self); particles.start(self)
+```
+
+Gameplay hooks: Frontier Survival mining debris (dust + sparks), tile breaks,
+muzzle flash + gun smoke; Airship Works muzzle flashes, break-up explosions
+and thruster plumes; 3D VR grab sparkle. In multiplayer, bursts travel as
+`ts.fx` events from the server; cosmetic local effects (thrusters) are not
+sent. 3D particles are drawn as soft camera-facing billboards in ts_game,
+the VR presenter and editor Play.
+
+**2D lighting.** A scene `lighting` block (View > Lighting in the 2D
+editor) turns it on: ambient tint, optional day / night cycle (day + night
+ambient, day length, start time) and lightmap resolution. Entities carry a
+`light` component (point or spot: colour, intensity, radius, angle, cone,
+softness, flicker, shadows). Solid tiles cast soft shadows (CPU ray march,
+3 rays per texel, blurred) and the lightmap multiplies the world under the
+HUD. Plugins can add lights, occluders, ambient overrides and HUD layers
+through the Registrar (`add_light_source`, `add_light_occluder`,
+`add_ambient`, `add_hud_layer`); Frontier Survival uses these for torches,
+campfires and night instead of the old glow squares.
+
+Smoke: `ts_admin --smoke-fx` (also part of `--smoke`).
+
 ## Project Goals
 
 - Deliver a fast, stable, and fully custom C++ engine  
