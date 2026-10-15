@@ -317,6 +317,7 @@ class World final : public ScriptWorld {
   void script_sound(SoundEvent event) override;
   void script_ui(UiCommand command) override;
   void script_fx(FxEvent event) override;
+  std::uint32_t script_buttons(int slot) const override;
 
   // --- Particles + 2D lighting (World_Fx.cpp) --------------------------------
   // Entity emitters ("particles") run on the tick; fx() adds one-shot

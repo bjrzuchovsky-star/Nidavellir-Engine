@@ -45,8 +45,12 @@ struct UiCommand {
 inline constexpr int kScriptTickRate = 60;
 
 // "scripts/gate.lua"-style: relative, forward slashes, no "." / ".."
-// parts, ends in ".lua".
+// parts, ends in a script language's extension (see script_language).
 bool valid_script_path(const std::string& rel);
+// Language a script file is written in, by extension: "lua" (.lua),
+// "graph" (.graph.json, visual scripts), "cpp" (.cpp, compiled into the
+// project's native module), "cs" (.cs, .NET); "" for anything else.
+std::string script_language(const std::string& rel);
 
 // Script sources by project-relative path, re-read when the file changes on
 // disk. put() pins an in-memory source (tests, unsaved buffers) that wins
@@ -125,55 +129,89 @@ class ScriptWorld {
   // particles.burst / emit / stop / start (World::fx / World3D::fx).
   virtual void script_fx(FxEvent /*event*/) {}
   virtual void script_open_extensions(lua_State* /*L*/, int /*sandbox*/) {}
+  // Buttons (runtime::kButton* bits) the rider in `slot` holds this tick;
+  // graphs' Key event and compiled scripts read it. Default: none.
+  virtual std::uint32_t script_buttons(int /*slot*/) const { return 0; }
 };
 
-class ScriptHost {
+// One scripting language's host (Lua, graphs, C++ modules, C#). The world
+// talks to ScriptHost (ScriptHost.h), which routes each entity's script
+// component to the language its file extension names.
+class ScriptLanguageHost {
+ public:
+  virtual ~ScriptLanguageHost() = default;
+  virtual const char* language() const = 0;
+  virtual bool attach(const Entity2D& e) = 0;
+  virtual void detach(std::uint64_t entity) = 0;
+  virtual bool has(std::uint64_t entity) const = 0;
+  virtual bool running(std::uint64_t entity) const = 0;
+  virtual bool has_hook(std::uint64_t entity, const char* hook) = 0;
+  virtual std::size_t instance_count() const = 0;
+  virtual void start_pending() = 0;
+  virtual void trigger(bool enter, std::uint64_t trigger, std::uint64_t other) = 0;
+  virtual void interact(std::uint64_t target, std::uint64_t rider) = 0;
+  virtual void hand_event(std::uint64_t target, const char* hook, const std::string& text,
+                          double number) = 0;
+  virtual void ui_event(const std::string& /*widget*/, bool /*change*/, double /*value*/,
+                        const std::string& /*text*/) {}
+  virtual void run_timers(std::uint64_t /*tick*/) {}
+  virtual void tick(double dt) = 0;
+  virtual int reload_changed() = 0;
+  virtual bool reload(const std::string& /*rel*/) { return false; }
+  // Some running instance uses this file.
+  virtual bool uses(const std::string& /*rel*/) const { return false; }
+};
+
+// Lua 5.4 (sandboxed): the original TombStone script language.
+class LuaScriptHost final : public ScriptLanguageHost {
  public:
   static constexpr std::size_t kMemoryLimit = 64u << 20;     // bytes, all scripts
   static constexpr long long kInstructionBudget = 2000000;   // per hook call
   static constexpr std::size_t kMaxTimers = 4096;            // per world
   static constexpr std::size_t kMaxStateKeys = 256;          // per entity
 
-  ScriptHost(ScriptWorld& world, ScriptLibrary& library,
+  LuaScriptHost(ScriptWorld& world, ScriptLibrary& library,
              std::string project_dir);
-  ~ScriptHost();
-  ScriptHost(const ScriptHost&) = delete;
-  ScriptHost& operator=(const ScriptHost&) = delete;
+  ~LuaScriptHost() override;
+  const char* language() const override { return "lua"; }
+  LuaScriptHost(const LuaScriptHost&) = delete;
+  LuaScriptHost& operator=(const LuaScriptHost&) = delete;
 
   // Give `e` its script instance and run the file's top level (props and
   // hook definitions). False (logged) when it cannot load; the instance is
   // kept, stopped, so a hot reload can bring it back.
-  bool attach(const Entity2D& e);
+  bool attach(const Entity2D& e) override;
   // The entity left the world: drop its instance and timers.
-  void detach(std::uint64_t entity);
-  bool has(std::uint64_t entity) const;
-  bool running(std::uint64_t entity) const;  // loaded and not stopped
-  bool has_hook(std::uint64_t entity, const char* hook);
-  std::size_t instance_count() const;
+  void detach(std::uint64_t entity) override;
+  bool has(std::uint64_t entity) const override;
+  bool running(std::uint64_t entity) const override;  // loaded and not stopped
+  bool has_hook(std::uint64_t entity, const char* hook) override;
+  std::size_t instance_count() const override;
   std::size_t timer_count() const;
   std::size_t memory_used() const;
 
   // Tick phases, in World::step order.
-  void start_pending();
-  void trigger(bool enter, std::uint64_t trigger, std::uint64_t other);
-  void interact(std::uint64_t target, std::uint64_t rider);
+  void start_pending() override;
+  void trigger(bool enter, std::uint64_t trigger, std::uint64_t other) override;
+  void interact(std::uint64_t target, std::uint64_t rider) override;
   // A hook called with (text, number): the VR hand events on_grab(hand),
   // on_release(hand, speed), on_point(hand), on_unpoint(hand),
   // on_vr_trigger(hand). Missing hooks are skipped.
   // The host's UI reports a widget event: every ui.on_click(id, fn) /
   // ui.on_change(id, fn) handler for that widget id runs fn(id, value, text).
-  void ui_event(const std::string& widget, bool change, double value, const std::string& text);
+  void ui_event(const std::string& widget, bool change, double value, const std::string& text) override;
   std::size_t ui_handler_count() const;
   void hand_event(std::uint64_t target, const char* hook, const std::string& text,
-                  double number);
-  void run_timers(std::uint64_t tick);
-  void tick(double dt);
+                  double number) override;
+  void run_timers(std::uint64_t tick) override;
+  void tick(double dt) override;
 
   // Hot reload: re-run changed files in their instances (props re-applied,
   // stopped instances restarted, on_reload called). A file that no longer
   // compiles keeps the old version and logs why. Returns files reloaded.
-  int reload_changed();
-  bool reload(const std::string& rel);
+  int reload_changed() override;
+  bool reload(const std::string& rel) override;
+  bool uses(const std::string& rel) const override;
 
   // Props a script declares (`props = { reach = 24, ... }` at top level),
   // sorted by name. False with the error (file:line) when it does not run.
@@ -189,3 +227,5 @@ class ScriptHost {
 }  // namespace runtime
 }  // namespace tombstone
 }  // namespace ts
+
+#include "runtime/ScriptHost.h"

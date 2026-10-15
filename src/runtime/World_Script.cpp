@@ -420,3 +420,16 @@ void World::script_log(LogEntry entry) {
 }  // namespace runtime
 }  // namespace tombstone
 }  // namespace ts
+
+namespace ts {
+namespace tombstone {
+namespace runtime {
+
+std::uint32_t World::script_buttons(int slot) const {
+  if (slot < 0 || slot >= kMaxPlayers) return 0;
+  return input_.slot(slot).buttons;
+}
+
+}  // namespace runtime
+}  // namespace tombstone
+}  // namespace ts

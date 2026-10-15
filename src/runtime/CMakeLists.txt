@@ -13,6 +13,9 @@ add_library(ts_runtime
   PlaySession.cpp
   Script.cpp
   ScriptApi.cpp
+  ScriptHost.cpp
+  ScriptLanguages.cpp
+  GraphScript.cpp
   Sound.cpp
 )
 

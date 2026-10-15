@@ -1,6 +1,6 @@
 #pragma once
 
-// Internal to Script.cpp / ScriptApi.cpp: the Lua side of ScriptHost.
+// Internal to Script.cpp / ScriptApi.cpp: the Lua side of LuaScriptHost.
 
 #include "runtime/Script.h"
 
@@ -44,7 +44,7 @@ struct ScriptUiHandler {
   int fn = LUA_NOREF;
 };
 
-struct ScriptHost::State {
+struct LuaScriptHost::State {
   ScriptWorld* world = nullptr;  // null while describing a file
   ScriptLibrary* library = nullptr;
   std::string project_dir;

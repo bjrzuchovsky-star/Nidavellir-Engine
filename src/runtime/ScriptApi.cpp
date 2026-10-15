@@ -20,7 +20,7 @@ constexpr std::size_t kMaxKey = 64;
 constexpr std::size_t kMaxLogText = 4096;
 constexpr double kDefaultToastSeconds = 2.5;
 
-using State = ScriptHost::State;
+using State = LuaScriptHost::State;
 
 State& host(lua_State* L) { return *State::from(L); }
 
@@ -303,9 +303,9 @@ int add_timer(lua_State* L, bool repeat) {
   if (!s.world || !s.current) {
     return luaL_error(L, "timers can only be set while the world runs (not at load)");
   }
-  if (s.timers.size() >= ScriptHost::kMaxTimers) {
+  if (s.timers.size() >= LuaScriptHost::kMaxTimers) {
     return luaL_error(L, "too many timers (limit %d)",
-                      static_cast<int>(ScriptHost::kMaxTimers));
+                      static_cast<int>(LuaScriptHost::kMaxTimers));
   }
   ScriptTimer t;
   t.id = s.next_timer++;
@@ -695,7 +695,7 @@ int add_ui_handler(lua_State* L, bool change) {
   if (!s.current) {
     return luaL_error(L, "ui.on_click / ui.on_change need a running script");
   }
-  if (s.ui_handlers.size() >= ScriptHost::kMaxTimers) {
+  if (s.ui_handlers.size() >= LuaScriptHost::kMaxTimers) {
     return luaL_error(L, "too many ui handlers");
   }
   lua_pushvalue(L, 2);

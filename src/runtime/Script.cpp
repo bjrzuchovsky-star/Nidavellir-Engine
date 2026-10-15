@@ -21,9 +21,20 @@ namespace runtime {
 
 namespace fs = std::filesystem;
 
+std::string script_language(const std::string& rel) {
+  auto ends = [&](const char* ext) {
+    const std::size_t n = std::strlen(ext);
+    return rel.size() > n && rel.compare(rel.size() - n, n, ext) == 0;
+  };
+  if (ends(".lua")) return "lua";
+  if (ends(".graph.json")) return "graph";
+  if (ends(".cpp")) return "cpp";
+  if (ends(".cs")) return "cs";
+  return {};
+}
+
 bool valid_script_path(const std::string& rel) {
-  if (rel.size() < 5 || rel.size() > 260 ||
-      rel.compare(rel.size() - 4, 4, ".lua") != 0) {
+  if (rel.size() < 4 || rel.size() > 260 || script_language(rel).empty()) {
     return false;
   }
   if (rel.find('\\') != std::string::npos || rel.find(':') != std::string::npos) {
@@ -194,7 +205,7 @@ namespace {
 constexpr int kHookEvery = 1000;  // instructions between budget checks
 
 void* script_alloc(void* ud, void* ptr, std::size_t osize, std::size_t nsize) {
-  auto* s = static_cast<ScriptHost::State*>(ud);
+  auto* s = static_cast<LuaScriptHost::State*>(ud);
   if (!ptr) {
     osize = 0;  // osize carries the object type for new blocks
   }
@@ -206,7 +217,7 @@ void* script_alloc(void* ud, void* ptr, std::size_t osize, std::size_t nsize) {
   // The cap only bites while a script runs, so host bookkeeping never
   // fails half-way.
   if (s->depth > 0 && nsize > osize &&
-      s->mem_used - osize + nsize > ScriptHost::kMemoryLimit) {
+      s->mem_used - osize + nsize > LuaScriptHost::kMemoryLimit) {
     return nullptr;
   }
   void* p = std::realloc(ptr, nsize);
@@ -222,9 +233,9 @@ int script_panic(lua_State* L) {
 }
 
 void count_hook(lua_State* L, lua_Debug*) {
-  auto* s = ScriptHost::State::from(L);
+  auto* s = LuaScriptHost::State::from(L);
   s->instructions += kHookEvery;
-  if (s->instructions <= ScriptHost::kInstructionBudget) {
+  if (s->instructions <= LuaScriptHost::kInstructionBudget) {
     return;
   }
   lua_Debug ar;
@@ -237,7 +248,7 @@ void count_hook(lua_State* L, lua_Debug*) {
   lua_pushfstring(L,
                   "ran too long (over %d instructions in one call; endless "
                   "loop?)",
-                  static_cast<int>(ScriptHost::kInstructionBudget));
+                  static_cast<int>(LuaScriptHost::kInstructionBudget));
   lua_concat(L, 2);
   lua_error(L);
 }
@@ -270,19 +281,19 @@ int message_handler(lua_State* L) {
 
 }  // namespace
 
-ScriptHost::State::~State() {
+LuaScriptHost::State::~State() {
   if (L) {
     lua_close(L);
   }
 }
 
-ScriptHost::State* ScriptHost::State::from(lua_State* L) {
+LuaScriptHost::State* LuaScriptHost::State::from(lua_State* L) {
   State* s = nullptr;
   std::memcpy(&s, lua_getextraspace(L), sizeof s);
   return s;
 }
 
-bool ScriptHost::State::open() {
+bool LuaScriptHost::State::open() {
   L = lua_newstate(&script_alloc, this);
   if (!L) {
     return false;
@@ -351,7 +362,7 @@ bool ScriptHost::State::open() {
   return true;
 }
 
-ScriptInstance* ScriptHost::State::find(std::uint64_t entity) {
+ScriptInstance* LuaScriptHost::State::find(std::uint64_t entity) {
   for (auto& in : instances) {
     if (in->entity == entity && !in->gone) {
       return in.get();
@@ -360,12 +371,12 @@ ScriptInstance* ScriptHost::State::find(std::uint64_t entity) {
   return nullptr;
 }
 
-std::string ScriptHost::State::entity_name(std::uint64_t id) const {
+std::string LuaScriptHost::State::entity_name(std::uint64_t id) const {
   const Entity2D* e = world ? world->script_entity(id) : nullptr;
   return e ? e->name : "#" + std::to_string(id);
 }
 
-void ScriptHost::State::log(LogLevel level, const std::string& text,
+void LuaScriptHost::State::log(LogLevel level, const std::string& text,
                             const std::string& file, int line,
                             std::uint64_t entity) {
   if (!world) {
@@ -382,7 +393,7 @@ void ScriptHost::State::log(LogLevel level, const std::string& text,
   world->script_log(std::move(e));
 }
 
-void ScriptHost::State::fail(ScriptInstance* in, const std::string& message) {
+void LuaScriptHost::State::fail(ScriptInstance* in, const std::string& message) {
   std::string file;
   int line = 0;
   std::string rest = message;
@@ -409,7 +420,7 @@ void ScriptHost::State::fail(ScriptInstance* in, const std::string& message) {
   }
 }
 
-void ScriptHost::State::drop_timers(std::uint64_t entity) {
+void LuaScriptHost::State::drop_timers(std::uint64_t entity) {
   auto it = std::remove_if(timers.begin(), timers.end(), [&](const ScriptTimer& t) {
     if (t.entity != entity) {
       return false;
@@ -428,7 +439,7 @@ void ScriptHost::State::drop_timers(std::uint64_t entity) {
   ui_handlers.erase(ui, ui_handlers.end());
 }
 
-bool ScriptHost::State::push_hook(ScriptInstance& in, const char* hook) {
+bool LuaScriptHost::State::push_hook(ScriptInstance& in, const char* hook) {
   if (in.gone || !in.enabled || !in.loaded ||
       (world && !world->script_entity(in.entity))) {
     return false;
@@ -444,7 +455,7 @@ bool ScriptHost::State::push_hook(ScriptInstance& in, const char* hook) {
   return true;
 }
 
-bool ScriptHost::State::call(ScriptInstance* in, int nargs) {
+bool LuaScriptHost::State::call(ScriptInstance* in, int nargs) {
   const int base = lua_gettop(L) - nargs;
   lua_pushcfunction(L, &message_handler);
   lua_insert(L, base);
@@ -462,7 +473,7 @@ bool ScriptHost::State::call(ScriptInstance* in, int nargs) {
     const std::string text = msg ? msg : "unknown error";
     lua_pop(L, 2);
     fail(in, status == LUA_ERRMEM ? text + " (scripts share a " +
-                                        std::to_string(ScriptHost::kMemoryLimit >> 20) +
+                                        std::to_string(LuaScriptHost::kMemoryLimit >> 20) +
                                         " MB budget)"
                                   : text);
     return false;
@@ -471,7 +482,7 @@ bool ScriptHost::State::call(ScriptInstance* in, int nargs) {
   return true;
 }
 
-bool ScriptHost::State::run_file(ScriptInstance& in, const std::string& text) {
+bool LuaScriptHost::State::run_file(ScriptInstance& in, const std::string& text) {
   const std::string chunk = "@" + in.path;
   // Text only: precompiled bytecode can break out of any sandbox.
   if (luaL_loadbufferx(L, text.data(), text.size(), chunk.c_str(), "t") !=
@@ -494,7 +505,7 @@ bool ScriptHost::State::run_file(ScriptInstance& in, const std::string& text) {
   return true;
 }
 
-void ScriptHost::State::apply_props(ScriptInstance& in) {
+void LuaScriptHost::State::apply_props(ScriptInstance& in) {
   lua_rawgeti(L, LUA_REGISTRYINDEX, in.env);
   lua_pushliteral(L, "props");
   lua_rawget(L, -2);
@@ -512,7 +523,7 @@ void ScriptHost::State::apply_props(ScriptInstance& in) {
   lua_pop(L, 2);
 }
 
-void ScriptHost::State::sweep() {
+void LuaScriptHost::State::sweep() {
   if (depth > 0) {
     return;
   }
@@ -526,7 +537,7 @@ void ScriptHost::State::sweep() {
   instances.erase(it, instances.end());
 }
 
-// --- ScriptHost -------------------------------------------------------------
+// --- LuaScriptHost -------------------------------------------------------------
 
 namespace {
 
@@ -534,7 +545,7 @@ namespace {
 // never happen: every script call is protected) turns scripting off for
 // this ride instead of taking the process with it.
 template <typename F>
-void guarded(ScriptHost::State& s, F&& body) {
+void guarded(LuaScriptHost::State& s, F&& body) {
   if (s.broken || !s.L) {
     return;
   }
@@ -553,7 +564,7 @@ void guarded(ScriptHost::State& s, F&& body) {
 
 }  // namespace
 
-ScriptHost::ScriptHost(ScriptWorld& world, ScriptLibrary& library,
+LuaScriptHost::LuaScriptHost(ScriptWorld& world, ScriptLibrary& library,
                        std::string project_dir)
     : s_(std::make_unique<State>()) {
   s_->world = &world;
@@ -565,9 +576,9 @@ ScriptHost::ScriptHost(ScriptWorld& world, ScriptLibrary& library,
   }
 }
 
-ScriptHost::~ScriptHost() = default;
+LuaScriptHost::~LuaScriptHost() = default;
 
-bool ScriptHost::attach(const Entity2D& e) {
+bool LuaScriptHost::attach(const Entity2D& e) {
   if (!e.script) {
     return false;
   }
@@ -608,7 +619,7 @@ bool ScriptHost::attach(const Entity2D& e) {
   return ok;
 }
 
-void ScriptHost::detach(std::uint64_t entity) {
+void LuaScriptHost::detach(std::uint64_t entity) {
   guarded(*s_, [&] {
     if (ScriptInstance* in = s_->find(entity)) {
       in->gone = true;
@@ -619,16 +630,16 @@ void ScriptHost::detach(std::uint64_t entity) {
   });
 }
 
-bool ScriptHost::has(std::uint64_t entity) const {
+bool LuaScriptHost::has(std::uint64_t entity) const {
   return s_->find(entity) != nullptr;
 }
 
-bool ScriptHost::running(std::uint64_t entity) const {
+bool LuaScriptHost::running(std::uint64_t entity) const {
   const ScriptInstance* in = s_->find(entity);
   return in && in->loaded && in->enabled && !s_->broken;
 }
 
-bool ScriptHost::has_hook(std::uint64_t entity, const char* hook) {
+bool LuaScriptHost::has_hook(std::uint64_t entity, const char* hook) {
   bool yes = false;
   guarded(*s_, [&] {
     ScriptInstance* in = s_->find(entity);
@@ -640,11 +651,11 @@ bool ScriptHost::has_hook(std::uint64_t entity, const char* hook) {
   return yes;
 }
 
-std::size_t ScriptHost::instance_count() const { return s_->instances.size(); }
-std::size_t ScriptHost::timer_count() const { return s_->timers.size(); }
-std::size_t ScriptHost::memory_used() const { return s_->mem_used; }
+std::size_t LuaScriptHost::instance_count() const { return s_->instances.size(); }
+std::size_t LuaScriptHost::timer_count() const { return s_->timers.size(); }
+std::size_t LuaScriptHost::memory_used() const { return s_->mem_used; }
 
-void ScriptHost::start_pending() {
+void LuaScriptHost::start_pending() {
   guarded(*s_, [&] {
     State& s = *s_;
     // Index loop: on_start may spawn (append) more instances.
@@ -662,7 +673,7 @@ void ScriptHost::start_pending() {
   });
 }
 
-void ScriptHost::trigger(bool enter, std::uint64_t trigger,
+void LuaScriptHost::trigger(bool enter, std::uint64_t trigger,
                          std::uint64_t other) {
   guarded(*s_, [&] {
     State& s = *s_;
@@ -676,7 +687,7 @@ void ScriptHost::trigger(bool enter, std::uint64_t trigger,
   });
 }
 
-void ScriptHost::interact(std::uint64_t target, std::uint64_t rider) {
+void LuaScriptHost::interact(std::uint64_t target, std::uint64_t rider) {
   guarded(*s_, [&] {
     State& s = *s_;
     ScriptInstance* in = s.find(target);
@@ -688,7 +699,7 @@ void ScriptHost::interact(std::uint64_t target, std::uint64_t rider) {
   });
 }
 
-void ScriptHost::hand_event(std::uint64_t target, const char* hook, const std::string& text,
+void LuaScriptHost::hand_event(std::uint64_t target, const char* hook, const std::string& text,
                             double number) {
   guarded(*s_, [&] {
     State& s = *s_;
@@ -702,7 +713,7 @@ void ScriptHost::hand_event(std::uint64_t target, const char* hook, const std::s
   });
 }
 
-void ScriptHost::ui_event(const std::string& widget, bool change, double value,
+void LuaScriptHost::ui_event(const std::string& widget, bool change, double value,
                           const std::string& text) {
   guarded(*s_, [&] {
     State& s = *s_;
@@ -722,9 +733,9 @@ void ScriptHost::ui_event(const std::string& widget, bool change, double value,
   });
 }
 
-std::size_t ScriptHost::ui_handler_count() const { return s_->ui_handlers.size(); }
+std::size_t LuaScriptHost::ui_handler_count() const { return s_->ui_handlers.size(); }
 
-void ScriptHost::run_timers(std::uint64_t tick) {
+void LuaScriptHost::run_timers(std::uint64_t tick) {
   guarded(*s_, [&] {
     State& s = *s_;
     for (;;) {
@@ -761,7 +772,7 @@ void ScriptHost::run_timers(std::uint64_t tick) {
   });
 }
 
-void ScriptHost::tick(double dt) {
+void LuaScriptHost::tick(double dt) {
   guarded(*s_, [&] {
     State& s = *s_;
     const std::size_t n = s.instances.size();  // spawned this tick wait
@@ -776,7 +787,7 @@ void ScriptHost::tick(double dt) {
   });
 }
 
-bool ScriptHost::reload(const std::string& rel) {
+bool LuaScriptHost::reload(const std::string& rel) {
   bool ok = false;
   guarded(*s_, [&] {
     State& s = *s_;
@@ -833,7 +844,12 @@ bool ScriptHost::reload(const std::string& rel) {
   return ok;
 }
 
-int ScriptHost::reload_changed() {
+bool LuaScriptHost::uses(const std::string& rel) const {
+  return std::any_of(s_->instances.begin(), s_->instances.end(),
+                     [&](const auto& in) { return !in->gone && in->path == rel; });
+}
+
+int LuaScriptHost::reload_changed() {
   int n = 0;
   for (const std::string& rel : s_->library->refresh(s_->project_dir)) {
     const bool used = std::any_of(
@@ -847,7 +863,7 @@ int ScriptHost::reload_changed() {
   return n;
 }
 
-bool ScriptHost::describe(const std::string& source, const std::string& rel,
+bool LuaScriptHost::describe(const std::string& source, const std::string& rel,
                           std::vector<ScriptProp>* defaults,
                           std::string* error) {
   if (defaults) defaults->clear();
