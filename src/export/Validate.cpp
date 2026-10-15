@@ -69,7 +69,8 @@ bool is_editor_only(const std::string& rel) {
   for (const char* d : kDirs) {
     if (r.rfind(d, 0) == 0) return true;
   }
-  static const char* kFiles[] = {"imgui.ini", "export_report.txt", "game.json", "game.tspak"};
+  static const char* kFiles[] = {"imgui.ini", "export_report.txt", "game.json", "game.tspak",
+                                 "export_settings.json"};
   for (const char* f : kFiles) {
     if (r == f) return true;
   }

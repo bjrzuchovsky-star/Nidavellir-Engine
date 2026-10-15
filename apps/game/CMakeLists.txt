@@ -21,6 +21,7 @@ add_executable(ts_game
   Game3D.cpp
   GameVR.cpp
   GameManifest.cpp
+  GpuCheck.cpp
 )
 
 target_include_directories(ts_game PRIVATE ${ts_stb_easy_font_SOURCE_DIR})
@@ -53,4 +54,29 @@ if(MSVC)
   # Version resource (the exporter stamps each game's icon into its copy).
   configure_file(ts_game.rc.in ${CMAKE_CURRENT_BINARY_DIR}/ts_game.rc @ONLY)
   target_sources(ts_game PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/ts_game.rc)
+endif()
+
+# App-local VC++ runtime: copy vcruntime140*.dll / msvcp140*.dll next to
+# ts_game so exports (which take every DLL beside the runtime) run on PCs
+# without the VC++ Redistributable. UCRT is part of Windows 10+.
+if(MSVC)
+  set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+  set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_NO_WARNINGS TRUE)
+  set(CMAKE_INSTALL_UCRT_LIBRARIES FALSE)
+  include(InstallRequiredSystemLibraries)
+  set(TS_APP_LOCAL_CRT "")
+  foreach(lib IN LISTS CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+    get_filename_component(lib_name "${lib}" NAME)
+    if(lib_name MATCHES "^(vcruntime140|vcruntime140_1|msvcp140|msvcp140_1|msvcp140_2|msvcp140_atomic_wait|concrt140)\\.dll$")
+      list(APPEND TS_APP_LOCAL_CRT "${lib}")
+    endif()
+  endforeach()
+  if(TS_APP_LOCAL_CRT)
+    add_custom_command(TARGET ts_game POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${TS_APP_LOCAL_CRT} $<TARGET_FILE_DIR:ts_game>
+      COMMENT "App-local VC++ runtime next to ts_game"
+      VERBATIM)
+  else()
+    message(WARNING "VC++ runtime DLLs not found; exported games will need the VC++ Redistributable")
+  endif()
 endif()

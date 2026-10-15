@@ -2,6 +2,7 @@
 #include "audio/SoundStage3D.h"
 #include "Game3D.h"
 #include "GameManifest.h"
+#include "GpuCheck.h"
 #include "GameUi.h"
 
 #include "render3d/GlRenderer3D.h"
@@ -170,6 +171,7 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
                                      nullptr);
   if (!win) {
     std::cerr << "[ts_game] could not open a GL 3.3 core window\n";
+    game::show_gpu_error(name, game::last_glfw_error());
     glfwTerminate();
     return 1;
   }

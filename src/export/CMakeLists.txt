@@ -6,6 +6,7 @@ add_library(ts_export
   Validate.cpp
   Zip.cpp
   WinIcon.cpp
+  Installer.cpp
 )
 
 target_include_directories(ts_export

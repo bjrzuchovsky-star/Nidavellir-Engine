@@ -47,6 +47,38 @@ void report_lines(const exporter::ValidationReport& r) {
 }
 }  // namespace
 
+void FreightOffice::draw_distribution() {
+  ImGui::SeparatorText("Distribution");
+  ImGui::Checkbox("Portable zip", &zip_);
+  ImGui::SameLine();
+  ImGui::Checkbox("Windows setup installer", &installer_);
+  ImGui::BeginDisabled(!installer_);
+  ImGui::InputText("License / EULA (txt or rtf)", license_, sizeof(license_));
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Project-relative file; shown as the installer's license page");
+  const char* modes[] = {"Ask the player (per-user default)", "Per-user (no admin)", "All users (admin)"};
+  ImGui::Combo("Install for", &install_mode_, modes, 3);
+  ImGui::Checkbox("Start menu shortcut", &start_menu_);
+  ImGui::SameLine();
+  ImGui::Checkbox("Desktop shortcut", &desktop_icon_);
+  ImGui::EndDisabled();
+  ImGui::PushStyleColor(ImGuiCol_Text, theme::TextMuted());
+  ImGui::TextWrapped("Ships the VC++ runtime app-local (no redistributable), an uninstaller, "
+                     "and an OpenGL 3.3 check with a friendly message.");
+  ImGui::PopStyleColor();
+  if (installer_) {
+    if (iscc_.empty()) {
+      line(theme::Warning(), "MIND ", "Inno Setup not found: the .iss script is written but no setup.exe "
+                                     "(run tools/installer/install_inno.ps1, or set TS_ISCC).");
+    } else {
+      ImGui::TextDisabled("Inno Setup: %s", iscc_.c_str());
+    }
+  }
+  if (ImGui::Button("Save settings")) save_settings();
+  ImGui::SameLine();
+  ImGui::TextDisabled("%s", settings_status_.empty() ? "kept in the project (export_settings.json)"
+                                                     : settings_status_.c_str());
+}
+
 FreightOffice& FreightOffice::get() {
   static FreightOffice office;
   return office;
@@ -61,6 +93,19 @@ void FreightOffice::reset_for(const std::string& project_dir, const std::string&
   std::error_code ec;
   copy_to(icon_, sizeof(icon_), fs::exists(fs::path(project_dir) / "icon.png", ec) ? "icon.png" : "");
   if (out_dir_[0] == '\0') copy_to(out_dir_, sizeof(out_dir_), default_out_dir());
+  // Saved distribution settings win over the defaults above.
+  const exporter::ExportSettings st = exporter::load_settings(project_dir);
+  if (!st.version.empty()) copy_to(version_, sizeof(version_), st.version);
+  if (!st.icon.empty()) copy_to(icon_, sizeof(icon_), st.icon);
+  copy_to(publisher_, sizeof(publisher_), st.publisher);
+  copy_to(license_, sizeof(license_), st.license);
+  install_mode_ = st.install_mode == "user" ? 1 : st.install_mode == "all" ? 2 : 0;
+  installer_ = st.installer;
+  zip_ = st.portable_zip;
+  start_menu_ = st.start_menu;
+  desktop_icon_ = st.desktop_icon;
+  settings_status_.clear();
+  iscc_ = exporter::find_iscc();
   inspected_ = shipped_ = false;
   report_ = {};
   result_ = {};
@@ -78,7 +123,25 @@ void FreightOffice::inspect() {
   inspected_ = true;
 }
 
+void FreightOffice::save_settings() {
+  exporter::ExportSettings st;
+  st.icon = icon_;
+  st.version = version_;
+  st.publisher = publisher_;
+  st.license = license_;
+  st.install_mode = install_mode_ == 1 ? "user" : install_mode_ == 2 ? "all" : "ask";
+  st.installer = installer_;
+  st.portable_zip = zip_;
+  st.start_menu = start_menu_;
+  st.desktop_icon = desktop_icon_;
+  std::string err;
+  settings_status_ = exporter::save_settings(project_dir_, st, &err)
+                         ? std::string("Saved to ") + exporter::kSettingsFile
+                         : err;
+}
+
 void FreightOffice::ship() {
+  save_settings();
   exporter::ExportOptions opt;
   opt.project_dir = project_dir_;
   opt.out_dir = out_dir_;
@@ -92,13 +155,24 @@ void FreightOffice::ship() {
   opt.icon = icon_;
   opt.window_width = width_;
   opt.window_height = height_;
+  opt.publisher = publisher_;
+  opt.license = license_;
+  opt.installer = installer_;
+  opt.install_mode = install_mode_ == 1 ? "user" : install_mode_ == 2 ? "all" : "ask";
+  opt.start_menu = start_menu_;
+  opt.desktop_icon = desktop_icon_;
   exporter::export_project(opt, &result_);
   shipped_ = true;
 }
 
 void FreightOffice::draw() {
   if (!open_) return;
-  ImGui::SetNextWindowSize(ImVec2(620, 640), ImGuiCond_FirstUseEver);
+  if (pinned_) {
+    ImGui::SetNextWindowPos(ImVec2(pin_[0], pin_[1]), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(pin_[2], pin_[3]), ImGuiCond_Always);
+  } else {
+    ImGui::SetNextWindowSize(ImVec2(640, 780), ImGuiCond_FirstUseEver);
+  }
   if (!ImGui::Begin("Freight Office###ts_freight_office", &open_)) {
     ImGui::End();
     return;
@@ -115,13 +189,14 @@ void FreightOffice::draw() {
   ImGui::InputText("Version", version_, sizeof(version_));
   ImGui::InputText("Executable", exe_, sizeof(exe_));
   ImGui::InputText("Icon (png in project)", icon_, sizeof(icon_));
+  ImGui::InputText("Publisher", publisher_, sizeof(publisher_));
   ImGui::InputInt("Window width", &width_, 16, 128);
   ImGui::InputInt("Window height", &height_, 16, 128);
   const char* profiles[] = {"Shipping (strict, editor data stripped)", "Dev (Debug-ish, warnings only, log)"};
   if (ImGui::Combo("Profile", &profile_, profiles, 2)) inspect();
   ImGui::Checkbox("Dedicated server (ts_server)", &server_);
-  ImGui::SameLine();
-  ImGui::Checkbox("Zip it", &zip_);
+
+  draw_distribution();
 
   ImGui::SeparatorText("Depot");
   ImGui::InputText("Output folder", out_dir_, sizeof(out_dir_));
@@ -157,7 +232,12 @@ void FreightOffice::draw() {
       ImGui::TextWrapped("game.tspak: %zu files, %llu bytes, hash %s", result_.pak_files,
                          static_cast<unsigned long long>(result_.pak_bytes),
                          vfs::hex64(result_.pak_hash).c_str());
-      if (!result_.zip_path.empty()) ImGui::TextWrapped("Zip: %s", result_.zip_path.c_str());
+      if (!result_.zip_path.empty()) ImGui::TextWrapped("Portable zip: %s", result_.zip_path.c_str());
+      if (!result_.installer_path.empty()) {
+        ImGui::TextWrapped("Installer: %s", result_.installer_path.c_str());
+      } else if (!result_.iss_path.empty()) {
+        ImGui::TextWrapped("Installer script: %s", result_.iss_path.c_str());
+      }
       for (const std::string& p : result_.plugins_shipped) ImGui::BulletText("%s", p.c_str());
     }
     report_lines(result_.report);

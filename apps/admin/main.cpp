@@ -22,6 +22,7 @@
 #include "SmokeCSharp.h"
 #include "SmokePhysics.h"
 #include "editor/scripting/BrandBook.h"
+#include "editor/export/FreightOffice.h"
 #include "SmokeNative.h"
 #include "SmokeFx.h"
 #include "SmokeUi.h"
@@ -1332,6 +1333,145 @@ int run_brand_book_app(const std::string& project, const std::string& graph) {
   return 0;
 }
 
+// Minimal PNG writer (stored deflate blocks; no extra dependency).
+bool write_png_rgba(const std::filesystem::path& path, int w, int h, const std::vector<unsigned char>& rgba) {
+  auto crc32 = [](const unsigned char* d, std::size_t n, std::uint32_t c) {
+    c = ~c;
+    for (std::size_t i = 0; i < n; ++i) {
+      c ^= d[i];
+      for (int k = 0; k < 8; ++k) c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1u)));
+    }
+    return ~c;
+  };
+  std::string raw;
+  raw.reserve(static_cast<std::size_t>(h) * (w * 4 + 1));
+  for (int y = 0; y < h; ++y) {
+    raw.push_back('\0');
+    raw.append(reinterpret_cast<const char*>(rgba.data()) + static_cast<std::size_t>(y) * w * 4, w * 4);
+  }
+  std::string z = "\x78\x01";
+  std::uint32_t a = 1, b = 0;
+  for (unsigned char c : raw) {
+    a = (a + c) % 65521;
+    b = (b + a) % 65521;
+  }
+  for (std::size_t off = 0; off < raw.size() || off == 0;) {
+    const std::size_t n = std::min<std::size_t>(65535, raw.size() - off);
+    const bool last = off + n >= raw.size();
+    z.push_back(last ? 1 : 0);
+    z.push_back(static_cast<char>(n & 0xff));
+    z.push_back(static_cast<char>(n >> 8));
+    z.push_back(static_cast<char>(~n & 0xff));
+    z.push_back(static_cast<char>((~n >> 8) & 0xff));
+    z.append(raw, off, n);
+    off += n;
+    if (last) break;
+  }
+  const std::uint32_t adler = (b << 16) | a;
+  for (int i = 3; i >= 0; --i) z.push_back(static_cast<char>((adler >> (i * 8)) & 0xff));
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  auto be = [&](std::uint32_t v) {
+    const char c[4] = {char(v >> 24), char(v >> 16), char(v >> 8), char(v)};
+    out.write(c, 4);
+  };
+  auto chunk = [&](const char* type, const std::string& data) {
+    be(static_cast<std::uint32_t>(data.size()));
+    std::string td = std::string(type, 4) + data;
+    out.write(td.data(), static_cast<std::streamsize>(td.size()));
+    be(crc32(reinterpret_cast<const unsigned char*>(td.data()), td.size(), 0));
+  };
+  out.write("\x89PNG\r\n\x1a\n", 8);
+  std::string ihdr;
+  for (std::uint32_t v : {static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h)}) {
+    for (int i = 3; i >= 0; --i) ihdr.push_back(static_cast<char>((v >> (i * 8)) & 0xff));
+  }
+  ihdr += std::string("\x08\x06\x00\x00\x00", 5);
+  chunk("IHDR", ihdr);
+  chunk("IDAT", z);
+  chunk("IEND", "");
+  return static_cast<bool>(out);
+}
+
+// ts_admin --freight-shot <project dir | sample:<id>> <out.png>: the Freight
+// Office (Dusk theme) alone in a window, saved as a PNG (docs screenshots).
+int run_freight_shot(std::string project, const std::string& png) {
+  if (project.rfind("sample:", 0) == 0) {
+    std::string err;
+    project = ts::tombstone::export_sample_dir(project.substr(7), &err);
+    if (project.empty()) {
+      std::cerr << err << '\n';
+      return 1;
+    }
+  }
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+  const int W = 720, H = 940;
+  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Freight Office", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(window);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGui::GetIO().IniFilename = nullptr;
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  Settings defaults;
+  apply_theme(defaults);
+  editor::FreightOffice& office = editor::FreightOffice::get();
+  office.open(project, std::filesystem::path(project).filename().string());
+  int fw = 0, fh = 0;
+  std::vector<unsigned char> px;
+  for (int frame = 0; frame < 8 && !glfwWindowShouldClose(window); ++frame) {
+    glfwPollEvents();
+    glfwGetFramebufferSize(window, &fw, &fh);
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    office.pin(0, 0, static_cast<float>(fw), static_cast<float>(fh));
+    office.draw();
+    ImGui::Render();
+    glViewport(0, 0, fw, fh);
+    const ImVec4 clear = editor::theme::Charcoal();
+    glClearColor(clear.x, clear.y, clear.z, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    if (frame == 7) {
+      px.assign(static_cast<std::size_t>(fw) * fh * 4, 0);
+      glPixelStorei(GL_PACK_ALIGNMENT, 1);
+      glReadBuffer(GL_BACK);
+      glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    }
+    glfwSwapBuffers(window);
+  }
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  if (px.empty()) return 1;
+  std::vector<unsigned char> flipped(px.size());
+  for (int y = 0; y < fh; ++y) {
+    std::memcpy(&flipped[static_cast<std::size_t>(y) * fw * 4],
+                &px[static_cast<std::size_t>(fh - 1 - y) * fw * 4], static_cast<std::size_t>(fw) * 4);
+  }
+  for (std::size_t i = 3; i < flipped.size(); i += 4) flipped[i] = 255;
+  if (!write_png_rgba(png, fw, fh, flipped)) {
+    std::cerr << "cannot write " << png << '\n';
+    return 1;
+  }
+  std::cout << "Freight Office screenshot: " << png << " (" << fw << "x" << fh << ")\n";
+  return 0;
+}
+
 int run_imgui_app() {
   if (!glfwInit()) {
     std::cerr << "glfwInit failed\n";
@@ -1477,6 +1617,12 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-templates") == 0) {
       return run_templates_smoke();
+    }
+    if (std::strcmp(argv[i], "--freight-shot") == 0 && i + 2 < argc) {
+      return run_freight_shot(argv[i + 1], argv[i + 2]);
+    }
+    if (std::strcmp(argv[i], "--smoke-installer") == 0) {
+      return ts::tombstone::run_installer_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-export") == 0) {
       return ts::tombstone::run_export_smoke();

@@ -15,6 +15,7 @@
 #include "GameRenderer.h"
 #include "GameUi.h"
 #include "GameManifest.h"
+#include "GpuCheck.h"
 #include "HudText.h"
 
 #include "core/JsonMini.h"
@@ -68,6 +69,8 @@ constexpr const char* kUsage =
     "  --desktop        VR projects: ride flat on the desktop (also what\n"
     "                   happens when no headset is found; TS_VR=sim picks\n"
     "                   the simulator for that case instead)\n"
+    "  --check-gpu      exit 0 when an OpenGL 3.3 core context opens, else 3\n"
+    "                   with a friendly message box (--quiet: no box)\n"
     "  --xr-probe       check the OpenXR runtime + headset (creates and destroys\n"
     "                   a session, no window) and exit\n"
     "Keys: WASD / arrows move P1 | E / Space / pad A action |\n"
@@ -84,6 +87,8 @@ struct Options {
   bool sim = false;
   bool desktop = false;
   bool xr_probe = false;
+  bool check_gpu = false;
+  bool quiet = false;
   std::string log_path;
 };
 
@@ -102,6 +107,10 @@ bool parse_args(int argc, char** argv, Options* out, std::string* err) {
       out->desktop = true;
     } else if (a == "--sim") {
       out->sim = true;
+    } else if (a == "--check-gpu") {
+      out->check_gpu = true;
+    } else if (a == "--quiet") {
+      out->quiet = true;
     } else if (a == "--xr-probe") {
       out->xr_probe = true;
     } else if (a == "--collision") {
@@ -568,6 +577,7 @@ int run_window(const Options& opt, Telegraph& telegraph) {
                                      nullptr, nullptr);
   if (!win) {
     std::cerr << "[ts_game] could not open a window\n";
+    game::show_gpu_error(name, game::last_glfw_error());
     glfwTerminate();
     return 1;
   }
@@ -744,6 +754,9 @@ int main(int argc, char** argv) {
   }
   if (opt.xr_probe) {
     return game::run_xr_probe();
+  }
+  if (opt.check_gpu) {
+    return game::run_check_gpu(opt.quiet);
   }
   // Exported games: game.json next to the exe (or in --project) mounts
   // the .tspak through ts_vfs and hands its folder to the loaders.

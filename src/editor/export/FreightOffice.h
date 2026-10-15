@@ -3,10 +3,12 @@
 // The Freight Office (File > Export...): the editor face of ts_export.
 // Pick a profile, name, version, window, icon and an output folder, inspect
 // the cargo (validation report), then Ship It: Release ts_game + DLLs +
-// game.json + cooked game.tspak (+ server, + zip). One shared window for
+// game.json + cooked game.tspak (+ server, + portable zip, + Windows
+// setup installer). Distribution settings are saved in the project. One shared window for
 // the 2D and 3D/VR editors.
 
 #include "export/Exporter.h"
+#include "export/Installer.h"
 
 #include <string>
 
@@ -23,11 +25,18 @@ class FreightOffice {
   bool is_open() const { return open_; }
   // Call every frame from the active editor screen.
   void draw();
+  // Pins the window (headless screenshots: ts_admin --freight-shot).
+  void pin(float x, float y, float w, float h) {
+    pinned_ = true;
+    pin_[0] = x; pin_[1] = y; pin_[2] = w; pin_[3] = h;
+  }
 
  private:
   void reset_for(const std::string& project_dir, const std::string& project_name);
   void inspect();
   void ship();
+  void save_settings();
+  void draw_distribution();
 
   bool open_ = false;
   std::string project_dir_;
@@ -47,6 +56,17 @@ class FreightOffice {
   bool shipped_ = false;
   exporter::ExportResult result_;
   std::string runtime_;
+  // Distribution (export_settings.json in the project).
+  char publisher_[128] = {};
+  char license_[260] = {};
+  int install_mode_ = 0;  // 0 ask, 1 per-user, 2 all users
+  bool installer_ = false;
+  bool start_menu_ = true;
+  bool desktop_icon_ = true;
+  std::string iscc_;
+  std::string settings_status_;
+  bool pinned_ = false;
+  float pin_[4] = {};
 };
 
 }  // namespace editor

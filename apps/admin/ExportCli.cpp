@@ -9,6 +9,7 @@
 #include "scene/SampleScripts.h"
 #include "scene/SceneJson.h"
 #include "export/Exporter.h"
+#include "export/Installer.h"
 #include "vfs/Pak.h"
 #include "vfs/Vfs.h"
 
@@ -16,6 +17,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -31,6 +33,10 @@ constexpr const char* kExportUsage =
     "Usage: ts_admin --export <project dir | sample:<id>> --out <dir>\n"
     "                [--profile shipping|dev] [--server] [--zip]\n"
     "                [--runtime <path to ts_game>] [--name N] [--version V]\n"
+    "                [--installer] [--publisher P] [--license <file>]\n"
+    "                [--install-mode ask|user|all] [--icon <png>] [--no-desktop-icon]\n"
+    "  The project's export_settings.json (Freight Office) is applied first;\n"
+    "  flags override it.\n"
     "  samples: sample-2d-platformer ghost-town-3d haunted-saloon-vr\n"
     "           frontier-survival sky-pirates\n";
 
@@ -94,6 +100,19 @@ std::string export_sample_dir(const std::string& id, std::string* err) { return 
 int run_export_cli(int argc, char** argv) {
   exporter::ExportOptions opt;
   std::string project;
+  // Pass 1: the project, so its saved settings sit under the flags.
+  for (int i = 1; i + 1 < argc; ++i) {
+    if (std::string(argv[i]) == "--export") project = argv[i + 1];
+  }
+  {
+    std::string err;
+    if (project.rfind("sample:", 0) == 0) project = sample_dir(project.substr(7), &err);
+    std::error_code ec;
+    if (!project.empty() && fs::exists(fs::path(project) / exporter::kSettingsFile, ec)) {
+      opt.project_dir = project;
+      exporter::apply_project_settings(&opt);
+    }
+  }
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     auto next = [&](std::string* v) {
@@ -102,7 +121,8 @@ int run_export_cli(int argc, char** argv) {
       return true;
     };
     bool ok = true;
-    if (a == "--export") ok = next(&project);
+    std::string ignored;
+    if (a == "--export") ok = next(&ignored);
     else if (a == "--out") ok = next(&opt.out_dir);
     else if (a == "--profile") ok = next(&opt.profile);
     else if (a == "--runtime") ok = next(&opt.runtime_exe);
@@ -110,6 +130,12 @@ int run_export_cli(int argc, char** argv) {
     else if (a == "--version") ok = next(&opt.version);
     else if (a == "--server") opt.server = true;
     else if (a == "--zip") opt.zip = true;
+    else if (a == "--installer") opt.installer = true;
+    else if (a == "--publisher") ok = next(&opt.publisher);
+    else if (a == "--license") ok = next(&opt.license);
+    else if (a == "--install-mode") ok = next(&opt.install_mode);
+    else if (a == "--icon") ok = next(&opt.icon);
+    else if (a == "--no-desktop-icon") opt.desktop_icon = false;
     else if (a == "--headless") {}
     else ok = false;
     if (!ok) {
@@ -122,13 +148,17 @@ int run_export_cli(int argc, char** argv) {
     std::cerr << kExportUsage;
     return 2;
   }
-  std::string err;
-  if (project.rfind("sample:", 0) == 0) {
-    project = sample_dir(project.substr(7), &err);
-    if (project.empty()) {
-      std::cerr << err << '\n';
-      return 1;
-    }
+  if (opt.install_mode != "ask" && opt.install_mode != "user" && opt.install_mode != "all") {
+    std::cerr << kExportUsage;
+    return 2;
+  }
+  if (project.empty()) {
+    std::cerr << "no such sample / project\n";
+    return 1;
+  }
+  if (!opt.license.empty() && fs::path(opt.license).is_relative() &&
+      !fs::exists(fs::path(project) / opt.license)) {
+    opt.license = fs::absolute(opt.license).string();  // relative to the cwd
   }
   opt.project_dir = project;
   if (opt.runtime_exe.empty()) opt.runtime_exe = editor::launcher::find_game_executable();
@@ -221,6 +251,187 @@ int run_export_smoke() {
     }
   }
   std::cout << (failures ? "[smoke-export] FAILED\n" : "[smoke-export] OK (5 samples shipped + rode from pak)\n");
+  return failures ? 1 : 0;
+}
+
+namespace {
+
+// Runs a command with stdout/stderr to log; on Windows the PATH is cut to
+// the Windows folders so nothing resolves from the dev machine.
+int run_clean(const std::string& cmdline, const std::string& cwd, const std::string& log) {
+#if defined(_WIN32)
+  std::string sysroot = "C:\\Windows";
+  if (const char* r = std::getenv("SystemRoot")) sysroot = r;
+  const std::string cmd = "\"cd /d \"" + cwd + "\" && set \"PATH=" + sysroot + "\\System32;" + sysroot +
+                          "\" && " + cmdline + " > \"" + log + "\" 2>&1\"";
+#else
+  const std::string cmd = "cd \"" + cwd + "\" && " + cmdline + " > \"" + log + "\" 2>&1";
+#endif
+  return std::system(cmd.c_str());
+}
+
+std::string slurp(const fs::path& p) {
+  std::ifstream in(p, std::ios::binary);
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+}  // namespace
+
+int run_installer_smoke() {
+  int failures = 0;
+  auto fail = [&](const std::string& what) {
+    std::cerr << "[smoke-installer] FAIL: " << what << '\n';
+    ++failures;
+  };
+  std::error_code ec;
+  const std::string runtime = editor::launcher::find_game_executable();
+  if (runtime.empty()) {
+    std::cerr << "[smoke-installer] FAIL: ts_game not built\n";
+    return 1;
+  }
+  const fs::path out = fs::temp_directory_path(ec) / "ts_installer_smoke";
+  fs::remove_all(out, ec);
+  fs::create_directories(out, ec);
+  set_env("TS_PAK_CACHE", (out / "pak-cache").string());
+  set_env("TS_NO_DIALOGS", "1");
+  std::string err;
+  const std::string dir = sample_dir("ghost-town-3d", &err);
+  if (dir.empty()) {
+    std::cerr << "[smoke-installer] FAIL: " << err << '\n';
+    return 1;
+  }
+
+  // Settings round trip (what the Freight Office saves in the project).
+  {
+    const fs::path tmp = out / "settings-project";
+    fs::create_directories(tmp, ec);
+    exporter::ExportSettings s;
+    s.version = "2.4.1";
+    s.publisher = "Dusty \"Quotes\" & Co";
+    s.license = "EULA.txt";
+    s.install_mode = "all";
+    s.installer = true;
+    s.desktop_icon = false;
+    if (!exporter::save_settings(tmp.string(), s, &err)) fail(err);
+    const exporter::ExportSettings b = exporter::load_settings(tmp.string());
+    if (b.version != s.version || b.publisher != s.publisher || b.license != s.license ||
+        b.install_mode != "all" || !b.installer || b.desktop_icon || !b.portable_zip) {
+      fail("export_settings.json round trip");
+    }
+    if (!exporter::is_editor_only(exporter::kSettingsFile)) fail("export_settings.json would ship in the pak");
+  }
+
+  // Script text (checked everywhere, ISCC or not).
+  {
+    exporter::InstallerSpec sp;
+    sp.game_dir = "C:/x/ghost-town-3d";
+    sp.out_dir = "C:/x";
+    sp.name = "Ghost {Town}";
+    sp.version = "1.2.3-beta";
+    sp.publisher = "Brenden";
+    sp.exe_name = "ghost.exe";
+    sp.slug = "ghost";
+    sp.license_file = "C:/x/EULA.txt";
+    const std::string t = exporter::inno_script(sp);
+    for (const char* need : {"AppName=Ghost {{Town}", "AppPublisher=Brenden", "LicenseFile=",
+                             "PrivilegesRequiredOverridesAllowed=dialog commandline",
+                             "{autoprograms}", "{autodesktop}", "VersionInfoVersion=1.2.3",
+                             "--check-gpu --quiet", "ArchitecturesInstallIn64BitMode=x64compatible"}) {
+      if (t.find(need) == std::string::npos) fail(std::string("installer script lacks ") + need);
+    }
+  }
+
+  // Export: portable zip + installer, EULA from outside the project.
+  const fs::path eula = out / "EULA.txt";
+  std::ofstream(eula) << "TombStone smoke EULA\r\nRide at your own risk.\r\n";
+  exporter::ExportOptions opt;
+  opt.project_dir = dir;
+  opt.out_dir = (out / "depot").string();
+  opt.runtime_exe = runtime;
+  opt.zip = true;
+  opt.installer = true;
+  opt.publisher = "TombStone Smoke";
+  opt.license = eula.string();
+  opt.install_mode = "ask";
+  exporter::ExportResult res;
+  if (!exporter::export_project(opt, &res)) {
+    std::cerr << "[smoke-installer] FAIL: export: " << res.text();
+    return 1;
+  }
+  if (res.zip_path.empty() || !fs::exists(res.zip_path, ec)) fail("portable zip missing");
+  if (!fs::exists(fs::path(res.game_dir) / "LICENSE.txt", ec)) fail("LICENSE.txt not shipped");
+  if (res.iss_path.empty() || !fs::exists(res.iss_path, ec)) fail("installer script not written");
+  if (!res.missing_dlls.empty()) fail("missing DLLs: " + res.missing_dlls.front());
+#if defined(_WIN32)
+  {
+    bool crt = false;
+    for (const auto& e : fs::directory_iterator(res.game_dir, ec)) {
+      if (e.path().filename().string().rfind("vcruntime140", 0) == 0) crt = true;
+    }
+    if (!crt) fail("app-local VC++ runtime (vcruntime140.dll) not shipped");
+  }
+#endif
+
+  // Clean folder: a copy far from the build tree, system-only PATH.
+  {
+    const fs::path clean = out / "clean-pc" / "game";
+    fs::create_directories(clean.parent_path(), ec);
+    fs::copy(res.game_dir, clean, fs::copy_options::recursive, ec);
+    if (ec) fail("copy to clean folder: " + ec.message());
+    const fs::path exe = clean / fs::path(res.exe_path).filename();
+    const int rc = run_clean("\"" + exe.string() + "\" --smoke", out.string(), (out / "clean.log").string());
+    std::cout << "[smoke-installer] clean-folder --smoke rc=" << rc << '\n';
+    if (rc != 0) fail("clean-folder run failed: " + slurp(out / "clean.log"));
+  }
+
+  if (res.installer_skipped || res.installer_path.empty()) {
+    std::cout << "[smoke-installer] SKIP installer build: Inno Setup (ISCC) not found\n";
+    std::cout << (failures ? "[smoke-installer] FAILED\n"
+                           : "[smoke-installer] OK (settings, script, zip, deps, clean run; installer SKIPPED)\n");
+    return failures ? 1 : 0;
+  }
+  std::cout << "[smoke-installer] installer: " << res.installer_path << " ("
+            << fs::file_size(res.installer_path, ec) << " bytes)\n";
+#if defined(_WIN32)
+  const fs::path inst = out / "installed";
+  const std::string exe_name = fs::path(res.exe_path).filename().string();
+  const int irc = run_clean("\"" + res.installer_path + "\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER /DIR=\"" +
+                                inst.string() + "\" /MERGETASKS=\"desktopicon\" /LOG=\"" + (out / "setup.log").string() + "\"",
+                            out.string(), (out / "setup.out").string());
+  std::cout << "[smoke-installer] silent install rc=" << irc << '\n';
+  if (irc != 0 || !fs::exists(inst / exe_name, ec)) fail("silent install (see " + (out / "setup.log").string() + ")");
+  const std::string game_name = "Ghost Town 3D";
+  fs::path start_lnk, desk_lnk;
+  if (const char* a = std::getenv("APPDATA")) start_lnk = fs::path(a) / "Microsoft/Windows/Start Menu/Programs" / (game_name + ".lnk");
+  if (const char* u = std::getenv("USERPROFILE")) desk_lnk = fs::path(u) / "Desktop" / (game_name + ".lnk");
+  if (!start_lnk.empty() && !fs::exists(start_lnk, ec)) fail("Start menu shortcut missing: " + start_lnk.string());
+  if (!fs::exists(desk_lnk, ec)) {
+    std::cout << "[smoke-installer] note: no desktop shortcut at " << desk_lnk.string() << " (redirected Desktop?)\n";
+  }
+  const int grc = run_clean("\"" + (inst / exe_name).string() + "\" --smoke", out.string(), (out / "installed.log").string());
+  std::cout << "[smoke-installer] installed game --smoke rc=" << grc << '\n';
+  if (grc != 0) fail("installed game --smoke: " + slurp(out / "installed.log"));
+  const int gpu = run_clean("\"" + (inst / exe_name).string() + "\" --check-gpu --quiet", out.string(), (out / "gpu.log").string());
+  std::cout << "[smoke-installer] --check-gpu rc=" << gpu << " " << slurp(out / "gpu.log");
+  const fs::path unins = inst / "unins000.exe";
+  if (!fs::exists(unins, ec)) fail("uninstaller missing");
+  const int urc = run_clean("\"" + unins.string() + "\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART", out.string(),
+                            (out / "uninstall.out").string());
+  // The uninstaller re-launches itself from %TEMP%; wait for it to finish.
+  bool gone = false;
+  for (int i = 0; i < 120 && !gone; ++i) {
+    gone = !fs::exists(inst / exe_name, ec) && !fs::exists(unins, ec);
+    if (!gone) std::system("ping -n 2 127.0.0.1 > nul");
+  }
+  std::cout << "[smoke-installer] uninstall rc=" << urc << (gone ? ", files removed" : ", files LEFT") << '\n';
+  if (!gone) fail("uninstall left files in " + inst.string());
+  if (!start_lnk.empty() && fs::exists(start_lnk, ec)) fail("uninstall left the Start menu shortcut");
+  if (fs::exists(desk_lnk, ec)) fail("uninstall left the desktop shortcut");
+#endif
+  std::cout << (failures ? "[smoke-installer] FAILED\n"
+                         : "[smoke-installer] OK (settings, script, zip, deps, clean run, install / --smoke / uninstall)\n");
   return failures ? 1 : 0;
 }
 

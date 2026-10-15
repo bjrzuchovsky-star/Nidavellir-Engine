@@ -1,7 +1,7 @@
 #pragma once
 
 // ts_export: "Ship It". Turns a TombStone project folder into a standalone
-// game folder (and optionally a zip):
+// game folder (optionally a portable zip and a Windows setup installer):
 //
 //   <out>/<slug>/
 //     <Exe>(.exe)        ts_game (Release), renamed; Windows: icon stamped
@@ -43,7 +43,19 @@ struct ExportOptions {
   std::string icon;                 // project-relative png ("" = auto: icon.png)
   int window_width = 0;             // 0 = project.json / 1280
   int window_height = 0;            // 0 = project.json / 720
+  // Distribution (Windows): see docs/distribution.md.
+  std::string publisher;            // installer / version info
+  std::string license;              // project-relative EULA (.txt/.rtf), "" = none
+  bool installer = false;           // also build <out_dir>/<slug>-<version>-setup.exe
+  std::string install_mode = "ask"; // "ask" | "user" | "all"
+  bool start_menu = true;
+  bool desktop_icon = true;
+  bool check_dependencies = true;   // PE import check of the shipped folder
 };
+
+// Fills the distribution fields (icon, version, publisher, license,
+// installer, zip, shortcuts) from <project>/export_settings.json.
+void apply_project_settings(ExportOptions* opt);
 
 struct ValidationReport {
   std::vector<std::string> errors;
@@ -58,6 +70,10 @@ struct ExportResult {
   std::string exe_path;
   std::string pak_path;
   std::string zip_path;
+  std::string installer_path;  // <out>/<slug>-<version>-setup.exe
+  std::string iss_path;        // the Inno Setup script it was built from
+  bool installer_skipped = false;  // ISCC absent (script still written)
+  std::vector<std::string> missing_dlls;  // imports not on Windows nor shipped
   std::uint64_t pak_hash = 0;
   std::size_t pak_files = 0;
   std::uint64_t pak_bytes = 0;

@@ -1,5 +1,6 @@
 #include "export/Exporter.h"
 
+#include "export/Installer.h"
 #include "export/Plugins.h"
 #include "export/WinIcon.h"
 #include "export/Zip.h"
@@ -108,12 +109,28 @@ std::string ExportResult::text() const {
     o << "pak: " << pak_path << " (" << pak_files << " files, " << pak_bytes
       << " bytes, hash " << vfs::hex64(pak_hash) << ")\n";
   }
-  if (!zip_path.empty()) o << "zip: " << zip_path << '\n';
+  if (!zip_path.empty()) o << "portable zip: " << zip_path << '\n';
+  if (!installer_path.empty()) o << "installer: " << installer_path << '\n';
+  if (!iss_path.empty()) o << "installer script: " << iss_path << '\n';
+  for (const std::string& m : missing_dlls) o << "MISSING DLL: " << m << '\n';
   for (const std::string& p : plugins_shipped) o << "plugin dll: " << p << '\n';
   for (const std::string& e : report.errors) o << "ERROR: " << e << '\n';
   for (const std::string& w : report.warnings) o << "warning: " << w << '\n';
   for (const std::string& n : report.notes) o << "note: " << n << '\n';
   return o.str();
+}
+
+void apply_project_settings(ExportOptions* opt) {
+  const ExportSettings s = load_settings(opt->project_dir);
+  if (!s.icon.empty()) opt->icon = s.icon;
+  if (!s.version.empty()) opt->version = s.version;
+  opt->publisher = s.publisher;
+  opt->license = s.license;
+  opt->installer = s.installer;
+  opt->zip = s.portable_zip;
+  opt->install_mode = s.install_mode;
+  opt->start_menu = s.start_menu;
+  opt->desktop_icon = s.desktop_icon;
 }
 
 bool export_project(const ExportOptions& opt, ExportResult* out, const Progress& progress) {
@@ -334,6 +351,36 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
     r.plugins_shipped.push_back(p.id + " -> plugins/" + lib.filename().string());
   }
 
+  // License / EULA: shipped beside the exe and shown by the installer.
+  fs::path license_src;
+  if (!opt.license.empty()) {
+    license_src = fs::path(opt.license).is_absolute() ? fs::path(opt.license) : proj / opt.license;
+    if (!fs::is_regular_file(license_src, ec)) {
+      return fail("license file not found: " + license_src.string());
+    }
+    const std::string ext = license_src.extension().string().empty() ? ".txt" : license_src.extension().string();
+    if (!copy_into(license_src, game_dir / ("LICENSE" + ext), &err)) return fail(err);
+  }
+
+  // Nothing from the dev machine: every DLL the exe and its DLLs import is
+  // either part of Windows or shipped in the folder (app-local VC++ CRT).
+#if defined(_WIN32)
+  if (opt.check_dependencies) {
+    say("Checking DLL dependencies");
+    std::vector<std::string> shipped;
+    std::string derr;
+    check_folder_dependencies(game_dir.string(), &r.missing_dlls, &shipped, &derr);
+    for (const std::string& m : r.missing_dlls) {
+      r.report.errors.push_back("missing DLL on a clean PC: " + m);
+    }
+    if (!r.missing_dlls.empty()) return fail("the export depends on DLLs it does not ship");
+    std::string list;
+    for (const std::string& d : shipped) list += (list.empty() ? "" : ", ") + d;
+    r.report.notes.push_back("dependencies: Windows system DLLs + shipped " +
+                             (list.empty() ? std::string("(none)") : list));
+  }
+#endif
+
   // Manifest.
   std::vector<std::pair<std::string, std::string>> gs = {
       {"name", name},           {"version", version},  {"dimension", dimension},
@@ -374,6 +421,13 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
       const fs::path sdir = game_dir / "server";
       const fs::path sbin = sdir / (std::string("ts_server") + kExeExt);
       if (!copy_into(sexe, sbin, &err)) return fail(err);
+      // App-local VC++ runtime for the server too.
+      for (const auto& e : fs::directory_iterator(game_dir, ec)) {
+        const std::string f = e.path().filename().string();
+        if (f.rfind("vcruntime140", 0) == 0 || f.rfind("msvcp140", 0) == 0 || f.rfind("concrt140", 0) == 0) {
+          if (!copy_into(e.path(), sdir / f, &err)) return fail(err);
+        }
+      }
       fs::permissions(sbin, fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
                       fs::perm_options::add, ec);
       for (const std::string& rel : content_files(proj.string())) {
@@ -403,9 +457,10 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
          << "\nSelf-check: " << exe_name << " --smoke\n"
          << "Content: game.tspak (mounted through ts_vfs into a per-hash cache;\n"
          << "set TS_PAK_CACHE to choose the folder).\n"
-         << "\nWindows: the runtime links the MSVC runtime dynamically (/MD). On a PC\n"
-         << "without Visual Studio install the Microsoft Visual C++ 2015-2022\n"
-         << "Redistributable (x64): https://aka.ms/vs/17/release/vc_redist.x64.exe\n";
+         << "\nWindows: the Visual C++ runtime DLLs (vcruntime140*.dll, msvcp140*.dll)\n"
+         << "ship beside the exe (app-local), so no VC++ Redistributable install is\n"
+         << "needed. Needs Windows 10+ (x64) and a GPU with OpenGL 3.3.\n"
+         << "Portable: copy this folder anywhere and run " << exe_name << ".\n";
   if (vr) {
     readme << "\nVR: rides in a headset through an OpenXR runtime (SteamVR / Oculus /\n"
            << "WMR). Without a headset it starts on the desktop (flat 3D); --sim\n"
@@ -421,6 +476,37 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
     if (!zip_folder(game_dir.string(), slug, r.zip_path, &err)) {
       r.report.warnings.push_back(err);
       r.zip_path.clear();
+    }
+  }
+  if (opt.installer) {
+    InstallerSpec spec;
+    spec.game_dir = game_dir.string();
+    spec.out_dir = fs::absolute(fs::path(opt.out_dir), ec).string();
+    spec.name = name;
+    spec.version = version;
+    spec.publisher = opt.publisher;
+    spec.exe_name = exe_name;
+    spec.slug = slug;
+    spec.install_mode = opt.install_mode;
+    spec.start_menu = opt.start_menu;
+    spec.desktop_icon = opt.desktop_icon;
+    if (!license_src.empty()) spec.license_file = license_src.string();
+    if (!icon.empty()) {
+      const fs::path ico = fs::path(spec.out_dir) / (slug + "-icon.ico");
+      if (write_ico_from_png((proj / icon).string(), ico.string(), &err)) spec.icon_ico = ico.string();
+      else r.report.warnings.push_back("installer icon: " + err);
+    }
+    say("Building the setup installer (Inno Setup)");
+    std::string log;
+    err.clear();
+    if (build_installer(spec, &r.iss_path, &r.installer_path, &log, &err)) {
+      r.report.notes.push_back("installer: " + r.installer_path);
+    } else if (err.rfind("ISCC not found", 0) == 0) {
+      r.installer_skipped = true;
+      r.report.warnings.push_back(err + "; script written to " + r.iss_path);
+    } else {
+      write_all(game_dir / "export_report.txt", r.text());
+      return fail("installer: " + err);
     }
   }
   write_all(game_dir / "export_report.txt", r.text());

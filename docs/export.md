@@ -32,7 +32,7 @@ On Windows, build Release first with `cmake --build build --config Release`. The
 - **shipping:** any validation error stops the export, and editor state is stripped.
 - **dev:** problems are only warnings, `.pdb` files are kept, and the game writes `telegraph.log`.
 
-`--zip` writes `<slug>-<version>.zip`.
+`--zip` writes `<slug>-<version>.zip` (portable). `--installer` also builds a Windows setup installer; see [distribution.md](distribution.md) for the installer, the app-local VC++ runtime, the dependency check and the distribution settings.
 
 ## Validation
 
