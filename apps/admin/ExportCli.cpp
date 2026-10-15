@@ -2,6 +2,7 @@
 
 #include "editor/launch/GameLauncher.h"
 #include "editor/projects/ProjectStore.h"
+#include "editor/templates/TemplateStore.h"
 #include "editor/workspace/SceneIO.h"
 #include "editor/workspace/Workspace2D.h"
 #include "scene/SampleRider.h"
@@ -56,10 +57,18 @@ std::string sample_dir(const std::string& id, std::string* err) {
   if (!fs::exists(root / id / "project.json", ec)) {
     fs::remove_all(root, ec);
     fs::create_directories(root, ec);
-    editor::ProjectStore store(root.string());
-    if (!store.refresh()) {
-      *err = "could not seed samples: " + store.last_error();
-      return {};
+    // The samples are template generators now (nothing seeds a root).
+    for (const std::string& gen : editor::TemplateStore::generator_ids()) {
+      std::string gen_err;
+      const std::string name = gen == "sample-2d-platformer" ? "Sample 2D Platformer"
+                               : gen == "ghost-town-3d"      ? "Ghost Town 3D"
+                               : gen == "haunted-saloon-vr"  ? "Haunted Saloon VR"
+                               : gen == "frontier-survival"  ? "Frontier Survival"
+                                                             : "Sky Pirates";
+      if (!editor::TemplateStore::run_generator(gen, (root / gen).string(), name, &gen_err)) {
+        *err = "could not write sample " + gen + ": " + gen_err;
+        return {};
+      }
     }
   }
   if (!fs::exists(root / id / "project.json", ec)) {

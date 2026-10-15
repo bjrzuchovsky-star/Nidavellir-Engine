@@ -10,7 +10,8 @@ namespace tombstone {
 namespace editor {
 
 // Scans projects_root for project folders (each containing project.json).
-// Creates new projects (2D / 3D / VR) on disk and seeds a sample when the root is empty.
+// Creates new projects (2D / 3D / VR) on disk. Samples come from templates
+// (editor/templates/TemplateStore.h); nothing is seeded here.
 class ProjectStore {
  public:
   explicit ProjectStore(std::string projects_root);
@@ -21,7 +22,7 @@ class ProjectStore {
   const std::vector<ProjectInfo>& projects() const { return projects_; }
   const std::string& last_error() const { return last_error_; }
 
-  // Ensures root exists, scans for project.json folders, seeds sample if empty.
+  // Ensures root exists and scans for project.json folders.
   // Returns false on hard failures (missing/unwritable root).
   bool refresh();
 
@@ -40,6 +41,11 @@ class ProjectStore {
   bool create_project(const std::string& name, ProjectKind kind,
                       const std::vector<std::string>* plugins,
                       ProjectInfo* out = nullptr);
+
+  // Project settings: switch VR on / off for a 3D project (old "vr"
+  // dimension files are migrated to "3d" + "vr" here). Keeps other fields.
+  static bool set_project_vr(const std::string& project_dir, bool on,
+                             std::string* error_out = nullptr);
 
   // Marks last_opened on disk and in the in-memory list.
   bool touch_last_opened(const std::string& project_path);
@@ -65,10 +71,6 @@ class ProjectStore {
  private:
   static std::string now_timestamp();
   static std::string trim_copy(const std::string& s);
-  bool seed_sample_2d_if_empty();
-  // haunted-saloon-vr: always with the other samples, once for older roots.
-  void seed_vr_sample(bool force);
-  void seed_shipyard_sample(bool force);
 
   std::string projects_root_;
   std::vector<ProjectInfo> projects_;

@@ -1,0 +1,14 @@
+{
+  "id": "ghost-town-3d",
+  "name": "Ghost Town 3D",
+  "dimension": "3d",
+  "description": "A 3D main street of primitives, a glTF lantern post, textures and Lua. Ride in and walk it.",
+  "plugins": [],
+  "tags": [
+    "sample"
+  ],
+  "order": 20,
+  "thumbnail": "thumbnail.png",
+  "project": "project",
+  "generator": "ghost-town-3d"
+}

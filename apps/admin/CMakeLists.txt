@@ -21,6 +21,7 @@ add_executable(ts_admin
   ExportCli.cpp
   SmokeGraph.cpp
   SmokeNative.cpp
+  SmokeTemplates.cpp
 )
 
 target_link_libraries(ts_admin
@@ -57,6 +58,14 @@ target_compile_features(ts_admin PRIVATE cxx_std_20)
 target_compile_definitions(ts_admin PRIVATE
   TS_SAMPLE_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugins")
 add_dependencies(ts_admin ts_plugin_lantern)
+
+# Ship the engine templates next to ts_admin (<exe dir>/templates); runs
+# every build so edited templates are picked up.
+add_custom_target(ts_admin_templates ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${PROJECT_SOURCE_DIR}/templates" "$<TARGET_FILE_DIR:ts_admin>/templates"
+  COMMENT "Copying engine templates next to ts_admin")
+add_dependencies(ts_admin_templates ts_admin)
 
 # MSVC: enable UTF-8 source and avoid min/max macros interfering with ImGui.
 if(MSVC)

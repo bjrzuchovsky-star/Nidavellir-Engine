@@ -58,7 +58,7 @@ void EditorPlugins::open(ProjectInfo* project, std::string host,
   host_object_ = host_object;
   sink_ = std::move(sink);
   build_catalog();
-  const plugin::ProjectType type = plugin_type_of(project_->kind);
+  const plugin::ProjectType type = plugin_type_of(vr_enabled(*project_) ? ProjectKind::VR : project_->kind);
   enabled_ = project_->plugins_set
                  ? project_->plugins
                  : plugin::PluginManager::defaults(*catalog_, type);
@@ -175,7 +175,7 @@ bool EditorPlugins::set_enabled(const std::string& id, bool on,
 std::size_t EditorPlugins::apply() {
   if (!project_) return 0;
   plugin::PluginContext ctx;
-  ctx.project_type = plugin_type_of(project_->kind);
+  ctx.project_type = plugin_type_of(vr_enabled(*project_) ? ProjectKind::VR : project_->kind);
   ctx.project_dir = project_->path;
   ctx.host = host_;
   ctx.host_object = host_object_;

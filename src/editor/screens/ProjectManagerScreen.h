@@ -2,14 +2,20 @@
 
 #include "editor/ProjectInfo.h"
 #include "editor/screens/IScreen.h"
+#include "gfx/TextureCache.h"
 
 #include <optional>
 #include <string>
 #include <vector>
 
+struct ImVec2;
+
 namespace ts {
 namespace tombstone {
 namespace editor {
+
+class TemplateStore;
+struct ProjectTemplate;
 
 // On-disk project list/select shell with ImGui UI.
 // Actions: Open (select index / double-click), New Project (2D / 3D / VR
@@ -68,10 +74,38 @@ class ProjectManagerScreen final : public IScreen {
   void clear_new_project_request();
   void clear_delete_request();
 
+  // --- Templates (ProjectManager_Templates.cpp) ------------------------------
+  // The picker lists `templates` (owned by AppFlow; may be null).
+  void set_templates(const TemplateStore* templates) { templates_ = templates; }
+  void open_template_picker(std::string preselect_id = {});
+  bool template_picker_open() const { return picker_open_; }
+  // vr: -1 = template default, 0 off, 1 on (3D only).
+  void request_new_from_template(std::string name, std::string template_id, int vr = -1);
+  bool template_create_requested() const { return template_create_requested_; }
+  const std::string& pending_template_id() const { return pending_template_id_; }
+  int pending_template_vr() const { return pending_template_vr_; }
+  void clear_template_create_request();
+  // Save the highlighted project as a user template.
+  void request_save_as_template(std::string name, std::string description);
+  bool save_template_requested() const { return save_template_requested_; }
+  const std::string& pending_template_name() const { return pending_template_name_; }
+  const std::string& pending_template_description() const { return pending_template_desc_; }
+  void clear_save_template_request() { save_template_requested_ = false; }
+  // Claim settings: VR switch on the highlighted 3D project.
+  void request_set_vr(bool on);
+  bool set_vr_requested() const { return set_vr_requested_; }
+  bool pending_vr() const { return pending_vr_; }
+  void clear_set_vr_request() { set_vr_requested_ = false; }
+
  private:
   void draw_ui();
   void draw_project_card(std::size_t index);
   void draw_kind_picker();
+  void draw_template_picker();
+  void draw_template_card(const ProjectTemplate& t, float w, float h);
+  void draw_save_template_popup();
+  void draw_claim_settings_popup();
+  void draw_template_thumb(const ProjectTemplate& t, const ImVec2& p0, const ImVec2& p1);
 
   std::vector<ProjectInfo> projects_;
   std::string projects_root_;
@@ -90,6 +124,29 @@ class ProjectManagerScreen final : public IScreen {
   bool settings_requested_ = false;
   bool logout_requested_ = false;
   char new_name_buf_[128]{};
+
+  // Templates.
+  const TemplateStore* templates_ = nullptr;
+  gfx::TextureCache thumbs_;
+  bool picker_open_ = false;
+  bool picker_popup_pending_ = false;
+  std::string picked_template_id_;
+  int picker_filter_ = 0;  // 0 all, 1 2D, 2 3D, 3 VR, 4 mine
+  bool picker_vr_ = false;
+  char picker_search_[64]{};
+  char picker_name_buf_[128]{};
+  bool template_create_requested_ = false;
+  std::string pending_template_id_;
+  int pending_template_vr_ = -1;
+  bool save_popup_pending_ = false;
+  char save_name_buf_[128]{};
+  char save_desc_buf_[256]{};
+  bool save_template_requested_ = false;
+  std::string pending_template_name_;
+  std::string pending_template_desc_;
+  bool settings_popup_pending_ = false;
+  bool set_vr_requested_ = false;
+  bool pending_vr_ = false;
 };
 
 }  // namespace editor

@@ -65,6 +65,9 @@ constexpr const char* kUsage =
     "  --log <file>     also write the Telegraph (script, toast and trigger\n"
     "                   log lines, always on stdout) to <file>\n"
     "  --sim            VR projects: use the desktop simulator, not the headset\n"
+    "  --desktop        VR projects: ride flat on the desktop (also what\n"
+    "                   happens when no headset is found; TS_VR=sim picks\n"
+    "                   the simulator for that case instead)\n"
     "  --xr-probe       check the OpenXR runtime + headset (creates and destroys\n"
     "                   a session, no window) and exit\n"
     "Keys: WASD / arrows move P1 | E / Space / pad A action |\n"
@@ -79,6 +82,7 @@ struct Options {
   bool collision = false;
   bool help = false;
   bool sim = false;
+  bool desktop = false;
   bool xr_probe = false;
   std::string log_path;
 };
@@ -94,6 +98,8 @@ bool parse_args(int argc, char** argv, Options* out, std::string* err) {
       out->frames = std::strtol(argv[++i], nullptr, 10);
     } else if (a == "--log" && i + 1 < argc) {
       out->log_path = argv[++i];
+    } else if (a == "--desktop") {
+      out->desktop = true;
     } else if (a == "--sim") {
       out->sim = true;
     } else if (a == "--xr-probe") {
@@ -755,10 +761,20 @@ int main(int argc, char** argv) {
     return 2;
   }
   std::cout << "TombStone Game\n";
-  if (game::is_vr_project(opt.project)) {
+  // VR is a switch on 3D projects: with a headset (or --sim) ride in VR,
+  // otherwise (or with --desktop) the same scene rides flat on the desktop.
+  if (game::is_vr_project(opt.project) && !opt.desktop) {
     const std::string name = project_name(opt.project);
-    return opt.smoke ? game::run_smoke_vr(opt.project, name)
-                     : game::run_window_vr(opt.project, name, opt.frames, opt.sim);
+    if (opt.smoke) return game::run_smoke_vr(opt.project, name);
+    std::string why;
+    const char* pref = std::getenv("TS_VR");
+    const bool sim_fallback = pref && std::string(pref) == "sim";
+    if (opt.sim || sim_fallback || game::headset_present(&why)) {
+      return game::run_window_vr(opt.project, name, opt.frames, opt.sim);
+    }
+    std::cout << "[ts_game] no headset (" << why
+              << ") -- riding on the desktop (--sim for the VR simulator)\n";
+    return game::run_window_3d(opt.project, name, opt.frames);
   }
   if (game::is_3d_project(opt.project)) {
     const std::string name = project_name(opt.project);

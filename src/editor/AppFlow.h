@@ -5,6 +5,7 @@
 #include "editor/projects/ProjectStore.h"
 #include "editor/screens/IScreen.h"
 #include "editor/settings/Settings.h"
+#include "editor/templates/TemplateStore.h"
 #include "editor/workspace/Workspace2D.h"
 
 #include <memory>
@@ -51,6 +52,15 @@ class AppFlow {
   // Any kind; starts with the default plugins for that kind.
   bool create_new_project(const std::string& name, ProjectKind kind);
   bool delete_project(std::size_t index);
+  // Templates (Break Ground picker): create from a template id; vr = -1
+  // template default, 0 off, 1 on (3D only).
+  bool create_from_template(const std::string& name, const std::string& template_id, int vr = -1);
+  bool save_project_as_template(std::size_t index, const std::string& name,
+                                const std::string& description);
+  // Claim Settings: VR switch on a 3D project.
+  bool set_project_vr(std::size_t index, bool on);
+  const TemplateStore& templates() const { return templates_; }
+  void reload_templates();
   bool open_settings_from_projects();
   bool logout();
 
@@ -102,6 +112,7 @@ class AppFlow {
   std::unique_ptr<IScreen> screen_;
   Settings settings_;
   ProjectStore project_store_;
+  TemplateStore templates_;
   std::unique_ptr<ProjectInfo> active_project_;
   std::string status_message_;
   std::string last_error_;

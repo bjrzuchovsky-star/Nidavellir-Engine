@@ -25,6 +25,7 @@
 #include "SmokeShipyard.h"
 #include "SmokeSurvival.h"
 #include "SmokeRuntime.h"
+#include "SmokeTemplates.h"
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -159,8 +160,18 @@ int run_console_smoke() {
     return 1;
   }
 
-  if (flow.projects().empty()) {
-    std::cerr << "Expected seeded sample project on disk\n";
+  // Samples are templates now: a fresh root starts empty, and the Break
+  // Ground picker creates claims from templates.
+  if (!flow.projects().empty()) {
+    std::cerr << "Expected an empty projects root (no seeded samples)\n";
+    engine.shutdown();
+    return 1;
+  }
+  if (flow.templates().templates().size() < 7 ||
+      !flow.create_from_template("Frontier Smoke", "frontier-survival") ||
+      !flow.create_from_template("Saloon Smoke", "haunted-saloon-vr") ||
+      flow.projects().size() != 2) {
+    std::cerr << "Template create failed: " << flow.last_error() << '\n';
     engine.shutdown();
     return 1;
   }
@@ -207,7 +218,7 @@ int run_console_smoke() {
 
   bool opened = false;
   for (std::size_t i = 0; i < flow.projects().size(); ++i) {
-    // The seeded ghost-town-3d sorts first; this walk-through is 2D.
+    // Claims sort by name (Frontier Smoke first); this walk-through is 2D.
     if (flow.projects()[i].kind != ts::tombstone::editor::ProjectKind::TwoD) continue;
     if (flow.select_project(i)) {
       opened = true;
@@ -1173,6 +1184,9 @@ int run_console_smoke() {
   engine.shutdown();
 
   // Runtime + Play mode (headless; see SmokeRuntime.cpp).
+  if (run_templates_smoke() != 0) {
+    return 1;
+  }
   if (run_runtime_smoke() != 0) {
     return 1;
   }
@@ -1347,6 +1361,12 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--export") == 0) {
       // Headless Ship It: ts_admin --export <project> --out <dir> [...]
       return ts::tombstone::run_export_cli(argc, argv);
+    }
+    if (std::strcmp(argv[i], "--bake-templates") == 0 && i + 1 < argc) {
+      return run_bake_templates(argv[i + 1]);
+    }
+    if (std::strcmp(argv[i], "--smoke-templates") == 0) {
+      return run_templates_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-export") == 0) {
       return ts::tombstone::run_export_smoke();

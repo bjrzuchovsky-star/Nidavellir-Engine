@@ -121,7 +121,10 @@ world3d::VrPose tracked_at(const world3d::World3D& w, const Vec3& world_pos) {
 bool is_vr_project(const std::string& dir) {
   const std::string pj = slurp(fs::path(dir) / "project.json");
   if (auto obj = json_mini::parse_object(pj)) {
-    return json_mini::get_string(*obj, "dimension", "") == "vr";
+    // The old "dimension": "vr", or a 3D project with the VR switch on.
+    const std::string dim = json_mini::get_string(*obj, "dimension", "");
+    const std::string vr = json_mini::get_string(*obj, "vr", json_mini::get_string(*obj, "xr", ""));
+    return dim == "vr" || ((dim == "3d" || dim == "3D") && vr == "true");
   }
   return false;
 }
@@ -449,6 +452,14 @@ int run_window_vr(const std::string& dir, const std::string& name, long frames, 
   glfwDestroyWindow(win);
   glfwTerminate();
   return code;
+}
+
+bool headset_present(std::string* why) {
+  const xr::XrProbe p = xr::probe_openxr(false);
+  if (!p.system && why) {
+    *why = !p.error.empty() ? p.error : (p.instance ? "no headset" : "no OpenXR runtime");
+  }
+  return p.system;
 }
 
 int run_xr_probe() {

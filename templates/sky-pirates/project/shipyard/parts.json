@@ -1,0 +1,15 @@
+{
+  "parts": [
+    {"id": "hull", "name": "Plank hull", "kind": "hull", "w": 1, "h": 1, "mass": 1.0, "hp": 40, "color": [0.56, 0.40, 0.25]},
+    {"id": "armor", "name": "Riveted iron plate", "kind": "armor", "w": 1, "h": 1, "mass": 2.5, "hp": 140, "color": [0.45, 0.45, 0.48]},
+    {"id": "gangway", "name": "Gangway", "kind": "corridor", "w": 1, "h": 1, "mass": 0.6, "hp": 30, "color": [0.70, 0.55, 0.34]},
+    {"id": "steam_engine", "name": "Steam paddle engine", "kind": "engine", "w": 1, "h": 2, "mass": 3.0, "hp": 60, "power": -2, "crew": -1, "thrust": 900, "color": [0.72, 0.46, 0.24]},
+    {"id": "trim_jet", "name": "Trim jet", "kind": "engine", "w": 1, "h": 1, "mass": 1.0, "hp": 35, "power": -0.5, "thrust": 480, "color": [0.80, 0.60, 0.30]},
+    {"id": "boiler", "name": "Coal boiler", "kind": "reactor", "w": 2, "h": 2, "mass": 6.0, "hp": 120, "power": 12, "crew": -1, "color": [0.40, 0.30, 0.28]},
+    {"id": "bunkhouse", "name": "Bunkhouse", "kind": "quarters", "w": 2, "h": 1, "mass": 2.0, "hp": 50, "crew": 6, "color": [0.62, 0.48, 0.36]},
+    {"id": "gatling", "name": "Gatling turret", "kind": "gun", "w": 1, "h": 1, "mass": 2.0, "hp": 60, "power": -1, "range": 330, "damage": 9, "fire_rate": 5, "shot_speed": 560, "color": [0.30, 0.30, 0.32]},
+    {"id": "cannon", "name": "Long Tom cannon", "kind": "gun", "w": 2, "h": 2, "mass": 6.0, "hp": 130, "power": -3, "crew": -2, "range": 460, "damage": 45, "fire_rate": 0.8, "shot_speed": 480, "color": [0.24, 0.22, 0.24]},
+    {"id": "shield_vane", "name": "Tesla shield vane", "kind": "shield", "w": 1, "h": 2, "mass": 2.0, "hp": 50, "power": -2, "crew": -1, "shield": 160, "shield_regen": 14, "color": [0.35, 0.55, 0.75]},
+    {"id": "cargo", "name": "Cargo hold", "kind": "storage", "w": 2, "h": 2, "mass": 3.0, "hp": 80, "capacity": 40, "color": [0.55, 0.45, 0.30]}
+  ]
+}

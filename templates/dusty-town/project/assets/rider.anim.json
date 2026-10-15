@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "image": "rider.png",
+  "grid": {"frame_w": 32, "frame_h": 48, "cols": 6, "rows": 4},
+  "default_clip": "idle_down",
+  "clips": [
+    {"name": "idle_down", "fps": 3, "mode": "loop", "start": 0, "count": 2},
+    {"name": "idle_up", "fps": 3, "mode": "loop", "start": 6, "count": 2},
+    {"name": "idle_left", "fps": 3, "mode": "loop", "start": 12, "count": 2},
+    {"name": "idle_right", "fps": 3, "mode": "loop", "start": 18, "count": 2},
+    {"name": "walk_down", "fps": 8, "mode": "loop", "start": 2, "count": 4},
+    {"name": "walk_up", "fps": 8, "mode": "loop", "start": 8, "count": 4},
+    {"name": "walk_left", "fps": 8, "mode": "loop", "start": 14, "count": 4},
+    {"name": "walk_right", "fps": 8, "mode": "loop", "start": 20, "count": 4}
+  ]
+}

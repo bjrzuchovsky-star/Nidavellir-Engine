@@ -1056,9 +1056,11 @@ bool write_haunted_saloon_sample(const std::string& project_dir,
   s.editor_camera.target = {0, 1, 0};
   s.editor_camera.distance = 16.0f;
   if (!save_file(scene_path(project_dir), s, error)) return false;
+  // A 3D claim with the VR switch on (VR is no longer a dimension).
   const std::string pj = json_mini::write_object({{"name", display_name},
-                                                  {"dimension", "vr"},
-                                                  {"created", "sample"}});
+                                                  {"dimension", "3d"},
+                                                  {"created", "sample"}},
+                                                 {{"vr", true}});
   return write_text(dir / "project.json", pj, error);
 }
 

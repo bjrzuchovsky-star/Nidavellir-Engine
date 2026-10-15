@@ -1,0 +1,5 @@
+{
+  "name": "Dusty Town (2D Platformer)",
+  "dimension": "2d",
+  "plugins": "ts.posse"
+}

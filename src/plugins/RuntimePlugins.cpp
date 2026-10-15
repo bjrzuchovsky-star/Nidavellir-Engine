@@ -27,7 +27,11 @@ ProjectPluginList read_project_plugins(const std::string& project_dir) {
   if (!parsed) return out;
   const std::string dim = json_mini::get_string(*parsed, "dimension", "2d");
   if (dim == "3d" || dim == "3D") out.type = plugin::ProjectType::ThreeD;
-  if (dim == "vr" || dim == "VR") out.type = plugin::ProjectType::VR;
+  // VR: the old "dimension": "vr", or a 3D project with "vr": true.
+  const std::string vr = json_mini::get_string(*parsed, "vr", json_mini::get_string(*parsed, "xr", ""));
+  if (dim == "vr" || dim == "VR" || (out.type == plugin::ProjectType::ThreeD && vr == "true")) {
+    out.type = plugin::ProjectType::VR;
+  }
   if (parsed->count("plugins") != 0) {
     out.listed = true;
     out.ids = plugin::split_plugin_list(json_mini::get_string(*parsed, "plugins"));

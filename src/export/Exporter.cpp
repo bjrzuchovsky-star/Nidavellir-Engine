@@ -148,6 +148,10 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
   if (version.empty()) version = "1.0.0";
   std::string dimension = json_mini::get_string(*pj, "dimension", "2d");
   for (char& c : dimension) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  // VR is a 3D switch: old "vr" dimensions ship as 3d + vr.
+  const std::string vr_flag = json_mini::get_string(*pj, "vr", json_mini::get_string(*pj, "xr", ""));
+  const bool vr = dimension == "vr" || (dimension == "3d" && vr_flag == "true");
+  if (dimension == "vr") dimension = "3d";
   const std::string slug = slugify(name);
   const std::string exe_name = (opt.exe_name.empty() ? slug : opt.exe_name) + kExeExt;
   auto pick_int = [&](int given, const char* key, int fallback) {
@@ -313,7 +317,8 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
   std::vector<std::pair<std::string, std::string>> gs = {
       {"name", name},           {"version", version},  {"dimension", dimension},
       {"start_scene", "scene.json"}, {"icon", icon},   {"pak", "game.tspak"},
-      {"profile", profile},     {"engine", "TombStone Engine"}};
+      {"profile", profile},     {"engine", "TombStone Engine"},
+      {"vr", vr ? "true" : "false"}};
   if (!write_all(game_dir / "game.json",
                  json_num_object(gs, {{"window_width", ww}, {"window_height", wh}}))) {
     return fail("cannot write game.json");
@@ -380,9 +385,10 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
          << "\nWindows: the runtime links the MSVC runtime dynamically (/MD). On a PC\n"
          << "without Visual Studio install the Microsoft Visual C++ 2015-2022\n"
          << "Redistributable (x64): https://aka.ms/vs/17/release/vc_redist.x64.exe\n";
-  if (dimension == "vr") {
-    readme << "\nVR: needs an OpenXR runtime (SteamVR / Oculus / WMR); without a headset\n"
-           << "run with --sim for the desktop simulator.\n";
+  if (vr) {
+    readme << "\nVR: rides in a headset through an OpenXR runtime (SteamVR / Oculus /\n"
+           << "WMR). Without a headset it starts on the desktop (flat 3D); --sim\n"
+           << "gives the VR desktop simulator, --desktop forces the flat ride.\n";
   }
   write_all(game_dir / "README.txt", readme.str());
   r.ok = true;

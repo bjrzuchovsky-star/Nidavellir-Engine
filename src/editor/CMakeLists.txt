@@ -55,7 +55,14 @@ add_library(ts_editor
   audio/MixerPanel.cpp
   audio/AudioWidgets.cpp
   export/FreightOffice.cpp
+  templates/TemplateStore.cpp
+  screens/ProjectManager_Templates.cpp
 )
+
+# Engine templates: the source tree's templates/ is the fallback when no
+# <exe dir>/templates exists (ts_admin's build copies one there).
+target_compile_definitions(ts_editor PRIVATE
+  TS_TEMPLATES_SOURCE_DIR="${PROJECT_SOURCE_DIR}/templates")
 
 target_include_directories(ts_editor
   PUBLIC
@@ -65,6 +72,7 @@ target_include_directories(ts_editor
 target_link_libraries(ts_editor
   PUBLIC
     ts_core
+    ts_store
     ts_scene
     ts_runtime
     ts_net

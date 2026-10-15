@@ -1,0 +1,17 @@
+{
+  "id": "frontier-survival",
+  "name": "Frontier Survival",
+  "dimension": "2d",
+  "description": "A 2D survival claim: gather, craft, build, day/night and hunger, with the Frontier Survival plugin on.",
+  "plugins": [
+    "ts.frontier"
+  ],
+  "tags": [
+    "sample",
+    "survival"
+  ],
+  "order": 11,
+  "thumbnail": "thumbnail.png",
+  "project": "project",
+  "generator": "frontier-survival"
+}

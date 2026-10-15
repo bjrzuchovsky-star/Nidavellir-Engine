@@ -64,6 +64,7 @@ bool AppFlow::reload_projects() {
   }
 
   project_store_.set_projects_root(settings_.projects_root);
+  reload_templates();
   if (!project_store_.refresh()) {
     last_error_ = project_store_.last_error();
     std::cout << "[AppFlow] project scan failed: " << last_error_ << '\n';
@@ -176,6 +177,26 @@ void AppFlow::handle_pending_screen_actions() {
       pm->clear_new_project_request();
       create_new_project(name, kind);
     }
+    if (pm->template_create_requested()) {
+      const std::string name = pm->pending_new_project_name();
+      const std::string id = pm->pending_template_id();
+      const int vr = pm->pending_template_vr();
+      pm->clear_template_create_request();
+      create_from_template(name, id, vr);
+    }
+    if (pm->save_template_requested()) {
+      const auto idx = pm->highlighted_index();
+      const std::string name = pm->pending_template_name();
+      const std::string desc = pm->pending_template_description();
+      pm->clear_save_template_request();
+      if (idx.has_value()) save_project_as_template(*idx, name, desc);
+    }
+    if (pm->set_vr_requested()) {
+      const auto idx = pm->highlighted_index();
+      const bool on = pm->pending_vr();
+      pm->clear_set_vr_request();
+      if (idx.has_value()) set_project_vr(*idx, on);
+    }
     if (pm->delete_requested()) {
       const auto idx = pm->pending_delete_index();
       pm->clear_delete_request();
@@ -264,6 +285,91 @@ bool AppFlow::create_new_project(const std::string& name, ProjectKind kind) {
     pm->set_error_message({});
     pm->highlight_project_by_id(created.id);
   }
+  return true;
+}
+
+void AppFlow::reload_templates() {
+  templates_.refresh(settings_.projects_root);
+  for (const std::string& e : templates_.errors()) std::cout << "[AppFlow] template: " << e << '\n';
+  if (auto* pm = dynamic_cast<ProjectManagerScreen*>(screen_.get())) pm->set_templates(&templates_);
+}
+
+namespace {
+void pm_report(IScreen* screen, const std::vector<ProjectInfo>* projects, const std::string& status,
+               const std::string& error, const std::string& highlight_id = {}) {
+  auto* pm = dynamic_cast<ProjectManagerScreen*>(screen);
+  if (!pm) return;
+  if (projects) pm->set_projects(*projects);
+  pm->set_status_message(status);
+  pm->set_error_message(error);
+  if (!highlight_id.empty()) pm->highlight_project_by_id(highlight_id);
+}
+}  // namespace
+
+bool AppFlow::create_from_template(const std::string& name, const std::string& template_id,
+                                   int vr) {
+  last_error_.clear();
+  const ProjectTemplate* tpl = templates_.find(template_id);
+  if (!tpl) {
+    last_error_ = "No template \"" + template_id + "\"";
+    pm_report(screen_.get(), nullptr, {}, last_error_);
+    return false;
+  }
+  ProjectInfo created;
+  std::string err;
+  if (!TemplateStore::create_project(project_store_, *tpl, name, &created, &err, vr)) {
+    last_error_ = err;
+    status_message_.clear();
+    std::cout << "[AppFlow] create from template " << template_id << " failed: " << err << '\n';
+    pm_report(screen_.get(), nullptr, {}, last_error_);
+    return false;
+  }
+  status_message_ = std::string("Broke ground on ") + kind_label(created) + " claim \"" +
+                    created.name + "\" from " + tpl->name;
+  std::cout << "[AppFlow] " << status_message_ << " at " << created.path << '\n';
+  pm_report(screen_.get(), &project_store_.projects(), status_message_, {}, created.id);
+  return true;
+}
+
+bool AppFlow::save_project_as_template(std::size_t index, const std::string& name,
+                                       const std::string& description) {
+  last_error_.clear();
+  if (index >= project_store_.projects().size()) {
+    last_error_ = "No such project";
+    return false;
+  }
+  const ProjectInfo& p = project_store_.projects()[index];
+  ProjectTemplate t;
+  std::string err;
+  if (!TemplateStore::save_as_template(p, TemplateStore::user_template_dir(settings_.projects_root),
+                                       name, description, &t, &err)) {
+    last_error_ = err;
+    pm_report(screen_.get(), nullptr, {}, last_error_);
+    return false;
+  }
+  reload_templates();
+  status_message_ = "Saved \"" + p.name + "\" as template \"" + t.name + "\"";
+  std::cout << "[AppFlow] " << status_message_ << " at " << t.dir << '\n';
+  pm_report(screen_.get(), nullptr, status_message_, {});
+  return true;
+}
+
+bool AppFlow::set_project_vr(std::size_t index, bool on) {
+  last_error_.clear();
+  if (index >= project_store_.projects().size()) {
+    last_error_ = "No such project";
+    return false;
+  }
+  const ProjectInfo p = project_store_.projects()[index];
+  std::string err;
+  if (!ProjectStore::set_project_vr(p.path, on, &err)) {
+    last_error_ = err;
+    pm_report(screen_.get(), nullptr, {}, last_error_);
+    return false;
+  }
+  project_store_.refresh();
+  status_message_ = "VR " + std::string(on ? "on" : "off") + " for \"" + p.name + "\"";
+  pm_report(screen_.get(), &project_store_.projects(), status_message_, {}, p.id);
   return true;
 }
 
@@ -477,8 +583,12 @@ std::unique_ptr<IScreen> AppFlow::make_screen(AppState state) {
       return std::make_unique<LoginScreen>(settings_.username,
                                            settings_.auto_login_dev);
     case AppState::ProjectManager:
-      return std::make_unique<ProjectManagerScreen>(
+    {
+      auto pm = std::make_unique<ProjectManagerScreen>(
           project_store_.projects(), settings_.projects_root, status_message_);
+      pm->set_templates(&templates_);
+      return pm;
+    }
     case AppState::Settings:
       return std::make_unique<SettingsScreen>(settings_, settings_return_state_);
     case AppState::Editor2D: {

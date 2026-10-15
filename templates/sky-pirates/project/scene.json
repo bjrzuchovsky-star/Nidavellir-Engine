@@ -1,0 +1,56 @@
+{
+  "version": 9,
+  "pan_x": 0,
+  "pan_y": 0,
+  "zoom": 1,
+  "show_grid": true,
+  "grid_size": 32,
+  "snap": false,
+  "selected_id": null,
+  "selection": [],
+  "tile_solidity": [],
+  "entities": [
+    {
+      "id": 1,
+      "name": "Camera",
+      "x": 0,
+      "y": 0,
+      "w": 16,
+      "h": 16,
+      "r": 0.35,
+      "g": 0.65,
+      "b": 0.95,
+      "a": 0,
+      "layer": 0,
+      "camera": {"target": 2, "smoothing": 0.15, "zoom": 1, "use_bounds": false, "bounds_x": 0, "bounds_y": 0, "bounds_w": 1024, "bounds_h": 768}
+    },
+    {
+      "id": 2,
+      "name": "Captain",
+      "x": -12,
+      "y": -12,
+      "w": 24,
+      "h": 24,
+      "r": 0.95,
+      "g": 0.72,
+      "b": 0.32,
+      "a": 1,
+      "layer": 5,
+      "player": {"slot": 0, "speed": 0}
+    },
+    {
+      "id": 3,
+      "name": "BountyBoard",
+      "x": -2000,
+      "y": -2000,
+      "w": 8,
+      "h": 8,
+      "r": 0.35,
+      "g": 0.65,
+      "b": 0.95,
+      "a": 0,
+      "layer": 0,
+      "script": {"path": "scripts/bounty_board.lua", "props": []}
+    }
+  ]
+}

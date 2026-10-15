@@ -141,7 +141,7 @@ class Editor3DScreen final : public IScreen {
   void play_ticks(int n, const world3d::Input3D& in) { world_.run_ticks(n, in); }
 
   // ---- VR (Editor3DScreen_VR.cpp) -------------------------------------------
-  bool vr_project() const { return project_.kind == ProjectKind::VR; }
+  bool vr_project() const { return vr_enabled(project_); }
   // Start the scene in VR mode: OpenXR headset unless `simulator`, falling
   // back to the simulator (the reason goes to the Telegraph).
   bool vr_preview_start(bool simulator);

@@ -353,7 +353,10 @@ int project_checks() {
     editor::ProjectInfo back;
     std::string err;
     if (!editor::ProjectStore::load_project_json(made.path, &back, &err)) return fail(err);
-    if (back.kind != k || !back.plugins_set || back.plugins != plugins) {
+    const editor::ProjectKind want =
+        k == editor::ProjectKind::VR ? editor::ProjectKind::ThreeD : k;
+    if (back.kind != want || back.vr != (k == editor::ProjectKind::VR) || !back.plugins_set ||
+        back.plugins != plugins) {
       return fail(std::string("project type / plugins should round-trip for ") +
                   editor::to_string(k));
     }
@@ -364,6 +367,44 @@ int project_checks() {
     if (k != editor::ProjectKind::TwoD && !plugins.empty()) {
       return fail("3D / VR projects start with no 2D-only plugins");
     }
+  }
+
+  // VR moved from a dimension to a 3D switch: an old "dimension": "vr" file
+  // loads as 3D + VR, and the project-settings toggle rewrites it as 3d.
+  {
+    const fs::path legacy = root / "legacy-goggles";
+    fs::create_directories(legacy);
+    std::ofstream(legacy / "project.json")
+        << "{\n  \"name\": \"Legacy Goggles\",\n  \"dimension\": \"vr\",\n"
+           "  \"created\": \"2026-01-02\",\n  \"window_width\": \"1600\"\n}\n";
+    editor::ProjectInfo lg;
+    std::string lerr;
+    if (!editor::ProjectStore::load_project_json(legacy.string(), &lg, &lerr) ||
+        lg.kind != editor::ProjectKind::ThreeD || !lg.vr || !editor::vr_enabled(lg)) {
+      return fail("a legacy vr project should load as 3D with VR on");
+    }
+    if (!editor::ProjectStore::set_project_vr(legacy.string(), false, &lerr)) return fail(lerr);
+    editor::ProjectStore::load_project_json(legacy.string(), &lg, &lerr);
+    const std::string txt = read_file(legacy / "project.json");
+    if (lg.vr || lg.kind != editor::ProjectKind::ThreeD ||
+        txt.find("\"3d\"") == std::string::npos || txt.find("1600") == std::string::npos) {
+      return fail("VR off should write dimension 3d and keep other fields: " + txt);
+    }
+    if (!editor::ProjectStore::set_project_vr(legacy.string(), true, &lerr)) return fail(lerr);
+    editor::ProjectStore::load_project_json(legacy.string(), &lg, &lerr);
+    if (!lg.vr) return fail("VR back on");
+    lg.kind = editor::ProjectKind::TwoD;
+    editor::ProjectInfo two;
+    two.path = (root / "two-d-vr").string();
+    two.name = "Flat";
+    two.vr = true;
+    editor::ProjectStore::write_project_json(two, &lerr);
+    editor::ProjectStore::load_project_json(two.path, &two, &lerr);
+    if (two.vr || editor::ProjectStore::set_project_vr(two.path, true, &lerr)) {
+      return fail("2D projects have no VR switch");
+    }
+    fs::remove_all(legacy);
+    fs::remove_all(two.path);
   }
 
   // A project.json from before plugins and project types.
@@ -538,7 +579,11 @@ int flow_checks() {
                         Case{editor::ProjectKind::ThreeD, "Mesa Verde 3D"}}) {
     if (!flow.create_new_project(c.name, c.kind)) return fail("create " + std::string(c.name));
     const int idx = find(c.name);
-    if (idx < 0 || flow.projects()[idx].kind != c.kind) return fail("created kind");
+    // VR is a 3D switch now: a "VR" create is 3D with vr on.
+    if (idx < 0 || flow.projects()[idx].kind != editor::ProjectKind::ThreeD ||
+        flow.projects()[idx].vr != (c.kind == editor::ProjectKind::VR)) {
+      return fail("created kind (3D, VR switch)");
+    }
     if (!flow.select_project(static_cast<std::size_t>(idx))) return fail("open " + std::string(c.name));
     editor::Editor3DScreen* ed = flow.editor3d_screen();
     if (flow.current_state() != editor::AppState::Editor3D || !ed) {

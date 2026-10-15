@@ -1,10 +1,8 @@
 #include "editor/projects/ProjectStore.h"
 
-#include "plugins/shipyard/Sample.h"
-#include "plugins/survival/Sample.h"
-#include "render3d/Scene3D.h"
 
 #include "editor/settings/JsonMini.h"
+#include "store/Json.h"
 
 #include <algorithm>
 #include <iostream>
@@ -178,6 +176,11 @@ bool ProjectStore::load_project_json(const std::string& project_dir,
   const std::string dimension =
       json_mini::get_string(*parsed, "dimension", "2d");
   info.kind = project_kind_from_dimension(dimension);
+  // VR is a 3D switch now: "vr" (or "xr") true, or the old "dimension": "vr".
+  const std::string vr_flag = json_mini::get_string(*parsed, "vr",
+                                                    json_mini::get_string(*parsed, "xr", "false"));
+  info.vr = vr_flag == "true" || vr_flag == "1";
+  normalize_vr(info);
   info.created = json_mini::get_string(*parsed, "created");
   info.last_opened = json_mini::get_string(*parsed, "last_opened");
   // "plugins" arrived with the plugin system; absent = defaults.
@@ -253,9 +256,11 @@ bool ProjectStore::write_project_json(const ProjectInfo& project,
     return false;
   }
 
+  ProjectInfo norm = project;
+  normalize_vr(norm);
   std::vector<std::pair<std::string, std::string>> fields = {
       {"name", project.name},
-      {"dimension", dimension_string(project.kind)},
+      {"dimension", dimension_string(norm.kind)},
       {"created", project.created},
   };
   if (!project.last_opened.empty()) {
@@ -265,105 +270,15 @@ bool ProjectStore::write_project_json(const ProjectInfo& project,
     fields.emplace_back("plugins", join_plugin_ids(project.plugins));
   }
 
-  out << json_mini::write_object(fields);
+  std::vector<std::pair<std::string, bool>> flags;
+  if (norm.kind == ProjectKind::ThreeD) flags.emplace_back("vr", norm.vr);
+  out << json_mini::write_object(fields, flags);
   if (!out) {
     if (error_out) {
       *error_out = "Failed while writing " + json_path.string();
     }
     return false;
   }
-  return true;
-}
-
-void ProjectStore::seed_vr_sample(bool force) {
-  // Roots seeded before VR landed get the saloon once (a marker file keeps
-  // a deleted sample deleted).
-  const fs::path root(projects_root_);
-  const fs::path marker = root / ".haunted-saloon-vr.seeded";
-  std::error_code ec;
-  if (!force && fs::exists(marker, ec)) return;
-  const fs::path dir = root / "haunted-saloon-vr";
-  if (!fs::exists(dir, ec)) {
-    std::string err;
-    ProjectInfo saloon;
-    if (scene3d::write_haunted_saloon_sample(dir.string(), "Haunted Saloon VR", &err) &&
-        load_project_json(dir.string(), &saloon, &err)) {
-      projects_.push_back(std::move(saloon));
-    } else {
-      std::cerr << "[ProjectStore] haunted-saloon-vr sample: " << err << '\n';
-      return;
-    }
-  }
-  std::ofstream(marker) << "seeded\n";
-}
-
-void ProjectStore::seed_shipyard_sample(bool force) {
-  // Roots seeded before Airship Works landed get Sky Pirates once (a marker
-  // keeps a deleted sample deleted).
-  const fs::path root(projects_root_);
-  const fs::path marker = root / ".sky-pirates.seeded";
-  std::error_code ec;
-  if (!force && fs::exists(marker, ec)) return;
-  const fs::path dir = root / shipyard::kSampleId;
-  if (!fs::exists(dir, ec)) {
-    std::string err;
-    ProjectInfo sky;
-    if (shipyard::write_sky_pirates_sample(dir.string(), shipyard::kSampleName, &err) &&
-        load_project_json(dir.string(), &sky, &err)) {
-      projects_.push_back(std::move(sky));
-    } else {
-      std::cerr << "[ProjectStore] sky-pirates sample: " << err << '\n';
-      return;
-    }
-  }
-  std::ofstream(marker) << "seeded\n";
-}
-
-bool ProjectStore::seed_sample_2d_if_empty() {
-  if (!projects_.empty()) {
-    return true;
-  }
-
-  ProjectInfo sample;
-  sample.id = "sample-2d-platformer";
-  sample.name = "Sample 2D Platformer";
-  sample.kind = ProjectKind::TwoD;
-  sample.path = (fs::path(projects_root_) / sample.id).string();
-  sample.created = now_timestamp();
-
-  if (!write_project_json(sample, &last_error_)) {
-    return false;
-  }
-  projects_.push_back(std::move(sample));
-
-  // And a 3D claim to ride: the ghost town (primitives, a glTF lantern,
-  // textures, Lua). A failure here is reported but keeps the 2D sample.
-  const std::string ghost_dir = (fs::path(projects_root_) / "ghost-town-3d").string();
-  std::string ghost_err;
-  ProjectInfo ghost;
-  if (scene3d::write_ghost_town_sample(ghost_dir, "Ghost Town 3D", &ghost_err) &&
-      load_project_json(ghost_dir, &ghost, &ghost_err)) {
-    projects_.push_back(std::move(ghost));
-  } else {
-    std::cerr << "[ProjectStore] ghost-town-3d sample: " << ghost_err << '\n';
-  }
-
-  // And the VR claim: the haunted saloon (grab, throw, teleport, laser).
-  seed_vr_sample(true);
-
-  // And the Frontier Survival claim (2D with the ts.frontier plugin on).
-  const std::string frontier_dir = (fs::path(projects_root_) / survival::kSampleId).string();
-  std::string frontier_err;
-  ProjectInfo frontier;
-  if (survival::write_frontier_sample(frontier_dir, survival::kSampleName, &frontier_err) &&
-      load_project_json(frontier_dir, &frontier, &frontier_err)) {
-    projects_.push_back(std::move(frontier));
-  } else {
-    std::cerr << "[ProjectStore] frontier-survival sample: " << frontier_err << '\n';
-  }
-
-  // And the Airship Works claim (2D with the ts.shipyard plugin on).
-  seed_shipyard_sample(true);
   return true;
 }
 
@@ -415,18 +330,10 @@ bool ProjectStore::refresh() {
               return a.name < b.name;
             });
 
-  if (!seed_sample_2d_if_empty()) {
-    return false;
-  }
-  if (!projects_.empty()) {
-    const std::size_t before = projects_.size();
-    seed_vr_sample(false);
-    seed_shipyard_sample(false);
-    if (projects_.size() != before) {
-      std::sort(projects_.begin(), projects_.end(),
-                [](const ProjectInfo& a, const ProjectInfo& b) { return a.name < b.name; });
-    }
-  }
+  // Samples are templates now (templates/ + TemplateStore): nothing is
+  // seeded into the projects root any more. Roots seeded by older builds
+  // keep their sample claims and the old .*.seeded marker files, which
+  // nothing reads.
   return true;
 }
 
@@ -475,6 +382,7 @@ bool ProjectStore::create_project(const std::string& name, ProjectKind kind,
   info.id = dir.filename().string();
   info.name = trimmed;
   info.kind = kind;
+  normalize_vr(info);  // a legacy VR kind becomes 3D + vr
   info.path = dir.string();
   info.created = now_timestamp();
   if (plugins) {
@@ -503,6 +411,31 @@ bool ProjectStore::create_project(const std::string& name, ProjectKind kind,
     *out = info;
   }
   return true;
+}
+
+bool ProjectStore::set_project_vr(const std::string& project_dir, bool on,
+                                  std::string* error_out) {
+  // Edits project.json in place (unknown fields kept): dimension "3d" and
+  // "vr": on. Refuses 2D projects.
+  const fs::path file = fs::path(project_dir) / "project.json";
+  store::Json j;
+  std::string err;
+  if (!store::read_json_file(file.string(), &j, &err) || !j.is_object()) {
+    if (error_out) *error_out = err.empty() ? "project.json is not an object" : err;
+    return false;
+  }
+  const ProjectKind kind = project_kind_from_dimension(j.string_at("dimension", "2d"));
+  if (kind == ProjectKind::TwoD) {
+    if (error_out) *error_out = "VR is a 3D switch; this is a 2D project";
+    return false;
+  }
+  j.set("dimension", "3d");
+  j.set("vr", on);
+  store::Json out = store::Json::object();
+  for (const auto& m : j.members()) {
+    if (m.first != "xr") out.set(m.first, m.second);
+  }
+  return store::write_text_file(file.string(), out.dump(), error_out);
 }
 
 bool ProjectStore::touch_last_opened(const std::string& project_path) {

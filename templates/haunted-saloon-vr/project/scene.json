@@ -1,0 +1,557 @@
+{
+  "version": 11,
+  "dimension": "3d",
+  "environment": {
+    "sky_top": [0.05, 0.06, 0.14],
+    "sky_horizon": [0.3, 0.2, 0.28],
+    "ground": [0.24, 0.19, 0.15],
+    "ambient": 0.3,
+    "sun_direction": [-0.45, -0.8, -0.35],
+    "sun_color": [1, 0.88, 0.7],
+    "sun_intensity": 0.8,
+    "shadows": true,
+    "shadow_distance": 40
+  },
+  "entities": [
+    {
+      "id": 1,
+      "name": "Ground",
+      "position": [0, -0.25, 0],
+      "rotation": [0, 0, 0, 1],
+      "scale": [30, 0.5, 30],
+      "mesh": {
+        "source": "primitive:cube"
+      },
+      "material": {
+        "albedo": [0.71, 0.58, 0.42, 1],
+        "metallic": 0,
+        "roughness": 0.95
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      }
+    },
+    {
+      "id": 2,
+      "name": "Floor Boards",
+      "position": [0, 0.02, 0],
+      "rotation": [0, 0, 0, 1],
+      "scale": [12, 0.04, 12],
+      "mesh": {
+        "source": "primitive:cube"
+      },
+      "material": {
+        "albedo": [0.42, 0.27, 0.16, 1],
+        "metallic": 0,
+        "roughness": 0.9
+      }
+    },
+    {
+      "id": 3,
+      "name": "Back Wall",
+      "position": [0, 2, -6],
+      "rotation": [0, 0, 0, 1],
+      "scale": [12, 4, 0.3],
+      "mesh": {
+        "source": "primitive:cube"
+      },
+      "material": {
+        "albedo": [0.22, 0.14, 0.09, 1],
+        "metallic": 0,
+        "roughness": 0.8
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      }
+    },
+    {
+      "id": 4,
+      "name": "Left Wall",
+      "position": [-6, 2, 0],
+      "rotation": [0, 0, 0, 1],
+      "scale": [0.3, 4, 12],
+      "mesh": {
+        "source": "primitive:cube"
+      },
+      "material": {
+        "albedo": [0.22, 0.14, 0.09, 1],
+        "metallic": 0,
+        "roughness": 0.8
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      }
+    },
+    {
+      "id": 5,
+      "name": "Right Wall",
+      "position": [6, 2, 0],
+      "rotation": [0, 0, 0, 1],
+      "scale": [0.3, 4, 12],
+      "mesh": {
+        "source": "primitive:cube"
+      },
+      "material": {
+        "albedo": [0.22, 0.14, 0.09, 1],
+        "metallic": 0,
+        "roughness": 0.8
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      }
+    },
+    {
+      "id": 6,
+      "name": "Front Wall L",
+      "position": [-3.6, 2, 6],
+      "rotation": [0, 0, 0, 1],
+      "scale": [4.8, 4, 0.3],
+      "mesh": {
+        "source": "primitive:cube"
+      },
+      "material": {
+        "albedo": [0.22, 0.14, 0.09, 1],
+        "metallic": 0,
+        "roughness": 0.8
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      }
+    },
+    {
+      "id": 7,
+      "name": "Front Wall R",
+      "position": [3.6, 2, 6],
+      "rotation": [0, 0, 0, 1],
+      "scale": [4.8, 4, 0.3],
+      "mesh": {
+        "source": "primitive:cube"
+      },
+      "material": {
+        "albedo": [0.22, 0.14, 0.09, 1],
+        "metallic": 0,
+        "roughness": 0.8
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      }
+    },
+    {
+      "id": 8,
+      "name": "Swinging Door L",
+      "position": [-0.6, 1.3, 6],
+      "rotation": [0, 0, 0, 1],
+      "scale": [1.1, 1.2, 0.06],
+      "mesh": {
+        "source": "primitive:cube"
+      },
+      "material": {
+        "albedo": [0.42, 0.27, 0.16, 1],
+        "metallic": 0,
+        "roughness": 0.8
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      }
+    },
+    {
+      "id": 9,
+      "name": "Swinging Door R",
+      "position": [0.6, 1.3, 6],
+      "rotation": [0, 0, 0, 1],
+      "scale": [1.1, 1.2, 0.06],
+      "mesh": {
+        "source": "primitive:cube"
+      },
+      "material": {
+        "albedo": [0.42, 0.27, 0.16, 1],
+        "metallic": 0,
+        "roughness": 0.8
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      }
+    },
+    {
+      "id": 10,
+      "name": "Bar",
+      "position": [0, 0.55, -4],
+      "rotation": [0, 0, 0, 1],
+      "scale": [6, 1.1, 0.8],
+      "mesh": {
+        "source": "primitive:cube"
+      },
+      "material": {
+        "albedo": [0.42, 0.27, 0.16, 1],
+        "metallic": 0,
+        "roughness": 0.6
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      }
+    },
+    {
+      "id": 11,
+      "name": "Brass Rail",
+      "position": [0, 0.15, -3.55],
+      "rotation": [0, 0, 0, 1],
+      "scale": [6, 0.06, 0.06],
+      "mesh": {
+        "source": "primitive:cube"
+      },
+      "material": {
+        "albedo": [0.78, 0.62, 0.3, 1],
+        "metallic": 0.9,
+        "roughness": 0.3
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      }
+    },
+    {
+      "id": 12,
+      "name": "Bottle 1",
+      "position": [-1.5, 1.175, -4],
+      "rotation": [0, 0, 0, 1],
+      "scale": [0.08, 0.15, 0.08],
+      "mesh": {
+        "source": "primitive:capsule"
+      },
+      "material": {
+        "albedo": [0.3, 0.55, 0.32, 1],
+        "metallic": 0,
+        "roughness": 0.2
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      },
+      "grabbable": {
+        "throwable": true,
+        "snap_to_hand": false,
+        "throw_scale": 1
+      },
+      "script": {
+        "path": "scripts/bottle.lua"
+      }
+    },
+    {
+      "id": 13,
+      "name": "Bottle 2",
+      "position": [-0.5, 1.175, -4],
+      "rotation": [0, 0, 0, 1],
+      "scale": [0.08, 0.15, 0.08],
+      "mesh": {
+        "source": "primitive:capsule"
+      },
+      "material": {
+        "albedo": [0.7, 0.42, 0.12, 1],
+        "metallic": 0,
+        "roughness": 0.2
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      },
+      "grabbable": {
+        "throwable": true,
+        "snap_to_hand": false,
+        "throw_scale": 1
+      },
+      "script": {
+        "path": "scripts/bottle.lua"
+      }
+    },
+    {
+      "id": 14,
+      "name": "Bottle 3",
+      "position": [0.5, 1.175, -4],
+      "rotation": [0, 0, 0, 1],
+      "scale": [0.08, 0.15, 0.08],
+      "mesh": {
+        "source": "primitive:capsule"
+      },
+      "material": {
+        "albedo": [0.3, 0.55, 0.32, 1],
+        "metallic": 0,
+        "roughness": 0.2
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      },
+      "grabbable": {
+        "throwable": true,
+        "snap_to_hand": false,
+        "throw_scale": 1
+      },
+      "script": {
+        "path": "scripts/bottle.lua"
+      }
+    },
+    {
+      "id": 15,
+      "name": "Bottle 4",
+      "position": [1.5, 1.175, -4],
+      "rotation": [0, 0, 0, 1],
+      "scale": [0.08, 0.15, 0.08],
+      "mesh": {
+        "source": "primitive:capsule"
+      },
+      "material": {
+        "albedo": [0.7, 0.42, 0.12, 1],
+        "metallic": 0,
+        "roughness": 0.2
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      },
+      "grabbable": {
+        "throwable": true,
+        "snap_to_hand": false,
+        "throw_scale": 1
+      },
+      "script": {
+        "path": "scripts/bottle.lua"
+      }
+    },
+    {
+      "id": 16,
+      "name": "Card Table",
+      "position": [2.5, 0.4, 0.5],
+      "rotation": [0, 0, 0, 1],
+      "scale": [1.4, 0.8, 1.4],
+      "mesh": {
+        "source": "primitive:cube"
+      },
+      "material": {
+        "albedo": [0.16, 0.38, 0.2, 1],
+        "metallic": 0,
+        "roughness": 0.9
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      }
+    },
+    {
+      "id": 17,
+      "name": "Stetson",
+      "position": [2.5, 0.88, 0.5],
+      "rotation": [0, 0, 0, 1],
+      "scale": [0.36, 0.16, 0.36],
+      "mesh": {
+        "source": "primitive:sphere"
+      },
+      "material": {
+        "albedo": [0.3, 0.22, 0.15, 1],
+        "metallic": 0,
+        "roughness": 0.9
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      },
+      "grabbable": {
+        "throwable": true,
+        "snap_to_hand": false,
+        "throw_scale": 1
+      }
+    },
+    {
+      "id": 18,
+      "name": "Poker Chip Stack",
+      "position": [2.2, 0.84, 0.8],
+      "rotation": [0, 0, 0, 1],
+      "scale": [0.08, 0.08, 0.08],
+      "mesh": {
+        "source": "primitive:cube"
+      },
+      "material": {
+        "albedo": [0.78, 0.62, 0.3, 1],
+        "metallic": 0,
+        "roughness": 0.5
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      },
+      "grabbable": {
+        "throwable": true,
+        "snap_to_hand": false,
+        "throw_scale": 1
+      }
+    },
+    {
+      "id": 19,
+      "name": "Spittoon",
+      "position": [-2, 0.2, -2],
+      "rotation": [0, 0, 0, 1],
+      "scale": [0.4, 0.4, 0.4],
+      "mesh": {
+        "source": "primitive:sphere"
+      },
+      "material": {
+        "albedo": [0.78, 0.62, 0.3, 1],
+        "metallic": 0.9,
+        "roughness": 0.3
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1.6, 1.6, 1.6],
+        "offset": [0, 0, 0],
+        "trigger": true
+      },
+      "script": {
+        "path": "scripts/spittoon.lua"
+      }
+    },
+    {
+      "id": 20,
+      "name": "Piano",
+      "position": [-5, 0.7, -1],
+      "rotation": [0, 0, 0, 1],
+      "scale": [1.2, 1.4, 2.2],
+      "mesh": {
+        "source": "primitive:cube"
+      },
+      "material": {
+        "albedo": [0.22, 0.14, 0.09, 1],
+        "metallic": 0,
+        "roughness": 0.5
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      },
+      "script": {
+        "path": "scripts/piano.lua"
+      }
+    },
+    {
+      "id": 21,
+      "name": "Ghost",
+      "position": [-4.4, 1.9, -1],
+      "rotation": [0, 0, 0, 1],
+      "scale": [0.5, 0.9, 0.5],
+      "mesh": {
+        "source": "primitive:capsule"
+      },
+      "material": {
+        "albedo": [0.8, 0.88, 0.95, 1],
+        "metallic": 0,
+        "roughness": 0.3,
+        "emissive": [0.35, 0.4, 0.45]
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0],
+        "trigger": true
+      },
+      "script": {
+        "path": "scripts/ghost.lua",
+        "props": {
+          "bob": 0.2
+        }
+      }
+    },
+    {
+      "id": 22,
+      "name": "Oil Lamp 1",
+      "position": [-3, 3.2, -3],
+      "rotation": [0, 0, 0, 1],
+      "scale": [1, 1, 1],
+      "light": {
+        "type": "point",
+        "color": [1, 0.78, 0.5],
+        "intensity": 7,
+        "range": 9
+      }
+    },
+    {
+      "id": 23,
+      "name": "Oil Lamp 2",
+      "position": [3, 3.2, -3],
+      "rotation": [0, 0, 0, 1],
+      "scale": [1, 1, 1],
+      "light": {
+        "type": "point",
+        "color": [1, 0.78, 0.5],
+        "intensity": 7,
+        "range": 9
+      }
+    },
+    {
+      "id": 24,
+      "name": "Oil Lamp 3",
+      "position": [0, 3.2, 2.5],
+      "rotation": [0, 0, 0, 1],
+      "scale": [1, 1, 1],
+      "light": {
+        "type": "point",
+        "color": [1, 0.78, 0.5],
+        "intensity": 7,
+        "range": 9
+      }
+    },
+    {
+      "id": 25,
+      "name": "VR Rig",
+      "position": [0, 0, 3.5],
+      "rotation": [0, 0, 0, 1],
+      "scale": [1, 1, 1],
+      "vr_rig": {
+        "locomotion": "both",
+        "move_speed": 2,
+        "snap_turn_deg": 45,
+        "smooth_turn_speed": 120,
+        "teleport_range": 9,
+        "vignette": true,
+        "seated": false,
+        "seated_offset": 0.45
+      }
+    }
+  ],
+  "editor": {
+    "camera_target": [0, 1, 0],
+    "camera_yaw": 35,
+    "camera_pitch": 28,
+    "camera_distance": 16,
+    "show_grid": true,
+    "snap": true,
+    "snap_translate": 0.5,
+    "snap_rotate": 15,
+    "snap_scale": 0.25,
+    "selection": []
+  }
+}

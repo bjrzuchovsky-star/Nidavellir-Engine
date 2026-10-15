@@ -1,0 +1,17 @@
+{
+  "id": "dusty-town",
+  "name": "Dusty Town (2D Platformer)",
+  "dimension": "2d",
+  "description": "The 2D platformer sample: an animated rider, Dusty Town's starter scene and sample Lua scripts. Posse multiplayer on.",
+  "plugins": [
+    "ts.posse"
+  ],
+  "tags": [
+    "sample",
+    "platformer"
+  ],
+  "order": 10,
+  "thumbnail": "thumbnail.png",
+  "project": "project",
+  "generator": "sample-2d-platformer"
+}

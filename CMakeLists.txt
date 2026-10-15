@@ -70,6 +70,8 @@ endif()
 if(TS_BUILD_ADMIN)
   # Ship It: export pipeline (ts_export) used by the Freight Office + CLI.
   add_subdirectory(src/export)
+  # Project templates + Trading Post plumbing (JSON, hashes, signatures, fetch).
+  add_subdirectory(src/store)
   add_subdirectory(src/editor)
   add_subdirectory(apps/admin)
 endif()

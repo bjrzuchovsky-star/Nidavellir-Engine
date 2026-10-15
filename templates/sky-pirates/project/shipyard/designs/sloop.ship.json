@@ -1,0 +1,107 @@
+{
+  "format": "tombstone.ship",
+  "version": 1,
+  "name": "Dust Devil (sloop)",
+  "parts": [
+    {
+      "part": "gatling",
+      "x": 3,
+      "y": 0
+    },
+    {
+      "part": "armor",
+      "x": 2,
+      "y": 0
+    },
+    {
+      "part": "armor",
+      "x": 4,
+      "y": 0
+    },
+    {
+      "part": "hull",
+      "x": 2,
+      "y": 1
+    },
+    {
+      "part": "hull",
+      "x": 3,
+      "y": 1
+    },
+    {
+      "part": "hull",
+      "x": 4,
+      "y": 1
+    },
+    {
+      "part": "boiler",
+      "x": 2,
+      "y": 2
+    },
+    {
+      "part": "shield_vane",
+      "x": 4,
+      "y": 2
+    },
+    {
+      "part": "gatling",
+      "x": 1,
+      "y": 2
+    },
+    {
+      "part": "gatling",
+      "x": 5,
+      "y": 2
+    },
+    {
+      "part": "bunkhouse",
+      "x": 2,
+      "y": 4
+    },
+    {
+      "part": "gangway",
+      "x": 4,
+      "y": 4
+    },
+    {
+      "part": "trim_jet",
+      "x": 1,
+      "y": 1,
+      "rot": 1
+    },
+    {
+      "part": "trim_jet",
+      "x": 5,
+      "y": 1,
+      "rot": 3
+    },
+    {
+      "part": "trim_jet",
+      "x": 1,
+      "y": 4,
+      "rot": 1
+    },
+    {
+      "part": "trim_jet",
+      "x": 5,
+      "y": 4,
+      "rot": 3
+    },
+    {
+      "part": "steam_engine",
+      "x": 2,
+      "y": 5
+    },
+    {
+      "part": "steam_engine",
+      "x": 4,
+      "y": 5
+    },
+    {
+      "part": "trim_jet",
+      "x": 3,
+      "y": 5,
+      "rot": 2
+    }
+  ]
+}

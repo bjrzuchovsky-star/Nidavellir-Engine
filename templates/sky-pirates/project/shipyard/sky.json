@@ -1,0 +1,10 @@
+{
+  "player_design": "shipyard/designs/sloop.ship.json",
+  "crew": true,
+  "respawn_seconds": 4,
+  "reinforce_seconds": 25,
+  "enemies": [
+    {"design": "shipyard/designs/marauder.ship.json", "x": 560, "y": -380},
+    {"design": "shipyard/designs/marauder.ship.json", "x": -620, "y": -300}
+  ]
+}

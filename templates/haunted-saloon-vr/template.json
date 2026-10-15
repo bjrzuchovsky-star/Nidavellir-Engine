@@ -1,0 +1,15 @@
+{
+  "id": "haunted-saloon-vr",
+  "name": "Haunted Saloon VR",
+  "dimension": "3d",
+  "description": "A 3D saloon with VR on: grab and throw bottles, teleport, laser pointer. Headset, desktop simulator, or flat on the desktop.",
+  "plugins": [],
+  "tags": [
+    "sample"
+  ],
+  "order": 30,
+  "thumbnail": "thumbnail.png",
+  "project": "project",
+  "generator": "haunted-saloon-vr",
+  "vr": true
+}

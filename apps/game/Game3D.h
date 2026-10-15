@@ -32,6 +32,8 @@ int run_window_vr(const std::string& dir, const std::string& name, long frames, 
 // Non-interactive OpenXR check: loader, runtime, headset, session create
 // (+ destroy). 0 when a session could be created.
 int run_xr_probe();
+// Is an OpenXR runtime with a headset there right now? (no window, no GL)
+bool headset_present(std::string* why);
 
 }  // namespace game
 }  // namespace tombstone

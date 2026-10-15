@@ -1,0 +1,24 @@
+{
+  "recipes": [
+    {"id": "workbench", "makes": "workbench", "needs": {"wood": 6}},
+    {"id": "campfire", "makes": "campfire", "needs": {"wood": 3, "stone": 2}},
+    {"id": "torch", "makes": "torch", "count": 4, "needs": {"wood": 1, "fiber": 1}},
+    {"id": "stone_pick", "makes": "stone_pick", "needs": {"wood": 3, "stone": 3}, "station": "workbench"},
+    {"id": "knife", "makes": "knife", "needs": {"wood": 1, "stone": 2}, "station": "workbench"},
+    {"id": "bow", "makes": "bow", "needs": {"wood": 3, "fiber": 4}, "station": "workbench"},
+    {"id": "arrow", "makes": "arrow", "count": 8, "needs": {"wood": 1, "stone": 1}, "station": "workbench"},
+    {"id": "wood_wall", "makes": "wood_wall", "count": 4, "needs": {"wood": 2}, "station": "workbench"},
+    {"id": "door", "makes": "door", "needs": {"wood": 4}, "station": "workbench"},
+    {"id": "planks", "makes": "planks", "count": 4, "needs": {"wood": 2}, "station": "workbench"},
+    {"id": "bed", "makes": "bed", "needs": {"wood": 4, "fiber": 6}, "station": "workbench"},
+    {"id": "forge", "makes": "forge", "needs": {"stone": 12, "wood": 4}, "station": "workbench"},
+    {"id": "copper_bar", "makes": "copper_bar", "needs": {"copper_ore": 2}, "station": "forge"},
+    {"id": "iron_bar", "makes": "iron_bar", "needs": {"iron_ore": 2}, "station": "forge"},
+    {"id": "copper_pick", "makes": "copper_pick", "needs": {"wood": 2, "copper_bar": 3}, "station": "forge"},
+    {"id": "iron_pick", "makes": "iron_pick", "needs": {"wood": 2, "iron_bar": 3}, "station": "forge"},
+    {"id": "saber", "makes": "saber", "needs": {"iron_bar": 4, "wood": 1}, "station": "forge"},
+    {"id": "revolver", "makes": "revolver", "needs": {"iron_bar": 6, "gold_nugget": 2}, "station": "forge"},
+    {"id": "bullet", "makes": "bullet", "count": 12, "needs": {"copper_bar": 1}, "station": "forge"},
+    {"id": "jerky", "makes": "jerky", "needs": {"hide": 1}, "station": "campfire"}
+  ]
+}

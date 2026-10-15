@@ -110,6 +110,18 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
       break;
     }
   }
+  // A VR-on 3D claim riding flat on the desktop (no headset / --desktop):
+  // the VR Rig stands in as a third-person rider so it is still playable.
+  if (!vr_ && player_ == 0) {
+    for (Entity3D& e : ents_) {
+      if (e.vr_rig) {
+        e.player = scene3d::Player3D{};
+        player_ = e.id;
+        post(LogLevel::Info, "play", "VR scene on the desktop: " + e.name + " (VR Rig) rides as the rider");
+        break;
+      }
+    }
+  }
   if (vr_) vr_start();
   if (player_ == 0) {
     post(LogLevel::Warn, "play",

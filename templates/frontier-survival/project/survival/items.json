@@ -1,0 +1,32 @@
+{
+  "items": [
+    {"id": "wood", "name": "Cottonwood logs", "kind": "material", "color": [0.55, 0.38, 0.22]},
+    {"id": "stone", "name": "Fieldstone", "kind": "material", "color": [0.58, 0.56, 0.52]},
+    {"id": "fiber", "name": "Sage fiber", "kind": "material", "color": [0.62, 0.66, 0.48]},
+    {"id": "hide", "name": "Rawhide", "kind": "material", "color": [0.66, 0.50, 0.36]},
+    {"id": "copper_ore", "name": "Copper ore", "kind": "material", "color": [0.80, 0.47, 0.25]},
+    {"id": "iron_ore", "name": "Iron ore", "kind": "material", "color": [0.62, 0.58, 0.56]},
+    {"id": "gold_nugget", "name": "Gold nugget", "kind": "material", "color": [0.95, 0.80, 0.25]},
+    {"id": "copper_bar", "name": "Copper bar", "kind": "material", "color": [0.90, 0.55, 0.30]},
+    {"id": "iron_bar", "name": "Iron bar", "kind": "material", "color": [0.78, 0.78, 0.80]},
+    {"id": "cactus_flesh", "name": "Cactus pulp", "kind": "food", "heal": 8, "color": [0.40, 0.70, 0.40]},
+    {"id": "jerky", "name": "Trail jerky", "kind": "food", "heal": 30, "color": [0.55, 0.25, 0.18]},
+    {"id": "stone_pick", "name": "Stone pick", "kind": "tool", "mine_power": 3, "tier": 1, "damage": 4, "stack": 1, "color": [0.60, 0.58, 0.55]},
+    {"id": "copper_pick", "name": "Copper pick", "kind": "tool", "mine_power": 4, "tier": 2, "damage": 5, "stack": 1, "color": [0.90, 0.55, 0.30]},
+    {"id": "iron_pick", "name": "Iron pick", "kind": "tool", "mine_power": 6, "tier": 2, "damage": 6, "stack": 1, "color": [0.80, 0.80, 0.85]},
+    {"id": "knife", "name": "Bowie knife", "kind": "weapon", "damage": 7, "cooldown": 0.3, "stack": 1, "color": [0.75, 0.75, 0.70]},
+    {"id": "saber", "name": "Cavalry saber", "kind": "weapon", "damage": 14, "cooldown": 0.45, "reach": 1.8, "stack": 1, "color": [0.85, 0.85, 0.90]},
+    {"id": "bow", "name": "Hunting bow", "kind": "ranged", "damage": 8, "ammo": "arrow", "cooldown": 0.6, "stack": 1, "color": [0.60, 0.42, 0.24]},
+    {"id": "revolver", "name": "Six-shooter", "kind": "ranged", "damage": 16, "ammo": "bullet", "cooldown": 0.35, "stack": 1, "color": [0.35, 0.33, 0.32]},
+    {"id": "arrow", "name": "Arrows", "kind": "ammo", "color": [0.70, 0.60, 0.45]},
+    {"id": "bullet", "name": "Cartridges", "kind": "ammo", "color": [0.85, 0.65, 0.30]},
+    {"id": "wood_wall", "name": "Plank wall", "kind": "placeable", "places": "wood_wall", "color": [0.48, 0.33, 0.19]},
+    {"id": "door", "name": "Swinging door", "kind": "placeable", "places": "door", "color": [0.55, 0.38, 0.22]},
+    {"id": "planks", "name": "Floor planks", "kind": "placeable", "places": "planks", "color": [0.62, 0.45, 0.27]},
+    {"id": "workbench", "name": "Workbench", "kind": "placeable", "places": "workbench", "stack": 9, "color": [0.58, 0.42, 0.26]},
+    {"id": "forge", "name": "Forge", "kind": "placeable", "places": "forge", "stack": 9, "color": [0.36, 0.33, 0.32]},
+    {"id": "campfire", "name": "Campfire", "kind": "placeable", "places": "campfire", "stack": 9, "color": [0.90, 0.45, 0.18]},
+    {"id": "torch", "name": "Torch", "kind": "placeable", "places": "torch", "color": [0.95, 0.70, 0.30]},
+    {"id": "bed", "name": "Bedroll", "kind": "placeable", "places": "bed", "stack": 9, "color": [0.65, 0.25, 0.22]}
+  ]
+}

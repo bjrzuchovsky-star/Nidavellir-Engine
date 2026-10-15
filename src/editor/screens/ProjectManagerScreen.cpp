@@ -36,6 +36,11 @@ void ProjectManagerScreen::on_enter() {
   new_kind_ = ProjectKind::TwoD;
   pending_new_kind_ = ProjectKind::TwoD;
   std::strncpy(new_name_buf_, "New 2D Project", sizeof(new_name_buf_) - 1);
+  picker_open_ = false;
+  picker_popup_pending_ = false;
+  template_create_requested_ = false;
+  save_template_requested_ = false;
+  set_vr_requested_ = false;
 
   std::cout << "[ProjectManager] root=" << projects_root_ << '\n';
   if (!status_message_.empty()) {
@@ -86,7 +91,11 @@ void ProjectManagerScreen::draw_project_card(std::size_t i) {
   ImGui::TextUnformatted(p.name.c_str());
   ImGui::PopStyleColor();
   ImGui::SameLine();
-  theme::DimensionBadge(to_string(p.kind));
+  theme::DimensionBadge(p.kind == ProjectKind::TwoD ? "2D" : "3D");
+  if (vr_enabled(p)) {
+    ImGui::SameLine();
+    theme::DimensionBadge("VR");
+  }
   ImGui::TextDisabled("%s", p.path.c_str());
   if (!p.last_opened.empty()) {
     ImGui::TextDisabled("Last worked  %s", p.last_opened.c_str());
@@ -96,7 +105,7 @@ void ProjectManagerScreen::draw_project_card(std::size_t i) {
   ImGui::EndGroup();
 
   if (highlight) {
-    const char* hint = p.kind == ProjectKind::VR
+    const char* hint = vr_enabled(p)
                            ? "Opens the 3D editor; Preview in headset to ride it in VR"
                            : "Double-click or Open to ride in";
     const ImVec2 hs = ImGui::CalcTextSize(hint);
@@ -143,7 +152,7 @@ void ProjectManagerScreen::draw_ui() {
   ImGui::Spacing();
 
   ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
-  ImGui::BeginChild("ProjectList", ImVec2(0, -164), ImGuiChildFlags_None);
+  ImGui::BeginChild("ProjectList", ImVec2(0, -96), ImGuiChildFlags_None);
   if (projects_.empty()) {
     const float w = ImGui::GetContentRegionAvail().x;
     ImGui::Dummy(ImVec2(0, 36));
@@ -155,9 +164,9 @@ void ProjectManagerScreen::draw_ui() {
     ImGui::Dummy(ImVec2(w, 68.0f));
     theme::CenteredText("Nothing staked yet.", 22.0f, theme::Text(), w);
     ImGui::Dummy(ImVec2(0, 4));
-    theme::CenteredText("Pick 2D, 3D or VR below, name it and break ground.",
+    theme::CenteredText("Break ground below: pick a template (blank 2D / 3D or a sample),",
                         ImGui::GetFontSize(), theme::TextMuted(), w);
-    theme::CenteredText("An empty territory gets a sample claim on next load.",
+    theme::CenteredText("name your claim and ride in.",
                         ImGui::GetFontSize(), theme::TextMuted(), w);
   } else {
     for (std::size_t i = 0; i < projects_.size(); ++i) {
@@ -167,24 +176,9 @@ void ProjectManagerScreen::draw_ui() {
   ImGui::EndChild();
   ImGui::PopStyleColor();
 
-  theme::SectionHeader("Break Ground", "new project: pick your territory");
-  draw_kind_picker();
-  ImGui::SetNextItemWidth(260.0f);
-  ImGui::InputTextWithHint("##newname", "Name your claim", new_name_buf_,
-                           sizeof(new_name_buf_));
-  ImGui::SameLine();
-  char create_label[32];
-  std::snprintf(create_label, sizeof(create_label), "+ New %s###newproj",
-                to_string(new_kind_));
-  if (theme::PrimaryButton(create_label, ImVec2(96, 0))) {
-    std::string validate_err;
-    if (!ProjectStore::validate_project_name(new_name_buf_, &validate_err)) {
-      error_message_ = validate_err;
-      status_message_.clear();
-    } else {
-      error_message_.clear();
-      request_new_project(new_name_buf_, new_kind_);
-    }
+  theme::SectionHeader("Break Ground", "new claim from a template: blank 2D / 3D or a sample");
+  if (theme::PrimaryButton("+ New Claim...", ImVec2(140, 0))) {
+    open_template_picker();
   }
   ImGui::SameLine();
   if (theme::CopperButton("Open", ImVec2(80, 0))) {
@@ -201,6 +195,26 @@ void ProjectManagerScreen::draw_ui() {
     } else {
       confirm_delete_open_ = true;
       ImGui::OpenPopup("Bury Project?");
+    }
+  }
+  ImGui::SameLine();
+  if (theme::SecondaryButton("Save as Template", ImVec2(140, 0))) {
+    if (!highlighted_index_.has_value()) {
+      error_message_ = "Pick a claim first, then Save as Template.";
+    } else {
+      const ProjectInfo& hp = projects_[*highlighted_index_];
+      std::memset(save_name_buf_, 0, sizeof(save_name_buf_));
+      std::memset(save_desc_buf_, 0, sizeof(save_desc_buf_));
+      std::snprintf(save_name_buf_, sizeof(save_name_buf_), "%s Template", hp.name.c_str());
+      save_popup_pending_ = true;
+    }
+  }
+  ImGui::SameLine();
+  if (theme::SecondaryButton("Claim Settings", ImVec2(130, 0))) {
+    if (!highlighted_index_.has_value()) {
+      error_message_ = "Pick a claim first, then Claim Settings.";
+    } else {
+      settings_popup_pending_ = true;
     }
   }
   ImGui::SameLine(0.0f, 24.0f);
@@ -237,6 +251,10 @@ void ProjectManagerScreen::draw_ui() {
     }
     ImGui::EndPopup();
   }
+
+  draw_template_picker();
+  draw_save_template_popup();
+  draw_claim_settings_popup();
 
   theme::EndRoot();
 }

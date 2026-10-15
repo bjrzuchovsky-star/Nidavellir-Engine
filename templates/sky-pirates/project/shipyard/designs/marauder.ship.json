@@ -1,0 +1,122 @@
+{
+  "format": "tombstone.ship",
+  "version": 1,
+  "name": "Black Kettle (marauder)",
+  "parts": [
+    {
+      "part": "cannon",
+      "x": 2,
+      "y": 0
+    },
+    {
+      "part": "armor",
+      "x": 1,
+      "y": 0
+    },
+    {
+      "part": "armor",
+      "x": 4,
+      "y": 0
+    },
+    {
+      "part": "armor",
+      "x": 1,
+      "y": 1
+    },
+    {
+      "part": "armor",
+      "x": 4,
+      "y": 1
+    },
+    {
+      "part": "boiler",
+      "x": 2,
+      "y": 2
+    },
+    {
+      "part": "hull",
+      "x": 1,
+      "y": 2
+    },
+    {
+      "part": "hull",
+      "x": 4,
+      "y": 2
+    },
+    {
+      "part": "hull",
+      "x": 1,
+      "y": 3
+    },
+    {
+      "part": "hull",
+      "x": 4,
+      "y": 3
+    },
+    {
+      "part": "gatling",
+      "x": 0,
+      "y": 2
+    },
+    {
+      "part": "gatling",
+      "x": 5,
+      "y": 2
+    },
+    {
+      "part": "bunkhouse",
+      "x": 2,
+      "y": 4
+    },
+    {
+      "part": "gangway",
+      "x": 1,
+      "y": 4
+    },
+    {
+      "part": "gangway",
+      "x": 4,
+      "y": 4
+    },
+    {
+      "part": "trim_jet",
+      "x": 0,
+      "y": 1,
+      "rot": 1
+    },
+    {
+      "part": "trim_jet",
+      "x": 5,
+      "y": 1,
+      "rot": 3
+    },
+    {
+      "part": "trim_jet",
+      "x": 0,
+      "y": 4,
+      "rot": 1
+    },
+    {
+      "part": "trim_jet",
+      "x": 5,
+      "y": 4,
+      "rot": 3
+    },
+    {
+      "part": "steam_engine",
+      "x": 1,
+      "y": 5
+    },
+    {
+      "part": "steam_engine",
+      "x": 4,
+      "y": 5
+    },
+    {
+      "part": "trim_jet",
+      "x": 2,
+      "y": 5,
+      "rot": 2
+    }
+  ]
+}
