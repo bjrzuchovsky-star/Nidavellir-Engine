@@ -352,6 +352,53 @@ void SurvivalPlugin::on_register(plugin::Registrar& reg) {
   reg.add_draw_layer("frontier.sky", true,
                      [this](const runtime::World& w, const runtime::WorldRect& view, float,
                             std::vector<runtime::DrawQuad>* out) { draw_over(w, view, out); });
+  reg.add_hud_layer("frontier.hotbar",
+                    [this](const runtime::World& w, const runtime::WorldRect& view, float,
+                           std::vector<runtime::DrawQuad>* out) { draw_hud(w, view, out); });
+  // Night: real 2D lights from torches / campfires / lanterns (the tile
+  // object's light radius), soft shadows from solid tiles, and a dusk
+  // ambient that turns lighting on after sundown.
+  reg.add_ambient("frontier.night", [this](const runtime::World&, float out[3]) {
+    if (!sim_.has_seed()) return false;
+    const float dark = sim_.darkness() / 0.62f;
+    if (dark <= 0.01f) return false;
+    const float night[3] = {0.16f, 0.15f, 0.32f};
+    for (int i = 0; i < 3; ++i) out[i] = 1.0f + (night[i] - 1.0f) * dark;
+    return true;
+  });
+  reg.add_light_source("frontier.lights", [this](const runtime::World&,
+                                                 const runtime::WorldRect& view,
+                                                 std::vector<fx::LightInstance>* out) {
+    if (!sim_.has_seed()) return;
+    const int tx0 = static_cast<int>(std::floor(view.x0 / kTile)) - 8;
+    const int ty0 = static_cast<int>(std::floor(view.y0 / kTile)) - 8;
+    const int tx1 = static_cast<int>(std::floor(view.x1 / kTile)) + 8;
+    const int ty1 = static_cast<int>(std::floor(view.y1 / kTile)) + 8;
+    if ((tx1 - tx0) * (ty1 - ty0) > 140 * 140) return;
+    for (int ty = ty0; ty <= ty1; ++ty) {
+      for (int tx = tx0; tx <= tx1; ++tx) {
+        const Tile* t = sim_.chunks().peek(tx, ty);
+        if (!t || t->object == kObjNone) continue;
+        const float r = object_def(t->object).light * kTile;
+        if (r <= 0.0f) continue;
+        fx::LightInstance L;
+        L.x = (tx + 0.5f) * kTile;
+        L.y = (ty + 0.5f) * kTile;
+        L.data.radius = r * 1.8f;
+        L.data.color[0] = 1.0f;
+        L.data.color[1] = 0.72f;
+        L.data.color[2] = 0.38f;
+        L.data.intensity = 1.3f;
+        L.data.flicker = 0.35f;
+        L.data.softness = 0.6f;
+        out->push_back(L);
+      }
+    }
+  });
+  reg.add_light_occluder("frontier.tiles", kTile, [this](const runtime::World&, int cx, int cy) {
+    const Tile* t = sim_.chunks().peek(cx, cy);
+    return t && tile_solid(*t);
+  });
   reg.add_blocker("frontier.tiles", [this](const runtime::World&, const runtime::Aabb& area,
                                            std::vector<runtime::Aabb>* out) {
     if (!sim_.has_seed()) return;
@@ -494,31 +541,15 @@ void SurvivalPlugin::draw_over(const runtime::World& w, const runtime::WorldRect
       quad(out, x + kTile - k, y, x + kTile, y + kTile, 0.96f, 0.85f, 0.55f, 0.8f);
     }
   }
-  // Night: a dusk wash over everything, holes punched by light sources
-  // approximated with warm glows on top.
-  const float dark = sim_.darkness();
-  if (dark > 0.01f) {
-    quad(out, view.x0, view.y0, view.x1, view.y1, 0.04f, 0.03f, 0.12f, dark);
-    const int tx0 = static_cast<int>(std::floor(view.x0 / kTile)) - 4;
-    const int ty0 = static_cast<int>(std::floor(view.y0 / kTile)) - 4;
-    const int tx1 = static_cast<int>(std::floor(view.x1 / kTile)) + 4;
-    const int ty1 = static_cast<int>(std::floor(view.y1 / kTile)) + 4;
-    if ((tx1 - tx0) * (ty1 - ty0) <= 120 * 120) {
-      for (int ty = ty0; ty <= ty1; ++ty) {
-        for (int tx = tx0; tx <= tx1; ++tx) {
-          const Tile* t = sim_.chunks().peek(tx, ty);
-          if (!t || t->object == kObjNone) continue;
-          const float r = object_def(t->object).light * kTile;
-          if (r <= 0.0f) continue;
-          const float cx = (tx + 0.5f) * kTile, cy = (ty + 0.5f) * kTile;
-          for (int ring = 3; ring >= 1; --ring) {
-            const float rr = r * static_cast<float>(ring) / 3.0f;
-            quad(out, cx - rr, cy - rr, cx + rr, cy + rr, 1.0f, 0.72f, 0.35f, dark * 0.16f);
-          }
-        }
-      }
-    }
-  }
+}
+
+// Hotbar (view space): drawn last, over the night lightmap.
+void SurvivalPlugin::draw_hud(const runtime::World& w, const runtime::WorldRect& view,
+                              std::vector<runtime::DrawQuad>* out) {
+  if (!sim_.has_seed()) return;
+  const int me = w.net_role() == runtime::NetRole::Client ? sim_.my_slot() : 0;
+  if (!w.player(me)) return;
+  const GameData& d = sim_.data();
   // Hotbar (view space: bottom centre of the view).
   const FrontierSim::Player& p = sim_.player(me);
   const ui::FontAtlas& atlas = ui::default_atlas();

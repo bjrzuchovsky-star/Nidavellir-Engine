@@ -156,6 +156,9 @@ class FrontierSim {
   void sound(runtime::World& w, const char* clip, float x, float y, float volume = 1.0f,
              float pitch = 1.0f, float variation = 0.1f);
   void footsteps(runtime::World& w, int slot);
+  // A particle burst every rider sees (World::fx replicates it).
+  void burst(runtime::World& w, const char* preset, float x, float y, int count = 0,
+             float dir = 0.0f);
   bool rider_box(const runtime::World& w, int slot, runtime::Aabb* box) const;
   void place_safe(runtime::World& w, int slot);
   void act(runtime::World& w, int slot, std::uint32_t buttons);

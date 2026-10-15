@@ -53,6 +53,8 @@ class SurvivalPlugin : public plugin::Plugin {
                   std::vector<runtime::DrawQuad>* out);
   void draw_over(const runtime::World& w, const runtime::WorldRect& view,
                  std::vector<runtime::DrawQuad>* out);
+  void draw_hud(const runtime::World& w, const runtime::WorldRect& view,
+                std::vector<runtime::DrawQuad>* out);
   void ensure_client(const runtime::World& w);
 
   FrontierSim sim_;

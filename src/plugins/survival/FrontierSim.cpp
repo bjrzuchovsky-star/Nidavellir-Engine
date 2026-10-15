@@ -320,6 +320,16 @@ void FrontierSim::sound(World& w, const char* clip, float x, float y, float volu
   w.play_sound(std::move(ev));
 }
 
+void FrontierSim::burst(World& w, const char* preset, float x, float y, int count, float dir) {
+  runtime::FxEvent ev;
+  ev.preset = preset;
+  ev.x = x;
+  ev.y = y;
+  ev.count = count;
+  ev.dir = dir;
+  w.fx(std::move(ev));
+}
+
 // One footfall every ~26 px walked (a rider standing still is quiet).
 void FrontierSim::footsteps(World& w, int slot) {
   Player& p = players_[static_cast<std::size_t>(slot)];
@@ -568,10 +578,13 @@ void FrontierSim::mine(World& w, int slot, const ItemDef* item) {
       t.damage = static_cast<std::uint8_t>(std::min(dmg, 255));
       chunks_.set(p.target_tx, p.target_ty, t);
       sound(w, "builtin:mine", tx, ty, 0.8f);
+      burst(w, "dust", tx, ty, 5);
+      burst(w, "sparks", tx, ty, 4);
       return;
     }
     // Broke it: a lower, heavier knock.
     sound(w, "builtin:mine", tx, ty, 1.0f, 0.7f);
+    burst(w, "dust", tx, ty, 14);  // debris
     const std::uint8_t broken = t.object;
     t.object = kObjNone;
     t.damage = 0;
@@ -595,6 +608,7 @@ void FrontierSim::mine(World& w, int slot, const ItemDef* item) {
   }
   if (t.ground == kPlanks) {
     sound(w, "builtin:mine", tx, ty, 0.8f, 0.85f);
+    burst(w, "dust", tx, ty, 8);
     t.ground = kDirt;
     chunks_.set(p.target_tx, p.target_ty, t);
     const int drop = data_.item("planks");
@@ -653,6 +667,9 @@ void FrontierSim::fire(World& w, int slot, const ItemDef* item) {
   shots_.push_back(s);
   p.cooldown = item->cooldown;
   sound(w, "builtin:gunshot", s.x, s.y, 0.9f, 1.0f, 0.08f);
+  const float aim = std::atan2(dy, dx) * 57.2957795f;
+  burst(w, "muzzle_flash", s.x, s.y, 0, aim);
+  burst(w, "gun_smoke", s.x, s.y, 6, aim);
 }
 
 void FrontierSim::step_shots(World& w) {
