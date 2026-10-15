@@ -66,7 +66,7 @@ With the Visual Studio generator, binaries go under `build/apps/<app>/<Config>/`
 
 `ts_admin --smoke` runs the whole headless suite. Single areas, from the flags parsed in `apps/admin/main.cpp`:
 
-`--smoke-3d`, `--smoke-anim3d`, `--smoke-vr`, `--smoke-audio`, `--smoke-ui`, `--smoke-fx`, `--smoke-tools`, `--smoke-graph`, `--smoke-cpp`, `--smoke-cs`, `--smoke-export`, `--smoke-templates`, `--smoke-store`, `--smoke-survival`, `--smoke-shipyard`
+`--smoke-3d`, `--smoke-anim3d`, `--smoke-vr`, `--smoke-audio`, `--smoke-ui`, `--smoke-fx`, `--smoke-tools`, `--smoke-prefab`, `--smoke-graph`, `--smoke-cpp`, `--smoke-cs`, `--smoke-export`, `--smoke-templates`, `--smoke-store`, `--smoke-survival`, `--smoke-shipyard`
 
 Also: `ts_game --smoke --project <dir>`, `ts_server --smoke` and `ts_client --smoke`.
 
@@ -76,3 +76,24 @@ Environment switches used by the smokes:
 - `TS_SMOKE_REQUIRE_CPP=1` / `TS_SMOKE_REQUIRE_CS=1`: a missing C++ or C# toolchain counts as a failure.
 - `TS_SMOKE_CS_PREBUILT=<dir>`: runs a prebuilt C# assembly.
 - `TS_AUDIO=null`: no sound device.
+
+## Linux and CI
+
+The same tree builds on Linux with GCC 13+ (or Clang) and Ninja. This is the groundwork for a Linux export target. On Debian / Ubuntu, install the GLFW build dependencies first:
+
+```
+sudo apt-get install ninja-build libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+  libxi-dev libgl1-mesa-dev libwayland-dev libxkbcommon-dev wayland-protocols
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+cd build/apps/admin && TS_AUDIO=null ./ts_admin --smoke
+```
+
+Without a display, the editors and smokes fall back to the null renderer. `xvfb-run` gives the GLFW paths a virtual screen.
+
+`.github/workflows/ci.yml` runs on every push to `main` and on pull requests:
+
+- `windows-latest`: MSVC, VS 2022 x64, Release.
+- `ubuntu-latest`: GCC + Ninja, Release.
+
+Each job builds every app, then runs `ts_server --smoke`, `ts_client --smoke`, `ts_admin --smoke-prefab` and the full `ts_admin --smoke` with `TS_AUDIO=null`. The runners have no GPU and `TS_SMOKE_REQUIRE_GL` is left unset, so the GL-only checks are skipped instead of failing.
