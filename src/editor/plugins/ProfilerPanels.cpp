@@ -238,9 +238,15 @@ std::vector<std::string> counter_names(const std::vector<FrameRecord>& frames, c
 void draw_assay_panel(AssayPanelState& s) {
   Profiler& p = Profiler::get();
   bool rec = p.enabled();
-  ImGui::PushStyleColor(ImGuiCol_Text, rec ? theme::Danger() : theme::TextMuted());
-  ImGui::TextUnformatted(rec ? "\xE2\x97\x8F" : "\xE2\x97\x8B");
-  ImGui::PopStyleColor();
+  {  // recording lamp (drawn: the UI font has no circle glyph)
+    const float r = ImGui::GetTextLineHeight() * 0.32f;
+    const ImVec2 c = ImGui::GetCursorScreenPos();
+    const ImVec2 mid(c.x + r + 1, c.y + ImGui::GetFrameHeight() * 0.5f);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (rec) dl->AddCircleFilled(mid, r, theme::U32(theme::Danger()));
+    else dl->AddCircle(mid, r, theme::U32(theme::TextMuted()));
+    ImGui::Dummy(ImVec2(r * 2 + 2, ImGui::GetFrameHeight()));
+  }
   ImGui::SameLine();
   if (ImGui::Checkbox("Record", &rec)) p.set_enabled(rec);
   ImGui::SameLine();
