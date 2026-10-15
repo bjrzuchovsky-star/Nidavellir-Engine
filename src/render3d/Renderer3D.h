@@ -80,6 +80,16 @@ class Renderer3D {
   // Unlit lines (grid, gizmos, colliders); depth_test false = on top.
   virtual void draw_line(const Vec3& /*a*/, const Vec3& /*b*/,
                          const float* /*rgba*/, bool /*depth_test*/ = true) {}
+  // Camera-facing soft particles for this frame (fx::ParticleWorld in 3D):
+  // depth-tested, no depth writes; alpha ones first, then additive.
+  struct Billboard {
+    Vec3 position;
+    float size = 0.1f;      // metres across
+    float rotation = 0.0f;  // degrees
+    float rgba[4] = {1, 1, 1, 1};
+    bool additive = false;
+  };
+  virtual void draw_billboards(const std::vector<Billboard>& /*billboards*/) {}
   virtual FrameStats end_frame() = 0;
   // Screen-space overlay (the in-game UI raster): RGBA8, top row first,
   // straight alpha, stretched over the whole frame after the scene. Kept

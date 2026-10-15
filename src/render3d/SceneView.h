@@ -62,6 +62,10 @@ class SceneView {
 
   // World matrix of an entity.
   static Mat4 world_matrix(const scene3d::Entity3D& e) { return e.transform.matrix(); }
+  // Particles for this frame (call between begin() and end()).
+  void billboards(const std::vector<Renderer3D::Billboard>& b) {
+    if (r_) r_->draw_billboards(b);
+  }
   // World-space box lines.
   void draw_box(const Mat4& world, const Aabb& local, const float* rgba, bool on_top);
 

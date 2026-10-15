@@ -235,6 +235,33 @@ struct LineVertex {
   float c[4];
 };
 
+struct BillVertex {
+  float p[3];
+  float c[4];
+  float uv[2];
+};
+
+const char* kBillVS = R"glsl(#version 330 core
+layout(location = 0) in vec3 a_pos;
+layout(location = 1) in vec4 a_col;
+layout(location = 2) in vec2 a_uv;
+uniform mat4 u_view_proj;
+out vec4 v_col;
+out vec2 v_uv;
+void main() { v_col = a_col; v_uv = a_uv; gl_Position = u_view_proj * vec4(a_pos, 1.0); }
+)glsl";
+
+const char* kBillFS = R"glsl(#version 330 core
+in vec4 v_col;
+in vec2 v_uv;
+out vec4 o_color;
+void main() {
+  float a = clamp(1.0 - length(v_uv * 2.0 - 1.0), 0.0, 1.0);
+  a = a * a * (3.0 - 2.0 * a);
+  o_color = vec4(v_col.rgb, v_col.a * a);
+}
+)glsl";
+
 GLuint compile(GLenum type, const char* src, std::string* err) {
   const Gl33& g = gl33();
   GLuint s = g.CreateShader(type);
@@ -326,6 +353,20 @@ class GlRenderer3D final : public Renderer3D {
       return false;
     }
     overlay_prog_ = link(kOverlayVS, kOverlayFS, &err);  // optional (UI)
+    bill_prog_ = link(kBillVS, kBillFS, &err);           // optional (particles)
+    g.GenVertexArrays(1, &bill_vao_);
+    g.GenBuffers(1, &bill_vbo_);
+    g.BindVertexArray(bill_vao_);
+    g.BindBuffer(GL_ARRAY_BUFFER, bill_vbo_);
+    g.EnableVertexAttribArray(0);
+    g.VertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(BillVertex), nullptr);
+    g.EnableVertexAttribArray(1);
+    g.VertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(BillVertex),
+                          reinterpret_cast<const void*>(sizeof(float) * 3));
+    g.EnableVertexAttribArray(2);
+    g.VertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(BillVertex),
+                          reinterpret_cast<const void*>(sizeof(float) * 7));
+    g.BindVertexArray(0);
     const unsigned char white[4] = {255, 255, 255, 255};
     const unsigned char flat[4] = {128, 128, 255, 255};
     white_tex_ = make_texture(white, 1, 1, false);
@@ -387,6 +428,9 @@ class GlRenderer3D final : public Renderer3D {
       if (shadow_fbo_) g.DeleteFramebuffers(1, &shadow_fbo_);
       if (line_vbo_) g.DeleteBuffers(1, &line_vbo_);
       if (line_vao_) g.DeleteVertexArrays(1, &line_vao_);
+      if (bill_vbo_) g.DeleteBuffers(1, &bill_vbo_);
+      if (bill_vao_) g.DeleteVertexArrays(1, &bill_vao_);
+      bill_vbo_ = bill_vao_ = 0;
       if (empty_vao_) g.DeleteVertexArrays(1, &empty_vao_);
       free_target();
       shutdown_programs();
@@ -476,7 +520,13 @@ class GlRenderer3D final : public Renderer3D {
     points_.clear();
     lines_depth_.clear();
     lines_top_.clear();
+    billboards_.clear();
     stats_ = {};
+  }
+
+  void draw_billboards(const std::vector<Billboard>& b) override {
+    if (billboards_.size() + b.size() > 16384) return;
+    billboards_.insert(billboards_.end(), b.begin(), b.end());
   }
 
   void add_point_light(const PointLight& l) override {
@@ -676,6 +726,53 @@ class GlRenderer3D final : public Renderer3D {
     };
     glDepthMask(GL_FALSE);
     draw_lines(lines_depth_);
+    // Particles: camera-facing quads, alpha then additive.
+    if (!billboards_.empty() && bill_prog_) {
+      const Mat4 v = camera_.view();
+      const Vec3 right{v.at(0, 0), v.at(0, 1), v.at(0, 2)};
+      const Vec3 up{v.at(1, 0), v.at(1, 1), v.at(1, 2)};
+      std::vector<BillVertex> verts;
+      auto build = [&](bool additive) {
+        verts.clear();
+        for (const Billboard& b : billboards_) {
+          if (b.additive != additive) continue;
+          const float h = b.size * 0.5f;
+          const float a = b.rotation * 0.01745329f;
+          const float c = std::cos(a) * h, s = std::sin(a) * h;
+          const Vec3 r{right.x * c + up.x * s, right.y * c + up.y * s, right.z * c + up.z * s};
+          const Vec3 u{up.x * c - right.x * s, up.y * c - right.y * s, up.z * c - right.z * s};
+          const Vec3& p = b.position;
+          const float corner[4][4] = {{-1, -1, 0, 0}, {1, -1, 1, 0}, {1, 1, 1, 1}, {-1, 1, 0, 1}};
+          BillVertex q[4];
+          for (int k = 0; k < 4; ++k) {
+            q[k].p[0] = p.x + r.x * corner[k][0] + u.x * corner[k][1];
+            q[k].p[1] = p.y + r.y * corner[k][0] + u.y * corner[k][1];
+            q[k].p[2] = p.z + r.z * corner[k][0] + u.z * corner[k][1];
+            for (int i = 0; i < 4; ++i) q[k].c[i] = b.rgba[i];
+            q[k].uv[0] = corner[k][2];
+            q[k].uv[1] = corner[k][3];
+          }
+          for (int idx : {0, 1, 2, 0, 2, 3}) verts.push_back(q[idx]);
+        }
+        if (verts.empty()) return;
+        glBlendFunc(GL_SRC_ALPHA, additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
+        g.BindBuffer(GL_ARRAY_BUFFER, bill_vbo_);
+        g.BufferData(GL_ARRAY_BUFFER,
+                     static_cast<GLsizeiptr_ts>(verts.size() * sizeof(BillVertex)), verts.data(),
+                     GL_DYNAMIC_DRAW);
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(verts.size()));
+        ++stats_.draws;
+      };
+      g.UseProgram(bill_prog_);
+      g.UniformMatrix4fv(g.GetUniformLocation(bill_prog_, "u_view_proj"), 1, GL_FALSE,
+                         view_proj.m);
+      g.BindVertexArray(bill_vao_);
+      build(false);
+      build(true);
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      g.UseProgram(line_prog_);
+      g.BindVertexArray(line_vao_);
+    }
     glDisable(GL_DEPTH_TEST);
     draw_lines(lines_top_);
 
@@ -756,7 +853,8 @@ class GlRenderer3D final : public Renderer3D {
   }
   void shutdown_programs() {
     const Gl33& g = gl33();
-    for (GLuint* p : {&mesh_prog_, &depth_prog_, &sky_prog_, &line_prog_, &overlay_prog_}) {
+    for (GLuint* p : {&mesh_prog_, &depth_prog_, &sky_prog_, &line_prog_, &overlay_prog_,
+                      &bill_prog_}) {
       if (*p && g.DeleteProgram) g.DeleteProgram(*p);
       *p = 0;
     }
@@ -795,6 +893,8 @@ class GlRenderer3D final : public Renderer3D {
   bool offscreen_ = false;
   GLuint mesh_prog_ = 0, depth_prog_ = 0, sky_prog_ = 0, line_prog_ = 0;
   GLuint overlay_prog_ = 0, overlay_tex_ = 0;
+  GLuint bill_prog_ = 0, bill_vao_ = 0, bill_vbo_ = 0;
+  std::vector<Billboard> billboards_;
   std::uint64_t overlay_version_ = 0;
   bool overlay_on_ = false;
   GLuint white_tex_ = 0, flat_tex_ = 0;
