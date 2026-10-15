@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <future>
+#include <atomic>
 #include <fstream>
 #include <sstream>
 
@@ -58,6 +60,12 @@ fs::path sdk_dir() {
   return {};
 }
 }  // namespace
+
+namespace {
+std::atomic<bool> g_blocking{false};
+}
+void set_blocking_builds(bool on) { g_blocking = on; }
+bool blocking_builds() { return g_blocking; }
 
 std::string module_file_name() { return std::string("ts_scripts") + SharedLib::extension(); }
 std::string prebuilt_module(const std::string& p) { return (fs::path(p) / "native" / module_file_name()).string(); }
@@ -231,6 +239,17 @@ struct NativeScriptHost::Impl {
   bool prebuilt = false;
   std::int64_t stamp = 0;
   int generation = 0;
+  // Background build (off the game tick); swapped in by poll().
+  std::future<native_scripts::BuildResult> pending;
+  std::int64_t pending_stamp = 0;
+
+  bool building() const { return pending.valid(); }
+  void start_build(bool force) {
+    if (building()) return;
+    pending_stamp = native_scripts::sources_stamp(project_dir);
+    const std::string dir = project_dir;
+    pending = std::async(std::launch::async, [dir, force] { return native_scripts::build(dir, force); });
+  }
 
   void log(LogLevel lv, const std::string& text, const std::string& file = {}, int line = 0,
            std::uint64_t entity = 0) {
@@ -302,15 +321,78 @@ struct NativeScriptHost::Impl {
       if (!mod) log(LogLevel::Error, "C++ scripts: " + err);
       return mod != nullptr;
     }
+    if (!native_scripts::blocking_builds()) {
+      log(LogLevel::Info, "C++ scripts: building the project module in the background");
+      start_build(false);
+      return false;
+    }
     log(LogLevel::Info, "C++ scripts: building the project module");
     const native_scripts::BuildResult b = native_scripts::build(project_dir);
-    report(b);
-    if (!b.ok) return false;
     stamp = native_scripts::sources_stamp(project_dir);
-    mod = open_module(b.module, &err);
-    if (!mod) log(LogLevel::Error, "C++ scripts: " + err);
-    else log(LogLevel::Info, "C++ scripts: module loaded (" + fs::path(b.module).filename().string() + ")");
-    return mod != nullptr;
+    return install(b) >= 0 && mod != nullptr;
+  }
+
+  // A finished build: report it, then load the module (first time: create
+  // every waiting instance; later: hot swap). -1 failed, 0 nothing, 1 swapped.
+  int install(const native_scripts::BuildResult& b) {
+    report(b);
+    if (!b.ok) {
+      if (mod) log(LogLevel::Error, "C++ reload skipped, the previous module keeps riding");
+      return -1;
+    }
+    std::string err;
+    auto next = open_module(b.module, &err);
+    if (!next) {
+      log(LogLevel::Error, std::string(mod ? "C++ reload: " : "C++ scripts: ") + err);
+      return -1;
+    }
+    if (!mod) {
+      mod = std::move(next);
+      log(LogLevel::Info, "C++ scripts: module loaded (" + fs::path(b.module).filename().string() + ")");
+      for (auto& in : insts) if (!in->obj) create(*in);
+      return 0;
+    }
+    swap(std::move(next));
+    return 1;
+  }
+
+  // Save every instance with the old code, swap, restore with the new.
+  void swap(std::unique_ptr<Module> next) {
+    std::vector<std::string> saved(insts.size());
+    for (std::size_t i = 0; i < insts.size(); ++i) {
+      Inst& in = *insts[i];
+      if (!in.obj || !mod) continue;
+      if (mod->save) {
+        const int need = mod->save(in.obj, nullptr, 0);
+        saved[i].resize(static_cast<std::size_t>(std::max(0, need)));
+        if (need > 0) mod->save(in.obj, saved[i].data(), need);
+      }
+      mod->destroy(in.obj);
+      in.obj = nullptr;
+    }
+    const std::string old_path = mod ? mod->path : std::string();
+    mod = std::move(next);
+    std::error_code ec;
+    if (!old_path.empty()) fs::remove(old_path, ec);  // best effort (Windows may hold it briefly)
+    int good = 0;
+    for (std::size_t i = 0; i < insts.size(); ++i) {
+      Inst& in = *insts[i];
+      if (!create(in)) continue;
+      if (mod->load) mod->load(in.obj, saved[i].data(), static_cast<int>(saved[i].size()));
+      ++good;
+      if (in.started) call(in, TS_HOOK_RELOAD, 0, 0, "");
+    }
+    log(LogLevel::Info, "Reloaded C++ scripts (" + std::to_string(good) + " of " +
+                            std::to_string(insts.size()) + " running)");
+  }
+
+  // Background build done? Install it. 1 when it hot-swapped.
+  int poll(bool wait = false) {
+    if (!building()) return 0;
+    if (!wait && pending.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return 0;
+    const native_scripts::BuildResult b = pending.get();
+    stamp = pending_stamp;
+    return install(b) == 1 ? 1 : 0;
   }
 
   bool create(Inst& in) {
@@ -343,6 +425,7 @@ NativeScriptHost::NativeScriptHost(ScriptWorld& world, ScriptLibrary&, std::stri
 }
 
 NativeScriptHost::~NativeScriptHost() {
+  if (m_->building()) m_->pending.wait();
   if (m_->mod) {
     for (auto& i : m_->insts) {
       if (i->obj) m_->mod->destroy(i->obj);
@@ -366,7 +449,7 @@ bool NativeScriptHost::attach(const Entity2D& e) {
     m_->log(LogLevel::Error, "C++ scripts need a project folder (" + e.name + ")", ref.path, 0, e.id);
     return false;
   }
-  if (!m_->ensure_module()) return false;
+  if (!m_->ensure_module()) return m_->building();  // waits for the background build
   return m_->create(ref);
 }
 
@@ -426,6 +509,7 @@ void NativeScriptHost::ui_event(const std::string& widget, bool change, double v
   }
 }
 void NativeScriptHost::tick(double dt) {
+  m_->poll();
   const std::size_t n = m_->insts.size();
   for (std::size_t i = 0; i < n && i < m_->insts.size(); ++i) {
     Inst& in = *m_->insts[i];
@@ -440,55 +524,28 @@ bool NativeScriptHost::uses(const std::string& rel) const {
 
 int NativeScriptHost::reload_changed() {
   if (m_->prebuilt || m_->insts.empty() || m_->project_dir.empty()) return 0;
+  if (m_->building()) return m_->poll();
   const std::int64_t now = native_scripts::sources_stamp(m_->project_dir);
   if (now == m_->stamp && m_->mod) return 0;
   m_->stamp = now;
+  if (!native_scripts::blocking_builds()) {
+    m_->log(LogLevel::Info, "C++ scripts changed: rebuilding in the background");
+    m_->start_build(true);
+    return 0;
+  }
   return reload("") ? 1 : 0;
 }
 
 bool NativeScriptHost::reload(const std::string&) {
   Impl& m = *m_;
+  if (m.building()) m.poll(true);
   const native_scripts::BuildResult b = native_scripts::build(m.project_dir, true);
-  m.report(b);
-  if (!b.ok) {
-    m.log(LogLevel::Error, "C++ reload skipped, the previous module keeps riding");
-    return false;
-  }
-  std::string err;
-  auto next = m.open_module(b.module, &err);
-  if (!next) {
-    m.log(LogLevel::Error, "C++ reload: " + err);
-    return false;
-  }
-  // Save every instance with the old code, swap, restore with the new.
-  std::vector<std::string> saved(m.insts.size());
-  for (std::size_t i = 0; i < m.insts.size(); ++i) {
-    Inst& in = *m.insts[i];
-    if (!in.obj || !m.mod) continue;
-    if (m.mod->save) {
-      const int need = m.mod->save(in.obj, nullptr, 0);
-      saved[i].resize(static_cast<std::size_t>(std::max(0, need)));
-      if (need > 0) m.mod->save(in.obj, saved[i].data(), need);
-    }
-    m.mod->destroy(in.obj);
-    in.obj = nullptr;
-  }
-  const std::string old_path = m.mod ? m.mod->path : std::string();
-  m.mod = std::move(next);
-  std::error_code ec;
-  if (!old_path.empty()) fs::remove(old_path, ec);  // best effort (Windows may hold it briefly)
-  int good = 0;
-  for (std::size_t i = 0; i < m.insts.size(); ++i) {
-    Inst& in = *m.insts[i];
-    if (!m.create(in)) continue;
-    if (m.mod->load) m.mod->load(in.obj, saved[i].data(), static_cast<int>(saved[i].size()));
-    ++good;
-    if (in.started) m.call(in, TS_HOOK_RELOAD, 0, 0, "");
-  }
-  m.log(LogLevel::Info, "Reloaded C++ scripts (" + std::to_string(good) + " of " +
-                            std::to_string(m.insts.size()) + " running)");
-  return good == static_cast<int>(m.insts.size());
+  const int r = m.install(b);
+  return r == 1 || (r == 0 && m.mod);
 }
+
+bool NativeScriptHost::building() const { return m_->building(); }
+bool NativeScriptHost::wait_build() { return m_->poll(true) == 1 || m_->mod != nullptr; }
 
 bool NativeScriptHost::module_loaded() const { return m_->mod != nullptr; }
 const std::string& NativeScriptHost::module_path() const {

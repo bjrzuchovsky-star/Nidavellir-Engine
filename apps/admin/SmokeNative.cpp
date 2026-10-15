@@ -130,6 +130,8 @@ int run_native_smoke() {
   const fs::path proj = fs::temp_directory_path(ec) / "ts_native_smoke";
   fs::remove_all(proj, ec);
   write(proj / "scripts" / "door.cpp", kDoorV1);
+  native_scripts::set_blocking_builds(true);
+  struct Unblock { ~Unblock() { native_scripts::set_blocking_builds(false); } } unblock;
   World w;
   Entity2D door;
   door.id = 2;
@@ -176,9 +178,28 @@ int run_native_smoke() {
   for (LogEntry& e : ride(w, 30)) (void)e;
   const ScriptValue* after = w.script_get(2, "opened");
   if (!after || after->number < 3) return fail("still ticking after a failed reload");
+  // Background build: the tick keeps running while the module compiles,
+  // the new code swaps in when ready.
+  native_scripts::set_blocking_builds(false);
+  write(proj / "scripts" / "door.cpp", v2() + "// v3\n");
+  if (w.reload_scripts() != 0) return fail("a background rebuild should not swap at once");
+  int bg_ticks = 0;
+  bool swapped = false;
+  const auto bg0 = std::chrono::steady_clock::now();
+  while (!swapped && std::chrono::steady_clock::now() - bg0 < std::chrono::minutes(5)) {
+    for (LogEntry& e : ride(w, 1)) swapped = swapped || e.text.find("Reloaded C++ scripts") != std::string::npos;
+    swapped = w.reload_scripts() == 1 || swapped;
+    ++bg_ticks;
+    if (!swapped) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  if (!swapped) return fail("background rebuild never swapped in");
+  if (bg_ticks < 2) return fail("the game should tick while the module builds");
+  if (!w.scripts()->running(2)) return fail("running after the background swap");
+  native_scripts::set_blocking_builds(true);
   if (int r = check_export()) return r;
   std::cout << "[smoke] C++ scripts OK (module built in " << static_cast<int>(build_s)
             << " s, hooks + props + state, hot reload kept state, compile error at "
-               "scripts/door.cpp:line kept the old module, exported game ran the module from its pak)\n";
+               "scripts/door.cpp:line kept the old module, background rebuild swapped in after " << bg_ticks
+            << " live ticks, exported game ran the module from its pak)\n";
   return 0;
 }

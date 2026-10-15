@@ -47,6 +47,11 @@ struct BuildResult {
 BuildResult build(const std::string& project_dir, bool force = false);
 // cmake found (TS_CMAKE_COMMAND, else on PATH)?
 bool toolchain_available(std::string* why);
+// Default false: the editor / ts_game build modules on a worker thread and
+// swap them in when ready (the tick never waits). Smokes, servers and
+// exports can ask for the old synchronous builds.
+void set_blocking_builds(bool on);
+bool blocking_builds();
 
 }  // namespace native_scripts
 
@@ -76,6 +81,8 @@ class NativeScriptHost final : public ScriptLanguageHost {
   bool uses(const std::string& rel) const override;
 
   bool module_loaded() const;
+  bool building() const;      // a background build is running
+  bool wait_build();          // block until it lands; module loaded?
   const std::string& module_path() const;
 
   struct Impl;
