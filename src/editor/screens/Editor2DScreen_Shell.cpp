@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/export/FreightOffice.h"
 
 #include "editor/audio/EditorAudio.h"
 #include "editor/ui/Brand.h"
@@ -159,6 +160,9 @@ void Editor2DScreen::draw_menu_bar() {
     if (ImGui::MenuItem("Launch Game (ts_game)", nullptr, false,
                         !is_playing())) {
       launch_game();
+    }
+    if (ImGui::MenuItem("Export... (Freight Office)", nullptr, false, !is_playing())) {
+      FreightOffice::get().open(project_.path, project_.name);
     }
     ImGui::Separator();
     if (ImGui::MenuItem("Back to Projects")) {
@@ -845,6 +849,7 @@ void Editor2DScreen::draw_ui() {
   }
   ui_preview_.draw(&show_ui_preview_, project_.path);
   draw_lighting_panel();
+  FreightOffice::get().draw();
   if (show_stable_) {
     ImGui::SetNextWindowSize(ImVec2(320, 460), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Stable", &show_stable_)) {

@@ -54,6 +54,7 @@ add_library(ts_editor
   screens/Editor2DScreen_Fx.cpp
   audio/MixerPanel.cpp
   audio/AudioWidgets.cpp
+  export/FreightOffice.cpp
 )
 
 target_include_directories(ts_editor
@@ -78,6 +79,7 @@ target_link_libraries(ts_editor
     ts_audio
     ts_audio3d
     ts_ui
+    ts_export
 )
 
 target_compile_features(ts_editor PUBLIC cxx_std_20)

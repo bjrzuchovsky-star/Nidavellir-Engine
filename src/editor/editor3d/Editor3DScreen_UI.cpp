@@ -1,4 +1,5 @@
 #include "editor/fx/FxInspector.h"
+#include "editor/export/FreightOffice.h"
 #include "editor/editor3d/Editor3DScreen.h"
 
 #include "ui/UiScript.h"
@@ -129,6 +130,7 @@ void Editor3DScreen::draw_ui() {
   }
   ui_preview_.draw(&show_ui_preview_, project_.path);
   draw_vr_mirror();
+  FreightOffice::get().draw();
 }
 
 void Editor3DScreen::draw_menu_bar() {
@@ -144,6 +146,8 @@ void Editor3DScreen::draw_menu_bar() {
       if (!reload_scene(&err)) note("Reload failed: " + err, runtime::LogLevel::Error);
     }
     if (ImGui::MenuItem("Rescan assets")) rescan_assets();
+    if (ImGui::MenuItem("Export... (Freight Office)", nullptr, false, !playing()))
+      FreightOffice::get().open(project_.path, project_.name);
     ImGui::Separator();
     if (ImGui::MenuItem("Back to Claims")) request_back_to_projects();
     if (ImGui::MenuItem("Quit")) request_quit();
