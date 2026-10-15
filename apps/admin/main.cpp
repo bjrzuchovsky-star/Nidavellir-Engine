@@ -26,6 +26,8 @@
 #include "SmokeSurvival.h"
 #include "SmokeRuntime.h"
 #include "SmokeTemplates.h"
+#include "SmokeTradingPost.h"
+#include "store/TradingPost.h"
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -36,6 +38,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -1187,6 +1190,9 @@ int run_console_smoke() {
   if (run_templates_smoke() != 0) {
     return 1;
   }
+  if (run_trading_post_smoke() != 0) {
+    return 1;
+  }
   if (run_runtime_smoke() != 0) {
     return 1;
   }
@@ -1357,6 +1363,16 @@ int run_imgui_app() {
 
 int main(int argc, char** argv) {
   bool smoke = false;
+  // The Trading Post's plugin cache: installed plugins are found by this
+  // process and by the ts_game / ts_client it launches.
+  if (!std::getenv("TS_PLUGIN_CACHE")) {
+    const std::string cache = ts::tombstone::store::TradingPost::default_cache_root();
+#if defined(_WIN32)
+    _putenv_s("TS_PLUGIN_CACHE", cache.c_str());
+#else
+    setenv("TS_PLUGIN_CACHE", cache.c_str(), 1);
+#endif
+  }
   for (int i = 1; i < argc; ++i) {
     if (std::strcmp(argv[i], "--export") == 0) {
       // Headless Ship It: ts_admin --export <project> --out <dir> [...]
@@ -1364,6 +1380,13 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--bake-templates") == 0 && i + 1 < argc) {
       return run_bake_templates(argv[i + 1]);
+    }
+    if (std::strcmp(argv[i], "--smoke-store") == 0) {
+      return run_trading_post_smoke();
+    }
+    if (std::strcmp(argv[i], "--store-sign") == 0) {
+      // ts_admin --store-sign <index.json> <seed hex>: writes index.json.sig
+      return run_store_sign(argc, argv);
     }
     if (std::strcmp(argv[i], "--smoke-templates") == 0) {
       return run_templates_smoke();

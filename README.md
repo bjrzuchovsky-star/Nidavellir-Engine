@@ -968,14 +968,74 @@ Each project is a folder under `projects_root` with a `project.json` (and, for 2
 {
   "name": "Sample 2D Platformer",
   "dimension": "2d",
+  "vr": false,
   "created": "2026-09-30T00:00:00Z",
   "last_opened": "2026-09-30T00:00:00Z"
 }
 ```
 
-`scene.json` stores the Editor2D workspace (entity list + view). On first run (empty `projects_root`), Admin seeds one sample 2D project. Changing `projects_root` in Settings reloads the project list from the new folder. Local `TombStoneProjects/` and `TombStoneConfig/` are gitignored.
+`scene.json` stores the Editor2D workspace (entity list + view). New projects come from templates (see **Claim templates** below); nothing is seeded. Changing `projects_root` in Settings reloads the project list from the new folder. Local `TombStoneProjects/` and `TombStoneConfig/` are gitignored.
 
 Configure with CMake 3.20+ and a C++20 toolchain. Toggle `TS_BUILD_ADMIN`, `TS_BUILD_CLIENT`, and `TS_BUILD_GAME` as needed. See **Building admin with ImGui** above when enabling Admin.
+
+### Claim templates (New Claim...)
+
+**+ New Claim...** in the Project Manager opens the template picker. Each card shows a thumbnail, the dimension (2D / 3D), a VR badge, a description and the plugins it turns on. Filters are All / 2D / 3D / VR / Mine. The **Blank 2D** and **Blank 3D** claims are always there.
+
+Templates are data, not code. Each one is `templates/<id>/template.json` plus a baked `project/` folder. Creating a claim copies the folder and renames it.
+
+```json
+{ "id": "haunted-saloon-vr", "name": "Haunted Saloon VR", "dimension": "3d", "vr": true,
+  "description": "...", "plugins": [], "tags": ["sample"], "order": 30,
+  "thumbnail": "thumbnail.png", "project": "project", "generator": "haunted-saloon-vr" }
+```
+
+- `generator` is optional. If the `project/` folder is missing, the built-in sample writer is used instead.
+- `ts_admin --bake-templates <dir>` regenerates the baked folders.
+- Templates are searched in this order: `$TS_TEMPLATES_PATH`, then `<exe>/templates` (the build copies them there), then the source tree.
+- **Save as Template** writes the highlighted claim into `<projects_root>/.templates/`, shown under **Mine**.
+- Admin no longer seeds sample projects into `projects_root`. Use the templates instead.
+
+### VR is a switch on 3D
+
+`project.json` now has `"dimension": "2d" | "3d"` plus `"vr": true|false`. Old projects with `"dimension": "vr"` load as 3D with VR on, and nothing is lost. You can flip VR in the create flow or in **Claim Settings**. Any 3D project with VR on gets the editor's VR tools. Export writes `"vr"` into `game.json`.
+
+`ts_game` runs a VR project in the headset when one is found, or with `--sim` / `TS_VR=sim`. Otherwise it falls back to the desktop 3D window. Pass `--desktop` to force the desktop. When a scene has no Player, the VR rig stands in as the desktop rider.
+
+### The Trading Post (plugin store)
+
+Open it with **Trading Post** in the Project Manager, or with **Visit the Trading Post...** in the editor's Plugins panel. You can browse, search, filter by category, and see details, versions and dependencies. Install / uninstall works there, and so does turning a plugin on or off for the current claim. That toggle is the same list Outfitter's Wagon uses.
+
+The store lists goods from four kinds of source:
+- **Built-ins**: ts.posse, ts.tumbleweed, sample.lantern, plus the *optional* ts.frontier and ts.shipyard, which stay off until a project enables them.
+- **Local folders**, which hold plugin libraries.
+- **Remote indexes**, over `file://`, `http://`, or `https://` (Windows).
+- **Coming soon**: Quests, Dialogue, Steam, AI Toolkit, Profiler.
+
+Installed plugins live in the engine plugin cache: `$TS_PLUGIN_CACHE`, which defaults to `./TombStonePlugins`. Each one is `<id>/installed.json` plus its library. Uninstall leaves a `.remove` marker when the library is still loaded. Sources are stored in `<cache>/trading_post.json`:
+
+```json
+{ "local_folders": ["D:/plugins"], "index_urls": ["https://example.com/ts/index.json"],
+  "trusted_keys": ["<64 hex Ed25519 public key>"], "allow_unsigned": false }
+```
+
+Remote index (`index.json`, with `index.json.sig` beside it):
+
+```json
+{ "name": "My Exchange", "plugins": [ { "id": "acme.lanterns", "name": "Lanterns", "version": "0.3.0",
+  "category": "Sample", "description": "...", "types": ["2d"],
+  "deps": [ { "id": "ts.tumbleweed", "min": "1.0.0" } ],
+  "downloads": { "windows-x64": { "url": "pkgs/lanterns.dll", "sha256": "<hex>", "size": 12345 },
+                 "linux-x64":   { "url": "pkgs/liblanterns.so", "sha256": "<hex>", "size": 23456 } } } ] }
+```
+
+How an index and its downloads are checked:
+- **Signature**: `index.json.sig` is a hex Ed25519 signature over the exact bytes of `index.json`. An index whose signature doesn't match one of `trusted_keys` is refused. `allow_unsigned` is for development only.
+- **Signing**: run `ts_admin --store-sign <index.json> <64-hex seed>`. It writes the `.sig` file and prints the public key to trust. Ed25519 comes from Monocypher 4.0.2, fetched with a pinned hash.
+- **Downloads**: each download must match its `sha256` and `size`. The library is loaded to confirm its plugin id before the install counts.
+- **URLs**: relative URLs resolve against the index URL.
+
+Smokes: `ts_admin --smoke-templates`, `ts_admin --smoke-store`. Both also run as part of `--smoke`.
 
 ## Ship It: build & export (Freight Office)
 

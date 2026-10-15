@@ -217,6 +217,10 @@ void ProjectManagerScreen::draw_ui() {
       settings_popup_pending_ = true;
     }
   }
+  ImGui::SameLine();
+  if (theme::CopperButton("Trading Post", ImVec2(120, 0))) {
+    open_trading_post();
+  }
   ImGui::SameLine(0.0f, 24.0f);
   if (theme::SecondaryButton("Settings", ImVec2(90, 0))) {
     request_settings();
@@ -255,6 +259,13 @@ void ProjectManagerScreen::draw_ui() {
   draw_template_picker();
   draw_save_template_popup();
   draw_claim_settings_popup();
+  {
+    TradingPostTarget target;
+    if (highlighted_index_ && *highlighted_index_ < projects_.size()) {
+      target.project = &projects_[*highlighted_index_];
+    }
+    draw_trading_post_window(trading_post_, target);
+  }
 
   theme::EndRoot();
 }

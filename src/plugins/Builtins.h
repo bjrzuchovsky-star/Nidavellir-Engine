@@ -19,9 +19,16 @@ void register_builtin_plugins(plugin::Catalog& catalog,
                               std::vector<std::string>* errors = nullptr);
 
 // Folders a host scans for dynamic plugins, in order: $TS_PLUGIN_PATH
-// (';' or ':' separated, ';' only on Windows), <project_dir>/plugins, and
-// the build-tree sample folder when compiled in. Missing ones are fine.
+// (';' or ':' separated, ';' only on Windows), <project_dir>/plugins, the
+// Trading Post cache folders (see plugin_cache_root), and the build-tree
+// sample folder when compiled in. Missing ones are fine.
 std::vector<std::string> plugin_search_dirs(const std::string& project_dir);
+
+// The engine plugin cache the Trading Post installs into ($TS_PLUGIN_CACHE;
+// ts_admin sets it for itself and the games it launches). Each
+// <cache>/<id>/ folder is a search dir unless it is marked .remove.
+// "" = no cache (shipped games).
+std::string plugin_cache_root();
 
 // register_builtin_plugins + scan_folder over plugin_search_dirs().
 void fill_catalog(plugin::Catalog& catalog, const std::string& project_dir,

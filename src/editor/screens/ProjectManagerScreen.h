@@ -2,6 +2,7 @@
 
 #include "editor/ProjectInfo.h"
 #include "editor/screens/IScreen.h"
+#include "editor/store/TradingPostPanel.h"
 #include "gfx/TextureCache.h"
 
 #include <optional>
@@ -91,6 +92,10 @@ class ProjectManagerScreen final : public IScreen {
   const std::string& pending_template_name() const { return pending_template_name_; }
   const std::string& pending_template_description() const { return pending_template_desc_; }
   void clear_save_template_request() { save_template_requested_ = false; }
+  // Trading Post (plugin store), outfitting the highlighted claim.
+  void open_trading_post() { trading_post_.open = true; }
+  TradingPostUi& trading_post() { return trading_post_; }
+
   // Claim settings: VR switch on the highlighted 3D project.
   void request_set_vr(bool on);
   bool set_vr_requested() const { return set_vr_requested_; }
@@ -145,6 +150,7 @@ class ProjectManagerScreen final : public IScreen {
   std::string pending_template_name_;
   std::string pending_template_desc_;
   bool settings_popup_pending_ = false;
+  TradingPostUi trading_post_;
   bool set_vr_requested_ = false;
   bool pending_vr_ = false;
 };

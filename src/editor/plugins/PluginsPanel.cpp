@@ -1,5 +1,6 @@
 #include "editor/plugins/PluginsPanel.h"
 
+#include "editor/store/TradingPostPanel.h"
 #include "editor/ui/Theme.h"
 #include "plugins/Builtins.h"
 
@@ -107,6 +108,17 @@ PluginsPanelResult draw_plugins_panel(EditorPlugins& plugins,
     theme::StatusError(line);
   }
 
+  // The Trading Post: install more plugins, then hitch them here.
+  static TradingPostUi trading_post;
+  if (theme::CopperButton("Visit the Trading Post...", ImVec2(-1.0f, 0))) trading_post.open = true;
+  {
+    TradingPostTarget target;
+    target.plugins = &plugins;
+    target.project_dir = mgr.context().project_dir;
+    const TradingPostResult tp = draw_trading_post_window(trading_post, target);
+    if (tp.installed_changed) result.rescan_requested = true;
+    if (tp.enabled_changed) result.changed = true;
+  }
   ImGui::SetNextItemWidth(-1.0f);
   ImGui::InputTextWithHint("##pluginfilter", "Search the wagon", state.filter,
                            sizeof(state.filter));

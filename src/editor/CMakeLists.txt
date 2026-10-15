@@ -57,6 +57,7 @@ add_library(ts_editor
   export/FreightOffice.cpp
   templates/TemplateStore.cpp
   screens/ProjectManager_Templates.cpp
+  store/TradingPostPanel.cpp
 )
 
 # Engine templates: the source tree's templates/ is the fallback when no

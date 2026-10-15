@@ -22,6 +22,7 @@ add_executable(ts_admin
   SmokeGraph.cpp
   SmokeNative.cpp
   SmokeTemplates.cpp
+  SmokeTradingPost.cpp
 )
 
 target_link_libraries(ts_admin
@@ -37,6 +38,7 @@ target_link_libraries(ts_admin
     ts_runtime
     ts_gfx
     ts_editor
+    ts_store
     ts_plugin
     ts_plugins_builtin
     ts_lua

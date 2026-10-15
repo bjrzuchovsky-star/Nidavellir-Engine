@@ -3,6 +3,7 @@
 #include "plugins/survival/SurvivalPlugin.h"
 #include "runtime/World.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 
@@ -53,10 +54,28 @@ std::vector<std::string> plugin_search_dirs(const std::string& project_dir) {
   if (!project_dir.empty()) {
     dirs.push_back((std::filesystem::path(project_dir) / "plugins").string());
   }
+  const std::string cache = plugin_cache_root();
+  std::error_code ec;
+  if (!cache.empty() && std::filesystem::is_directory(cache, ec)) {
+    std::vector<std::string> installed;
+    for (const auto& e : std::filesystem::directory_iterator(cache, ec)) {
+      if (!e.is_directory(ec)) continue;
+      if (std::filesystem::exists(e.path() / ".remove", ec)) continue;  // uninstalled
+      if (!std::filesystem::exists(e.path() / "installed.json", ec)) continue;
+      installed.push_back(e.path().string());
+    }
+    std::sort(installed.begin(), installed.end());
+    dirs.insert(dirs.end(), installed.begin(), installed.end());
+  }
 #if defined(TS_SAMPLE_PLUGIN_DIR)
   dirs.push_back(TS_SAMPLE_PLUGIN_DIR);
 #endif
   return dirs;
+}
+
+std::string plugin_cache_root() {
+  const char* env = std::getenv("TS_PLUGIN_CACHE");
+  return env ? std::string(env) : std::string();
 }
 
 void fill_catalog(plugin::Catalog& catalog, const std::string& project_dir,
