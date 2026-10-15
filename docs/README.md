@@ -15,6 +15,9 @@ These pages are written from the source in this repository (`src/`, `apps/`, `sd
 | [Export and the Freight Office](export.md) | Export UI and CLI, profiles, `.tspak`, the output folder |
 | [3D, VR and animation](3d-vr-animation.md) | `ts_render3d`, the 3D editor, VR / OpenXR, 2D sprite and 3D skeletal animation |
 | AI toolkit (`ts.ai`) | See "Pathfinder AI toolkit (ts.ai)" in the root `README.md`: behaviour trees, 2D grid / 3D navmesh paths, crowds, perception, the BT panel |
+| [Quests: Bounty Board](quests.md) | Optional `ts.quests`: quest files, objectives, journal / tracker, Lua `quests`, hooks |
+| [Dialogue: Parley](dialogue.md) | Optional `ts.dialogue`: branching `.dlg.json`, conditions / actions, Lua `dialogue` / `story`, the Parley panel |
+| [Saves: Strongbox](saves.md) | Optional `ts.saves`: slots, autosave, `story.json`, Lua `saves` |
 | [Multiplayer (the posse)](multiplayer.md) | `ts_server`, `ts_client`, protocol, prediction, Play with Posse |
 
 ## Coming soon

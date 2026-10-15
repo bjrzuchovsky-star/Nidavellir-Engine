@@ -1144,7 +1144,8 @@ The store lists goods from four kinds of source:
 - **Built-ins**: ts.posse, ts.tumbleweed, sample.lantern, plus the *optional* ts.frontier and ts.shipyard, which stay off until a project enables them.
 - **Local folders**, which hold plugin libraries.
 - **Remote indexes**, over `file://`, `http://`, or `https://` (Windows).
-- **Coming soon**: Quests, Dialogue, Steam, AI Toolkit, Profiler.
+- **Story (optional)**: Story Core (`ts.story`) plus Bounty Board (`ts.quests`), Parley (`ts.dialogue`) and Strongbox (`ts.saves`); see below.
+- **Coming soon**: Steam, Profiler.
 
 Installed plugins live in the engine plugin cache: `$TS_PLUGIN_CACHE`, which defaults to `./TombStonePlugins`. Each one is `<id>/installed.json` plus its library. Uninstall leaves a `.remove` marker when the library is still loaded. Sources are stored in `<cache>/trading_post.json`:
 
@@ -1170,6 +1171,16 @@ How an index and its downloads are checked:
 - **URLs**: relative URLs resolve against the index URL.
 
 Smokes: `ts_admin --smoke-templates`, `ts_admin --smoke-store`. Both also run as part of `--smoke`.
+
+### Quests, dialogue and saves (optional)
+
+Story Core (`ts.story`) holds the shared story variables, condition and action language, and runtime. Three optional plugins sit on top of it, and enabling any one of them also enables the core:
+
+- **Bounty Board** (`ts.quests`): `quests/*.quest.json` with objectives, prerequisites, chains and rewards; a journal and tracker HUD; the `quests` Lua table; `on_quest_*` and `on_objective` hooks.
+- **Parley** (`ts.dialogue`): branching `dialogue/*.dlg.json` with conditions, actions, `{var}` text and once-only choices; a Dusk dialogue box; the `dialogue` Lua table; a node-graph editor panel.
+- **Strongbox** (`ts.saves`): slots under `saves/slots/`, a rotating autosave (settings in `story.json`), a save menu and the `saves` Lua table.
+
+The editor panels appear in the 2D and 3D View menus, including during Play. The Ghost Town 3D template turns all of this on: Old Hank offers "Ring the Bell" through dialogue. Smoke: `ts_admin --smoke-story`. Docs: `docs/quests.md`, `docs/dialogue.md`, `docs/saves.md`.
 
 ## Ship It: build & export (Freight Office)
 

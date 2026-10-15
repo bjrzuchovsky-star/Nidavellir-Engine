@@ -15,12 +15,10 @@ Use **Trading Post** in the Project Manager, or **Visit the Trading Post...** in
 
 Entries come from four kinds of source (`TradingPost::refresh`):
 
-- **Built-ins** from the plugin catalog (including `ts.ai`, Pathfinder (AI Toolkit); see the root README).
+- **Built-ins** from the plugin catalog, including `ts.ai` (Pathfinder, the AI Toolkit; see the root README) and the optional story plugins: `ts.story` (Story Core), `ts.quests` (Bounty Board, [quests.md](quests.md)), `ts.dialogue` (Parley, [dialogue.md](dialogue.md)) and `ts.saves` (Strongbox, [saves.md](saves.md)). Enabling any feature plugin also enables `ts.story`.
 - **Local folders** that hold plugin libraries.
 - **Remote indexes** over `file://` or `http(s)://`. The README notes that https is supported on Windows.
 - **Coming soon** roadmap entries, hard-coded in `TradingPost.cpp`:
-  - `ts.quests`: Bounty Board
-  - `ts.dialogue`: Parley
   - `ts.steam`: Steam Hitch
   - `ts.profiler`: Assay Office
 
