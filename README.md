@@ -1145,7 +1145,8 @@ The store lists goods from four kinds of source:
 - **Local folders**, which hold plugin libraries.
 - **Remote indexes**, over `file://`, `http://`, or `https://` (Windows).
 - **Story (optional)**: Story Core (`ts.story`) plus Bounty Board (`ts.quests`), Parley (`ts.dialogue`) and Strongbox (`ts.saves`); see below.
-- **Coming soon**: Steam, Profiler.
+- **Assay Office (optional)**: `ts.profiler`, the profiler and debug tools; see below.
+- **Coming soon**: Steam.
 
 Installed plugins live in the engine plugin cache: `$TS_PLUGIN_CACHE`, which defaults to `./TombStonePlugins`. Each one is `<id>/installed.json` plus its library. Uninstall leaves a `.remove` marker when the library is still loaded. Sources are stored in `<cache>/trading_post.json`:
 
@@ -1181,6 +1182,10 @@ Story Core (`ts.story`) holds the shared story variables, condition and action l
 - **Strongbox** (`ts.saves`): slots under `saves/slots/`, a rotating autosave (settings in `story.json`), a save menu and the `saves` Lua table.
 
 The editor panels appear in the 2D and 3D View menus, including during Play. The Ghost Town 3D template turns all of this on: Old Hank offers "Ring the Bell" through dialogue. Smoke: `ts_admin --smoke-story`. Docs: `docs/quests.md`, `docs/dialogue.md`, `docs/saves.md`.
+
+### Profiler and debug tools: Assay Office (optional)
+
+Turn on `ts.profiler` for a project and Play records every frame: named CPU scopes per system, script language and plugin; GPU pass times from timer queries (3D); draw calls, triangles, asset counts and memory; and posse net stats. The 2D and 3D View menus get **Assay Office** (frame bars, timeline / flame view, scope table, capture and load), **Render & Memory** and **Net**. The Telegraph gets a console command line. In game (and in editor Play), **F3** shows the debug overlay and **`** opens the console (`help`, `fps`, `scopes`, `counters`, `gpu`, `mem`, `capture`). Captures go to `<project>/captures/*.tsprof.json` (Chrome trace JSON: open them in Perfetto too). Lua gets `profiler` and `console`. Smoke: `ts_admin --smoke-profiler`. Docs: `docs/profiler.md`.
 
 ## Ship It: build & export (Freight Office)
 

@@ -20,7 +20,8 @@ Entries come from four kinds of source (`TradingPost::refresh`):
 - **Remote indexes** over `file://` or `http(s)://`. The README notes that https is supported on Windows.
 - **Coming soon** roadmap entries, hard-coded in `TradingPost.cpp`:
   - `ts.steam`: Steam Hitch
-  - `ts.profiler`: Assay Office
+
+  Assay Office (`ts.profiler`) used to be listed here. It is now an optional built-in ([profiler.md](profiler.md)).
 
 ## Plugin cache and configuration
 
