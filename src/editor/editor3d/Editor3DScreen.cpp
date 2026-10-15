@@ -585,6 +585,7 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
   render3d::Camera3D cam;
   if (playing()) {
     cam = free_camera_in_play_ ? editor_camera() : world_.camera();
+    opt.colliders = world_.authored().physics.debug_draw;  // Physics Settings
     if (world_.vr()) {
       // VR preview: the head's view plus the hands, lasers and menu.
       std::vector<scene3d::Entity3D> ents = world_.entities();

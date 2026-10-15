@@ -96,6 +96,41 @@ bool overlaps(const Aabb& a, const Obb& b) {
   return overlap_shifts(a, b, 0, &lo, &hi) && lo < 0.0f && hi > 0.0f;
 }
 
+std::vector<std::pair<float, float>> overlay_outline(const OverlayBox& b) {
+  std::vector<std::pair<float, float>> pts;
+  const float cx = (b.x0 + b.x1) * 0.5f, cy = (b.y0 + b.y1) * 0.5f;
+  const float hx = (b.x1 - b.x0) * 0.5f, hy = (b.y1 - b.y0) * 0.5f;
+  constexpr float kPi = 3.14159265f;
+  if (b.shape == ColliderData::Shape::Circle) {
+    const float r = std::min(hx, hy);
+    for (int i = 0; i < 24; ++i) {
+      const float a = 2.0f * kPi * static_cast<float>(i) / 24.0f;
+      pts.emplace_back(std::cos(a) * r, std::sin(a) * r);
+    }
+  } else if (b.shape == ColliderData::Shape::Capsule) {
+    // Round ends on the long axis.
+    const bool wide = hx >= hy;
+    const float r = wide ? hy : hx, half = (wide ? hx : hy) - r;
+    for (int end = 0; end < 2; ++end) {
+      for (int i = 0; i <= 12; ++i) {
+        const float a = kPi * static_cast<float>(i) / 12.0f + (end ? kPi : 0.0f) + (wide ? -kPi * 0.5f : 0.0f);
+        const float s = end ? -half : half;
+        pts.emplace_back(std::cos(a) * r + (wide ? s : 0.0f), std::sin(a) * r + (wide ? 0.0f : s));
+      }
+    }
+  } else {
+    pts = {{-hx, -hy}, {hx, -hy}, {hx, hy}, {-hx, hy}};
+  }
+  const float rad = b.rotation * kPi / 180.0f;
+  const float c = std::cos(rad), s = std::sin(rad);
+  for (auto& [x, y] : pts) {
+    const float rx = x * c - y * s, ry = x * s + y * c;
+    x = cx + rx;
+    y = cy + ry;
+  }
+  return pts;
+}
+
 namespace {
 
 bool in_view(const Aabb& b, const WorldRect& view) {
@@ -183,6 +218,7 @@ void append_overlay(const Entity2D& e, float x, float y,
                    ? OverlayKind::DynamicSolid
                    : OverlayKind::StaticSolid;
       b.body = e.body.has_value();
+      if (e.collider) b.shape = e.collider->shape;
       b.entity = e.id;
       out->push_back(b);
     }

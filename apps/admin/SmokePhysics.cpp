@@ -703,10 +703,12 @@ int run_physics_world_smoke() {
 }
 
 int run_physics2d_smoke();  // SmokePhysics2D.cpp
+int run_physics_editor_smoke();  // SmokePhysicsEditor.cpp
 
 int run_physics_smoke() {
   if (run_physics_core_smoke() != 0) return 1;
   if (run_physics_world_smoke() != 0) return 1;
   if (run_physics2d_smoke() != 0) return 1;
+  if (run_physics_editor_smoke() != 0) return 1;
   return 0;
 }

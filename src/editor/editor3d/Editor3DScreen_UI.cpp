@@ -143,6 +143,15 @@ void Editor3DScreen::draw_ui() {
   }
   // Plugin panels (Behaviour Trees, ...): open in edit mode and during Play.
   draw_open_plugin_panels(plugins_, plugin_panel_open_);
+  if (show_physics_) {
+    ImGui::SetNextWindowSize(ImVec2(420, 520), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Physics Settings", &show_physics_)) {
+      ImGui::BeginDisabled(locked);
+      draw_physics_settings();
+      ImGui::EndDisabled();
+    }
+    ImGui::End();
+  }
   if (anim_preview_.open) {
     ImGui::SetNextWindowSize(ImVec2(380, 420), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Animation Preview", &anim_preview_.open)) draw_anim_preview();
@@ -224,7 +233,13 @@ void Editor3DScreen::draw_menu_bar() {
   }
   if (ImGui::BeginMenu("View")) {
     ImGui::MenuItem("Grid", "G", &scene_.show_grid);
-    ImGui::MenuItem("Colliders", nullptr, &show_colliders_);
+    ImGui::MenuItem("Colliders + joints", nullptr, &show_colliders_);
+    ImGui::MenuItem("Physics Settings", nullptr, &show_physics_);
+    if (ImGui::MenuItem("Physics debug draw (Play)", nullptr, scene_.physics.debug_draw, !playing())) {
+      const scene3d::Scene3D before = scene_;
+      scene_.physics.debug_draw = !scene_.physics.debug_draw;
+      push_undo("Physics debug draw", before);
+    }
     ImGui::MenuItem("Saloon Band (Mixer)", nullptr, &show_mixer_);
     ImGui::MenuItem("UI Preview", nullptr, &show_ui_preview_);
     ImGui::MenuItem("Animation Preview", nullptr, &anim_preview_.open);
@@ -251,6 +266,7 @@ void Editor3DScreen::draw_menu_bar() {
     theme::KeyHint("F5", "Play / Stop (Stop restores the scene)");
     theme::KeyHint("WASD Space E", "Ride: move, jump, interact");
     theme::KeyHint("C", "Free camera while playing");
+    theme::KeyHint("Hold F / G", "Carry a physics body / throw it");
     ImGui::EndMenu();
   }
   ImGui::SameLine(ImGui::GetWindowWidth() - 360.0f);
@@ -353,6 +369,11 @@ world3d::Input3D Editor3DScreen::poll_play_input() const {
             (down(ImGuiKey_Z) ? 1.0f : 0.0f);
   in.jump = down(ImGuiKey_Space);
   in.action = ImGui::IsKeyPressed(ImGuiKey_E, false);
+  // Physics gun: hold F to carry the body ahead, G (or left click while
+  // carrying) throws it.
+  in.grab = down(ImGuiKey_F);
+  in.throw_held = ImGui::IsKeyPressed(ImGuiKey_G, false) ||
+                  (in.grab && ImGui::IsMouseClicked(ImGuiMouseButton_Left));
   return in;
 }
 

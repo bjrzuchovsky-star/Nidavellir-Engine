@@ -68,6 +68,12 @@ class SceneView {
   }
   // World-space box lines.
   void draw_box(const Mat4& world, const Aabb& local, const float* rgba, bool on_top);
+  void draw_circle(const Mat4& world, const Vec3& c, float r, int plane, const float* rgba);
+  // Physics gizmos: collider shapes (compound parts included) coloured by
+  // body motion, and joints (anchor -> target, hinge / slider axis).
+  void draw_collider(const Mat4& world, const scene3d::Entity3D& e);
+  void draw_joint(const Mat4& world, const scene3d::Entity3D& e,
+                  const std::vector<scene3d::Entity3D>& entities);
 
  private:
   struct ModelEntry {

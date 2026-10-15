@@ -79,6 +79,7 @@ class Editor3DScreen final : public IScreen {
   const std::vector<std::uint64_t>& selection() const { return scene_.selection; }
   std::uint64_t primary() const;
   void select(std::uint64_t id, bool additive = false);
+  void set_show_physics_settings(bool on) { show_physics_ = on; }
   void clear_selection();
 
   // ---- Edits (each one undo step + autosave) ------------------------------
@@ -337,6 +338,8 @@ class Editor3DScreen final : public IScreen {
   bool viewport_hovered_ = false;
   bool viewport_focused_ = false;
   bool show_colliders_ = true;
+  bool show_physics_ = false;  // Physics Settings window
+  void draw_physics_settings();
   float viewport_w_ = 1280.0f, viewport_h_ = 720.0f;
   char rename_buf_[128] = {0};
   PluginsPanelState plugins_panel_;

@@ -10,6 +10,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <optional>
@@ -189,10 +190,26 @@ void Editor2DScreen::draw_collision_overlay(ImDrawList* draw,
     const ImVec4 col = overlay_color(b.kind);
     const ImVec2 p0 = to_screen(b.x0, b.y0);
     const ImVec2 p1 = to_screen(b.x1, b.y1);
-    draw->AddRectFilled(p0, p1, theme::U32(col, overlay_fill(b)));
     const float thick = b.kind == runtime::OverlayKind::SolidTile ? 1.5f : 2.0f;
-    draw->AddRect(p0, p1, theme::U32(col, 0.95f), 0.0f, 0, thick);
-    if (b.kind == runtime::OverlayKind::Trigger) {
+    if (b.rotation != 0.0f || b.shape != ColliderData::Shape::Box) {
+      // Turned boxes, circles and capsules: their real outline.
+      std::vector<ImVec2> pts;
+      for (const auto& [wx, wy] : runtime::overlay_outline(b)) pts.push_back(to_screen(wx, wy));
+      draw->AddConvexPolyFilled(pts.data(), static_cast<int>(pts.size()), theme::U32(col, overlay_fill(b)));
+      draw->AddPolyline(pts.data(), static_cast<int>(pts.size()), theme::U32(col, 0.95f), ImDrawFlags_Closed, thick);
+    } else {
+      draw->AddRectFilled(p0, p1, theme::U32(col, overlay_fill(b)));
+      draw->AddRect(p0, p1, theme::U32(col, 0.95f), 0.0f, 0, thick);
+    }
+    if (b.body) {
+      // Rigid body: a centre dot (and a heading tick when it turns).
+      const ImVec2 c((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f);
+      draw->AddCircleFilled(c, 3.0f, theme::U32(col, 0.95f));
+      const float rad = b.rotation * 3.14159265f / 180.0f;
+      const float len = std::min(p1.x - p0.x, p1.y - p0.y) * 0.45f;
+      draw->AddLine(c, ImVec2(c.x + std::cos(rad) * len, c.y + std::sin(rad) * len), theme::U32(col, 0.95f), 1.5f);
+    }
+    if (b.kind == runtime::OverlayKind::Trigger && b.rotation == 0.0f && b.shape == ColliderData::Shape::Box) {
       // Crossed box: walk-through, never blocks.
       draw->AddLine(p0, p1, theme::U32(col, 0.55f), 1.0f);
       draw->AddLine(ImVec2(p0.x, p1.y), ImVec2(p1.x, p0.y),
@@ -265,7 +282,18 @@ void Editor2DScreen::draw_inspector_collider(std::uint64_t id) {
     return;
   }
   ColliderData c = *e->collider;
-  ImGui::TextColored(theme::Accent(), "Collider (AABB)");
+  ImGui::TextColored(theme::Accent(), "Collider");
+  {
+    int shape = static_cast<int>(c.shape);
+    ImGui::SetNextItemWidth(140.0f);
+    if (ImGui::Combo("Shape", &shape, "Box\0Circle\0Capsule\0")) {
+      c.shape = static_cast<ColliderData::Shape>(shape);
+      set_collider(id, c, "Collider shape");
+    }
+    if (c.shape != ColliderData::Shape::Box && !e->body) {
+      ImGui::TextDisabled("Round shapes need a Rigid Body; riders see the box.");
+    }
+  }
   ImGui::TextDisabled("Type");
   ImGui::SameLine(64.0f);
   if (ImGui::RadioButton("Solid", !c.trigger) && c.trigger) {
@@ -334,6 +362,128 @@ void Editor2DScreen::draw_inspector_collider(std::uint64_t id) {
   if (theme::DangerButton("Remove Collider", ImVec2(130, 0))) {
     set_collider(id, std::nullopt, "Remove Collider");
   }
+  ImGui::PopID();
+}
+
+// --- Inspector: Rigid Body + Joint (Box2D) ---------------------------------------
+
+void Editor2DScreen::draw_inspector_body(std::uint64_t id) {
+  const Entity2D* e = workspace_.find(id);
+  if (!e || e->tilemap || e->player) return;  // riders keep the platformer solver
+  auto edit = [&](const char* label, auto&& fn) {
+    Workspace2D::Snapshot before = prepare_edit();
+    if (Entity2D* t = workspace_.find(id)) {
+      fn(*t);
+      commit_discrete(std::move(before), label, "");
+    }
+  };
+  ImGui::SeparatorText("Rigid Body");
+  ImGui::PushID("rigidbody");
+  if (!e->body) {
+    ImGui::TextDisabled("Not simulated: the collider (if any) uses the platformer rules.");
+    if (theme::SecondaryButton("+ Rigid Body", ImVec2(130, 0))) {
+      edit("Add Rigid Body", [](Entity2D& t) {
+        t.body = RigidBody2DData{};
+        if (!t.collider) t.collider = default_collider(t);
+      });
+    }
+    ImGui::PopID();
+    return;
+  }
+  RigidBody2DData b = *e->body;
+  int m = static_cast<int>(b.motion);
+  if (ImGui::Combo("Motion", &m, "Static\0Kinematic\0Dynamic\0")) {
+    edit("Body motion", [&](Entity2D& t) { t.body->motion = static_cast<RigidBody2DData::Motion>(m); });
+  }
+  // Live drags on the entity, one undo step on release.
+  auto drag = [&](const char* label, float RigidBody2DData::*field, float speed, float lo, float hi,
+                  const char* fmt) {
+    if (Entity2D* t = workspace_.find(id); t && t->body) {
+      if (ImGui::DragFloat(label, &(*t->body.*field), speed, lo, hi, fmt, ImGuiSliderFlags_AlwaysClamp)) {
+        mark_dirty();
+      }
+      track_inspector_item(label);
+    }
+  };
+  drag("Density", &RigidBody2DData::density, 0.01f, 0.0f, 1000.0f, "%.2f kg/m2");
+  drag("Mass", &RigidBody2DData::mass, 0.05f, 0.0f, 100000.0f, b.mass > 0 ? "%.2f kg" : "auto (density)");
+  drag("Friction", &RigidBody2DData::friction, 0.01f, 0.0f, 10.0f, "%.2f");
+  drag("Restitution", &RigidBody2DData::restitution, 0.01f, 0.0f, 1.0f, "%.2f");
+  drag("Linear damping", &RigidBody2DData::linear_damping, 0.01f, 0.0f, 100.0f, "%.2f");
+  drag("Angular damping", &RigidBody2DData::angular_damping, 0.01f, 0.0f, 100.0f, "%.2f");
+  drag("Gravity scale", &RigidBody2DData::gravity_scale, 0.01f, -10.0f, 10.0f, "%.2f (0 = top-down)");
+  bool fixed = b.fixed_rotation, bullet = b.bullet;
+  if (ImGui::Checkbox("Fixed rotation", &fixed)) edit("Fixed rotation", [&](Entity2D& t) { t.body->fixed_rotation = fixed; });
+  ImGui::SameLine();
+  if (ImGui::Checkbox("Bullet (CCD)", &bullet)) edit("Bullet", [&](Entity2D& t) { t.body->bullet = bullet; });
+  if (theme::DangerButton("Remove Rigid Body", ImVec2(150, 0))) {
+    edit("Remove Rigid Body", [](Entity2D& t) { t.body.reset(); t.joint.reset(); });
+    ImGui::PopID();
+    return;
+  }
+  ImGui::PopID();
+
+  ImGui::SeparatorText("Joint");
+  ImGui::PushID("joint2d");
+  e = workspace_.find(id);
+  if (!e) { ImGui::PopID(); return; }
+  if (!e->joint) {
+    if (theme::SecondaryButton("+ Joint", ImVec2(110, 0))) edit("Add Joint", [](Entity2D& t) { t.joint = Joint2DData{}; });
+    ImGui::PopID();
+    return;
+  }
+  Joint2DData j = *e->joint;
+  int ty = static_cast<int>(j.type);
+  if (ImGui::Combo("Type", &ty, "Weld\0Revolute (hinge)\0Prismatic (slider)\0Distance (rope)\0")) {
+    edit("Joint type", [&](Entity2D& t) { t.joint->type = static_cast<Joint2DData::Type>(ty); });
+  }
+  const Entity2D* tgt = j.target ? workspace_.find(j.target) : nullptr;
+  if (ImGui::BeginCombo("Target", tgt ? tgt->name.c_str() : "(the world)")) {
+    if (ImGui::Selectable("(the world)", j.target == 0)) edit("Joint target", [](Entity2D& t) { t.joint->target = 0; });
+    for (const Entity2D& o : workspace_.entities()) {
+      if (o.id == id || !o.body) continue;
+      ImGui::PushID(static_cast<int>(o.id));
+      if (ImGui::Selectable(o.name.c_str(), o.id == j.target)) {
+        const std::uint64_t to = o.id;
+        edit("Joint target", [to](Entity2D& t) { t.joint->target = to; });
+      }
+      ImGui::PopID();
+    }
+    ImGui::EndCombo();
+  }
+  if (Entity2D* t = workspace_.find(id); t && t->joint) {
+    float a[2] = {t->joint->anchor_x, t->joint->anchor_y};
+    if (ImGui::DragFloat2("Anchor", a, 0.5f, -10000.0f, 10000.0f, "%.1f px")) {
+      t->joint->anchor_x = a[0];
+      t->joint->anchor_y = a[1];
+      mark_dirty();
+    }
+    track_inspector_item("Joint anchor");
+    if (t->joint->type == Joint2DData::Type::Prismatic) {
+      float ax[2] = {t->joint->axis_x, t->joint->axis_y};
+      if (ImGui::DragFloat2("Axis", ax, 0.01f, -1.0f, 1.0f, "%.2f")) {
+        t->joint->axis_x = ax[0];
+        t->joint->axis_y = ax[1];
+        mark_dirty();
+      }
+      track_inspector_item("Joint axis");
+    }
+    if (t->joint->type != Joint2DData::Type::Weld) {
+      bool lim = t->joint->limits;
+      if (ImGui::Checkbox("Limits", &lim)) edit("Joint limits", [lim](Entity2D& x) { x.joint->limits = lim; });
+      if (Entity2D* u = workspace_.find(id); u && u->joint && u->joint->limits) {
+        float mm[2] = {u->joint->min, u->joint->max};
+        const char* unit = u->joint->type == Joint2DData::Type::Revolute ? "%.1f deg" : "%.1f px";
+        if (ImGui::DragFloat2("Min / Max", mm, 0.5f, -100000.0f, 100000.0f, unit)) {
+          u->joint->min = mm[0];
+          u->joint->max = mm[1];
+          mark_dirty();
+        }
+        track_inspector_item("Joint limits");
+      }
+    }
+  }
+  if (theme::DangerButton("Remove Joint", ImVec2(130, 0))) edit("Remove Joint", [](Entity2D& t) { t.joint.reset(); });
   ImGui::PopID();
 }
 

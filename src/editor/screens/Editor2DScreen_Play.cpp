@@ -860,6 +860,8 @@ void Editor2DScreen::draw_inspector_gameplay(std::uint64_t id) {
   }
   // Collider: AABB, solid / trigger, static / dynamic.
   draw_inspector_collider(id);
+  // Rigid Body (Box2D) + Joint.
+  draw_inspector_body(id);
   // Script: file + per-entity props.
   draw_inspector_script(id);
   // Audio Source: clip, bus, autoplay / loop, positional.

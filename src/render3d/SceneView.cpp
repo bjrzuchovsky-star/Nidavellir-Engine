@@ -3,6 +3,7 @@
 
 #include "core/MemImages.h"
 
+#include <cmath>
 #include <cstdio>
 #include <algorithm>
 #include <filesystem>
@@ -197,6 +198,100 @@ void SceneView::draw_box(const Mat4& world, const Aabb& b, const float* rgba, bo
   for (const auto& e : edges) r_->draw_line(c[e[0]], c[e[1]], rgba, !on_top);
 }
 
+void SceneView::draw_circle(const Mat4& world, const Vec3& c, float r, int plane, const float* rgba) {
+  constexpr int kSeg = 20;
+  Vec3 prev;
+  for (int i = 0; i <= kSeg; ++i) {
+    const float a = 6.2831853f * static_cast<float>(i) / kSeg;
+    const float u = std::cos(a) * r, v = std::sin(a) * r;
+    const Vec3 p = plane == 0 ? Vec3{c.x + u, c.y, c.z + v}    // XZ
+                   : plane == 1 ? Vec3{c.x + u, c.y + v, c.z}  // XY
+                                : Vec3{c.x, c.y + u, c.z + v}; // YZ
+    const Vec3 w = world.transform_point(p);
+    if (i > 0) r_->draw_line(prev, w, rgba, true);
+    prev = w;
+  }
+}
+
+void SceneView::draw_collider(const Mat4& world, const scene3d::Entity3D& e) {
+  if (!r_) return;
+  const scene3d::Collider3D& c = *e.collider;
+  float col[4] = {0.35f, 0.95f, 0.45f, 0.9f};  // static: green
+  if (e.rigid_body) {
+    using M = scene3d::RigidBody3D::Motion;
+    if (e.rigid_body->motion == M::Dynamic) {
+      col[0] = 1.0f, col[1] = 0.62f, col[2] = 0.2f;  // dynamic: orange
+    } else if (e.rigid_body->motion == M::Kinematic) {
+      col[0] = 0.4f, col[1] = 0.62f, col[2] = 1.0f;  // kinematic: blue
+    }
+  }
+  if (c.trigger) col[0] = 1.0f, col[1] = 0.85f, col[2] = 0.3f, col[3] = 0.55f;
+  auto prim = [&](const Mat4& m, scene3d::ColliderShape3D shape, const Vec3& size) {
+    using S = scene3d::ColliderShape3D;
+    switch (shape) {
+      case S::Sphere:
+        for (int p = 0; p < 3; ++p) draw_circle(m, {}, size.x, p, col);
+        break;
+      case S::Capsule: {
+        const float r = size.x, half = std::max(0.0f, size.y * 0.5f - r);
+        for (float y : {-half, half}) {
+          draw_circle(m, {0, y, 0}, r, 0, col);
+          draw_circle(m, {0, y, 0}, r, 1, col);
+          draw_circle(m, {0, y, 0}, r, 2, col);
+        }
+        for (const Vec3& d : {Vec3{r, 0, 0}, Vec3{-r, 0, 0}, Vec3{0, 0, r}, Vec3{0, 0, -r}}) {
+          r_->draw_line(m.transform_point(d + Vec3{0, -half, 0}), m.transform_point(d + Vec3{0, half, 0}), col, true);
+        }
+        break;
+      }
+      case S::ConvexHull:
+      case S::Mesh: {
+        // The model's bounds stand in for the hull / triangles.
+        const float hull[4] = {0.8f, 0.5f, 1.0f, 0.85f};
+        draw_box(m, local_bounds(e), hull, false);
+        break;
+      }
+      default:
+        draw_box(m, {size * -0.5f, size * 0.5f}, col, false);
+        break;
+    }
+  };
+  Transform t;
+  t.position = c.offset;
+  prim(world * t.matrix(), c.shape, c.size);
+  for (const scene3d::ColliderPart3D& p : c.parts) {
+    Transform pt;
+    pt.position = p.offset;
+    pt.rotation = Quat::from_euler_deg(p.rotation_deg);
+    prim(world * pt.matrix(), p.shape, p.size);
+  }
+}
+
+void SceneView::draw_joint(const Mat4& world, const scene3d::Entity3D& e,
+                           const std::vector<scene3d::Entity3D>& entities) {
+  if (!r_) return;
+  const scene3d::Joint3D& j = *e.joint;
+  const float col[4] = {1.0f, 0.35f, 0.85f, 0.95f};
+  const Vec3 a = world.transform_point(j.anchor);
+  Vec3 to = a;
+  for (const scene3d::Entity3D& o : entities) {
+    if (j.target && o.id == j.target) to = o.transform.position;
+  }
+  if (j.target) {
+    r_->draw_line(a, to, col, true);
+  } else {
+    const float s = 0.12f;  // pinned to the world: a small cross
+    r_->draw_line(a - Vec3{s, 0, 0}, a + Vec3{s, 0, 0}, col, true);
+    r_->draw_line(a - Vec3{0, s, 0}, a + Vec3{0, s, 0}, col, true);
+    r_->draw_line(a - Vec3{0, 0, s}, a + Vec3{0, 0, s}, col, true);
+  }
+  using T = scene3d::Joint3D::Type;
+  if (j.type == T::Hinge || j.type == T::Slider) {
+    const Vec3 ax = e.transform.rotation.rotate(normalize(j.axis)) * 0.4f;
+    r_->draw_line(a - ax, a + ax, col, true);
+  }
+}
+
 void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3D>& entities,
                       const Camera3D& camera, int width, int height,
                       const SceneViewOptions& opt) {
@@ -281,19 +376,8 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
       const float sel[4] = {1.0f, 0.72f, 0.25f, 1.0f};
       draw_box(world, local_bounds(e), sel, true);
     }
-    if (opt.colliders && e.collider) {
-      const float col[4] = {0.35f, 0.95f, 0.45f, e.collider->trigger ? 0.5f : 0.9f};
-      Aabb b;
-      if (e.collider->shape == scene3d::Collider3D::Shape::Capsule) {
-        const float r = e.collider->size.x, h = e.collider->size.y;
-        b = {{-r, -h * 0.5f, -r}, {r, h * 0.5f, r}};
-      } else {
-        b = {e.collider->size * -0.5f, e.collider->size * 0.5f};
-      }
-      b.min += e.collider->offset;
-      b.max += e.collider->offset;
-      draw_box(world, b, col, false);
-    }
+    if (opt.colliders && e.collider) draw_collider(world, e);
+    if (opt.colliders && e.joint) draw_joint(world, e, entities);
     if (opt.light_gizmos && e.light) {
       const float col[4] = {1.0f, 0.85f, 0.35f, 0.9f};
       const Vec3 p = e.transform.position;

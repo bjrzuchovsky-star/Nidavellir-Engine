@@ -7,6 +7,7 @@
 #include "scene/TileMap.h"
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace ts {
@@ -69,7 +70,14 @@ struct OverlayBox {
   // centre ((x0 + x1) / 2, (y0 + y1) / 2); x0..y1 is the unrotated box.
   float rotation = 0.0f;
   bool body = false;  // a Box2D rigid body
+  ColliderData::Shape shape = ColliderData::Shape::Box;
 };
+
+// The overlay shape's outline in world space, closed (box: 4 corners;
+// circle / capsule: a polygon), turned by `rotation` about the centre.
+std::vector<std::pair<float, float>> overlay_outline(const OverlayBox& b);
+
+
 
 // Overlay for one entity drawn with its top-left corner at (x, y): its
 // collider, and for a TileMap its solid tiles (each row merged into runs).

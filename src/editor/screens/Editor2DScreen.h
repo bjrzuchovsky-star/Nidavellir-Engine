@@ -423,6 +423,7 @@ class Editor2DScreen final : public IScreen {
   void draw_stable();
   // Collision section of the Inspector (Editor2DScreen_Collision.cpp).
   void draw_inspector_collider(std::uint64_t id);
+  void draw_inspector_body(std::uint64_t id);  // Rigid Body + Joint (Box2D)
   // Tile Palette "Solid" checkbox for the brush tile.
   void draw_tile_solid_controls(const Entity2D* target);
   // K toggles the overlay (both viewports call this).

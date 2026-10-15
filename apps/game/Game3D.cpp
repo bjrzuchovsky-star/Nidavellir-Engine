@@ -206,7 +206,7 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
       audio::SoundStage3D sound3d(sound.stage());
       std::size_t seen = 0;
       double last = glfwGetTime(), scripts_at = last;
-      bool prev_action = false, prev_pause = false;
+      bool prev_action = false, prev_pause = false, prev_throw = false;
       long n = 0;
       double mx0 = 0, my0 = 0;
       glfwGetCursorPos(win, &mx0, &my0);
@@ -253,6 +253,12 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
         const bool action = key(GLFW_KEY_E);
         in.action = action && !prev_action;
         prev_action = action;
+        // Physics gun: hold F (or the left mouse button) to carry the body
+        // ahead; G throws it.
+        in.grab = key(GLFW_KEY_F) || glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+        const bool throw_key = key(GLFW_KEY_G);
+        in.throw_held = throw_key && !prev_throw;
+        prev_throw = throw_key;
         const bool pause = key(GLFW_KEY_P);
         if (pause && !prev_pause) world.set_paused(!world.paused());
         prev_pause = pause;

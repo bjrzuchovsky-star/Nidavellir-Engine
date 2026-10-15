@@ -10,6 +10,7 @@
 #include "scene/SceneData.h"
 #include "scene/SceneJson.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
@@ -267,6 +268,45 @@ int script_api(std::string* report) {
   return 0;
 }
 
+// The collision overlay (editor K / ts_game K) outlines turned boxes,
+// circles and capsules by their real shape; play shows bodies as they turn.
+int overlay(std::string* report) {
+  Entity2D wall = box(1, "Wall", 200.0f, 200.0f, 64.0f, 64.0f);
+  wall.rotation = 45.0f;
+  std::vector<runtime::OverlayBox> out;
+  const runtime::WorldRect view{-1000, -1000, 2000, 2000};
+  runtime::append_overlay(wall, wall.x, wall.y, TileSolidity{}, view, &out);
+  if (out.size() != 1 || out[0].rotation != 45.0f) return fail("overlay keeps the rotation");
+  const auto pts = runtime::overlay_outline(out[0]);
+  // A 64 px square at 45 deg: corners on the axes, 45.25 px from the centre.
+  float min_x = 1e9f;
+  for (const auto& [x, y] : pts) min_x = std::min(min_x, x);
+  if (pts.size() != 4 || std::fabs(min_x - (232.0f - 32.0f * std::sqrt(2.0f))) > 0.01f) {
+    return fail("turned overlay outline (left corner " + f2(min_x) + ")");
+  }
+  Entity2D ball = body(box(2, "Ball", 0.0f, 0.0f, 20.0f, 20.0f), RigidBody2DData::Motion::Dynamic);
+  ball.collider->shape = ColliderData::Shape::Circle;
+  out.clear();
+  runtime::append_overlay(ball, 0.0f, 0.0f, TileSolidity{}, view, &out);
+  if (out.size() != 1 || !out[0].body || out[0].shape != ColliderData::Shape::Circle ||
+      runtime::overlay_outline(out[0]).size() < 16) {
+    return fail("circle body overlay");
+  }
+  // Play: a plank resting at an angle on the floor turns in the overlay.
+  runtime::World w;
+  Entity2D plank = body(box(3, "Plank", 290.0f, 300.0f, 96.0f, 12.0f), RigidBody2DData::Motion::Dynamic);
+  plank.rotation = 30.0f;
+  w.build({body(box(1, "Floor", 0.0f, 400.0f, 640.0f, 32.0f), RigidBody2DData::Motion::Static), plank});
+  for (int i = 0; i < 120; ++i) w.step(ride(0.0f, 0.0f));
+  out.clear();
+  w.build_overlay(view, 1.0f, &out);
+  float rot = 0.0f;
+  for (const auto& b : out) if (b.entity == 3) rot = b.rotation;
+  if (std::fabs(rot - 30.0f) < 1.0f) return fail("play overlay should follow the falling plank (" + f2(rot) + ")");
+  *report += ", overlay draws turned / round shapes";
+  return 0;
+}
+
 }  // namespace
 
 int run_physics2d_smoke() {
@@ -281,6 +321,7 @@ int run_physics2d_smoke() {
   if (push_and_trigger(&report) != 0) return 1;
   if (round_trip() != 0) return 1;
   if (script_api(&report) != 0) return 1;
+  if (overlay(&report) != 0) return 1;
   char hx[24];
   std::snprintf(hx, sizeof hx, "%016llx", static_cast<unsigned long long>(h1));
   std::cout << "[smoke] physics2d ok: " << report << ", hash " << hx << '\n';
