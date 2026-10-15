@@ -389,7 +389,16 @@ int run_smoke(const std::string& dir, Telegraph& telegraph) {
   }
 
   std::string ride = "no rider (add a Player component)";
-  if (rider) {
+  // Airship Works flies P1 (throttle / strafe), so the walk check does not
+  // apply; the ship must still exist and the ride still tick.
+  bool flies = false;
+  for (const std::string& id : plugins::read_project_plugins(dir).ids) {
+    flies = flies || id == "ts.shipyard";
+  }
+  if (rider && flies) {
+    rider = world.player(0);
+    ride = "P1 aboard an airship (flight controls; walk check skipped)";
+  } else if (rider) {
     rider = world.player(0);
     const float want = x0 + rider->data.player->speed;
     if (std::fabs(rider->data.x - want) > 0.05f ||
