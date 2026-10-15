@@ -106,6 +106,7 @@ class GraphScriptHost final : public ScriptLanguageHost {
   void ui_event(const std::string& widget, bool change, double value,
                 const std::string& text) override;
   void run_timers(std::uint64_t tick) override;
+  void broadcast(const char* hook, const std::string& text, double number) override;
   void tick(double dt) override;
   int reload_changed() override { return 0; }  // via ScriptHost + library
   bool reload(const std::string& rel) override;

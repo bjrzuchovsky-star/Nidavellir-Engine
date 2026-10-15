@@ -148,4 +148,17 @@ How C# scripts build and run:
 
 All three go through `ScriptWorld::script_plugin_call`.
 
+## Plugin events (story hooks)
+
+Plugins broadcast events to every running script, in entity id order. The story plugins send `on_quest_started`, `on_quest_completed`, `on_quest_failed`, `on_objective`, `on_dialogue_event`, `on_dialogue_end`, `on_game_saved` and `on_game_loaded`. Each event carries a text value and a number.
+
+| Language | Receive |
+|---|---|
+| Lua | `function on_quest_completed(id) ... end` (any hook name) |
+| Graphs | **On Plugin Event** node: set its `hook` input; it outputs `text` and `number` |
+| C++ | `void on_quest_completed(const std::string& id) override` and the other story virtuals, or override `on_event(hook, text, n)` to see every event |
+| C# | `public override void OnQuestCompleted(string id)` and the others, or override `OnEvent(hook, text, n)` |
+
+C++ and C# receive these through the ABI hook `TS_HOOK_EVENT` (9), with text in the form `"hook\ttext"`. The ABI version stays at 2: modules built before this change ignore the new hook.
+
 Smoke tests: `--smoke-graph`, `--smoke-cpp`, `--smoke-cs`.

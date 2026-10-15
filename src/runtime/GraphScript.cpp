@@ -35,6 +35,9 @@ std::vector<GraphNodeDef> build_catalog() {
   ev("event.reload", "On Reload", {}, {}, "the graph was hot-reloaded");
   ev("event.vr", "On VR Hand", {"hand", "number"}, {{"hook", T("on_grab")}},
      "on_grab / on_release / on_point / on_unpoint / on_vr_trigger");
+  ev("event.plugin", "On Plugin Event", {"text", "number"}, {{"hook", T("on_quest_completed")}},
+     "on_quest_started / _completed / _failed, on_objective, on_dialogue_event / _end, "
+     "on_game_saved / _loaded");
   ev("event.ui", "On UI", {"value", "text"}, {{"widget", T("")}, {"change", B(false)}},
      "a UI widget was clicked (or changed)");
 
@@ -797,6 +800,10 @@ bool GraphScriptHost::has_hook(std::uint64_t entity, const char* hook) {
       const auto it = n.inputs.find("hook");
       if ((it == n.inputs.end() ? std::string("on_grab") : text(it->second)) == h) return true;
     }
+    if (n.type == "event.plugin") {
+      const auto it = n.inputs.find("hook");
+      if ((it == n.inputs.end() ? std::string("on_quest_completed") : text(it->second)) == h) return true;
+    }
   }
   return false;
 }
@@ -848,6 +855,30 @@ void GraphScriptHost::hand_event(std::uint64_t target, const char* hook, const s
     }
   }
   m_->dispatch_one(target, "event.vr", match);
+}
+
+void GraphScriptHost::broadcast(const char* hook, const std::string& txt, double number) {
+  const std::string h = hook;
+  auto match = [&](const GraphNode& n) {
+    const auto it = n.inputs.find("hook");
+    return (it == n.inputs.end() ? std::string("on_quest_completed") : text(it->second)) == h;
+  };
+  std::vector<std::uint64_t> ids;
+  for (const auto& in : m_->instances) if (in->started && in->graph) ids.push_back(in->entity);
+  std::sort(ids.begin(), ids.end());
+  for (std::uint64_t id : ids) {
+    Instance* in = m_->find(id);
+    if (!in || !in->started || !in->graph) continue;
+    const std::shared_ptr<const Graph> keep = in->graph;
+    for (const GraphNode& n : keep->nodes) {
+      if (n.type == "event.plugin" && match(n)) {
+        in->outs[{n.id, "text"}] = ScriptValue::of_text(txt);
+        in->outs[{n.id, "number"}] = N(number);
+      }
+    }
+    m_->dispatch(*in, "event.plugin", match);
+  }
+  m_->sweep();
 }
 
 void GraphScriptHost::ui_event(const std::string& widget, bool change, double value,

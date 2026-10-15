@@ -48,7 +48,7 @@ Settings go in the optional `<project>/story.json`; these are the defaults:
 | `saves.autosave_every(seconds)` | Change the autosave interval. `0` turns the timer off. |
 | `saves.playtime()` | Seconds of play, carried across saves. |
 
-Hooks: `on_game_saved(slot)` and `on_game_loaded(slot)`. These are Lua only.
+Hooks: `on_game_saved(slot)` and `on_game_loaded(slot)`. Lua, graphs, C++ and C# all receive them (see [scripting.md](scripting.md#plugin-events-story-hooks)).
 
 ## Editor: Strongbox panel
 

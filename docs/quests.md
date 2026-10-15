@@ -54,12 +54,12 @@ Story Core adds these built-in Dusk UI documents unless the project already ship
 | `quests.track(id)` | Choose which quest the tracker shows. |
 | `quests.journal([on])` | Open or close the journal. With no argument it toggles. |
 
-Hooks are called on every running Lua script that defines them:
+Hooks are called on every running script that defines them:
 
 - `on_quest_started(id)`, `on_quest_completed(id)`, `on_quest_failed(id)`
 - `on_objective("quest/objective", count)`
 
-Hooks are **Lua only**. Graph, C++ and C# scripts don't receive them.
+Graphs use the **On Plugin Event** node, and C++ and C# override `on_quest_completed` / `OnQuestCompleted` and the other story hooks. See [scripting.md](scripting.md#plugin-events-story-hooks).
 
 ## Editor: Bounty Board panel
 

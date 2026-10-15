@@ -292,6 +292,15 @@ void CompiledScriptHost::ui_event(const std::string& widget, bool change, double
     if (in.started) m_->call(in, TS_HOOK_UI, change ? 1 : 0, value, widget + "\t" + text);
   }
 }
+void CompiledScriptHost::broadcast(const char* hook, const std::string& text, double n) {
+  std::vector<std::uint64_t> ids;
+  for (const auto& in : m_->insts) if (in->started) ids.push_back(in->entity);
+  std::sort(ids.begin(), ids.end());
+  const std::string payload = std::string(hook) + "\t" + text;
+  for (std::uint64_t id : ids) {
+    if (Inst* in = m_->find(id); in && in->started) m_->call(*in, TS_HOOK_EVENT, 0, n, payload);
+  }
+}
 void CompiledScriptHost::tick(double dt) {
   m_->poll();
   const std::size_t n = m_->insts.size();

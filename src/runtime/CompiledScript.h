@@ -79,6 +79,7 @@ class CompiledScriptHost : public ScriptLanguageHost {
                   double number) override;
   void ui_event(const std::string& widget, bool change, double value,
                 const std::string& text) override;
+  void broadcast(const char* hook, const std::string& text, double number) override;
   void tick(double dt) override;
   // Rebuilds + reloads when the sources changed (in the background unless
   // blocking). 1 when it swapped a new module in.

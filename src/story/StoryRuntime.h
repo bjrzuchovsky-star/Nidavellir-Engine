@@ -9,7 +9,8 @@
 // UI: built-in Dusk documents "dialogue", "journal", "quest_tracker" and
 // "save_menu" are added to the host's UiSystem unless the project ships
 // its own ui/<name>.ui.json with the same widget ids. Script hooks
-// (every running Lua script that defines them):
+// (every running script that defines them: Lua functions, graph On Plugin
+// Event nodes, C++ / C# on_event overrides):
 //   on_quest_started(id)  on_quest_completed(id)  on_quest_failed(id)
 //   on_objective("quest/objective", count)
 //   on_dialogue_event(name, number)  on_dialogue_end(dialogue_id)

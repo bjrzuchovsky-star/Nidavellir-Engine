@@ -63,6 +63,32 @@ namespace TombStone
         public virtual void OnDestroy() { }
         public virtual void OnHand(string hook, string hand, double n) { }
         public virtual void OnUi(string widget, bool change, double value, string text) { }
+
+        // Plugin events (ts.quests / ts.dialogue / ts.saves, ...). The default
+        // OnEvent routes the story hooks to the virtuals below; override it to
+        // see every event.
+        public virtual void OnEvent(string hook, string text, double n)
+        {
+            switch (hook)
+            {
+                case "on_quest_started": OnQuestStarted(text); break;
+                case "on_quest_completed": OnQuestCompleted(text); break;
+                case "on_quest_failed": OnQuestFailed(text); break;
+                case "on_objective": OnObjective(text, n); break;
+                case "on_dialogue_event": OnDialogueEvent(text, n); break;
+                case "on_dialogue_end": OnDialogueEnd(text); break;
+                case "on_game_saved": OnGameSaved(text); break;
+                case "on_game_loaded": OnGameLoaded(text); break;
+            }
+        }
+        public virtual void OnQuestStarted(string id) { }
+        public virtual void OnQuestCompleted(string id) { }
+        public virtual void OnQuestFailed(string id) { }
+        public virtual void OnObjective(string questSlashObjective, double count) { }
+        public virtual void OnDialogueEvent(string name, double n) { }
+        public virtual void OnDialogueEnd(string dialogueId) { }
+        public virtual void OnGameSaved(string slot) { }
+        public virtual void OnGameLoaded(string slot) { }
         public virtual string Save() => "";
         public virtual void Load(string state) { }
 

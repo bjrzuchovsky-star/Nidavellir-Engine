@@ -185,6 +185,13 @@ namespace TombStone
                         s.OnUi(tab < 0 ? t : t.Substring(0, tab), entity != 0, number, tab < 0 ? "" : t.Substring(tab + 1));
                         break;
                     }
+                    case 9:
+                    {
+                        string t = Utf8.Read(text);
+                        int tab = t.IndexOf('\t');
+                        s.OnEvent(tab < 0 ? t : t.Substring(0, tab), tab < 0 ? "" : t.Substring(tab + 1), number);
+                        break;
+                    }
                 }
             }
             catch (Exception e)

@@ -73,6 +73,27 @@ class Script {
   virtual void on_reload() {}
   virtual void on_destroy() {}
   virtual void on_hand(const std::string& /*hook*/, const std::string& /*hand*/, double /*n*/) {}
+  // Plugin events (ts.quests / ts.dialogue / ts.saves, ...). The default
+  // on_event routes the story hooks to the virtuals below; override on_event
+  // to see every event, including ones from other plugins.
+  virtual void on_event(const std::string& hook, const std::string& text, double n) {
+    if (hook == "on_quest_started") on_quest_started(text);
+    else if (hook == "on_quest_completed") on_quest_completed(text);
+    else if (hook == "on_quest_failed") on_quest_failed(text);
+    else if (hook == "on_objective") on_objective(text, n);
+    else if (hook == "on_dialogue_event") on_dialogue_event(text, n);
+    else if (hook == "on_dialogue_end") on_dialogue_end(text);
+    else if (hook == "on_game_saved") on_game_saved(text);
+    else if (hook == "on_game_loaded") on_game_loaded(text);
+  }
+  virtual void on_quest_started(const std::string& /*id*/) {}
+  virtual void on_quest_completed(const std::string& /*id*/) {}
+  virtual void on_quest_failed(const std::string& /*id*/) {}
+  virtual void on_objective(const std::string& /*quest_slash_objective*/, double /*count*/) {}
+  virtual void on_dialogue_event(const std::string& /*name*/, double /*n*/) {}
+  virtual void on_dialogue_end(const std::string& /*dialogue_id*/) {}
+  virtual void on_game_saved(const std::string& /*slot*/) {}
+  virtual void on_game_loaded(const std::string& /*slot*/) {}
   virtual void on_ui(const std::string& /*widget*/, bool /*change*/, double /*value*/,
                      const std::string& /*text*/) {}
   // Hot reload state.
@@ -252,6 +273,7 @@ TS_SCRIPT_EXPORT void ts_script_call(void* sp, int hook, uint64_t e, double n, c
     case TS_HOOK_DESTROY: s->on_destroy(); break;
     case TS_HOOK_HAND: s->on_hand(t.substr(0, tab), tab == std::string::npos ? "" : t.substr(tab + 1), n); break;
     case TS_HOOK_UI: s->on_ui(t.substr(0, tab), e != 0, n, tab == std::string::npos ? "" : t.substr(tab + 1)); break;
+    case TS_HOOK_EVENT: s->on_event(t.substr(0, tab), tab == std::string::npos ? "" : t.substr(tab + 1), n); break;
     default: break;
   }
   } catch (const std::exception& ex) {

@@ -45,6 +45,7 @@ public class Door : Script {
         if (Tick % 30 == 0) { opened++; Set("opened", (double)opened); }
     }
     public override void OnReload() => Log("door reloaded, opened " + opened);
+    public override void OnQuestCompleted(string id) => Log("door heard quest " + id);
     public override string Save() => opened.ToString();
     public override void Load(string s) => int.TryParse(s, out opened);
 }
@@ -248,6 +249,8 @@ int run_csharp_smoke() {
   if (!has(logs, "plugin says howdy pardner")) return fail("plugin call bridge from C#:" + dump(logs));
   const ScriptValue* opened = w.script_get(2, "opened");
   if (!opened || opened->number != 2) return fail("OnTick + state (opened)" + dump(logs));
+  w.script_broadcast("on_quest_completed", "bell", 0);
+  if (!has(w.take_logs(), "door heard quest bell")) return fail("story hook (OnQuestCompleted) in C#");
 
   // Hot reload: new assembly in a new load context, state through Save/Load.
   write(proj / "scripts" / "door.cs", v2());

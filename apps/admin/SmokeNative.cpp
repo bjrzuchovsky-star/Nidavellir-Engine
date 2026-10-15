@@ -42,6 +42,7 @@ struct Door : ts::Script {
     if (tick() % 30 == 0) { ++opened; set("opened", static_cast<double>(opened)); }
   }
   void on_reload() override { log("door reloaded, opened " + std::to_string(opened)); }
+  void on_quest_completed(const std::string& id) override { log("door heard quest " + id); }
   std::string save() const override { return std::to_string(opened); }
   void load(const std::string& s) override { opened = std::atoi(s.c_str()); }
 };
@@ -160,6 +161,8 @@ int run_native_smoke() {
   if (!has(logs, "plugin says howdy pardner")) return fail("plugin call bridge from C++:" + dump(logs));
   const ScriptValue* opened = w.script_get(2, "opened");
   if (!opened || opened->number != 2) return fail("on_tick + state set (opened)" + dump(logs));
+  w.script_broadcast("on_quest_completed", "bell", 0);
+  if (!has(w.take_logs(), "door heard quest bell")) return fail("story hook (on_quest_completed) in C++");
 
   // Hot reload: new code, member state kept through save() / load().
   write(proj / "scripts" / "door.cpp", v2());

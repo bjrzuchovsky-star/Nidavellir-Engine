@@ -75,7 +75,7 @@ Hooks:
 - `on_dialogue_event(name, number)`
 - `on_dialogue_end(dialogue_id)`
 
-These are Lua only.
+Lua, graphs, C++ and C# all receive them (see [scripting.md](scripting.md#plugin-events-story-hooks)).
 
 Example from Ghost Town's `scripts/hank.lua`:
 

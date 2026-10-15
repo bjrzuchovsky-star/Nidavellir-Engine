@@ -287,6 +287,29 @@ int check_round_trip() {
 
 }  // namespace
 
+// Story hooks reach graphs: On Plugin Event (hook = on_quest_completed).
+int check_plugin_event() {
+  World w;
+  G b;
+  const int ev = b.add("event.plugin", {{"hook", T("on_quest_completed")}});
+  const int join = b.add("text.join", {{"a", T("graph heard quest ")}});
+  const int log = b.add("log");
+  b.link(ev, "text", join, "b");
+  b.link(join, "value", log, "text");
+  b.flow(ev, log);
+  w.script_library().put("scripts/ear.graph.json", write_graph(b.g));
+  std::string err;
+  if (!w.build({scripted(2, "Ear", "scripts/ear.graph.json")}, "", &err)) return fail("plugin event build: " + err);
+  ride(w, 1, false);
+  if (!w.scripts()->has_hook(2, "on_quest_completed")) return fail("has_hook on_quest_completed");
+  w.script_broadcast("on_quest_started", "bell", 0);
+  w.script_broadcast("on_quest_completed", "bell", 0);
+  int heard = 0;
+  for (const LogEntry& e : w.take_logs()) heard += e.text == "graph heard quest bell" ? 1 : 0;
+  if (heard != 1) return fail("On Plugin Event should fire once for on_quest_completed, got " + std::to_string(heard));
+  return 0;
+}
+
 int run_graph_smoke() {
   if (int r = check_round_trip()) return r;
   std::vector<std::string> a, b;
@@ -296,6 +319,7 @@ int run_graph_smoke() {
   if (int r = check_mixed()) return r;
   if (int r = check_budget_and_reload()) return r;
   if (int r = check_plugin_bridge()) return r;
+  if (int r = check_plugin_event()) return r;
   {
     // The Brand Book's starter graph is clean and round-trips.
     const Graph g = ts::tombstone::editor::BrandBook::starter_graph();
@@ -310,6 +334,6 @@ int run_graph_smoke() {
   std::cout << "[smoke] graph OK (" << graph_node_catalog().size()
             << " node types, round trip, events / flow / delay / for / button edge, "
                "variables, budget stop, reload keeps vars, deterministic x2 ("
-            << a.size() << " trace lines), mixed Lua + graph, plugin call bridge, Brand Book starter)\n";
+            << a.size() << " trace lines), mixed Lua + graph, plugin call bridge, plugin events, Brand Book starter)\n";
   return 0;
 }
