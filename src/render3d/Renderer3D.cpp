@@ -45,6 +45,12 @@ class NullRenderer3D final : public Renderer3D {
                    const Mat4& /*world*/, bool /*cast_shadow*/) override {
     count(mesh, material);
   }
+  void draw_skinned(MeshHandle mesh, MaterialHandle material, const Mat4& /*world*/,
+                    const Mat4* palette, std::size_t bones, bool /*cast_shadow*/) override {
+    const std::size_t before = frame_.draws;
+    count(mesh, material);
+    if (frame_.draws != before && palette && bones > 0) ++frame_.skinned;
+  }
   void add_point_light(const PointLight& /*light*/) override {
     if (frame_.lights < kMaxPointLights) ++frame_.lights;
   }

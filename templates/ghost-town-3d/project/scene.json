@@ -1,5 +1,5 @@
 {
-  "version": 11,
+  "version": 12,
   "dimension": "3d",
   "environment": {
     "sky_top": [0.13, 0.16, 0.3],
@@ -323,27 +323,245 @@
     {
       "id": 16,
       "name": "Rider",
-      "position": [0, 1, 6],
+      "position": [0, 0, 6],
       "rotation": [0, 0, 0, 1],
       "scale": [1, 1, 1],
       "mesh": {
-        "source": "primitive:capsule"
-      },
-      "material": {
-        "albedo": [0.62, 0.27, 0.18, 1],
-        "metallic": 0,
-        "roughness": 0.6
+        "source": "assets/drifter.gltf"
       },
       "collider": {
         "shape": "capsule",
-        "size": [0.4, 2, 0.4],
-        "offset": [0, 0, 0]
+        "size": [0.4, 1.9, 0.4],
+        "offset": [0, 0.95, 0]
       },
       "player": {
         "speed": 4.5,
         "jump_speed": 5.5,
         "camera_distance": 6,
         "camera_height": 2.5
+      },
+      "script": {
+        "path": "scripts/rider.lua"
+      },
+      "animator": {
+        "params": [
+          {
+            "name": "speed",
+            "type": "float",
+            "value": 0
+          },
+          {
+            "name": "grounded",
+            "type": "bool",
+            "value": true
+          },
+          {
+            "name": "jump",
+            "type": "trigger"
+          },
+          {
+            "name": "vertical_speed",
+            "type": "float",
+            "value": 0
+          }
+        ],
+        "layers": [
+          {
+            "name": "Base",
+            "entry": "locomotion",
+            "states": [
+              {
+                "name": "locomotion",
+                "blend": [
+                  {
+                    "clip": "idle",
+                    "at": 0
+                  },
+                  {
+                    "clip": "walk",
+                    "at": 1.8
+                  },
+                  {
+                    "clip": "run",
+                    "at": 4.5
+                  }
+                ],
+                "blend_param": "speed"
+              },
+              {
+                "name": "jump",
+                "clip": "jump",
+                "loop": false
+              }
+            ],
+            "transitions": [
+              {
+                "from": "*",
+                "to": "jump",
+                "param": "jump",
+                "op": "trigger",
+                "duration": 0.1
+              },
+              {
+                "from": "jump",
+                "to": "locomotion",
+                "param": "grounded",
+                "op": "true",
+                "duration": 0.25,
+                "at_end": true
+              }
+            ]
+          },
+          {
+            "name": "Upper Body",
+            "mask": [
+              "chest"
+            ],
+            "states": []
+          }
+        ],
+        "events": [
+          {
+            "clip": "walk",
+            "time": 0,
+            "name": "footstep"
+          },
+          {
+            "clip": "walk",
+            "time": 0.5,
+            "name": "footstep"
+          },
+          {
+            "clip": "run",
+            "time": 0,
+            "name": "footstep"
+          },
+          {
+            "clip": "run",
+            "time": 0.3,
+            "name": "footstep"
+          }
+        ]
+      }
+    },
+    {
+      "id": 17,
+      "name": "Old Hank",
+      "position": [-3, 0, 0.5],
+      "rotation": [0, -0.70710677, 0, 0.70710677],
+      "scale": [1, 1, 1],
+      "mesh": {
+        "source": "assets/drifter.gltf"
+      },
+      "collider": {
+        "shape": "box",
+        "size": [4, 2, 4],
+        "offset": [0, 1, 0],
+        "trigger": true
+      },
+      "script": {
+        "path": "scripts/hank.lua"
+      },
+      "animator": {
+        "drive_from_player": false,
+        "params": [
+          {
+            "name": "speed",
+            "type": "float",
+            "value": 0
+          },
+          {
+            "name": "grounded",
+            "type": "bool",
+            "value": true
+          },
+          {
+            "name": "jump",
+            "type": "trigger"
+          },
+          {
+            "name": "vertical_speed",
+            "type": "float",
+            "value": 0
+          }
+        ],
+        "layers": [
+          {
+            "name": "Base",
+            "entry": "locomotion",
+            "states": [
+              {
+                "name": "locomotion",
+                "blend": [
+                  {
+                    "clip": "idle",
+                    "at": 0
+                  },
+                  {
+                    "clip": "walk",
+                    "at": 1.8
+                  },
+                  {
+                    "clip": "run",
+                    "at": 4.5
+                  }
+                ],
+                "blend_param": "speed"
+              },
+              {
+                "name": "jump",
+                "clip": "jump",
+                "loop": false
+              }
+            ],
+            "transitions": [
+              {
+                "from": "*",
+                "to": "jump",
+                "param": "jump",
+                "op": "trigger",
+                "duration": 0.1
+              },
+              {
+                "from": "jump",
+                "to": "locomotion",
+                "param": "grounded",
+                "op": "true",
+                "duration": 0.25,
+                "at_end": true
+              }
+            ]
+          },
+          {
+            "name": "Upper Body",
+            "mask": [
+              "chest"
+            ],
+            "states": []
+          }
+        ],
+        "events": [
+          {
+            "clip": "walk",
+            "time": 0,
+            "name": "footstep"
+          },
+          {
+            "clip": "walk",
+            "time": 0.5,
+            "name": "footstep"
+          },
+          {
+            "clip": "run",
+            "time": 0,
+            "name": "footstep"
+          },
+          {
+            "clip": "run",
+            "time": 0.3,
+            "name": "footstep"
+          }
+        ]
       }
     }
   ],

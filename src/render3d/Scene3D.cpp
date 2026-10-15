@@ -1,6 +1,7 @@
 #include "render3d/Scene3D.h"
 
 #include "core/JsonMini.h"
+#include "render3d/Animator.h"
 #include "render3d/Gltf.h"
 #include "render3d/Json.h"
 #include "scene/JsonFlat.h"
@@ -114,6 +115,7 @@ Value entity_json(const Entity3D& e) {
     v.set("vignette", Value::boolean(r.vignette));
     v.set("seated", Value::boolean(r.seated));
     v.set("seated_offset", Value::number(r.seated_offset));
+    if (!r.hand_model.empty()) v.set("hand_model", Value::string(r.hand_model));
     o.set("vr_rig", std::move(v));
   }
   if (e.grabbable) {
@@ -161,6 +163,7 @@ Value entity_json(const Entity3D& e) {
     }
     o.set("particles", std::move(v));
   }
+  if (e.animator) o.set("animator", render3d::animator_to_json(*e.animator));
   return o;
 }
 
@@ -248,6 +251,7 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     r.vignette = v.flag("vignette", r.vignette);
     r.seated = v.flag("seated", r.seated);
     r.seated_offset = std::clamp(v.flt("seated_offset", r.seated_offset), 0.0f, 1.5f);
+    r.hand_model = v.str("hand_model");
     e.vr_rig = r;
   }
   if (o["grabbable"].is_object()) {
@@ -296,6 +300,7 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
       return std::nullopt;
     });
   }
+  if (o["animator"].is_object()) e.animator = render3d::animator_from_json(o["animator"]);
   *out = std::move(e);
   return true;
 }
@@ -849,6 +854,29 @@ end
 
 }  // namespace
 
+namespace {
+
+constexpr const char* kHankLua = R"lua(-- Old Hank: a townsfolk on the Drifter rig. Waves when a rider comes
+-- close. anim.play(entity, state_or_clip [, fade [, hold]]),
+-- anim.crossfade(entity, state, seconds), anim.set_param(entity, name, v),
+-- anim.trigger / anim.param / anim.state / anim.stop.
+function on_trigger_enter(other)
+  anim.play(self, "wave", 0.2)
+  toast("Old Hank tips his hat to " .. other:name(), 2)
+end
+)lua";
+
+constexpr const char* kRiderLua = R"lua(-- The rider: the Drifter's animator follows the controller (speed,
+-- grounded, jump). Clip events arrive as on_anim_event(name).
+function on_anim_event(name)
+  if name == "footstep" then
+    self:set("steps", self:get("steps", 0) + 1)
+  end
+end
+)lua";
+
+}  // namespace
+
 bool write_ghost_town_sample(const std::string& project_dir,
                              const std::string& display_name,
                              std::string* error) {
@@ -879,6 +907,11 @@ bool write_ghost_town_sample(const std::string& project_dir,
   if (!write_text(dir / "scripts" / "windmill.lua", kWindmillLua, error)) return false;
   if (!write_text(dir / "scripts" / "bell.lua", kBellLua, error)) return false;
   if (!write_text(dir / "scripts" / "town.lua", kTownLua, error)) return false;
+  if (!write_text(dir / "scripts" / "hank.lua", kHankLua, error)) return false;
+  if (!write_text(dir / "scripts" / "rider.lua", kRiderLua, error)) return false;
+  if (!render3d::write_sample_character_gltf((dir / "assets" / "drifter.gltf").string(), error)) {
+    return false;
+  }
   fs::create_directories(dir / "ui", ec);
   if (!write_text(dir / "ui" / "main_menu.ui.json", kMainMenuUi, error)) return false;
 
@@ -950,7 +983,34 @@ bool write_ghost_town_sample(const std::string& project_dir,
     l.collider = c;
     s.entities.push_back(l);
   }
-  s.entities.push_back(rider(id++, {0.0f, 1.0f, 6.0f}));
+  // The rider wears the skinned Drifter (assets/drifter.gltf, CC0): the
+  // animator blends idle / walk / run by speed and jumps.
+  Entity3D r = rider(id++, {0.0f, 0.0f, 6.0f});
+  r.mesh = MeshRef{"assets/drifter.gltf", true};
+  r.material.reset();
+  r.collider->size = {0.4f, 1.9f, 0.4f};
+  r.collider->offset = {0.0f, 0.95f, 0.0f};
+  r.animator = default_locomotion_animator();
+  r.script = ScriptData{};
+  r.script->path = "scripts/rider.lua";
+  s.entities.push_back(r);
+  // Old Hank idles by the saloon and waves (upper-body layer) at riders.
+  Entity3D hank;
+  hank.id = id++;
+  hank.name = "Old Hank";
+  hank.transform.position = {-3.0f, 0.0f, 0.5f};
+  hank.transform.rotation = Quat::axis_angle({0, 1, 0}, render3d::radians(-90.0f));
+  hank.mesh = MeshRef{"assets/drifter.gltf", true};
+  hank.animator = default_locomotion_animator();
+  hank.animator->drive_from_player = false;
+  Collider3D hz;
+  hz.trigger = true;
+  hz.size = {4.0f, 2.0f, 4.0f};
+  hz.offset = {0.0f, 1.0f, 0.0f};
+  hank.collider = hz;
+  hank.script = ScriptData{};
+  hank.script->path = "scripts/hank.lua";
+  s.entities.push_back(hank);
   s.editor_camera.target = {0, 1, 0};
   s.editor_camera.distance = 26.0f;
   if (!save_file(scene_path(project_dir), s, error)) return false;
@@ -1052,7 +1112,13 @@ bool write_haunted_saloon_sample(const std::string& project_dir,
     l.light = light;
     s.entities.push_back(l);
   }
-  s.entities.push_back(vr_rig_entity(id++, {0.0f, 0.0f, 3.5f}, 0.0f));
+  {
+    // Skinned gloves (assets/hand.gltf, CC0): fingers curl with the grip.
+    Entity3D rig = vr_rig_entity(id++, {0.0f, 0.0f, 3.5f}, 0.0f);
+    if (!render3d::write_sample_hand_gltf((dir / "assets" / "hand.gltf").string(), error)) return false;
+    rig.vr_rig->hand_model = "assets/hand.gltf";
+    s.entities.push_back(rig);
+  }
   s.editor_camera.target = {0, 1, 0};
   s.editor_camera.distance = 16.0f;
   if (!save_file(scene_path(project_dir), s, error)) return false;

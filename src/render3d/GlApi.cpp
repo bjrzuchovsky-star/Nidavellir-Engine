@@ -38,7 +38,8 @@ bool load_gl33(std::string* error) {
   TS_GL(FramebufferTexture2D); TS_GL(CheckFramebufferStatus); TS_GL(DeleteFramebuffers);
   TS_GL(GenRenderbuffers); TS_GL(BindRenderbuffer); TS_GL(RenderbufferStorage);
   TS_GL(FramebufferRenderbuffer); TS_GL(DeleteRenderbuffers); TS_GL(ActiveTexture);
-  TS_GL(GenerateMipmap); TS_GL(BlitFramebuffer);
+  TS_GL(GenerateMipmap); TS_GL(BlitFramebuffer); TS_GL(GetUniformBlockIndex);
+  TS_GL(UniformBlockBinding); TS_GL(BindBufferBase);
 #undef TS_GL
   if (missing) {
     if (error) *error = std::string("OpenGL 3.3 entry point missing: ") + missing;

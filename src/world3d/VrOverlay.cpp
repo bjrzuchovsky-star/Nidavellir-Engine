@@ -45,6 +45,23 @@ void vr_overlay_entities(const World3D& w, bool vignette, std::vector<Entity3D>*
       continue;
     }
     const Quat q = hs.grip.orientation;
+    // Skinned hands (vr_rig.hand_model): the right-hand model, mirrored
+    // for the left, its fingers curled by the squeeze.
+    if (!w.vr_settings().hand_model.empty()) {
+      if (auto pal = w.vr_hand_palette(h)) {
+        Entity3D hand;
+        hand.id = id;
+        hand.name = h == kLeftHand ? "Left Hand" : "Right Hand";
+        hand.transform.position = hs.grip.position;
+        hand.transform.rotation = q;
+        hand.transform.scale = {h == kLeftHand ? -1.0f : 1.0f, 1.0f, 1.0f};
+        hand.mesh = scene3d::MeshRef{w.vr_settings().hand_model, false};
+        hand.skin_palette = std::move(pal);
+        out->push_back(std::move(hand));
+        id += 3;
+        continue;
+      }
+    }
     const float tint = 0.25f + 0.75f * std::max(hs.trigger, hs.squeeze);
     const float base[3] = {h == kLeftHand ? 0.20f : 0.70f, 0.22f, h == kLeftHand ? 0.70f : 0.20f};
     // Handle tilted forward like a real grip.

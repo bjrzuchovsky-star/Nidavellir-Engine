@@ -98,6 +98,7 @@ Aabb SceneView::local_bounds(const scene3d::Entity3D& e) {
 void SceneView::upload(ModelEntry& m) {
   if (m.uploaded || !m.model || !r_) return;
   m.uploaded = true;
+  if (m.model->skinned()) skin_palette(m.model->skeleton, rest_pose(m.model->skeleton), &m.rest_palette);
   for (const ModelPrimitive& p : m.model->primitives) m.meshes.push_back(r_->create_mesh(p.mesh));
   for (const MaterialDesc& d : m.model->materials) m.materials.push_back(r_->create_material(d));
   m.materials.push_back(r_->create_material(MaterialDesc{}));
@@ -245,7 +246,14 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
                   ? m.materials[static_cast<std::size_t>(mi)]
                   : m.materials.back();
       }
-      r_->draw_matrix(m.meshes[i], mat, world, e.mesh->cast_shadows);
+      if (m.model->primitives[i].mesh.skinned()) {
+        // Posed by the animator this tick, else the rest pose.
+        const std::vector<Mat4>& pal =
+            (e.skin_palette && !e.skin_palette->empty()) ? *e.skin_palette : m.rest_palette;
+        r_->draw_skinned(m.meshes[i], mat, world, pal.data(), pal.size(), e.mesh->cast_shadows);
+      } else {
+        r_->draw_matrix(m.meshes[i], mat, world, e.mesh->cast_shadows);
+      }
     }
   }
   if (opt.grid) {

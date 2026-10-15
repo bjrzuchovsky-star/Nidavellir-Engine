@@ -5,6 +5,9 @@
 add_library(ts_render3d
   Mesh.cpp
   Gltf.cpp
+  GltfSkinned.cpp
+  Skeleton.cpp
+  Animator.cpp
   Scene3D.cpp
   SceneView.cpp
   Renderer3D.cpp

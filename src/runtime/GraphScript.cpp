@@ -116,6 +116,13 @@ std::vector<GraphNodeDef> build_catalog() {
   act("UI", "toast", "Toast", {{"text", T("Howdy")}, {"slot", N(0)}, {"seconds", N(2)}}, {},
       "message to rider slot (0 = all)");
   act("UI", "log", "Log", {{"text", T("")}}, {}, "a Telegraph line");
+  // 3D skeletal animation (World3D's anim table through the plugin bridge).
+  act("Animation", "anim.play", "Play Animation", {{"id", N(0)}, {"name", T("")}, {"fade", N(0.2)}}, {},
+      "state or clip on a 3D animator (0 = self)");
+  act("Animation", "anim.crossfade", "Crossfade", {{"id", N(0)}, {"name", T("")}, {"seconds", N(0.25)}}, {},
+      "blend to a state over seconds");
+  act("Animation", "anim.set_param", "Set Anim Param", {{"id", N(0)}, {"name", T("speed")}, {"value", N(0)}}, {},
+      "animator parameter (bools: 0 / 1)");
   act("Plugins", "plugin.call", "Plugin Call",
       {{"table", T("")}, {"fn", T("")}, {"a", N(0)}, {"b", N(0)}, {"c", N(0)}}, {"value"},
       "table.fn(a, b, c) on a plugin's Lua table");
@@ -630,6 +637,16 @@ struct GraphScriptHost::Impl {
       } else if (t == "toast") {
         const int slot = static_cast<int>(num(I("slot")));
         world->script_toast(slot <= 0 ? -1 : slot - 1, text(I("text")), num(I("seconds")), in.entity);
+      } else if (t.rfind("anim.", 0) == 0) {
+        const std::uint64_t e = id_of(I("id"));
+        const char* third = t == "anim.crossfade" ? "seconds" : t == "anim.set_param" ? "value" : "fade";
+        ScriptValue r;
+        std::string err;
+        if (!world->script_plugin_call("anim", t.substr(5),
+                                       {N(static_cast<double>(e ? e : in.entity)), I("name"), I(third)}, &r,
+                                       &err)) {
+          log(LogLevel::Error, err, &in, 0);
+        }
       } else if (t == "plugin.call") {
         ScriptValue r;
         std::string err;

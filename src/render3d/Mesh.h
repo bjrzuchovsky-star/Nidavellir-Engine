@@ -21,12 +21,23 @@ struct Vertex3D {
   Vec4 tangent{1.0f, 0.0f, 0.0f, 1.0f};  // xyz + handedness (w = +-1)
 };
 
+// Up to four joints per vertex (indices into the skin's joints, as floats
+// for the GPU) and their weights.
+struct SkinVertex {
+  float joints[4] = {0, 0, 0, 0};
+  float weights[4] = {1, 0, 0, 0};
+};
+
 struct MeshData {
   std::string name;
   std::vector<Vertex3D> vertices;
   std::vector<std::uint32_t> indices;  // triangles
+  // Skinned meshes: one entry per vertex (empty = rigid).
+  std::vector<SkinVertex> skin;
+  bool skinned() const { return !skin.empty(); }
   bool valid() const {
     if (vertices.empty() || indices.size() % 3 != 0) return false;
+    if (!skin.empty() && skin.size() != vertices.size()) return false;
     for (std::uint32_t i : indices) {
       if (i >= vertices.size()) return false;
     }

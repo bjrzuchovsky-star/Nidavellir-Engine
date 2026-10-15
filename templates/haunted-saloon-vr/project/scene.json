@@ -1,5 +1,5 @@
 {
-  "version": 11,
+  "version": 12,
   "dimension": "3d",
   "environment": {
     "sky_top": [0.05, 0.06, 0.14],
@@ -538,7 +538,8 @@
         "teleport_range": 9,
         "vignette": true,
         "seated": false,
-        "seated_offset": 0.45
+        "seated_offset": 0.45,
+        "hand_model": "assets/hand.gltf"
       }
     }
   ],

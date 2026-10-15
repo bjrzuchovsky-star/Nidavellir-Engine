@@ -316,7 +316,9 @@ void scenes() {
   const std::string t3 = s3::write(s);
   s3::Scene3D b3;
   check(s3::parse(t3, &b3, &err) && b3 == s && s3::write(b3) == t3, "3D v11 round trip: " + err);
-  check(t3.find("\"version\": 11") != std::string::npos, "3D writes v11");
+  check(s3::kScene3DVersion >= 11 &&
+            t3.find("\"version\": " + std::to_string(s3::kScene3DVersion)) != std::string::npos,
+        "3D writes the current version (>= v11)");
 }
 
 // The 2D world: entity emitters + lights, Lua particles.*, footstep dust,

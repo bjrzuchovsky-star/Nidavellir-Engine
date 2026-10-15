@@ -11,6 +11,7 @@
 #include "scene/SceneData.h"
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -25,9 +26,10 @@ using render3d::Vec3;
 
 // v8 added the VR components (vr_rig, grabbable); v9 parenting (parent)
 // and the editor-only locked / editor_hidden flags; v10 the sound source
-// (audio, distances in metres). v11 adds "particles" (emitters).
-// v7 / v8 / v9 / v10 files still load.
-inline constexpr int kScene3DVersion = 11;
+// (audio, distances in metres). v11 adds "particles" (emitters), v12 the
+// skeletal "animator" and the VR rig's skinned "hand_model".
+// v7 .. v11 files still load.
+inline constexpr int kScene3DVersion = 12;
 
 // What to draw: "primitive:cube|plane|sphere|capsule" or a project-relative
 // .gltf / .glb path.
@@ -95,6 +97,9 @@ struct VrRig3D {
   bool vignette = true;           // darken the edges while moving / turning
   bool seated = false;            // lift the head by seated_offset
   float seated_offset = 0.45f;    // m
+  // v12: a skinned right-hand glTF (its "grip" clip follows the squeeze;
+  // mirrored for the left hand). Empty = the controller stand-ins.
+  std::string hand_model;
   bool operator==(const VrRig3D& o) const = default;
 };
 
@@ -106,6 +111,90 @@ struct Grabbable3D {
   float throw_scale = 1.0f;   // release velocity multiplier
   bool operator==(const Grabbable3D& o) const = default;
 };
+
+// ---- Skeletal animation (v12) ------------------------------------------------
+// Parameters drive transitions and blend spaces. A rider's animator gets
+// "speed" (m/s across the ground), "grounded", "vertical_speed" and the
+// "jump" trigger from the controller when they exist.
+struct AnimParam3D {
+  enum class Type : std::uint8_t { Float, Bool, Trigger };
+  std::string name;
+  Type type = Type::Float;
+  float value = 0.0f;  // bool / trigger: 0 or 1
+  bool operator==(const AnimParam3D& o) const = default;
+};
+
+// A 1D blend-space point: `clip` at parameter value `at`.
+struct AnimBlendPoint3D {
+  std::string clip;
+  float at = 0.0f;
+  bool operator==(const AnimBlendPoint3D& o) const = default;
+};
+
+// One clip, or a 1D blend space (blend + blend_param) whose clips play in
+// step (normalised time).
+struct AnimState3D {
+  std::string name;
+  std::string clip;
+  std::vector<AnimBlendPoint3D> blend;
+  std::string blend_param;
+  float speed = 1.0f;
+  bool loop = true;
+  bool operator==(const AnimState3D& o) const = default;
+};
+
+struct AnimTransition3D {
+  enum class Op : std::uint8_t { Greater, Less, True, False, Trigger, Always };
+  std::string from = "*";  // state name, "*" = any
+  std::string to;
+  std::string param;
+  Op op = Op::Greater;
+  float value = 0.0f;
+  float duration = 0.2f;   // crossfade seconds
+  bool at_end = false;     // only once a non-looping state finished
+  bool operator==(const AnimTransition3D& o) const = default;
+};
+
+// Layers stack bottom to top. A layer's mask (bone names; each takes its
+// whole subtree, empty = all bones) limits what it overrides: "chest" on
+// an upper-body layer waves while the legs keep walking.
+struct AnimLayer3D {
+  std::string name = "Base";
+  std::vector<std::string> mask;
+  float weight = 1.0f;
+  std::string entry;  // first state ("" = the first listed)
+  std::vector<AnimState3D> states;
+  std::vector<AnimTransition3D> transitions;
+  bool operator==(const AnimLayer3D& o) const = default;
+};
+
+// Named moments in a clip (footsteps, ...): scripts get
+// on_anim_event(name) when playback crosses `time` (seconds).
+struct AnimEvent3D {
+  std::string clip;
+  float time = 0.0f;
+  std::string name;
+  bool operator==(const AnimEvent3D& o) const = default;
+};
+
+struct Animator3D {
+  std::string model;  // skinned glTF; "" = the entity's mesh
+  std::vector<AnimParam3D> params;
+  std::vector<AnimLayer3D> layers;
+  std::vector<AnimEvent3D> events;
+  float speed = 1.0f;
+  // Root motion: the root bone's ground travel moves the entity (the bone
+  // stays put). Off for riders (the controller moves them).
+  bool root_motion = false;
+  std::string root_bone;  // "" = the skeleton's first joint
+  // The rider controller feeds speed / grounded / jump / vertical_speed.
+  bool drive_from_player = true;
+  bool operator==(const Animator3D& o) const = default;
+};
+
+// idle / walk / run blend space by "speed", a "jump" state, and an
+// "Upper Body" layer (mask: chest) for one-shots like "wave".
+Animator3D default_locomotion_animator();
 
 struct Entity3D {
   std::uint64_t id = 0;
@@ -127,6 +216,11 @@ struct Entity3D {
   bool editor_hidden = false;  // v9, editor only: not drawn in the editor
   std::optional<AudioSourceData> audio;  // v10, 3D defaults: audio_3d()
   std::optional<fx::EmitterDesc> particles;  // v11, metres, y up
+  std::optional<Animator3D> animator;        // v12
+  // Runtime only (never saved): the skinning palette the animator posed
+  // this tick; SceneView draws the skinned mesh with it (rest pose when
+  // null). Shared so world copies stay cheap.
+  std::shared_ptr<const std::vector<render3d::Mat4>> skin_palette;
   bool operator==(const Entity3D& o) const = default;
 };
 

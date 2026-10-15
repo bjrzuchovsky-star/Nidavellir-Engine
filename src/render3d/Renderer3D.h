@@ -25,6 +25,7 @@ struct FrameStats {
   std::size_t lights = 0;
   std::size_t shadow_casters = 0;
   std::size_t lines = 0;
+  std::size_t skinned = 0;  // draws posed by a bone palette
 };
 
 // Sky, ambient and sun for a frame.
@@ -76,6 +77,15 @@ class Renderer3D {
     (void)world;
     (void)cast_shadow;
     draw(mesh, material, Transform{});
+  }
+  // A skinned mesh (MeshData::skin) posed by `palette` (joint * inverse
+  // bind, up to kMaxBones), then placed by `world`. Backends without
+  // skinning draw the bind pose.
+  virtual void draw_skinned(MeshHandle mesh, MaterialHandle material, const Mat4& world,
+                            const Mat4* palette, std::size_t bones, bool cast_shadow = true) {
+    (void)palette;
+    (void)bones;
+    draw_matrix(mesh, material, world, cast_shadow);
   }
   // Unlit lines (grid, gizmos, colliders); depth_test false = on top.
   virtual void draw_line(const Vec3& /*a*/, const Vec3& /*b*/,

@@ -166,6 +166,7 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
 
 void World3D::stop() {
   host_.reset();
+  anim_.reset();
   particles_.clear();
   running_ = false;
   ents_.clear();
@@ -427,6 +428,7 @@ void World3D::step(const Input3D& input0) {
     host_->run_timers(script_tick());
     host_->tick(kTickSeconds);
   }
+  anim_step();
   jump_held_ = input.action;
   ++tick_;
   in_step_ = false;
@@ -532,8 +534,8 @@ void World3D::script_set_collider(std::uint64_t id, bool on) {
   rebuild_statics();
 }
 
-bool World3D::script_play(std::uint64_t /*id*/, const std::string& /*clip*/, bool /*hold*/) {
-  return false;  // no 3D animation clips yet
+bool World3D::script_play(std::uint64_t id, const std::string& clip, bool hold) {
+  return anim_play(id, clip, -1.0f, hold);
 }
 
 void World3D::script_release(std::uint64_t /*id*/) {}

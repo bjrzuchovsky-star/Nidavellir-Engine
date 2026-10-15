@@ -106,6 +106,12 @@
 #ifndef GL_VERTEX_ARRAY_BINDING
 #define GL_VERTEX_ARRAY_BINDING 0x85B5
 #endif
+#ifndef GL_UNIFORM_BUFFER
+#define GL_UNIFORM_BUFFER 0x8A11
+#endif
+#ifndef GL_INVALID_INDEX
+#define GL_INVALID_INDEX 0xFFFFFFFFu
+#endif
 #ifndef GL_MAJOR_VERSION
 #define GL_MAJOR_VERSION 0x821B
 #endif
@@ -166,6 +172,9 @@ struct Gl33 {
   void(TS_GLAPI* DeleteRenderbuffers)(GLsizei, const GLuint*);
   void(TS_GLAPI* ActiveTexture)(GLenum);
   void(TS_GLAPI* GenerateMipmap)(GLenum);
+  GLuint(TS_GLAPI* GetUniformBlockIndex)(GLuint, const char*);
+  void(TS_GLAPI* UniformBlockBinding)(GLuint, GLuint, GLuint);
+  void(TS_GLAPI* BindBufferBase)(GLenum, GLuint, GLuint);
   void(TS_GLAPI* BlitFramebuffer)(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint,
                                   GLbitfield, GLenum);
 };

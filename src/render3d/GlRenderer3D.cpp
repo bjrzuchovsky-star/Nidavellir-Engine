@@ -1,6 +1,7 @@
 #include "render3d/GlRenderer3D.h"
 
 #include "render3d/GlApi.h"
+#include "render3d/Skeleton.h"
 
 #include <algorithm>
 #include <cmath>
@@ -21,6 +22,15 @@ layout(location = 0) in vec3 a_pos;
 layout(location = 1) in vec3 a_nrm;
 layout(location = 2) in vec2 a_uv;
 layout(location = 3) in vec4 a_tan;
+layout(location = 4) in vec4 a_joints;
+layout(location = 5) in vec4 a_weights;
+layout(std140) uniform Bones { mat4 u_bones[128]; };
+uniform int u_skinned;
+mat4 skin_matrix() {
+  if (u_skinned == 0) return mat4(1.0);
+  return a_weights.x * u_bones[int(a_joints.x)] + a_weights.y * u_bones[int(a_joints.y)] +
+         a_weights.z * u_bones[int(a_joints.z)] + a_weights.w * u_bones[int(a_joints.w)];
+}
 uniform mat4 u_model;
 uniform mat4 u_view_proj;
 uniform mat4 u_light_vp;
@@ -30,11 +40,12 @@ out vec2 v_uv;
 out vec4 v_tan;
 out vec4 v_light;
 void main() {
-  vec4 w = u_model * vec4(a_pos, 1.0);
-  mat3 nm = transpose(inverse(mat3(u_model)));
+  mat4 model = u_model * skin_matrix();
+  vec4 w = model * vec4(a_pos, 1.0);
+  mat3 nm = transpose(inverse(mat3(model)));
   v_world = w.xyz;
   v_nrm = normalize(nm * a_nrm);
-  v_tan = vec4(normalize(mat3(u_model) * a_tan.xyz), a_tan.w);
+  v_tan = vec4(normalize(mat3(model) * a_tan.xyz), a_tan.w);
   v_uv = a_uv;
   v_light = u_light_vp * w;
   gl_Position = u_view_proj * w;
@@ -143,8 +154,17 @@ void main() {
 
 const char* kDepthVS = R"glsl(#version 330 core
 layout(location = 0) in vec3 a_pos;
+layout(location = 4) in vec4 a_joints;
+layout(location = 5) in vec4 a_weights;
+layout(std140) uniform Bones { mat4 u_bones[128]; };
+uniform int u_skinned;
+mat4 skin_matrix() {
+  if (u_skinned == 0) return mat4(1.0);
+  return a_weights.x * u_bones[int(a_joints.x)] + a_weights.y * u_bones[int(a_joints.y)] +
+         a_weights.z * u_bones[int(a_joints.z)] + a_weights.w * u_bones[int(a_joints.w)];
+}
 uniform mat4 u_mvp;
-void main() { gl_Position = u_mvp * vec4(a_pos, 1.0); }
+void main() { gl_Position = u_mvp * (skin_matrix() * vec4(a_pos, 1.0)); }
 )glsl";
 
 const char* kDepthFS = R"glsl(#version 330 core
@@ -214,7 +234,7 @@ void main() { o_color = v_col; }
 )glsl";
 
 struct GpuMesh {
-  GLuint vao = 0, vbo = 0, ibo = 0;
+  GLuint vao = 0, vbo = 0, ibo = 0, skin_vbo = 0;
   GLsizei count = 0;
 };
 
@@ -228,6 +248,8 @@ struct DrawItem {
   std::uint32_t material;
   Mat4 model;
   bool shadow;
+  int bone_offset = -1;  // into the frame's bone pool (-1 = rigid)
+  int bones = 0;
 };
 
 struct LineVertex {
@@ -352,6 +374,20 @@ class GlRenderer3D final : public Renderer3D {
       shutdown_programs();
       return false;
     }
+    // Bone palette UBO (binding 0) for skinned draws.
+    for (GLuint prog : {mesh_prog_, depth_prog_}) {
+      const GLuint block = g.GetUniformBlockIndex(prog, "Bones");
+      if (block != GL_INVALID_INDEX) g.UniformBlockBinding(prog, block, 0);
+    }
+    g.GenBuffers(1, &bones_ubo_);
+    g.BindBuffer(GL_UNIFORM_BUFFER, bones_ubo_);
+    {
+      std::vector<Mat4> ident(kMaxBones);
+      g.BufferData(GL_UNIFORM_BUFFER, static_cast<GLsizeiptr_ts>(sizeof(Mat4) * kMaxBones), ident.data(),
+                   GL_DYNAMIC_DRAW);
+    }
+    g.BindBuffer(GL_UNIFORM_BUFFER, 0);
+    g.BindBufferBase(GL_UNIFORM_BUFFER, 0, bones_ubo_);
     overlay_prog_ = link(kOverlayVS, kOverlayFS, &err);  // optional (UI)
     bill_prog_ = link(kBillVS, kBillFS, &err);           // optional (particles)
     g.GenVertexArrays(1, &bill_vao_);
@@ -427,6 +463,8 @@ class GlRenderer3D final : public Renderer3D {
       if (shadow_tex_) glDeleteTextures(1, &shadow_tex_);
       if (shadow_fbo_) g.DeleteFramebuffers(1, &shadow_fbo_);
       if (line_vbo_) g.DeleteBuffers(1, &line_vbo_);
+      if (bones_ubo_) g.DeleteBuffers(1, &bones_ubo_);
+      bones_ubo_ = 0;
       if (line_vao_) g.DeleteVertexArrays(1, &line_vao_);
       if (bill_vbo_) g.DeleteBuffers(1, &bill_vbo_);
       if (bill_vao_) g.DeleteVertexArrays(1, &bill_vao_);
@@ -471,6 +509,20 @@ class GlRenderer3D final : public Renderer3D {
     g.EnableVertexAttribArray(3);
     g.VertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, stride,
                           reinterpret_cast<const void*>(offsetof(Vertex3D, tangent)));
+    if (mesh.skinned()) {
+      g.GenBuffers(1, &m.skin_vbo);
+      g.BindBuffer(GL_ARRAY_BUFFER, m.skin_vbo);
+      g.BufferData(GL_ARRAY_BUFFER,
+                   static_cast<GLsizeiptr_ts>(mesh.skin.size() * sizeof(SkinVertex)),
+                   mesh.skin.data(), GL_STATIC_DRAW);
+      const GLsizei sstride = sizeof(SkinVertex);
+      g.EnableVertexAttribArray(4);
+      g.VertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, sstride,
+                            reinterpret_cast<const void*>(offsetof(SkinVertex, joints)));
+      g.EnableVertexAttribArray(5);
+      g.VertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sstride,
+                            reinterpret_cast<const void*>(offsetof(SkinVertex, weights)));
+    }
     g.BindVertexArray(static_cast<GLuint>(prev_vao));
     m.count = static_cast<GLsizei>(mesh.indices.size());
     const std::uint32_t id = ++next_;
@@ -517,6 +569,7 @@ class GlRenderer3D final : public Renderer3D {
     width_ = std::max(1, width);
     height_ = std::max(1, height);
     draws_.clear();
+    bone_pool_.clear();
     points_.clear();
     lines_depth_.clear();
     lines_top_.clear();
@@ -541,6 +594,19 @@ class GlRenderer3D final : public Renderer3D {
                    bool cast_shadow) override {
     if (!meshes_.count(mesh.id)) return;
     draws_.push_back({mesh.id, material.id, world, cast_shadow});
+  }
+
+  void draw_skinned(MeshHandle mesh, MaterialHandle material, const Mat4& world,
+                    const Mat4* palette, std::size_t bones, bool cast_shadow) override {
+    if (!meshes_.count(mesh.id)) return;
+    DrawItem d{mesh.id, material.id, world, cast_shadow};
+    if (palette && bones > 0 && meshes_[mesh.id].skin_vbo && bone_pool_.size() < 65536) {
+      const std::size_t n = std::min<std::size_t>(bones, kMaxBones);
+      d.bone_offset = static_cast<int>(bone_pool_.size());
+      d.bones = static_cast<int>(n);
+      bone_pool_.insert(bone_pool_.end(), palette, palette + n);
+    }
+    draws_.push_back(d);
   }
 
   void draw_line(const Vec3& a, const Vec3& b, const float* rgba, bool depth_test) override {
@@ -595,11 +661,13 @@ class GlRenderer3D final : public Renderer3D {
       glPolygonOffset(1.5f, 2.0f);
       g.UseProgram(depth_prog_);
       const GLint u_mvp = g.GetUniformLocation(depth_prog_, "u_mvp");
+      const GLint u_dskin = g.GetUniformLocation(depth_prog_, "u_skinned");
       for (const DrawItem& d : draws_) {
         if (!d.shadow) continue;
         const GpuMesh& m = meshes_[d.mesh];
         const Mat4 mvp = light_vp * d.model;
         g.UniformMatrix4fv(u_mvp, 1, GL_FALSE, mvp.m);
+        g.Uniform1i(u_dskin, bind_bones(d) ? 1 : 0);
         g.BindVertexArray(m.vao);
         glDrawElements(GL_TRIANGLES, m.count, GL_UNSIGNED_INT, nullptr);
         ++stats_.shadow_casters;
@@ -678,7 +746,7 @@ class GlRenderer3D final : public Renderer3D {
     glBindTexture(GL_TEXTURE_2D, shadow_tex_);
     const GLint u_model = U("u_model"), u_alb = U("u_albedo"), u_met = U("u_metallic"),
                 u_rgh = U("u_roughness"), u_emi = U("u_emissive"), u_hn = U("u_has_normal"),
-                u_unl = U("u_unlit");
+                u_unl = U("u_unlit"), u_skn = U("u_skinned");
     const MaterialDesc fallback;
     for (const DrawItem& d : draws_) {
       const GpuMesh& m = meshes_[d.mesh];
@@ -691,6 +759,9 @@ class GlRenderer3D final : public Renderer3D {
         glCullFace(GL_BACK);
       }
       g.UniformMatrix4fv(u_model, 1, GL_FALSE, d.model.m);
+      const bool skinned = bind_bones(d);
+      g.Uniform1i(u_skn, skinned ? 1 : 0);
+      if (skinned) ++stats_.skinned;
       g.Uniform4f(u_alb, md.base_color[0], md.base_color[1], md.base_color[2], md.base_color[3]);
       g.Uniform1f(u_met, md.metallic);
       g.Uniform1f(u_rgh, md.roughness);
@@ -838,10 +909,21 @@ class GlRenderer3D final : public Renderer3D {
   }
 
  private:
+  // Upload a draw's palette into the bone UBO (binding 0). False = rigid.
+  bool bind_bones(const DrawItem& d) {
+    if (d.bone_offset < 0 || d.bones <= 0 || !bones_ubo_) return false;
+    const Gl33& g = gl33();
+    g.BindBuffer(GL_UNIFORM_BUFFER, bones_ubo_);
+    g.BufferSubData(GL_UNIFORM_BUFFER, 0, static_cast<GLsizeiptr_ts>(sizeof(Mat4) * static_cast<std::size_t>(d.bones)),
+                    &bone_pool_[static_cast<std::size_t>(d.bone_offset)]);
+    g.BindBufferBase(GL_UNIFORM_BUFFER, 0, bones_ubo_);
+    return true;
+  }
   void free_mesh(GpuMesh& m) {
     const Gl33& g = gl33();
     if (m.vbo) g.DeleteBuffers(1, &m.vbo);
     if (m.ibo) g.DeleteBuffers(1, &m.ibo);
+    if (m.skin_vbo) g.DeleteBuffers(1, &m.skin_vbo);
     if (m.vao) g.DeleteVertexArrays(1, &m.vao);
     m = {};
   }
@@ -910,6 +992,8 @@ class GlRenderer3D final : public Renderer3D {
   Camera3D camera_;
   int width_ = 1, height_ = 1;
   std::vector<DrawItem> draws_;
+  std::vector<Mat4> bone_pool_;
+  GLuint bones_ubo_ = 0;
   std::vector<PointLight> points_;
   std::vector<LineVertex> lines_depth_, lines_top_;
   FrameStats stats_;

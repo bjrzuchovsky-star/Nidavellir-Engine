@@ -173,14 +173,15 @@ int world_runtime(const fs::path& dir) {
   });
   if (!w.start(scene, dir.string(), &err)) return fail("World3D start: " + err);
   const std::uint64_t rider = w.player_id();
-  if (!rider || w.static_colliders() < 8 || w.script_count() != 3) {
+  if (!rider || w.static_colliders() < 8 || w.script_count() != 5) {
     return fail("World3D setup (rider / statics / scripts)");
   }
   w3::Input3D idle;
   w.run_ticks(30, idle);
   const r3::Vec3 settled = w.find(rider)->transform.position;
-  if (!w.grounded() || !near(settled.y, 1.0f, 0.05f)) {
-    return fail("rider should stand on the ground at y=1, got y=" + std::to_string(settled.y));
+  // The Drifter's feet are its origin (collider offset 0.95): it stands at y=0.
+  if (!w.grounded() || !near(settled.y, 0.0f, 0.05f)) {
+    return fail("rider should stand on the ground at y=0, got y=" + std::to_string(settled.y));
   }
   // Sails spin through Lua (spin about z).
   const std::uint64_t sails = w.script_find("Windmill Sails");
@@ -193,7 +194,7 @@ int world_runtime(const fs::path& dir) {
   w.run_ticks(10, idle);
   const float peak = w.find(rider)->transform.position.y;
   w.run_ticks(80, idle);
-  if (!(peak > 1.5f) || !w.grounded() || !near(w.find(rider)->transform.position.y, 1.0f, 0.05f)) {
+  if (!(peak > 0.5f) || !w.grounded() || !near(w.find(rider)->transform.position.y, 0.0f, 0.05f)) {
     return fail("jump and land");
   }
   // Ride north (camera yaw 0 -> forward is -z) under the bell (trigger).
@@ -216,7 +217,7 @@ int world_runtime(const fs::path& dir) {
   // West into the Saloon wall (x from -8.5 to -3.5, z -7..-1): blocked.
   w.stop();
   for (s3::Entity3D& e : scene.entities) {
-    if (e.player) e.transform.position = {0.0f, 1.0f, -4.0f};
+    if (e.player) e.transform.position = {0.0f, 0.0f, -4.0f};
   }
   if (!w.start(scene, dir.string(), &err)) return fail(err);
   w3::Input3D west;
@@ -234,7 +235,7 @@ int world_runtime(const fs::path& dir) {
   // Pure capsule-vs-box helper.
   const r3::Vec3 push = w3::capsule_box_push({0, 0.4f, 0}, {0, 1.6f, 0}, 0.4f, {{0.2f, 0, -1}, {2, 2, 1}});
   if (!near(push.x, -0.2f, 1e-4f)) return fail("capsule_box_push");
-  std::cout << "[smoke] 3D play OK (rider grounded at y=1, jump peak " << peak
+  std::cout << "[smoke] 3D play OK (rider grounded at y=0, jump peak " << peak
             << " m, rode past the bell: trigger enter/exit + Lua rings=1 + toast, "
             << "Saloon wall stopped at x=" << wall.x << ", windmill spun via self:spin, follow cam)\n";
   return 0;

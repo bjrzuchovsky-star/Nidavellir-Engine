@@ -75,6 +75,7 @@ class SceneView {
     std::unique_ptr<Model> model;
     std::vector<MeshHandle> meshes;      // per primitive
     std::vector<MaterialHandle> materials;  // per model material (+1 default)
+    std::vector<Mat4> rest_palette;         // skinned models: the rest pose
     bool uploaded = false;
   };
   struct MaterialEntry {

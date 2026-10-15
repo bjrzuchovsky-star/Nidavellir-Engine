@@ -26,6 +26,7 @@
 //     vr.haptic) and on_grab(hand) / on_release(hand, speed).
 
 #include "fx/Particles.h"
+#include "render3d/Animator.h"
 #include "render3d/Renderer3D.h"
 #include "render3d/Camera3D.h"
 #include "render3d/Scene3D.h"
@@ -230,7 +231,28 @@ class World3D final : public runtime::ScriptWorld {
   // Entities in flight after a throw / drop.
   std::size_t vr_bodies() const { return bodies_.size(); }
 
+  // ---- Skeletal animation (World3D_Anim.cpp) -------------------------------
+  // Entities with an `animator` get an AnimatorRuntime on their first tick
+  // (or first anim.* call); each tick it advances, feeds the rider's speed /
+  // grounded / jump, fires on_anim_event(name), applies root motion and
+  // leaves the skinning palette on the live entity for SceneView. Lua:
+  // anim.play / crossfade / set_param / param / trigger / state / stop.
+  render3d::AnimatorRuntime* animator(std::uint64_t id);
+  std::size_t animators() const;
+  bool anim_play(std::uint64_t id, const std::string& name, float fade, bool hold);
+  // VR skinned hands (vr_rig.hand_model): the posed palette per hand, null
+  // when there is no hand model.
+  std::shared_ptr<const std::vector<render3d::Mat4>> vr_hand_palette(int hand) const;
+
+  struct AnimSystem;  // World3D_Anim.cpp
+  struct AnimSystemDeleter {
+    void operator()(AnimSystem* a) const;
+  };
+
  private:
+  std::unique_ptr<AnimSystem, AnimSystemDeleter> anim_;
+  void anim_step();
+  void anim_open_lua(lua_State* L, int sandbox);
   struct Static {
     std::uint64_t id;
     Aabb box;
