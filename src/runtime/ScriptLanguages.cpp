@@ -1,4 +1,5 @@
 #include "runtime/GraphScript.h"
+#include "runtime/NativeScript.h"
 #include "runtime/ScriptHost.h"
 
 namespace ts {
@@ -10,6 +11,9 @@ namespace runtime {
 void register_builtin_script_languages() {
   register_script_language("graph", [](ScriptWorld& w, ScriptLibrary& l, const std::string& dir) {
     return std::make_unique<GraphScriptHost>(w, l, dir);
+  });
+  register_script_language("cpp", [](ScriptWorld& w, ScriptLibrary& l, const std::string& dir) {
+    return std::make_unique<NativeScriptHost>(w, l, dir);
   });
 }
 

@@ -16,12 +16,15 @@ add_library(ts_runtime
   ScriptHost.cpp
   ScriptLanguages.cpp
   GraphScript.cpp
+  ScriptAbi.cpp
+  NativeScript.cpp
   Sound.cpp
 )
 
 target_include_directories(ts_runtime
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${PROJECT_SOURCE_DIR}/sdk/include
 )
 
 target_link_libraries(ts_runtime
@@ -30,6 +33,12 @@ target_link_libraries(ts_runtime
     ts_fx
   PRIVATE
     ts_lua
+    ${CMAKE_DL_LIBS}
 )
+
+# C++ scripts: the module build runs this cmake against the bundled SDK.
+target_compile_definitions(ts_runtime PRIVATE
+  TS_CMAKE_COMMAND="${CMAKE_COMMAND}"
+  TS_SCRIPT_SDK_DIR="${PROJECT_SOURCE_DIR}/sdk/include")
 
 target_compile_features(ts_runtime PUBLIC cxx_std_20)

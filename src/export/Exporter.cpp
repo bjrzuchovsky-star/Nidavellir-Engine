@@ -5,6 +5,7 @@
 #include "export/Zip.h"
 
 #include "core/JsonMini.h"
+#include "runtime/NativeScript.h"
 #include "scene/SceneJson.h"
 #include "vfs/Pak.h"
 
@@ -203,7 +204,24 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
   say("Cooking content into game.tspak");
   vfs::PakWriter pak;
   std::string err;
+  // C++ scripts: build the project module and ship it (sources stay home
+  // in shipping exports).
+  if (runtime::native_scripts::has_sources(proj.string())) {
+    say("Compiling C++ scripts");
+    const runtime::native_scripts::BuildResult b = runtime::native_scripts::build(proj.string());
+    for (const runtime::LogEntry& p : b.problems) {
+      r.report.errors.push_back("C++ " + p.file + ":" + std::to_string(p.line) + ": " + p.text);
+    }
+    if (!b.ok) return fail(b.error.empty() ? "C++ scripts did not build" : b.error);
+    if (!pak.add_file("native/" + runtime::native_scripts::module_file_name(), b.module, &err)) return fail(err);
+    r.report.notes.push_back("C++ scripts: shipped native/" + runtime::native_scripts::module_file_name());
+  }
   for (const std::string& rel : content_files(proj.string())) {
+    if (!dev && (rel.size() > 4 && (rel.compare(rel.size() - 4, 4, ".cpp") == 0 ||
+                                    rel.compare(rel.size() - 2, 2, ".h") == 0) &&
+                 rel.rfind("scripts/", 0) == 0)) {
+      continue;  // compiled into native/
+    }
     if (rel == "project.json" && !dev) {
       // Strip editor-only bookkeeping (created / last_opened / editor_*).
       std::vector<std::pair<std::string, std::string>> keep;

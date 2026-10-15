@@ -20,6 +20,7 @@ add_executable(ts_admin
   SmokeFx.cpp
   ExportCli.cpp
   SmokeGraph.cpp
+  SmokeNative.cpp
 )
 
 target_link_libraries(ts_admin

@@ -6,6 +6,7 @@
 #include "plugin/PluginManager.h"
 #include "plugins/Builtins.h"
 #include "plugins/RuntimePlugins.h"
+#include "runtime/GraphScript.h"
 
 #include "lauxlib.h"
 #include "lua.h"
@@ -161,6 +162,19 @@ ValidationReport validate_project(const std::string& project_dir, const std::str
       rep.errors.push_back("script error: " + std::string(msg ? msg : f));
     }
     lua_close(L);
+  }
+  // Visual scripts: parse + node / link check.
+  for (const std::string& f : files) {
+    if (f.size() < 11 || f.compare(f.size() - 11, 11, ".graph.json") != 0) continue;
+    ++scripts;
+    runtime::Graph g;
+    std::string err;
+    std::vector<std::string> problems;
+    if (!runtime::parse_graph(read_all(root / f), &g, &err)) {
+      rep.errors.push_back("graph error: " + f + ": " + err);
+    } else if (!runtime::check_graph(g, &problems)) {
+      for (const std::string& p : problems) rep.errors.push_back("graph error: " + f + ": " + p);
+    }
   }
   rep.notes.push_back(std::to_string(scripts) + " script(s) compiled");
 

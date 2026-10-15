@@ -19,6 +19,7 @@
 #include "SmokeAudio.h"
 #include "ExportCli.h"
 #include "SmokeGraph.h"
+#include "SmokeNative.h"
 #include "SmokeFx.h"
 #include "SmokeUi.h"
 #include "SmokeShipyard.h"
@@ -1215,6 +1216,10 @@ int run_console_smoke() {
   if (run_graph_smoke() != 0) {
     return 1;
   }
+  // C++ gameplay scripts (see SmokeNative.cpp; skipped without a compiler).
+  if (run_native_smoke() != 0) {
+    return 1;
+  }
 
   std::cout << "TombStone Admin smoke complete\n";
   return flow.current_state() == AppState::Quit ? 0 : 1;
@@ -1368,6 +1373,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-ui") == 0) {
       return run_ui_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-cpp") == 0) {
+      return run_native_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-graph") == 0) {
       return run_graph_smoke();

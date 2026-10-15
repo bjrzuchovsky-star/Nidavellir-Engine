@@ -19,6 +19,7 @@ target_link_libraries(ts_export
     ts_vfs
   PRIVATE
     ts_scene
+    ts_runtime
     ts_plugin
     ts_plugins_builtin
     ts_lua

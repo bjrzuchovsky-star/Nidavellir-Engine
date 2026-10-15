@@ -80,6 +80,8 @@ void set_env(const char* k, const std::string& v) {
 
 }  // namespace
 
+std::string export_sample_dir(const std::string& id, std::string* err) { return sample_dir(id, err); }
+
 int run_export_cli(int argc, char** argv) {
   exporter::ExportOptions opt;
   std::string project;
