@@ -486,6 +486,13 @@ void World3D::vr_grab(int h) {
   ++vr_stats_.grabs;
   vr_haptic(h, 0.6f, 0.04f);
   vr_sound("builtin:grab", best, 0.8f, pulled ? 1.25f : 1.0f);
+  {
+    runtime::FxEvent spark;  // grab sparkle
+    spark.preset = "sparkle";
+    spark.entity = best;
+    spark.at_entity = true;
+    fx(std::move(spark));
+  }
   post(LogLevel::Info, "vr", std::string(hand_name(h)) + " hand grabbed " + e->name, e->id);
   vr_event(best, "on_grab", h, 0.0);
   vr_follow_held();

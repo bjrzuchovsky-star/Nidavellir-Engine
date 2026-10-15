@@ -154,6 +154,7 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
 
 void World3D::stop() {
   host_.reset();
+  particles_.clear();
   running_ = false;
   ents_.clear();
   proxies_.clear();
@@ -418,6 +419,7 @@ void World3D::step(const Input3D& input0) {
   ++tick_;
   in_step_ = false;
   if (has_parents_) follow_parents(before);
+  step_fx();
   // Scripts may have moved or switched colliders.
   rebuild_statics();
   if (!vr_) follow_camera(false);
@@ -595,6 +597,75 @@ void World3D::script_toast(int /*slot*/, const std::string& text, double seconds
 }
 
 void World3D::script_sound(runtime::SoundEvent event) { play_sound(std::move(event)); }
+
+void World3D::script_fx(runtime::FxEvent event) { fx(std::move(event)); }
+
+void World3D::fx(runtime::FxEvent ev) {
+  if (ev.at_entity || ev.kind != runtime::FxEvent::Kind::Burst) {
+    const Entity3D* e = find(ev.entity);
+    if (!e) return;
+    if (ev.at_entity) {
+      ev.x = e->transform.position.x;
+      ev.y = e->transform.position.y;
+      ev.z = e->transform.position.z;
+    }
+    if (e->particles && !particles_.has(e->id)) {
+      const float pos[3] = {e->transform.position.x, e->transform.position.y,
+                            e->transform.position.z};
+      particles_.sync(e->id, *e->particles, pos);
+    }
+  }
+  switch (ev.kind) {
+    case runtime::FxEvent::Kind::Burst: {
+      std::optional<fx::EmitterDesc> d;
+      if (!ev.preset.empty()) {
+        d = fx::preset(ev.preset, fx::Space::ThreeD);
+      } else if (const Entity3D* e = find(ev.entity); e && e->particles) {
+        d = *e->particles;
+      }
+      if (!d) {
+        post(LogLevel::Warn, "fx", "unknown particle preset \"" + ev.preset + "\"", ev.entity);
+        return;
+      }
+      const float pos[3] = {ev.x, ev.y, ev.z};
+      particles_.burst(*d, pos, ev.count);
+      break;
+    }
+    case runtime::FxEvent::Kind::Emit:
+      particles_.emit(ev.entity, ev.count);
+      break;
+    case runtime::FxEvent::Kind::Stop:
+      particles_.stop(ev.entity);
+      break;
+    case runtime::FxEvent::Kind::Start:
+      particles_.start(ev.entity);
+      break;
+  }
+}
+
+void World3D::step_fx() {
+  for (const Entity3D& e : ents_) {
+    if (!e.particles || !e.visible) continue;
+    const float pos[3] = {e.transform.position.x, e.transform.position.y, e.transform.position.z};
+    particles_.sync(e.id, *e.particles, pos);
+  }
+  particles_.prune();
+  particles_.update(static_cast<float>(kTickSeconds));
+}
+
+void World3D::billboards(std::vector<render3d::Renderer3D::Billboard>* out) const {
+  std::vector<fx::Sprite> sprites;
+  particles_.sprites(&sprites);
+  for (const fx::Sprite& s : sprites) {
+    render3d::Renderer3D::Billboard b;
+    b.position = {s.pos[0], s.pos[1], s.pos[2]};
+    b.size = s.size;
+    b.rotation = s.rotation;
+    for (int i = 0; i < 4; ++i) b.rgba[i] = s.rgba[i];
+    b.additive = s.additive;
+    out->push_back(b);
+  }
+}
 
 void World3D::script_ui(runtime::UiCommand command) {
   if (ui_commands_.size() >= 256) ui_commands_.erase(ui_commands_.begin());

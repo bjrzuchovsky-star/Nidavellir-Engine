@@ -25,6 +25,8 @@
 //     table (vr.active, vr.head, vr.hand, vr.held, vr.rig, vr.teleport,
 //     vr.haptic) and on_grab(hand) / on_release(hand, speed).
 
+#include "fx/Particles.h"
+#include "render3d/Renderer3D.h"
 #include "render3d/Camera3D.h"
 #include "render3d/Scene3D.h"
 #include "runtime/Log.h"
@@ -169,6 +171,12 @@ class World3D final : public runtime::ScriptWorld {
   void script_open_extensions(lua_State* L, int sandbox) override;
   void script_sound(runtime::SoundEvent event) override;
   void script_ui(runtime::UiCommand command) override;
+  void script_fx(runtime::FxEvent event) override;
+  // Particles (metres, y up): entity "particles" emitters plus bursts from
+  // Lua particles.* / gameplay (VR grab sparkle). fx() takes x, y, z.
+  void fx(runtime::FxEvent event);
+  const fx::ParticleWorld& particles() const { return particles_; }
+  void billboards(std::vector<render3d::Renderer3D::Billboard>* out) const;
   // In-game UI: Lua ui.* requests for the host, widget events back.
   std::vector<runtime::UiCommand> take_ui_commands();
   void ui_event(const std::string& widget, bool change, double value, const std::string& text);
@@ -285,6 +293,8 @@ class World3D final : public runtime::ScriptWorld {
   std::vector<Toast3D> toasts_;
   std::vector<runtime::SoundEvent> sounds_;
   std::vector<runtime::UiCommand> ui_commands_;
+  fx::ParticleWorld particles_{fx::Space::ThreeD};
+  void step_fx();
   render3d::Camera3D camera_;
   std::uint64_t player_ = 0;
   Vec3 spawn_;
