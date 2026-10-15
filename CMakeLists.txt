@@ -37,6 +37,9 @@ if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT)
   include(FetchOpenXR)
   add_subdirectory(src/render3d)
   add_subdirectory(src/xr)
+  # 3D physics core (ts_physics3d): Jolt Physics fetched by hash.
+  include(FetchJolt)
+  add_subdirectory(src/physics3d)
 endif()
 
 # Game runtime (World, fixed-step PlaySession, Lua gameplay scripts). Pure

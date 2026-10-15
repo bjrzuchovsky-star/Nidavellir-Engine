@@ -20,6 +20,7 @@
 #include "ExportCli.h"
 #include "SmokeGraph.h"
 #include "SmokeCSharp.h"
+#include "SmokePhysics.h"
 #include "editor/scripting/BrandBook.h"
 #include "SmokeNative.h"
 #include "SmokeFx.h"
@@ -1222,6 +1223,10 @@ int run_console_smoke() {
   if (run_vr_smoke() != 0) {
     return 1;
   }
+  // Physics: Jolt 3D core, World3D bodies / VR grabs, Box2D (SmokePhysics.cpp).
+  if (run_physics_smoke() != 0) {
+    return 1;
+  }
   // Frontier Survival plugin (see SmokeSurvival.cpp).
   if (run_survival_smoke() != 0) {
     return 1;
@@ -1504,6 +1509,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--brand-book") == 0 && i + 1 < argc) {
       return run_brand_book_app(argv[i + 1], i + 2 < argc ? argv[i + 2] : "");
+    }
+    if (std::strcmp(argv[i], "--smoke-physics") == 0) {
+      return run_physics_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-cs") == 0) {
       return run_csharp_smoke();
