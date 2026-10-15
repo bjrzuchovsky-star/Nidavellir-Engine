@@ -1086,3 +1086,123 @@ laying it out once in a per-content-hash cache (`$TS_PAK_CACHE`, else
 loader (scene, scripts, UI, audio, textures, glTF, plugin data) reads packed
 content without per-loader hooks. Entries are stored uncompressed (the
 flags field reserves compression).
+
+## Scripting languages (Lua, graphs, C++, C#)
+
+Every script component names a file under `scripts/`. Its extension picks the
+language, and one project can mix all four. They share the same hooks
+(`start`, `tick`, `trigger enter/exit`, `interact`, `reload`, `destroy`, the
+VR hand events and UI events) and the same world API: find / spawn / move /
+show / collider / play, entity state (shared by all languages and
+replicated), toast, log, sound / music, particle bursts, UI and buttons.
+Each phase runs the languages in a fixed order (lua, graph, cpp, cs), so a
+mixed project stays deterministic.
+
+| Extension | Language | Host | Hot reload |
+|---|---|---|---|
+| `.lua` | Lua 5.4 (sandboxed) | `LuaScriptHost` | per file, state kept |
+| `.graph.json` | visual graph | `GraphScriptHost` (interpreter) | variables kept |
+| `.cpp` | C++20 | `NativeScriptHost`: one module per project | `save()` / `load()` |
+| `.cs` | C# (.NET 8) | `CSharpScriptHost`: hostfxr + AssemblyLoadContext | `Save()` / `Load()` |
+
+**Visual graphs and the Brand Book.** Graphs are `*.graph.json` assets with
+64 node types:
+
+- events: start, tick, trigger, interact, key, UI, hand
+- flow: branch, sequence, delay, for, do-once
+- math / compare / logic, values, variables
+- entities and state
+- audio, particles, UI, toast, log
+- **Plugin Call**
+
+The interpreter runs on the fixed tick and is deterministic, so a server can
+run graphs too. Data pins are pulled, delays count ticks, and each hook call
+has a budget of 20000 steps and nesting depth 64.
+
+Edit graphs in the **Brand Book** node editor: **File > Brand Book...** in
+2D, **Claim > Brand Book...** in 3D/VR, the Scripts panel, or double-click a
+`.graph.json`. It is a frontier-themed canvas:
+
+- node cards coloured by family, heavy exec wires, and data wires tinted by
+  value type
+- a right-click palette with search
+- a Ledger panel for each node's constants
+- zoom, pan and fit-to-view
+- Ctrl+S saves, and a running ride hot-reloads the graph
+
+The Brand Book can also run on its own:
+`ts_admin --brand-book <project> [scripts/x.graph.json]`.
+
+**C++ scripts.** Write scripts against the header-only SDK
+`sdk/include/tombstone/script_sdk.h`, which wraps the C ABI in
+`script_abi.h`:
+
+```cpp
+#include <tombstone/script_sdk.h>
+struct Door : ts::Script {
+  int opened = 0;
+  void on_interact(ts::Entity) override { toast("The door creaks"); set("open", ++opened); }
+  std::string save() const override { return std::to_string(opened); }   // kept on hot reload
+  void load(const std::string& s) override { opened = std::atoi(s.c_str()); }
+};
+TS_SCRIPT(Door, "door")   // scripts/door.cpp
+```
+
+- All of a project's `scripts/*.cpp` build into one module. The engine
+  generates a CMake project in `<project>/.tombstone/native`, then builds it
+  with CMake and the host compiler.
+- Builds run on a worker thread and the game keeps ticking. The new module
+  is swapped in when it is ready.
+- Compile errors appear in the Telegraph with file:line, and the old module
+  keeps running.
+- The Brand Book has a **Build C++ scripts** button.
+- Exports ship `native/ts_scripts.dll` (or `.so`) inside the pak, and never
+  the sources.
+
+**C# scripts.** Scripts derive from `TombStone.Script`, from the binding in
+`sdk/dotnet/TombStone.Scripting`:
+
+```csharp
+using TombStone;
+[Script("teller")]                  // or name the class Teller
+public class Teller : Script {
+    int visits;
+    public override void OnInteract(ulong rider) { visits++; Toast("Howdy, visit " + visits); }
+    public override string Save() => visits.ToString();
+    public override void Load(string s) => int.TryParse(s, out visits);
+}
+```
+
+- The engine builds `scripts/*.cs` with `dotnet build` into
+  `ProjectScripts.dll`. That needs the **.NET 8 SDK**.
+- .NET is hosted in the engine process through `hostfxr`. The runtime is
+  found when the game starts, so the engine does not link nethost.
+- Each build loads into its own collectible `AssemblyLoadContext`. Hot reload
+  saves state, loads the new context, restores state, and unloads the old
+  context.
+- Without the SDK, C# scripts are disabled cleanly. The Telegraph and the
+  editor (the Brand Book's Languages list and the Scripts panel) say
+  *"install the .NET 8 SDK (https://dotnet.microsoft.com/download/dotnet/8.0)
+  to enable C#"*, and every other language keeps running.
+- Exports ship `dotnet/ProjectScripts.dll`, `TombStone.Scripting.dll` and
+  its runtimeconfig. The player only needs a .NET 8+ runtime.
+
+**Plugin call bridge.** Plugins expose Lua tables (`WorldExtensions::lua`).
+Graphs reach them with the Plugin Call node, C++ with
+`plugin("table", "fn", {ts::arg(3.0)})`, and C# with
+`Plugin("table", "fn", 3.0)`. All three go through
+`ScriptWorld::script_plugin_call`, which keeps one sandboxed Lua state per
+world (with an instruction budget) and returns a single value.
+
+**Smokes** (all are part of `--smoke`):
+
+| Command | Checks |
+|---|---|
+| `ts_admin --smoke-graph` | interpreter, determinism, budget, reload, plugin bridge, Brand Book starter graph |
+| `ts_admin --smoke-cpp` | build, hooks / props / state, bridge, hot reload, compile error file:line, background swap, exported game |
+| `ts_admin --smoke-cs` | the same for C#, plus AssemblyLoadContext unload and a mixed Lua + C# + C++ world |
+
+Without a toolchain, `--smoke-cs` checks that C# is disabled cleanly and
+reports SKIPPED. `TS_SMOKE_REQUIRE_CPP=1` / `TS_SMOKE_REQUIRE_CS=1` turn a
+skip into a failure. `TS_SMOKE_CS_PREBUILT=<dir>` runs a prebuilt assembly
+on a runtime-only machine.

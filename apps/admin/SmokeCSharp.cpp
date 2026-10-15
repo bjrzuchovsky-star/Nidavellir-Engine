@@ -186,6 +186,31 @@ TS_SCRIPT(Clerk, "clerk")
   return 0;
 }
 
+// A prebuilt assembly (what exports ship) needs only the .NET 8+ runtime:
+// TS_SMOKE_CS_PREBUILT=<folder with ProjectScripts.dll + TombStone.Scripting.*>
+// rides it in a project with no SDK on the machine.
+int check_prebuilt(const fs::path& from, std::string* said) {
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cs_prebuilt";
+  fs::remove_all(proj, ec);
+  fs::create_directories(proj / "dotnet", ec);
+  for (const auto& e : fs::directory_iterator(from, ec)) {
+    fs::copy_file(e.path(), proj / "dotnet" / e.path().filename(), fs::copy_options::overwrite_existing, ec);
+  }
+  World w;
+  Entity2D door = scripted(2, "Door", "scripts/door.cs");
+  door.script->set("reach", ScriptValue::of_number(40));
+  std::string err;
+  w.build({door}, proj.string(), &err);
+  std::vector<LogEntry> logs = w.take_logs();
+  for (LogEntry& e : ride(w, 31)) logs.push_back(std::move(e));
+  if (!has(logs, "door v1 ready, reach 40")) return fail("prebuilt assembly (" + from.string() + "):" + dump(logs));
+  const ScriptValue* opened = w.script_get(2, "opened");
+  if (!opened || opened->number != 1) return fail("prebuilt OnTick" + dump(logs));
+  *said = "prebuilt assembly hosted on the .NET " + csharp_scripts::dotnet_info().runtime + " runtime";
+  return 0;
+}
+
 }  // namespace
 
 int run_csharp_smoke() {
@@ -193,6 +218,12 @@ int run_csharp_smoke() {
   std::string why;
   if (!csharp_scripts::sdk_available(&why)) {
     if (int r = check_disabled(why)) return r;
+    if (const char* pre = std::getenv("TS_SMOKE_CS_PREBUILT"); pre && *pre) {
+      std::string said;
+      if (int r = check_prebuilt(pre, &said)) return r;
+      std::cout << "[smoke] C# scripts: no SDK (" << why << "), " << said << " OK\n";
+      return 0;
+    }
     std::cout << "[smoke] C# scripts SKIPPED (" << why << "; graceful disable checked)\n";
     return require ? 1 : 0;
   }
