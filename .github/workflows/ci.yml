@@ -22,13 +22,16 @@ env:
 
 jobs:
   windows:
-    name: windows-latest / MSVC
+    name: windows-latest / MSVC x64
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      # No pinned generator: windows-latest images move to newer Visual
+      # Studio releases, and a hard-coded "Visual Studio 17 2022" fails to
+      # configure on them. CMake picks the newest VS installed (x64 MSVC).
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+        run: cmake -S . -B build -A x64
       - name: Build (Release)
         run: cmake --build build --config Release --parallel
       - name: Smoke (server + client)

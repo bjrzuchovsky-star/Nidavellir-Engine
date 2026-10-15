@@ -93,7 +93,7 @@ Without a display, the editors and smokes fall back to the null renderer. `xvfb-
 
 `.github/workflows/ci.yml` runs on every push to `main` and on pull requests:
 
-- `windows-latest`: MSVC, VS 2022 x64, Release.
+- `windows-latest`: MSVC x64, Release, with the newest Visual Studio on the runner (no pinned generator, so image updates do not break configure).
 - `ubuntu-latest`: GCC + Ninja, Release.
 
 Each job builds every app, then runs `ts_server --smoke`, `ts_client --smoke`, `ts_admin --smoke-prefab` and the full `ts_admin --smoke` with `TS_AUDIO=null`. The runners have no GPU and `TS_SMOKE_REQUIRE_GL` is left unset, so the GL-only checks are skipped instead of failing.
