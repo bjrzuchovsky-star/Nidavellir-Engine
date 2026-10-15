@@ -119,6 +119,14 @@ ClipPtr synth_builtin(const std::string& name, int rate) {
       return std::sin(kTau * f * t) * std::exp(-t * 30.0f);
     }, 0.5f);
   }
+  if (n == "impact") {
+    // A wooden / glassy knock: a falling thud under a short noisy click.
+    auto lp = std::make_shared<LowPass>(0.2f);
+    return make(rate, 0.18f, [lp](float t, Noise& no) {
+      const float thud = std::sin(kTau * (180.0f - 300.0f * t) * t) * std::exp(-t * 28.0f);
+      return 0.9f * thud + 0.6f * (*lp)(no.next()) * std::exp(-t * 70.0f);
+    }, 0.7f);
+  }
   if (n == "throw") {
     auto lp = std::make_shared<LowPass>(0.05f);
     return make(rate, 0.28f, [lp](float t, Noise& no) {

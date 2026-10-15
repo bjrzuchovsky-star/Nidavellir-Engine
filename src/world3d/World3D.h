@@ -27,6 +27,7 @@
 
 #include "fx/Particles.h"
 #include "render3d/Animator.h"
+#include "physics3d/Physics3D.h"
 #include "render3d/Renderer3D.h"
 #include "render3d/Camera3D.h"
 #include "render3d/Scene3D.h"
@@ -81,6 +82,11 @@ struct Input3D {
   float turn = 0.0f;          // camera yaw, degrees this tick (+ = left)
   bool jump = false;
   bool action = false;
+  // Desktop physics-gun: hold `grab` to pick up the dynamic body in front of
+  // the rider and carry it (it pushes and knocks things over); `throw_held`
+  // flings it along the camera.
+  bool grab = false;
+  bool throw_held = false;
 };
 
 // One hand in the world (VR mode).
@@ -96,6 +102,7 @@ struct VrHandState {
   bool laser_hit = false;
   Vec3 laser_end;
   std::deque<Vec3> trail;     // recent grip positions (throw velocity)
+  bool pulling = false;       // force grab still flying in to the hand
 };
 
 struct VrTeleport {
@@ -257,8 +264,40 @@ class World3D final : public runtime::ScriptWorld {
     float smooth_moved = 0.0f;
   };
   const VrStats& vr_stats() const { return vr_stats_; }
-  // Entities in flight after a throw / drop.
-  std::size_t vr_bodies() const { return bodies_.size(); }
+  // Grabbables in flight after a throw / drop (awake, moving, not held).
+  std::size_t vr_bodies() const;
+
+  // ---- Physics (World3D_Physics.cpp; Jolt via ts_physics3d) ----------------
+  // Every collider is a body: static by default, dynamic for grabbables and
+  // rigid_body components (kinematic follows the entity transform). The
+  // rider is a Jolt character. Held things are driven by velocity, so they
+  // collide, push and knock other bodies over (impacts: on_impact(other,
+  // speed), "builtin:impact" sound, dust, a buzz in the holding hand).
+  physics3d::World* physics() { return phys_.get(); }
+  const physics3d::World* physics() const { return phys_.get(); }
+  physics3d::BodyId body_of(std::uint64_t id) const;
+  std::uint64_t entity_of(physics3d::BodyId body) const;
+  std::size_t physics_bodies() const { return phys_ ? phys_->body_count() : 0; }
+  std::size_t physics_joints() const { return phys_ ? phys_->joint_count() : 0; }
+  struct ImpactStats {
+    std::uint64_t impacts = 0;    // contacts above the impact speed
+    std::uint64_t held_hits = 0;  // ... where one side was held / carried
+    float max_speed = 0.0f;
+    std::uint64_t last_a = 0, last_b = 0;
+  };
+  const ImpactStats& impact_stats() const { return impact_stats_; }
+  // Desktop carry (physics gun).
+  std::uint64_t carried() const { return carry_.id; }
+  // Lua / graph / C++ / C# physics calls.
+  bool phys_apply(std::uint64_t id, const char* what, const Vec3& v);
+  bool phys_set_velocity(std::uint64_t id, const Vec3& v);
+  Vec3 phys_velocity(std::uint64_t id) const;
+  bool phys_raycast(const Vec3& from, const Vec3& dir, float dist, physics3d::RayHit* hit) const;
+  // Join two entities (0 = the world); returns the joint handle or 0.
+  physics3d::JointId phys_joint(const scene3d::Joint3D& desc, std::uint64_t a, std::uint64_t b,
+                                std::string* error = nullptr);
+  void phys_unjoint(physics3d::JointId id);
+  static constexpr float kImpactSpeed = 1.2f;  // m/s for an impact event
 
   // ---- Skeletal animation (World3D_Anim.cpp) -------------------------------
   // Entities with an `animator` get an AnimatorRuntime on their first tick
@@ -300,10 +339,6 @@ class World3D final : public runtime::ScriptWorld {
   void follow_camera(bool snap);
   std::uint64_t spawn_copy(const Entity3D& src, float x, float z, bool keep_y, float y);
   // VR (World3D_VR.cpp).
-  struct Body {
-    Vec3 vel;
-    std::set<std::uint64_t> inside;  // triggers it overlaps
-  };
   void vr_start();
   void vr_step();
   void vr_locomotion(float dt);
@@ -313,7 +348,6 @@ class World3D final : public runtime::ScriptWorld {
   void vr_sound(const char* clip, std::uint64_t entity, float volume, float pitch);
   void vr_release(int h);
   void vr_laser(int h);
-  void vr_bodies_step(float dt);
   void vr_update_triggers();
   void vr_layout_menu();
   void vr_press_menu(int button);
@@ -321,6 +355,21 @@ class World3D final : public runtime::ScriptWorld {
   float vr_floor_at(const Vec3& p, float max_step) const;
   void vr_event(std::uint64_t target, const char* hook, int hand, double num);
   void vr_follow_held();
+  void vr_drive_held(float dt);
+  // Physics glue (World3D_Physics.cpp).
+  void phys_build();
+  bool phys_wants_body(const Entity3D& e) const;
+  void phys_add(const Entity3D& e);
+  void phys_remove(std::uint64_t id);
+  void phys_pre(float dt);
+  void phys_step(float dt);
+  void phys_post();
+  void phys_drive(std::uint64_t id, const Vec3& p, const render3d::Quat& q, float dt,
+                  float max_speed);
+  void phys_carry(const Input3D& in, float dt);
+  void phys_on_hold(std::uint64_t id, bool held);
+  bool phys_held(std::uint64_t id) const;
+  const render3d::MeshData* phys_mesh(const std::string& source);
  public:
   // World bounds used by the laser and grabbing: the collider box, else
   // the unit primitive under the transform.
@@ -382,7 +431,21 @@ class World3D final : public runtime::ScriptWorld {
   std::vector<VrMenuButton> menu_;
   float vignette_ = 0.0f;
   float turn_activity_ = 0.0f;
-  std::map<std::uint64_t, Body> bodies_;
+  std::unique_ptr<physics3d::World> phys_;
+  std::map<std::uint64_t, physics3d::BodyId> body_ids_;
+  std::map<physics3d::BodyId, std::uint64_t> body_owner_;
+  std::map<std::uint64_t, Transform> synced_;   // last transform the body had
+  std::map<std::uint64_t, physics3d::JointId> joint_ids_;
+  std::map<std::uint64_t, std::uint64_t> impact_quiet_until_;  // tick
+  std::set<std::uint64_t> flying_;              // grabbables in flight
+  std::map<std::string, std::unique_ptr<render3d::MeshData>> phys_meshes_;
+  ImpactStats impact_stats_;
+  struct Carry {
+    std::uint64_t id = 0;
+    float distance = 2.0f;
+    render3d::Quat rel;  // body rotation relative to the camera yaw
+    bool grab_down = false, throw_down = false;
+  } carry_;
   std::map<std::uint64_t, render3d::Transform> grab_home_;
   std::vector<VrHaptic> haptics_;
   VrStats vr_stats_;

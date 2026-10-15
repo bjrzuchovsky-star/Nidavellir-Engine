@@ -30,8 +30,10 @@ using render3d::Vec3;
 // skeletal "animator" and the VR rig's skinned "hand_model".
 // v13 adds the AI "agent" (ts.ai navmesh agent) and "nav_link" (off-mesh
 // link from the entity to `to`).
-// v7 .. v12 files still load.
-inline constexpr int kScene3DVersion = 13;
+// v14 adds physics: rigid_body, joint, sphere / convex / mesh collider
+// shapes, compound parts, collision layers and the scene "physics" block.
+// v7 .. v13 files still load.
+inline constexpr int kScene3DVersion = 14;
 
 // ts.ai navmesh agent (v13): walks the baked navmesh with crowd avoidance,
 // optionally driven by a behaviour tree (*.bt.json).
@@ -88,14 +90,77 @@ struct Light3D {
   bool operator==(const Light3D& o) const = default;
 };
 
+// Collider shapes. Sizes are local (times the entity scale):
+//   box: full extents; capsule: x = radius, y = total height;
+//   sphere: x = radius; convex: hull of the entity's mesh (size unused);
+//   mesh: the entity's triangles (static bodies only; size unused).
+enum class ColliderShape3D : std::uint8_t { Box, Capsule, Sphere, ConvexHull, Mesh };
+const char* collider_shape_name(ColliderShape3D s);
+ColliderShape3D collider_shape_from(const std::string& name);
+
+// An extra primitive in a compound collider (offset / rotation local).
+struct ColliderPart3D {
+  ColliderShape3D shape = ColliderShape3D::Box;
+  Vec3 size{0.5f, 0.5f, 0.5f};
+  Vec3 offset;
+  Vec3 rotation_deg;  // euler, degrees
+  bool operator==(const ColliderPart3D& o) const = default;
+};
+
 struct Collider3D {
-  enum class Shape : std::uint8_t { Box, Capsule };
+  using Shape = ColliderShape3D;
   Shape shape = Shape::Box;
-  Vec3 size{1.0f, 1.0f, 1.0f};  // box: full extents (local, times scale);
-                                // capsule: x = radius, y = height
+  Vec3 size{1.0f, 1.0f, 1.0f};
   Vec3 offset;                   // local centre offset
   bool trigger = false;          // reports overlaps, never blocks
+  int layer = -1;                // collision layer 0..7; -1 = by role
+  std::vector<ColliderPart3D> parts;  // v14: compound extras
   bool operator==(const Collider3D& o) const = default;
+};
+
+// v14: a simulated body (Jolt). Without one, colliders are static and
+// grabbables are dynamic with defaults.
+struct RigidBody3D {
+  enum class Motion : std::uint8_t { Static, Kinematic, Dynamic };
+  Motion motion = Motion::Dynamic;
+  float mass = 0.0f;            // kg; 0 = from the volume (water density)
+  float friction = 0.5f;
+  float restitution = 0.1f;     // bounciness 0..1
+  float linear_damping = 0.05f;
+  float angular_damping = 0.05f;
+  float gravity_scale = 1.0f;
+  bool ccd = false;             // swept motion (fast, small things)
+  bool impact_events = true;    // on_impact + impact sound / dust
+  bool operator==(const RigidBody3D& o) const = default;
+};
+const char* motion_name(RigidBody3D::Motion m);
+
+// v14: joins this entity's body to `target` (0 = the world). Anchor and
+// axis are in this entity's local space.
+struct Joint3D {
+  enum class Type : std::uint8_t { Fixed, Hinge, Slider, Distance, Ball };
+  Type type = Type::Hinge;
+  std::uint64_t target = 0;
+  Vec3 anchor;                  // local
+  Vec3 axis{0.0f, 1.0f, 0.0f};  // local (hinge / slider)
+  bool limits = false;
+  float min = 0.0f;  // hinge: degrees, slider / distance: metres
+  float max = 0.0f;
+  bool operator==(const Joint3D& o) const = default;
+};
+const char* joint_type_name(Joint3D::Type t);
+
+// v14: scene-wide physics settings.
+struct PhysicsSettings3D {
+  Vec3 gravity{0.0f, -9.81f, 0.0f};
+  int collision_steps = 1;
+  std::string layer_names[8] = {"Static", "Default", "Held",     "Player",
+                                "Debris", "Trigger", "Custom A", "Custom B"};
+  // collide[i] bit j: layers i and j touch (kept symmetric). Debris only
+  // touches Static and Debris by default.
+  std::uint8_t collide[8] = {0xff, 0xef, 0xef, 0xef, 0x11, 0xef, 0xef, 0xef};
+  bool debug_draw = false;  // editor + play: collider wireframes
+  bool operator==(const PhysicsSettings3D& o) const = default;
 };
 
 // Third-person rider: WASD relative to the camera, jump, gravity.
@@ -246,6 +311,8 @@ struct Entity3D {
   // this tick; SceneView draws the skinned mesh with it (rest pose when
   // null). Shared so world copies stay cheap.
   std::shared_ptr<const std::vector<render3d::Mat4>> skin_palette;
+  std::optional<RigidBody3D> rigid_body;     // v14
+  std::optional<Joint3D> joint;              // v14
   bool operator==(const Entity3D& o) const = default;
 };
 
@@ -272,6 +339,7 @@ struct Scene3D {
   float snap_scale = 0.25f;
   bool snap = true;
   std::vector<std::uint64_t> selection;
+  PhysicsSettings3D physics;  // v14
   bool operator==(const Scene3D& o) const = default;
 
   Entity3D* find(std::uint64_t id);

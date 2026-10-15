@@ -1,16 +1,22 @@
 #include "SmokePhysics.h"
 
 #include "physics3d/Physics3D.h"
+#include "render3d/Scene3D.h"
+#include "world3d/World3D.h"
 
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
 
 namespace p3 = ts::tombstone::physics3d;
 namespace r3 = ts::tombstone::render3d;
+namespace s3 = ts::tombstone::scene3d;
+namespace w3 = ts::tombstone::world3d;
+namespace fs = std::filesystem;
 
 namespace {
 
@@ -318,6 +324,307 @@ int queries_and_events(std::string* report) {
   return 0;
 }
 
+
+// ---- World3D on Jolt ----------------------------------------------------------
+
+r3::Quat look_along(r3::Vec3 dir) {
+  dir = r3::normalize(dir);
+  const float yaw = std::atan2(-dir.x, -dir.z);
+  const float pitch = std::asin(std::fmax(-1.0f, std::fmin(1.0f, dir.y)));
+  return r3::Quat::axis_angle({0, 1, 0}, yaw) * r3::Quat::axis_angle({1, 0, 0}, pitch);
+}
+
+// Drives VR input in world space (the desktop simulator's job in the editor).
+struct Hands {
+  w3::World3D& w;
+  w3::VrInput in;
+  explicit Hands(w3::World3D& world) : w(world) {
+    in.head.position = {0.0f, 1.7f, 0.0f};
+    in.head.valid = true;
+    for (int h = 0; h < 2; ++h) {
+      in.hands[h].grip.position = {h ? 0.2f : -0.2f, 1.1f, -0.3f};
+      in.hands[h].grip.valid = in.hands[h].aim.valid = true;
+      in.hands[h].aim = in.hands[h].grip;
+    }
+  }
+  void place(int h, r3::Vec3 p, r3::Vec3 dir = {0, 0, -1}) {
+    const r3::Mat4 inv = w.rig_matrix().inverse();
+    const r3::Quat rig = r3::Quat::axis_angle({0, 1, 0}, r3::radians(w.rig_yaw()));
+    w3::VrPose pose;
+    pose.position = inv.transform_point(p);
+    pose.orientation = rig.conjugate() * look_along(dir);
+    pose.valid = true;
+    in.hands[h].grip = in.hands[h].aim = pose;
+  }
+  void tick(int n = 1) {
+    for (int i = 0; i < n; ++i) {
+      w.set_vr_input(in);
+      w.step({});
+    }
+  }
+};
+
+double num(const w3::World3D& w, std::uint64_t id, const char* key) {
+  const auto* v = w.state(id, key);
+  return v ? v->number : 0.0;
+}
+
+std::uint64_t named(const s3::Scene3D& s, const std::string& n) {
+  const s3::Entity3D* e = s.find_named(n);
+  return e ? e->id : 0;
+}
+
+int vr_knock(const fs::path& dir, std::string* report) {
+  s3::Scene3D s;
+  std::string err;
+  if (!s3::load_file(s3::scene_path(dir.string()), &s, &err)) return fail("load saloon: " + err);
+  w3::World3D w;
+  std::vector<std::string> errors;
+  w.set_log_sink([&](const ts::tombstone::runtime::LogEntry& e) {
+    if (e.level == ts::tombstone::runtime::LogLevel::Error) errors.push_back(e.text);
+  });
+  w.set_vr(true);
+  if (!w.start(s, dir.string(), &err)) return fail("start: " + err);
+  Hands r(w);
+  r.tick(30);  // settle: nothing on the shelves should move
+  std::vector<std::uint64_t> cans;
+  std::vector<r3::Vec3> can0;
+  for (int i = 1; i <= 6; ++i) {
+    cans.push_back(named(s, "Tin Can " + std::to_string(i)));
+    if (!cans.back() || !w.body_of(cans.back())) return fail("tin can bodies");
+    can0.push_back(w.find(cans.back())->transform.position);
+  }
+  for (std::size_t i = 0; i < cans.size(); ++i) {
+    const s3::Entity3D* a = s.find(cans[i]);
+    if (r3::length(can0[i] - a->transform.position) > 0.02f) {
+      return fail("can pyramid stands still before it is hit (can " + std::to_string(i + 1) + ")");
+    }
+  }
+  const std::uint64_t b4 = named(s, "Bottle 4"), b3 = named(s, "Bottle 3");
+  // Grab bottle 4, bring it beside the pyramid.
+  r.place(w3::kRightHand, w.find(b4)->transform.position);
+  r.in.hands[1].squeeze = 1.0f;
+  r.tick(2);
+  if (w.hand(w3::kRightHand).held != b4) return fail("grab bottle 4");
+  r3::Vec3 hand{-2.25f, 1.02f, 1.5f};
+  r.place(w3::kRightHand, hand, {-1, 0, 0});
+  r.tick(40);
+  if (r3::length(w.find(b4)->transform.position - hand) > 0.25f) {
+    return fail("held bottle follows the hand (at " + f3(w.find(b4)->transform.position) + ")");
+  }
+  w.take_sounds();
+  // Swing it west through the cans at 3 m/s; the bottle stays in the hand.
+  const auto hits0 = w.impact_stats().held_hits;
+  for (int i = 0; i < 30; ++i) {
+    hand.x -= 0.05f;
+    r.place(w3::kRightHand, hand, {-1, 0, 0});
+    r.tick(1);
+  }
+  r.tick(120);
+  if (w.hand(w3::kRightHand).held != b4) return fail("bottle still in the hand after the swing");
+  int moved = 0;
+  for (std::size_t i = 0; i < cans.size(); ++i) {
+    if (r3::length(w.find(cans[i])->transform.position - can0[i]) > 0.1f) ++moved;
+  }
+  const float top_y = w.find(cans[5])->transform.position.y;
+  if (moved < 3 || top_y > can0[5].y - 0.1f) {
+    return fail("held bottle knocks the cans over (" + std::to_string(moved) + " moved, top can y " +
+                std::to_string(top_y) + ")");
+  }
+  if (w.impact_stats().held_hits <= hits0) return fail("impacts from the held bottle");
+  bool clang = false;
+  for (const auto& ev : w.take_sounds()) clang |= ev.clip == "builtin:impact" && ev.positional;
+  if (!clang) return fail("impact sound");
+  double knocks = 0;
+  for (std::uint64_t c : cans) knocks += num(w, c, "knocks");
+  if (knocks < 1 || num(w, b4, "hits") < 1) return fail("on_impact(other, speed) in Lua");
+  bool buzz = false;
+  for (const auto& h : w.take_haptics()) buzz |= h.hand == w3::kRightHand;
+  if (!buzz) return fail("the holding hand buzzes on impact");
+  // Two held things hit each other: bottle 3 in the left hand swung into
+  // bottle 4 in the right.
+  r.place(w3::kLeftHand, w.find(b3)->transform.position);
+  r.in.hands[0].squeeze = 1.0f;
+  r.tick(2);
+  if (w.hand(w3::kLeftHand).held != b3) return fail("grab bottle 3 (left)");
+  r3::Vec3 right{-1.0f, 1.3f, 2.0f}, left{-1.0f, 1.3f, 2.6f};
+  r.place(w3::kRightHand, right);
+  r.place(w3::kLeftHand, left);
+  r.tick(40);
+  bool clash = false;
+  float closest = 10.0f;
+  for (int i = 0; i < 30; ++i) {
+    left.z -= 0.04f;  // through where the right-hand bottle is
+    r.place(w3::kLeftHand, left);
+    r.tick(1);
+    const auto& st = w.impact_stats();
+    clash |= (st.last_a == b3 && st.last_b == b4) || (st.last_a == b4 && st.last_b == b3);
+    closest = std::min(closest, r3::length(w.find(b3)->transform.position - w.find(b4)->transform.position));
+  }
+  if (!clash || closest < 0.05f) {
+    return fail("held bottles collide instead of passing through (closest " + std::to_string(closest) + ")");
+  }
+  if (!errors.empty()) return fail("script error: " + errors.front());
+  char b[220];
+  std::snprintf(b, sizeof(b),
+                "held bottle knocked %d/6 cans over (top can %.2f -> %.2f m), %llu held hits, "
+                "clang + dust + buzz + on_impact, two held bottles collide",
+                moved, can0[5].y, top_y,
+                static_cast<unsigned long long>(w.impact_stats().held_hits));
+  *report = b;
+  return 0;
+}
+
+int vr_throw(const fs::path& dir, std::string* report) {
+  s3::Scene3D s;
+  std::string err;
+  if (!s3::load_file(s3::scene_path(dir.string()), &s, &err)) return fail(err);
+  w3::World3D w;
+  w.set_vr(true);
+  if (!w.start(s, dir.string(), &err)) return fail(err);
+  Hands r(w);
+  r.tick(5);
+  const std::uint64_t b1 = named(s, "Bottle 1");
+  r3::Vec3 p = w.find(b1)->transform.position;
+  r.place(w3::kRightHand, p);
+  r.in.hands[1].squeeze = 1.0f;
+  r.tick(2);
+  if (w.hand(w3::kRightHand).held != b1) return fail("grab bottle 1");
+  // Lift clear of the bar, then swing at a steady (0, 1.2, 4.8) m/s.
+  p = p + r3::Vec3{0.0f, 0.3f, 0.3f};
+  r.place(w3::kRightHand, p);
+  r.tick(20);
+  const r3::Vec3 v{0.0f, 1.2f, 4.8f};
+  for (int i = 0; i < 10; ++i) {
+    p = p + v * static_cast<float>(w3::World3D::kTickSeconds);
+    r.place(w3::kRightHand, p);
+    r.tick(1);
+  }
+  // Let go mid-swing (the hand keeps moving as it opens).
+  p = p + v * static_cast<float>(w3::World3D::kTickSeconds);
+  r.place(w3::kRightHand, p);
+  r.in.hands[1].squeeze = 0.0f;
+  r.tick(1);
+  const r3::Vec3 got = w.phys_velocity(b1);
+  const float err_frac = r3::length(got - v) / r3::length(v);
+  if (w.hand(w3::kRightHand).held != 0 || err_frac > 0.15f || w.vr_bodies() != 1) {
+    return fail("throw keeps the hand's velocity: hand " + f3(v) + " bottle " + f3(got));
+  }
+  r.tick(300);
+  if (w.vr_bodies() != 0) return fail("thrown bottle comes to rest");
+  char b[160];
+  std::snprintf(b, sizeof(b), "throw: hand %.2f m/s -> bottle %.2f m/s (%.0f%% off), lands",
+                r3::length(v), r3::length(got), err_frac * 100.0f);
+  *report = b;
+  return 0;
+}
+
+s3::Entity3D cube(std::uint64_t id, const std::string& name, r3::Vec3 pos, r3::Vec3 scale) {
+  s3::Entity3D e;
+  e.id = id;
+  e.name = name;
+  e.transform.position = pos;
+  e.transform.scale = scale;
+  e.mesh = s3::MeshRef{};
+  e.material = s3::Material3D{};
+  e.collider = s3::Collider3D{};
+  return e;
+}
+
+int desktop_carry(std::string* report) {
+  s3::Scene3D s;
+  s.editor_camera.yaw = 0.0f;  // forward is -z
+  s.entities.push_back(cube(1, "Ground", {0, -0.5f, 0}, {40, 1, 40}));
+  s3::Entity3D rider;
+  rider.id = 2;
+  rider.name = "Rider";
+  rider.transform.position = {0, 1, 0};
+  rider.player = s3::Player3D{};
+  s.entities.push_back(rider);
+  s3::Entity3D crate = cube(3, "Crate", {0, 0.25f, -1.6f}, {0.5f, 0.5f, 0.5f});
+  crate.grabbable = s3::Grabbable3D{};
+  s.entities.push_back(crate);
+  // Three crates stacked ahead (rigid bodies).
+  for (int i = 0; i < 3; ++i) {
+    s3::Entity3D t = cube(10 + i, "Stack " + std::to_string(i + 1), {0, 0.3f + 0.6f * i, -5.0f},
+                          {0.6f, 0.6f, 0.6f});
+    s3::RigidBody3D rb;
+    rb.mass = 4.0f;
+    t.rigid_body = rb;
+    s.entities.push_back(t);
+  }
+  // A hinged gate (joint to the world, +-45 degrees).
+  s3::Entity3D gate = cube(20, "Gate", {4.5f, 1.0f, -2.0f}, {1.0f, 1.6f, 0.08f});
+  gate.rigid_body = s3::RigidBody3D{};
+  s3::Joint3D j;
+  j.type = s3::Joint3D::Type::Hinge;
+  j.anchor = {-0.5f, 0, 0};
+  j.limits = true;
+  j.min = -45.0f;
+  j.max = 45.0f;
+  gate.joint = j;
+  s.entities.push_back(gate);
+  // The scene round-trips with its physics.
+  s.physics.gravity = {0, -9.0f, 0};
+  s.physics.collide[3] &= static_cast<std::uint8_t>(~(1u << 6));
+  s.physics.collide[6] &= static_cast<std::uint8_t>(~(1u << 3));
+  s.entities[2].collider->parts.push_back({s3::ColliderShape3D::Sphere, {0.1f, 0, 0}, {0, 0.3f, 0}, {}});
+  s.entities[2].collider->parts.clear();
+  s3::Scene3D back;
+  std::string err;
+  if (!s3::parse(s3::write(s), &back, &err) || !(back == s) || s3::write(back) != s3::write(s)) {
+    return fail("rigid_body / joint / physics settings round trip " + err);
+  }
+  w3::World3D w;
+  if (!w.start(s, "", &err)) return fail(err);
+  if (w.physics_bodies() != 6 || w.physics_joints() != 1) {
+    return fail("bodies (" + std::to_string(w.physics_bodies()) + ") / joints (" +
+                std::to_string(w.physics_joints()) + ")");
+  }
+  w3::Input3D idle;
+  w.run_ticks(30, idle);
+  const float stack_top0 = w.find(12)->transform.position.y;
+  // Pick the crate up.
+  w3::Input3D grab;
+  grab.grab = true;
+  w.run_ticks(30, grab);
+  if (w.carried() != 3 || w.find(3)->transform.position.y < 0.9f) {
+    return fail("physics gun picks the crate up (carried " + std::to_string(w.carried()) + ", y " +
+                std::to_string(w.find(3)->transform.position.y) + ")");
+  }
+  // Walk into the stack with it.
+  w3::Input3D walk = grab;
+  walk.move_forward = 1.0f;
+  const auto hits0 = w.impact_stats().held_hits;
+  w.run_ticks(80, walk);
+  w.run_ticks(90, grab);
+  const float stack_top = w.find(12)->transform.position.y;
+  if (w.impact_stats().held_hits <= hits0 || stack_top > stack_top0 - 0.3f) {
+    return fail("carried crate knocks the stack over (top " + std::to_string(stack_top0) + " -> " +
+                std::to_string(stack_top) + ")");
+  }
+  // Throw.
+  w3::Input3D toss = grab;
+  toss.throw_held = true;
+  w.step(toss);
+  const float speed = r3::length(w.phys_velocity(3));
+  if (w.carried() != 0 || speed < 8.0f) return fail("throw (" + std::to_string(speed) + " m/s)");
+  // Shove the gate past its limit with impulses; it stops at 45 degrees.
+  for (int i = 0; i < 40; ++i) {
+    w.phys_apply(20, "impulse", {0, 0, -6.0f});
+    w.step(idle);
+  }
+  const float yaw = std::fabs(w.find(20)->transform.rotation.to_euler_deg().y);
+  if (yaw < 35.0f || yaw > 50.0f) return fail("gate hinge stops at 45 deg, at " + std::to_string(yaw));
+  char b[200];
+  std::snprintf(b, sizeof(b),
+                "desktop physics gun: carried crate toppled the stack (top %.2f -> %.2f m), thrown %.1f m/s; "
+                "scene hinge gate stops at %.0f deg",
+                stack_top0, stack_top, speed, yaw);
+  *report = b;
+  return 0;
+}
+
 }  // namespace
 
 int run_physics_core_smoke() {
@@ -340,7 +647,23 @@ int run_physics_core_smoke() {
   return 0;
 }
 
+int run_physics_world_smoke() {
+  const fs::path dir = fs::path("./TombStoneProjects") / "_physics_saloon_smoke";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  std::string err;
+  if (!s3::write_haunted_saloon_sample(dir.string(), "Haunted Saloon VR", &err)) {
+    return fail("write sample: " + err);
+  }
+  std::string knock, toss, carry;
+  if (vr_knock(dir, &knock) != 0 || vr_throw(dir, &toss) != 0 || desktop_carry(&carry) != 0) return 1;
+  fs::remove_all(dir, ec);
+  std::cout << "[smoke] physics world OK (VR saloon: " << knock << "; " << toss << "; " << carry << ")\n";
+  return 0;
+}
+
 int run_physics_smoke() {
   if (run_physics_core_smoke() != 0) return 1;
+  if (run_physics_world_smoke() != 0) return 1;
   return 0;
 }

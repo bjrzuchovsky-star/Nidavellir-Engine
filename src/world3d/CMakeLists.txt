@@ -7,6 +7,7 @@ add_library(ts_world3d
   World3D_Lua.cpp
   World3D_VR.cpp
   World3D_Anim.cpp
+  World3D_Physics.cpp
   VrOverlay.cpp
 )
 target_include_directories(ts_world3d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
@@ -14,6 +15,7 @@ target_link_libraries(ts_world3d
   PUBLIC
     ts_render3d
     ts_runtime
+    ts_physics3d
   PRIVATE
     ts_lua
 )

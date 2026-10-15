@@ -4,6 +4,7 @@
 #include "render3d/Animator.h"
 #include "render3d/Gltf.h"
 #include "render3d/Json.h"
+#include "render3d/Scene3DPhysicsJson.h"
 #include "scene/JsonFlat.h"
 
 #include <algorithm>
@@ -86,14 +87,7 @@ Value entity_json(const Entity3D& e) {
     l.set("range", Value::number(e.light->range));
     o.set("light", std::move(l));
   }
-  if (e.collider) {
-    Value c = Value::object();
-    c.set("shape", Value::string(e.collider->shape == Collider3D::Shape::Capsule ? "capsule" : "box"));
-    c.set("size", vec3(e.collider->size));
-    c.set("offset", vec3(e.collider->offset));
-    if (e.collider->trigger) c.set("trigger", Value::boolean(true));
-    o.set("collider", std::move(c));
-  }
+  if (e.collider) o.set("collider", physics_json::collider(*e.collider));
   if (e.player) {
     Value p = Value::object();
     p.set("speed", Value::number(e.player->speed));
@@ -125,6 +119,8 @@ Value entity_json(const Entity3D& e) {
     g.set("throw_scale", Value::number(e.grabbable->throw_scale));
     o.set("grabbable", std::move(g));
   }
+  if (e.rigid_body) o.set("rigid_body", physics_json::rigid_body(*e.rigid_body));
+  if (e.joint) o.set("joint", physics_json::joint(*e.joint));
   if (e.script) {
     Value s = Value::object();
     s.set("path", Value::string(e.script->path));
@@ -236,15 +232,9 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     l.range = std::max(0.1f, v.flt("range", l.range));
     e.light = l;
   }
-  if (o["collider"].is_object()) {
-    const Value& v = o["collider"];
-    Collider3D c;
-    c.shape = v.str("shape") == "capsule" ? Collider3D::Shape::Capsule : Collider3D::Shape::Box;
-    read_vec3(v, "size", &c.size);
-    read_vec3(v, "offset", &c.offset);
-    c.trigger = v.flag("trigger", false);
-    e.collider = c;
-  }
+  if (o["collider"].is_object()) e.collider = physics_json::read_collider(o["collider"]);
+  if (o["rigid_body"].is_object()) e.rigid_body = physics_json::read_rigid_body(o["rigid_body"]);
+  if (o["joint"].is_object()) e.joint = physics_json::read_joint(o["joint"]);
   if (o["player"].is_object()) {
     const Value& v = o["player"];
     Player3D p;
@@ -478,6 +468,10 @@ std::string write(const Scene3D& s) {
   Value ents = Value::array();
   for (const Entity3D& en : s.entities) ents.push(entity_json(en));
   root.set("entities", std::move(ents));
+  {
+    Value ph = physics_json::settings(s.physics);
+    if (!ph.is_null()) root.set("physics", std::move(ph));
+  }
   Value ed = Value::object();
   ed.set("camera_target", vec3(s.editor_camera.target));
   ed.set("camera_yaw", Value::number(s.editor_camera.yaw));
@@ -549,6 +543,7 @@ bool parse(const std::string& text, Scene3D* out, std::string* error) {
     s.entities.push_back(std::move(en));
   }
   repair_parents(&s.entities);
+  s.physics = physics_json::read_settings(root["physics"]);
   const Value& ed = root["editor"];
   if (ed.is_object()) {
     read_vec3(ed, "camera_target", &s.editor_camera.target);
@@ -886,6 +881,20 @@ function on_release(hand, speed)
     toast("Yeehaw! " .. string.format("%.1f", speed) .. " m/s", 1.5)
   end
 end
+
+-- Physics: hit something hard enough and it counts (other = its name).
+function on_impact(other, speed)
+  self:set("hits", self:get("hits", 0) + 1)
+end
+)lua";
+
+constexpr const char* kCanLua = R"lua(-- Tin can: knocked down when something hits it (physics on_impact).
+function on_impact(other, speed)
+  self:set("knocks", self:get("knocks", 0) + 1)
+  if speed > 2 and self:get("knocks", 0) == 1 then
+    toast("Clang! " .. other .. " hit a can", 1.2)
+  end
+end
 )lua";
 
 }  // namespace
@@ -1092,7 +1101,8 @@ bool write_haunted_saloon_sample(const std::string& project_dir,
   if (!write_text(dir / "scripts" / "ghost.lua", kGhostLua, error) ||
       !write_text(dir / "scripts" / "piano.lua", kPianoLua, error) ||
       !write_text(dir / "scripts" / "spittoon.lua", kSpittoonLua, error) ||
-      !write_text(dir / "scripts" / "bottle.lua", kBottleLua, error)) {
+      !write_text(dir / "scripts" / "bottle.lua", kBottleLua, error) ||
+      !write_text(dir / "scripts" / "can.lua", kCanLua, error)) {
     return false;
   }
   Scene3D s;
@@ -1174,6 +1184,30 @@ bool write_haunted_saloon_sample(const std::string& project_dir,
     light.range = 9.0f;
     l.light = light;
     s.entities.push_back(l);
+  }
+  // Target practice: a pyramid of tin cans on a side table (rigid bodies;
+  // swing a bottle through them or throw the hat).
+  const float tin[3] = {0.62f, 0.64f, 0.66f};
+  s.entities.push_back(prim(id++, "Can Table", "cube", {-3.0f, 0.4f, 1.5f}, {1.2f, 0.8f, 1.2f}, plank, 0.8f));
+  {
+    const float row_y[3] = {0.87f, 1.01f, 1.15f};
+    int n = 0;
+    for (int row = 0; row < 3; ++row) {
+      const int count = 3 - row;
+      for (int i = 0; i < count; ++i) {
+        const float x = -3.0f + (static_cast<float>(i) - 0.5f * static_cast<float>(count - 1)) * 0.115f;
+        Entity3D can = prim(id++, "Tin Can " + std::to_string(++n), "cube", {x, row_y[row], 1.5f},
+                            {0.1f, 0.14f, 0.1f}, tin, 0.35f, 0.8f);
+        RigidBody3D rb;
+        rb.mass = 0.3f;
+        rb.friction = 0.6f;
+        rb.restitution = 0.2f;
+        can.rigid_body = rb;
+        can.script = ScriptData{};
+        can.script->path = "scripts/can.lua";
+        s.entities.push_back(can);
+      }
+    }
   }
   {
     // Skinned gloves (assets/hand.gltf, CC0): fingers curl with the grip.

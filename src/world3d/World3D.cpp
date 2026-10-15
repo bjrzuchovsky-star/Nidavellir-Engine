@@ -129,6 +129,7 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
   }
   if (const Entity3D* p = find(player_)) spawn_ = p->transform.position;
   rebuild_statics();
+  phys_build();
   // Camera starts behind the rider, looking the way the editor camera did.
   cam_yaw_ = scene.editor_camera.yaw;
   camera_.position = {0, 3, 8};
@@ -184,7 +185,15 @@ void World3D::stop() {
   toasts_.clear();
   sounds_.clear();
   ui_commands_.clear();
-  bodies_.clear();
+  phys_.reset();
+  body_ids_.clear();
+  body_owner_.clear();
+  synced_.clear();
+  joint_ids_.clear();
+  impact_quiet_until_.clear();
+  flying_.clear();
+  carry_ = Carry{};
+  impact_stats_ = ImpactStats{};
   grab_home_.clear();
   haptics_.clear();
   for (VrHandState& h : hands_) h = VrHandState{};
@@ -302,6 +311,28 @@ void World3D::move_player(const Input3D& in) {
   }
   const float half = std::max(0.0f, h * 0.5f - r);
   grounded_ = false;
+  if (phys_ && phys_->has_character()) {
+    // Jolt character: undo the integration above and let it sweep.
+    p->transform.position -= vel_ * dt;
+    auto was = synced_.find(player_);
+    if (was == synced_.end() || !(was->second.position == p->transform.position)) {
+      phys_->set_character_position(p->transform.position);  // a script moved the rider
+    }
+    const physics3d::CharacterState st = phys_->move_character(vel_, dt);
+    p->transform.position = st.position;
+    vel_ = st.velocity;
+    grounded_ = st.grounded;
+    if (grounded_ && vel_.y < 0.0f) vel_.y = 0.0f;
+    contacts_ = static_cast<std::size_t>(st.contacts);
+    if (p->transform.position.y < kKillY) {
+      p->transform.position = spawn_;
+      vel_ = {};
+      phys_->set_character_position(spawn_);
+      post(LogLevel::Warn, "play", p->name + " fell off the edge of the map; back to the spawn", p->id);
+    }
+    synced_[player_] = p->transform;
+    return;
+  }
   for (int iter = 0; iter < 4; ++iter) {
     bool moved = false;
     for (const Static& s : statics_) {
@@ -420,12 +451,17 @@ void World3D::step(const Input3D& input0) {
     before.reserve(ents_.size());
     for (const Entity3D& e : ents_) before.emplace_back(e.id, e.transform);
   }
+  const float dt = static_cast<float>(kTickSeconds);
+  phys_pre(dt);
   if (vr_) {
     vr_step();
   } else {
     move_player(input);
-    update_triggers();
+    phys_carry(input, dt);
   }
+  phys_step(dt);
+  phys_post();
+  if (!vr_) update_triggers();
   if (host_) {
     host_->start_pending();
     if (input.action && !jump_held_) interact();

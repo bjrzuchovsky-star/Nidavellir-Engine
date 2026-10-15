@@ -95,7 +95,6 @@ void World3D::vr_start() {
   menu_.clear();
   vignette_ = turn_activity_ = 0.0f;
   snap_latched_ = false;
-  bodies_.clear();
   haptics_.clear();
   vr_stats_ = VrStats{};
   if (!vr_in_.head.valid) {
@@ -147,6 +146,7 @@ void World3D::vr_follow_held() {
       hs.held = 0;
       continue;
     }
+    if (body_of(hs.held)) continue;  // physics drives it (vr_drive_held)
     e->transform.position = hs.grip.position + hs.grip.orientation.rotate(hs.hold_offset);
     e->transform.rotation = render3d::normalize(hs.grip.orientation * hs.hold_rotation);
   }
@@ -222,7 +222,7 @@ void World3D::vr_step() {
   vr_locomotion(dt);
   vr_update_poses();
   vr_hands();
-  vr_bodies_step(dt);
+  vr_drive_held(dt);
   vr_update_triggers();
   if (Entity3D* r = live(rig_id_)) {
     r->transform.position = rig_pos_;
@@ -472,17 +472,18 @@ void World3D::vr_grab(int h) {
     }
   }
   if (!best) return;
-  VrHandState& other = hands_[h ^ 1];
-  if (other.held == best) other.held = 0;
+  // Both hands may hold the same thing (two-handed grab).
   Entity3D* e = live(best);
   if (!e) return;
-  bodies_.erase(best);
+  flying_.erase(best);
   const Quat inv = render3d::normalize(hs.grip.orientation).conjugate();
   const bool snap = pulled || (e->grabbable && e->grabbable->snap_to_hand);
   hs.hold_offset = snap ? Vec3{} : inv.rotate(e->transform.position - hs.grip.position);
   hs.hold_rotation = render3d::normalize(inv * e->transform.rotation);
   hs.held = best;
+  hs.pulling = pulled;
   hs.pointed = 0;
+  phys_on_hold(best, true);
   ++vr_stats_.grabs;
   vr_haptic(h, 0.6f, 0.04f);
   vr_sound("builtin:grab", best, 0.8f, pulled ? 1.25f : 1.0f);
@@ -513,7 +514,16 @@ void World3D::vr_release(int h) {
   if (!g.throwable) v = {};
   v *= g.throw_scale;
   const float speed = render3d::length(v);
-  bodies_[id].vel = v;
+  if (hands_[h ^ 1].held == id) {
+    // Still in the other hand (two-handed grab): just let go with this one.
+    ++vr_stats_.releases;
+    post(LogLevel::Info, "vr", std::string(hand_name(h)) + " hand let go of " + e->name +
+                                   " (still in the other hand)", id);
+    return;
+  }
+  phys_on_hold(id, false);
+  phys_set_velocity(id, v);
+  flying_.insert(id);
   ++vr_stats_.releases;
   if (speed > 1.5f) ++vr_stats_.throws;
   // A whoosh that grows with the throw; a soft drop otherwise.
@@ -531,70 +541,6 @@ void World3D::vr_release(int h) {
   vr_event(id, "on_release", h, speed);
 }
 
-// ---- Thrown / dropped things ----------------------------------------------------------
-
-void World3D::vr_bodies_step(float dt) {
-  bool any_floor = false;
-  for (const Static& s : statics_) any_floor = any_floor || s.box.max.y <= 0.05f;
-  for (auto it = bodies_.begin(); it != bodies_.end();) {
-    Entity3D* e = live(it->first);
-    if (!e || it->first == hands_[0].held || it->first == hands_[1].held) {
-      it = bodies_.erase(it);
-      continue;
-    }
-    Body& b = it->second;
-    b.vel.y -= kBodyGravity * dt;
-    e->transform.position += b.vel * dt;
-    bool landed = false;
-    for (const Static& s : statics_) {
-      const Aabb box = vr_bounds(*e);
-      if (!overlaps(box, s.box)) continue;
-      const float pen[3] = {std::min(box.max.x - s.box.min.x, s.box.max.x - box.min.x),
-                            std::min(box.max.y - s.box.min.y, s.box.max.y - box.min.y),
-                            std::min(box.max.z - s.box.min.z, s.box.max.z - box.min.z)};
-      int axis = 0;
-      if (pen[1] <= pen[axis]) axis = 1;
-      if (pen[2] < pen[axis]) axis = 2;
-      const float sign = box.center()[axis] >= s.box.center()[axis] ? 1.0f : -1.0f;
-      e->transform.position[axis] += pen[axis] * sign;
-      if (axis == 1 && sign > 0) {
-        if (b.vel.y < 0) b.vel.y = -b.vel.y * 0.25f;
-        if (b.vel.y < 0.6f) {
-          b.vel.y = 0.0f;
-          landed = true;
-        }
-        b.vel.x *= 0.8f;
-        b.vel.z *= 0.8f;
-      } else {
-        b.vel[axis] = -b.vel[axis] * 0.3f;
-      }
-    }
-    if (!any_floor) {
-      const Aabb box = vr_bounds(*e);
-      if (box.min.y < 0.0f) {
-        e->transform.position.y -= box.min.y;
-        if (b.vel.y < 0) b.vel.y = 0;
-        b.vel.x *= 0.8f;
-        b.vel.z *= 0.8f;
-        landed = true;
-      }
-    }
-    if (e->transform.position.y < kKillY) {
-      auto home = grab_home_.find(e->id);
-      if (home != grab_home_.end()) e->transform = home->second;
-      post(LogLevel::Warn, "vr", e->name + " fell off the edge of the map; back where it was", e->id);
-      it = bodies_.erase(it);
-      continue;
-    }
-    if (landed && render3d::length(b.vel) < 0.15f) {
-      ++vr_stats_.landings;
-      it = bodies_.erase(it);
-      continue;
-    }
-    ++it;
-  }
-}
-
 void World3D::vr_update_triggers() {
   std::vector<const Entity3D*> triggers;
   for (const Entity3D& e : ents_) {
@@ -602,29 +548,7 @@ void World3D::vr_update_triggers() {
       triggers.push_back(&e);
     }
   }
-  // Thrown / dropped things.
-  for (auto& [id, b] : bodies_) {
-    const Entity3D* e = find(id);
-    if (!e) continue;
-    const Aabb box = vr_bounds(*e);
-    std::set<std::uint64_t> now;
-    for (const Entity3D* t : triggers) {
-      if (t->id != id && overlaps(box, collider_box(*t))) now.insert(t->id);
-    }
-    for (std::uint64_t t : now) {
-      if (b.inside.count(t)) continue;
-      ++trigger_events_;
-      const Entity3D* te = find(t);
-      post(LogLevel::Info, "trigger", e->name + " flew into " + (te ? te->name : "?"), t);
-      if (host_) host_->trigger(true, t, id);
-    }
-    for (std::uint64_t t : b.inside) {
-      if (now.count(t)) continue;
-      ++trigger_events_;
-      if (host_) host_->trigger(false, t, id);
-    }
-    b.inside = std::move(now);
-  }
+  // Thrown / dropped / held things: Jolt sensor events (phys_post).
   // The player: a column from the rig floor up to the head.
   if (!player_) return;
   const Aabb me{{head_.position.x - 0.25f, rig_pos_.y, head_.position.z - 0.25f},
