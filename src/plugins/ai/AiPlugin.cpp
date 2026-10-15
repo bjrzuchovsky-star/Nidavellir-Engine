@@ -241,6 +241,21 @@ AiPlugin::~AiPlugin() {
 
 AiPlugin* AiPlugin::instance() { return instance_ref(); }
 
+namespace {
+AiPlugin::EditorHook& hook_ref() {
+  static AiPlugin::EditorHook h;
+  return h;
+}
+}  // namespace
+
+void AiPlugin::set_editor_hook(EditorHook hook) { hook_ref() = std::move(hook); }
+
+bool AiPlugin::on_load(const plugin::PluginContext& ctx, std::string* /*error*/) {
+  project_dir_ = ctx.project_dir;
+  host_ = ctx.host;
+  return true;
+}
+
 const plugin::PluginInfo& AiPlugin::static_info() {
   static const plugin::PluginInfo info = [] {
     plugin::PluginInfo i;
@@ -866,6 +881,7 @@ void AiPlugin::on_register(plugin::Registrar& reg) {
     lua_pushlightuserdata(L, &current_);
     luaL_setfuncs(L, fns, 2);
   });
+  if (hook_ref() && host_.rfind("editor", 0) == 0) hook_ref()(*this, reg);
 }
 
 void AiPlugin::on_play_begin(World& world) {

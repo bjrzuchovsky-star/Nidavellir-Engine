@@ -105,6 +105,14 @@ AiWorld3D* AiWorld3D::of(const World3D& w) {
   return it == registry().end() ? nullptr : it->second;
 }
 
+AiWorld3D* AiWorld3D::latest() {
+  AiWorld3D* best = nullptr;
+  for (const auto& [w, a] : registry()) {
+    if (w->running()) best = a;
+  }
+  return best;
+}
+
 std::shared_ptr<AiWorld3D> attach(World3D& w, bool enabled) {
   if (!enabled) return nullptr;
   if (auto* existing = dynamic_cast<AiWorld3D*>(w.extension(AiWorld3D::kName))) {

@@ -62,6 +62,8 @@ class AiWorld3D final : public world3d::World3DExtension {
 
   // The Editor BT panel reads live state through this (null when not riding).
   static AiWorld3D* of(const world3d::World3D& w);
+  // The most recently started 3D AI world (editor panels), or null.
+  static AiWorld3D* latest();
 
  private:
   void rebuild();

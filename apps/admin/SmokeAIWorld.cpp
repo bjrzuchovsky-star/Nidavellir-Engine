@@ -4,6 +4,8 @@
 
 #include "SmokeAI.h"
 
+#include "editor/plugins/AiPanels.h"
+#include "editor/plugins/EditorPlugins.h"
 #include "plugin/Catalog.h"
 #include "plugin/PluginManager.h"
 #include "plugins/Builtins.h"
@@ -14,6 +16,9 @@
 #include "runtime/World.h"
 #include "world3d/World3D.h"
 
+#include <imgui.h>
+
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -54,6 +59,53 @@ Entity2D box(std::uint64_t id, const char* name, float x, float y, float w, floa
 
 int run_ai3d_smoke();
 
+namespace {
+
+// The Behaviour Trees panel: registered for editor hosts, finds the
+// project's trees and draws live state in a headless ImGui frame.
+int bt_panel_check(const fs::path& dir, plugins::AiPlugin* live_plugin, std::uint64_t watch, std::string* note) {
+  plugin::Catalog cat;
+  plugins::register_builtin_plugins(cat, nullptr);
+  editor::register_editor_builtin_plugins(cat, nullptr);
+  plugin::PluginManager em(cat);
+  plugin::PluginContext ctx;
+  ctx.host = "editor2d";
+  ctx.project_dir = dir.string();
+  em.load({"ts.ai"}, ctx);
+  bool has_panel = false;
+  for (const auto& p : em.editor_panels()) has_panel |= p.item.id == "ai.behaviour_trees";
+  if (!has_panel) return fail("Behaviour Trees editor panel should register for editor hosts");
+  ImGuiContext* prev = ImGui::GetCurrentContext();
+  ImGuiContext* ctx_im = ImGui::CreateContext();
+  ImGui::SetCurrentContext(ctx_im);
+  ImGuiIO& io = ImGui::GetIO();
+  io.DisplaySize = ImVec2(1280, 800);
+  io.IniFilename = nullptr;
+  unsigned char* px = nullptr;
+  int fw = 0, fh = 0;
+  io.Fonts->GetTexDataAsRGBA32(&px, &fw, &fh);
+  editor::BtPanelState st;
+  st.watch = watch;
+  for (int frame = 0; frame < 3; ++frame) {
+    io.DeltaTime = 1.0f / 60.0f;
+    ImGui::NewFrame();
+    ImGui::Begin("Behaviour Trees");
+    editor::draw_bt_panel(*live_plugin, st);
+    ImGui::End();
+    ImGui::Render();
+  }
+  ImGui::DestroyContext(ctx_im);
+  ImGui::SetCurrentContext(prev);
+  em.unload_all();
+  if (std::find(st.files.begin(), st.files.end(), "ai/goto.bt.json") == st.files.end()) {
+    return fail("BT panel should list ai/goto.bt.json");
+  }
+  *note = std::to_string(st.files.size()) + " tree file(s) listed";
+  return 0;
+}
+
+}  // namespace
+
 int run_ai_world_smoke() {
   const fs::path dir = fs::temp_directory_path() / "ts_ai_smoke";
   std::error_code ec;
@@ -73,6 +125,7 @@ int run_ai_world_smoke() {
   if (!cat.find("ts.ai")) return fail("ts.ai should be a built-in plugin");
   plugin::PluginManager m(cat);
   plugin::PluginContext ctx;
+  ctx.project_dir = dir.string();
   m.load({"ts.ai"}, ctx);
   if (!m.loaded("ts.ai")) return fail("ts.ai should load");
   auto* aip = static_cast<plugins::AiPlugin*>(m.get("ts.ai"));
@@ -196,6 +249,8 @@ int run_ai_world_smoke() {
       out.number < 700.0) {
     return fail("bridge ai.path_length: " + err);
   }
+  std::string panel_note;
+  if (bt_panel_check(dir, aip, 2, &panel_note) != 0) return 1;
   m.play_end();
   w.clear();
 
@@ -227,7 +282,7 @@ int run_ai_world_smoke() {
 
   std::cout << "[smoke] ai world OK (plugin ts.ai; path round wall " << static_cast<int>(len)
             << " px; BT guard + Lua agent + graph agent arrived, worst gap " << min_gap
-            << " px; heard gunshot; Lua + bridge ai table; client skipped; coyote steers round fence)\n";
+            << " px; heard gunshot; Lua + bridge ai table; client skipped; coyote steers round fence; BT panel " << panel_note << ")\n";
   return run_ai3d_smoke();
 }
 

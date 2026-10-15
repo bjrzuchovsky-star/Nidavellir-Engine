@@ -27,6 +27,7 @@ class AiPlugin : public plugin::Plugin {
  public:
   static const plugin::PluginInfo& static_info();
   const plugin::PluginInfo& info() const override { return static_info(); }
+  bool on_load(const plugin::PluginContext& ctx, std::string* error) override;
   void on_register(plugin::Registrar& reg) override;
   void on_play_begin(runtime::World& world) override;
   void on_play_end() override;
@@ -69,6 +70,13 @@ class AiPlugin : public plugin::Plugin {
   std::uint64_t coyote_plans() const { return coyote_plans_; }
 
   static AiPlugin* instance();
+  // Editor panels (the BT editor) install through this, like Frontier's.
+  using EditorHook = std::function<void(AiPlugin&, plugin::Registrar&)>;
+  static void set_editor_hook(EditorHook hook);
+  const std::string& project_dir() const { return project_dir_; }
+  const std::string& host() const { return host_; }
+  // The 2D world riding now (null when stopped / on a client).
+  runtime::World* current_world() const { return current_ && active(*current_) ? current_ : nullptr; }
 
  private:
   WorldAi& state(runtime::World& w);
@@ -79,6 +87,8 @@ class AiPlugin : public plugin::Plugin {
   std::map<const runtime::World*, std::unique_ptr<WorldAi>> worlds_;
   runtime::World* current_ = nullptr;
   bool debug_ = false;
+  std::string project_dir_;
+  std::string host_;
   std::uint64_t coyote_plans_ = 0;
   struct CoyotePlan {
     std::vector<ai::Cell> cells;
