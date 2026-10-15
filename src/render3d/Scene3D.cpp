@@ -813,6 +813,8 @@ constexpr const char* kBellLua = R"lua(-- Church bell: rings when a rider walks 
 function on_trigger_enter(other)
   toast(other:name() .. " rang the bell", 2)
   self:set("rings", self:get("rings", 0) + 1)
+  -- ts.quests (optional): counts toward Old Hank's "Ring the Bell".
+  if quests then quests.progress("bell", "ring") end
 end
 )lua";
 
@@ -909,7 +911,45 @@ function on_trigger_enter(other)
   anim.play(self, "wave", 0.2)
   toast("Old Hank tips his hat to " .. other:name(), 2)
 end
+
+-- Walk up and press interact: Old Hank talks (ts.dialogue, dialogue/hank.dlg.json).
+function on_interact(who)
+  if dialogue and not dialogue.active() then dialogue.start("hank") end
+end
+
+-- "event journal" in the dialogue opens the quest journal (ts.quests).
+function on_dialogue_event(name, n)
+  if name == "journal" and quests then quests.journal(true) end
+end
 )lua";
+
+// ts.quests + ts.dialogue demo: Old Hank asks a rider to ring the bell.
+constexpr const char* kBellQuest = R"json({
+  "id": "bell", "title": "Ring the Bell", "giver": "Old Hank",
+  "description": "The church bell at the end of the street has gone quiet. Old Hank wants it rung before sundown.",
+  "objectives": [{"id": "ring", "text": "Ring the church bell", "count": 1}],
+  "rewards": ["add gold 25", "save"]
+}
+)json";
+
+constexpr const char* kHankDialogue = R"json({
+  "id": "hank", "start": "hello",
+  "speakers": {"hank": {"name": "Old Hank"}},
+  "nodes": [
+    {"id": "hello", "speaker": "hank", "text": "Evenin', stranger. Quiet town, ain't it?", "x": 0, "y": 0,
+     "choices": [
+       {"text": "Too quiet. Need a hand?", "next": "offer", "if": "quest:bell == inactive"},
+       {"text": "Still workin' on that bell.", "next": "waiting", "if": "quest:bell == active"},
+       {"text": "Bell's rung, Hank.", "next": "thanks", "if": "quest:bell == completed && !paid_thanks"},
+       {"text": "What am I up to again?", "next": "", "actions": ["event journal"]},
+       {"text": "Just passin' through.", "next": ""}]},
+    {"id": "offer", "speaker": "hank", "text": "Church bell ain't rung since the mine shut. Walk under it and give it a clang, would ya? There's {gold_offer} dollars in it.", "x": 320, "y": -120,
+     "actions": ["set gold_offer 25", "quest start bell"], "next": ""},
+    {"id": "waiting", "speaker": "hank", "text": "End of the street, past the windmill. Can't miss it.", "x": 320, "y": 40, "next": ""},
+    {"id": "thanks", "speaker": "hank", "text": "Heard it clear across town. That's {gold} dollars to your name now. Obliged.", "x": 320, "y": 180,
+     "actions": ["set paid_thanks true"], "next": ""}]
+}
+)json";
 
 // Old Hank's stroll (ts.ai): greets riders he can see, else wanders the
 // street between short rests. Inert unless the project enables ts.ai.
@@ -973,6 +1013,8 @@ bool write_ghost_town_sample(const std::string& project_dir,
   if (!write_text(dir / "scripts" / "rider.lua", kRiderLua, error)) return false;
   fs::create_directories(dir / "ai", ec);
   if (!write_text(dir / "ai" / "hank.bt.json", kHankBt, error)) return false;
+  if (!write_text(dir / "quests" / "bell.quest.json", kBellQuest, error)) return false;
+  if (!write_text(dir / "dialogue" / "hank.dlg.json", kHankDialogue, error)) return false;
   if (!render3d::write_sample_character_gltf((dir / "assets" / "drifter.gltf").string(), error)) {
     return false;
   }
@@ -1086,10 +1128,12 @@ bool write_ghost_town_sample(const std::string& project_dir,
   if (!save_file(scene_path(project_dir), s, error)) return false;
 
   // ts.ai on: Old Hank strolls the street (navmesh agent + ai/hank.bt.json).
-  const std::string pj = json_mini::write_object({{"name", display_name},
-                                                  {"dimension", "3d"},
-                                                  {"created", "sample"},
-                                                  {"plugins", "ts.ai"}});
+  // ts.story/quests/dialogue/saves on: he hands out "Ring the Bell" in a chat.
+  const std::string pj = json_mini::write_object(
+      {{"name", display_name},
+       {"dimension", "3d"},
+       {"created", "sample"},
+       {"plugins", "ts.ai,ts.story,ts.quests,ts.dialogue,ts.saves"}});
   return write_text(dir / "project.json", pj, error);
 }
 

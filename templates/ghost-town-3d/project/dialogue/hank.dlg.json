@@ -1,0 +1,17 @@
+{
+  "id": "hank", "start": "hello",
+  "speakers": {"hank": {"name": "Old Hank"}},
+  "nodes": [
+    {"id": "hello", "speaker": "hank", "text": "Evenin', stranger. Quiet town, ain't it?", "x": 0, "y": 0,
+     "choices": [
+       {"text": "Too quiet. Need a hand?", "next": "offer", "if": "quest:bell == inactive"},
+       {"text": "Still workin' on that bell.", "next": "waiting", "if": "quest:bell == active"},
+       {"text": "Bell's rung, Hank.", "next": "thanks", "if": "quest:bell == completed && !paid_thanks"},
+       {"text": "What am I up to again?", "next": "", "actions": ["event journal"]},
+       {"text": "Just passin' through.", "next": ""}]},
+    {"id": "offer", "speaker": "hank", "text": "Church bell ain't rung since the mine shut. Walk under it and give it a clang, would ya? There's {gold_offer} dollars in it.", "x": 320, "y": -120,
+     "actions": ["set gold_offer 25", "quest start bell"], "next": ""},
+    {"id": "waiting", "speaker": "hank", "text": "End of the street, past the windmill. Can't miss it.", "x": 320, "y": 40, "next": ""},
+    {"id": "thanks", "speaker": "hank", "text": "Heard it clear across town. That's {gold} dollars to your name now. Obliged.", "x": 320, "y": 180,
+     "actions": ["set paid_thanks true"], "next": ""}]
+}

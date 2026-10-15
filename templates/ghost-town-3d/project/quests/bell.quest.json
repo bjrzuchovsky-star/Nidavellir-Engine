@@ -1,0 +1,6 @@
+{
+  "id": "bell", "title": "Ring the Bell", "giver": "Old Hank",
+  "description": "The church bell at the end of the street has gone quiet. Old Hank wants it rung before sundown.",
+  "objectives": [{"id": "ring", "text": "Ring the church bell", "count": 1}],
+  "rewards": ["add gold 25", "save"]
+}

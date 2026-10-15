@@ -398,6 +398,53 @@ int plugin_checks(const fs::path& dir) {
   return 0;
 }
 
+// The shipped Ghost Town demo as generated (no smoke data): walk to Old Hank,
+// interact, take the job, ring the bell, get paid, autosave.
+int ghost_town_demo_checks(const fs::path& dir) {
+  std::string err;
+  if (!scene3d::write_ghost_town_sample(dir.string(), "Story Demo", &err)) return fail(err);
+  scene3d::Scene3D scene;
+  if (!scene3d::load_file(scene3d::scene_path(dir.string()), &scene, &err)) return fail(err);
+  render3d::Vec3 hank{}, bell{};
+  bool have_hank = false, have_bell = false;
+  for (const auto& e : scene.entities) {
+    if (e.script && e.script->path == "scripts/hank.lua") { hank = e.transform.position; have_hank = true; }
+    if (e.script && e.script->path == "scripts/bell.lua") { bell = e.transform.position; have_bell = true; }
+  }
+  if (!have_hank || !have_bell) return fail("demo: Hank / bell missing");
+  world3d::World3D world;
+  story::StoryFeatures f;
+  f.quests = f.dialogue = f.saves = true;
+  story3d::attach(world, f);
+  if (!world.start(scene, dir.string(), &err)) return fail("demo start: " + err);
+  world.run_ticks(4, {});
+  story3d::StoryWorld3D* st = story3d::find(world);
+  if (!st) return fail("demo: no story");
+  story::StoryRuntime& rt = st->runtime();
+  world3d::Input3D press;
+  press.action = true;
+  if (!world.set_rider_position({hank.x + 0.8f, hank.y, hank.z})) return fail("demo: move rider");
+  world.run_ticks(2, {});
+  world.run_ticks(1, press);
+  world.run_ticks(2, {});
+  if (!rt.dialogue.active() || rt.dialogue.dialogue_id() != "hank") return fail("demo: Hank should talk on interact");
+  if (!rt.dialogue.choose(0)) return fail("demo: take the job");
+  world.run_ticks(2, {});
+  if (rt.quests.status("bell") != story::QuestStatus::Active) return fail("demo: bell quest not started");
+  rt.dialogue.advance();
+  world.run_ticks(2, {});
+  rt.quests.progress("bell", "ring");  // what bell.lua's trigger does
+  world.run_ticks(4, {});
+  if (rt.quests.status("bell") != story::QuestStatus::Completed) return fail("demo: bell not completed");
+  if (rt.vars.get("gold").num() != 25) return fail("demo: reward");
+  world.run_ticks(1, press);
+  world.run_ticks(2, {});
+  if (!rt.dialogue.active()) return fail("demo: second chat");
+  world.stop();
+  std::cout << "[smoke] story demo OK (Ghost Town: interact with Old Hank, take Ring the Bell, ring it, $25)\n";
+  return 0;
+}
+
 int world3d_checks(const fs::path& dir) {
   std::string err;
   if (!scene3d::write_ghost_town_sample(dir.string(), "Story 3D", &err)) return fail(err);
@@ -532,6 +579,7 @@ int run_story_smoke() {
   if (runtime_checks(root / "runtime") != 0) return 1;
   if (plugin_checks(root / "plugin") != 0) return 1;
   if (world3d_checks(root / "w3d") != 0) return 1;
+  if (ghost_town_demo_checks(root / "demo") != 0) return 1;
   if (editor_checks(root / "editor") != 0) return 1;
   fs::remove_all(root, ec);
   std::cout << "[smoke] story OK\n";
