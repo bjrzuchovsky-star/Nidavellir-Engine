@@ -108,6 +108,41 @@ std::size_t Workspace2D::paint_line(std::uint64_t id, int c0, int r0, int c1,
   return changed;
 }
 
+std::size_t Workspace2D::paint_autotile(std::uint64_t id, int col, int row, const AutoTileSet& set,
+                                       int brush, bool erase) {
+  Entity2D* e = find(id);
+  if (!e || !e->tilemap) return 0;
+  return ::ts::tombstone::paint_autotile(*e->tilemap, set, col, row, brush, erase);
+}
+
+std::size_t Workspace2D::paint_autotile_line(std::uint64_t id, int c0, int r0, int c1, int r1,
+                                            const AutoTileSet& set, int brush, bool erase) {
+  const int dx = std::abs(c1 - c0), dy = -std::abs(r1 - r0);
+  const int sx = c0 < c1 ? 1 : -1, sy = r0 < r1 ? 1 : -1;
+  int err = dx + dy, c = c0, r = r0;
+  std::size_t changed = 0;
+  while (true) {
+    changed += paint_autotile(id, c, r, set, brush, erase);
+    if (c == c1 && r == r1) break;
+    const int e2 = 2 * err;
+    if (e2 >= dy) {
+      err += dy;
+      c += sx;
+    }
+    if (e2 <= dx) {
+      err += dx;
+      r += sy;
+    }
+  }
+  return changed;
+}
+
+std::size_t Workspace2D::retile_tilemap(std::uint64_t id, const AutoTileSet& set) {
+  Entity2D* e = find(id);
+  if (!e || !e->tilemap) return 0;
+  return retile_all(*e->tilemap, set);
+}
+
 std::size_t Workspace2D::flood_fill(std::uint64_t id, int col, int row,
                                     int tile_id) {
   Entity2D* e = find(id);

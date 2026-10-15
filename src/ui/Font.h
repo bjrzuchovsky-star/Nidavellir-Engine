@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace ts {
@@ -28,8 +29,18 @@ inline constexpr const char* kAtlasKey = "mem:ui/atlas";
 
 class FontAtlas {
  public:
-  // Bake the bundled faces. False (with error()) if a font fails to load.
-  bool build();
+  // Bake the bundled faces (ASCII at every size). `extra` code points
+  // (non-ASCII text of the current language) are baked too, at two sizes
+  // per face, from the bundled face when it has the glyph, else from the
+  // first of `fallback_fonts` (.ttf / .otf / .ttc files) that does. The
+  // atlas grows 1024 -> 2048 -> 4096 as needed. False (with error()) if a
+  // bundled font fails to load or the glyphs do not fit.
+  bool build(const std::vector<std::uint32_t>& extra = {},
+             const std::vector<std::string>& fallback_fonts = {});
+  // Extra glyphs baked / requested-but-found-in-no-font.
+  std::size_t extra_glyphs() const { return extra_count_; }
+  const std::vector<std::uint32_t>& missing_glyphs() const { return missing_; }
+  bool has_glyph(std::uint32_t cp) const;
   bool ok() const { return ok_; }
   const std::string& error() const { return error_; }
 
@@ -65,7 +76,19 @@ class FontAtlas {
     float line = 0;
     std::vector<Glyph> glyphs;  // chars 32..126
   };
+  struct ExtraBake {
+    float px = 0;
+    std::unordered_map<std::uint32_t, Glyph> glyphs;
+  };
   const Baked& pick(FontFace face, float px) const;
+  // Glyph for code point cp at px (ASCII bakes, then the extra bakes, then
+  // '?'); *scale = px / baked px.
+  const Glyph& glyph(FontFace face, float px, std::uint32_t cp, float* scale) const;
+  bool build_at(int size, const std::vector<std::uint32_t>& extra,
+                const std::vector<std::string>& fallback_fonts, bool* full);
+  std::vector<ExtraBake> extras_[2];
+  std::size_t extra_count_ = 0;
+  std::vector<std::uint32_t> missing_;
 
   bool ok_ = false;
   std::string error_;
@@ -77,7 +100,13 @@ class FontAtlas {
 };
 
 // Process-wide atlas, baked on first use and published as kAtlasKey.
+// Rebaked (same object, new kAtlasKey version) after request_glyphs()
+// changes what it must hold.
 const FontAtlas& default_atlas();
+// Ask the default atlas for every non-ASCII character of `text`, using
+// `fallback_fonts` for glyphs the bundled faces lack (localisation calls
+// this when the language changes). Cheap when nothing changed.
+void request_glyphs(const std::string& text, const std::vector<std::string>& fallback_fonts);
 
 }  // namespace ui
 }  // namespace tombstone

@@ -210,7 +210,20 @@ ScriptBuildResult build(const std::string& project, bool force) {
   std::error_code ec;
   const fs::path dir = dotnet_dir(project);
   const fs::path stamp_file = dir / "bin" / "sources.stamp";
-  const std::string stamp = std::to_string(sources_stamp(project));
+  // The binding (TombStone.Scripting) is part of the stamp too, so an SDK /
+  // script ABI change rebuilds old project assemblies.
+  std::uint64_t binding_hash = 1469598103934665603ULL;
+  if (const fs::path bsrc = binding_sources(); !bsrc.empty()) {
+    std::vector<fs::path> files;
+    for (const auto& e : fs::directory_iterator(bsrc, ec)) files.push_back(e.path());
+    std::sort(files.begin(), files.end());
+    for (const fs::path& f : files) {
+      const std::string ext = f.extension().string();
+      if (ext != ".cs" && ext != ".csproj") continue;
+      for (unsigned char c : f.filename().string() + read_all(f)) binding_hash = (binding_hash ^ c) * 1099511628211ULL;
+    }
+  }
+  const std::string stamp = std::to_string(sources_stamp(project)) + "/" + std::to_string(binding_hash);
   if (!force && fs::exists(r.module, ec) && read_all(stamp_file) == stamp) {
     r.ok = r.skipped = true;
     return r;

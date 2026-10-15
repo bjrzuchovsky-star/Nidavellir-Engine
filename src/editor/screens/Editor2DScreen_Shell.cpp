@@ -1,5 +1,8 @@
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/export/FreightOffice.h"
+#include "editor/tools/AutoTilePanel.h"
+#include "editor/tools/SpriteSlicerPanel.h"
+#include "editor/tools/StringsPanel.h"
 #include "editor/scripting/BrandBook.h"
 
 #include "editor/audio/EditorAudio.h"
@@ -168,6 +171,15 @@ void Editor2DScreen::draw_menu_bar() {
     }
     if (ImGui::MenuItem("Brand Book... (visual scripts)")) {
       BrandBook::get().open(project_.path, project_.name);
+    }
+    if (ImGui::MenuItem("Strings... (localisation)")) {
+      StringsPanel::get().open(project_.path, project_.name);
+    }
+    if (ImGui::MenuItem("Autotiles... (terrain brushes)")) {
+      AutoTilePanel::get().open(project_.path, project_.name);
+    }
+    if (ImGui::MenuItem("Sprite Slicer...")) {
+      SpriteSlicerPanel::get().open(project_.path);
     }
     ImGui::Separator();
     if (ImGui::MenuItem("Back to Projects")) {
@@ -869,6 +881,22 @@ void Editor2DScreen::draw_ui() {
   draw_lighting_panel();
   FreightOffice::get().draw();
   BrandBook::get().draw();
+  StringsPanel::get().draw();
+  AutoTilePanel::get().draw();
+  SpriteSlicerPanel::get().draw();
+  if (AutoTilePanel::get().take_retile_request()) {
+    const AutoTileSet* t = AutoTilePanel::get().brush(project_.path);
+    const std::uint64_t id = paint_target();
+    if (t && id) {
+      flush_pending_edit();
+      workspace_.begin_edit("Re-tile");
+      const std::size_t n = workspace_.retile_tilemap(id, *t);
+      if (workspace_.commit_edit()) mark_dirty_and_autosave();
+      note(("Re-tiled " + std::to_string(n) + " cells").c_str());
+    } else {
+      note("Select a TileMap to re-tile");
+    }
+  }
   if (show_stable_) {
     ImGui::SetNextWindowSize(ImVec2(320, 460), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Stable", &show_stable_)) {

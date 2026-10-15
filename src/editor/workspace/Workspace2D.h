@@ -1,5 +1,6 @@
 #pragma once
 
+#include "scene/AutoTile.h"
 #include "editor/workspace/TileMap.h"
 #include "scene/SceneData.h"
 
@@ -221,6 +222,13 @@ class Workspace2D {
   // Brush along a line of cells (no gaps on fast drags).
   std::size_t paint_line(std::uint64_t id, int c0, int r0, int c1, int r1,
                          int tile_id, int brush = 1);
+  // Terrain brush (scene/AutoTile.h): cells become the set's terrain (or
+  // empty with erase) and they and their neighbours re-pick their tiles.
+  std::size_t paint_autotile(std::uint64_t id, int col, int row, const AutoTileSet& set, int brush,
+                             bool erase);
+  std::size_t paint_autotile_line(std::uint64_t id, int c0, int r0, int c1, int r1, const AutoTileSet& set,
+                                  int brush, bool erase);
+  std::size_t retile_tilemap(std::uint64_t id, const AutoTileSet& set);
   // 4-connected bucket fill of the region matching the clicked tile.
   std::size_t flood_fill(std::uint64_t id, int col, int row, int tile_id);
   std::size_t fill_rect(std::uint64_t id, int c0, int r0, int c1, int r1,

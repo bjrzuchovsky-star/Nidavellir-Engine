@@ -83,6 +83,8 @@ bool read_widget(const json::Value& v, Widget* w, std::string* error, int depth)
   w->columns = static_cast<int>(v.num("columns", w->columns));
   if (w->columns < 1) w->columns = 1;
   w->text = v.str("text");
+  w->text_key = v.str("text_key");
+  w->text_fallback = w->text;
   w->font = v.str("font", "body") == "display" ? FontFace::Display : FontFace::Body;
   w->font_size = v.flt("font_size", w->font_size);
   w->align = align_from(v.str("align", "start"));
@@ -128,7 +130,12 @@ json::Value write_widget(const Widget& w) {
   if (w.gap != d.gap) o.set("gap", json::Value::number(w.gap));
   if (w.padding != d.padding) o.set("padding", json::Value::number(w.padding));
   if (w.columns != d.columns) o.set("columns", json::Value::number(w.columns));
-  if (!w.text.empty()) o.set("text", json::Value::string(w.text));
+  if (!w.text_key.empty()) {
+    o.set("text_key", json::Value::string(w.text_key));
+    if (!w.text_fallback.empty()) o.set("text", json::Value::string(w.text_fallback));
+  } else if (!w.text.empty()) {
+    o.set("text", json::Value::string(w.text));
+  }
   if (w.font != d.font) o.set("font", json::Value::string("display"));
   if (w.font_size != d.font_size) o.set("font_size", json::Value::number(w.font_size));
   if (w.align != d.align) o.set("align", json::Value::string(align_name(w.align)));

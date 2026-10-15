@@ -51,6 +51,10 @@ struct Widget {
   float padding = 0;
   int columns = 2;  // grid
   std::string text;
+  // Localisation: when set, text = tr(text_key) in the current language
+  // (re-bound on language change); the authored text is the fallback.
+  std::string text_key;
+  std::string text_fallback;  // authored text (kept for missing keys)
   FontFace font = FontFace::Body;
   float font_size = 18;
   Align align = Align::Start;  // text alignment
@@ -159,6 +163,9 @@ class UiSystem {
   // Widget lookup: "doc.widget", or a widget id searched in every document.
   Widget* find(const std::string& id);
   bool set_text(const std::string& id, const std::string& text);
+  // Re-resolve every text_key (also done by update() when the language
+  // or the tables change). Returns widgets re-bound.
+  int apply_language();
   bool set_value(const std::string& id, float value);
   bool set_visible(const std::string& id, bool visible);
 
@@ -188,6 +195,7 @@ class UiSystem {
   bool mouse_was_down_ = false;
   double clock_ = 0.0;
   float last_w_ = 1280, last_h_ = 720;
+  std::uint64_t loc_version_ = 0;
 };
 
 // Software rasteriser for UiDraws (atlas + "mem:" images) into an RGBA8
@@ -202,13 +210,16 @@ Document builtin_pause_menu();
 
 class PauseMenu {
  public:
-  enum class Action { None, Resume, Quit, Volume };
+  enum class Action { None, Resume, Quit, Volume, Language };
   // Adds the built-in document unless the system already has "pause".
   static void install(UiSystem& ui);
   void open(UiSystem& ui, float master, float music, float sfx);
   void close(UiSystem& ui);
+  static void refresh_language_button(UiSystem& ui);
   bool is_open(const UiSystem& ui) const { return ui.visible("pause"); }
-  // Feed every event; Volume fills bus ("master" / "music" / "sfx") + value.
+  // Feed every event; Volume fills bus ("master" / "music" / "sfx") + value;
+  // Language: the language button cycled loc's language (bus = the code).
+  // The button only shows when the project has two or more languages.
   Action handle(UiSystem& ui, const UiEvent& ev, std::string* bus, float* value);
 };
 

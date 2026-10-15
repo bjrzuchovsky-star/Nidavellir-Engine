@@ -1,3 +1,4 @@
+#include "core/Localization.h"
 #include "runtime/ScriptAbi.h"
 
 #include <algorithm>
@@ -163,6 +164,23 @@ int a_plugin_call(void* w, const char* table, const char* fn, const char* args, 
   if (out && cap >= need) std::memcpy(out, s.data(), s.size());
   return need;
 }
+int copy_out(const std::string& s, char* out, int cap) {
+  const int need = static_cast<int>(s.size());
+  if (out && cap >= need) std::memcpy(out, s.data(), s.size());
+  return need;
+}
+int a_translate(void*, const char* key, const char* args, char* out, int cap) {
+  std::vector<std::string> a;
+  const char* p = args ? args : "";
+  while (*p) {
+    const char* end = std::strchr(p, '\n');
+    a.emplace_back(p, end ? static_cast<std::size_t>(end - p) : std::strlen(p));
+    p = end ? end + 1 : p + a.back().size();
+  }
+  return copy_out(loc::format(loc::tr(key ? key : ""), a), out, cap);
+}
+int a_lang_set(void*, const char* lang) { return loc::set_language(lang ? lang : "") ? 1 : 0; }
+int a_lang_get(void*, char* out, int cap) { return copy_out(loc::language(), out, cap); }
 }  // namespace
 
 TsScriptApi make_script_api(ScriptWorld* world) {
@@ -191,6 +209,9 @@ TsScriptApi make_script_api(ScriptWorld* world) {
   a.ui = a_ui;
   a.buttons = a_buttons;
   a.plugin_call = a_plugin_call;
+  a.translate = a_translate;
+  a.lang_set = a_lang_set;
+  a.lang_get = a_lang_get;
   return a;
 }
 

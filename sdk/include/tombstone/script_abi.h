@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 
-#define TS_SCRIPT_ABI 2
+#define TS_SCRIPT_ABI 3
 
 #ifdef __cplusplus
 extern "C" {
@@ -61,6 +61,12 @@ typedef struct TsScriptApi {
    * -1 on error (logged to the Telegraph). */
   int (*plugin_call)(void* w, const char* table, const char* fn, const char* args, char* out,
                      int cap);
+  /* ABI 3: localisation. The current language's text for key ("{0}".."{9}"
+   * filled from args: "value\n" lines) into out (UTF-8, no NUL); returns the
+   * bytes it needs. Language: lang_set / lang_get (code into out). */
+  int (*translate)(void* w, const char* key, const char* args, char* out, int cap);
+  int (*lang_set)(void* w, const char* lang);              /* 1 = known language */
+  int (*lang_get)(void* w, char* out, int cap);            /* bytes needed */
 } TsScriptApi;
 
 /* Module exports (one module per project holds every script class).

@@ -3,6 +3,7 @@
 #include "editor/screens/Editor2DScreen.h"
 
 #include "editor/assets/AssetLibrary.h"
+#include "editor/tools/AutoTilePanel.h"
 
 #include <algorithm>
 #include <iostream>
@@ -101,6 +102,14 @@ bool Editor2DScreen::begin_paint_stroke(std::uint64_t tilemap_id, bool erase) {
   stroke_id_ = tilemap_id;
   stroke_erase_ = erase;
   stroke_has_last_ = false;
+  // A terrain brush on a fresh TileMap adopts the terrain's tileset.
+  if (const AutoTileSet* t = AutoTilePanel::get().brush(project_.path)) {
+    Entity2D* m = workspace_.find(tilemap_id);
+    if (m && m->tilemap && m->tilemap->count_nonempty() == 0 && m->tilemap->tileset != t->tileset) {
+      m->tilemap->tileset = t->tileset;
+      m->tilemap->tile_size = t->tile_size;
+    }
+  }
   stroke_cells_ = 0;
   return true;
 }
@@ -113,8 +122,13 @@ std::size_t Editor2DScreen::stroke_to_cell(int col, int row) {
     return 0;
   }
   const int tile = stroke_erase_ ? 0 : brush_tile_;
+  const AutoTileSet* terrain = AutoTilePanel::get().brush(project_.path);
   const std::size_t n =
-      stroke_has_last_
+      terrain ? (stroke_has_last_
+                     ? workspace_.paint_autotile_line(stroke_id_, stroke_last_col_, stroke_last_row_, col, row,
+                                                      *terrain, brush_size_, stroke_erase_)
+                     : workspace_.paint_autotile(stroke_id_, col, row, *terrain, brush_size_, stroke_erase_))
+      : stroke_has_last_
           ? workspace_.paint_line(stroke_id_, stroke_last_col_,
                                   stroke_last_row_, col, row, tile,
                                   brush_size_)

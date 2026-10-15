@@ -1,6 +1,9 @@
 #include "core/Engine.h"
 #include "profiler/Profiler.h"
 #include "editor/audio/EditorAudio.h"
+#include "editor/tools/AutoTilePanel.h"
+#include "editor/tools/SpriteSlicerPanel.h"
+#include "editor/tools/StringsPanel.h"
 #include "editor/AppFlow.h"
 #include "editor/AppState.h"
 #include "editor/assets/AssetLibrary.h"
@@ -11,6 +14,7 @@
 #include "editor/ui/Brand.h"
 #include "editor/ui/Theme.h"
 #include "editor/workspace/Workspace2D.h"
+#include "core/PngWrite.h"
 #include "gfx/GlTextureUploader.h"
 
 #include "Smoke3D.h"
@@ -27,6 +31,7 @@
 #include "editor/export/FreightOffice.h"
 #include "SmokeNative.h"
 #include "SmokeFx.h"
+#include "SmokeLocTiles.h"
 #include "SmokeUi.h"
 #include "SmokeShipyard.h"
 #include "SmokeSurvival.h"
@@ -47,6 +52,7 @@
 #include <GLFW/glfw3.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstdio>
@@ -1265,6 +1271,10 @@ int run_console_smoke() {
   if (run_ui_smoke() != 0) {
     return 1;
   }
+  // Localisation + autotiles / sprite slicer (see SmokeLocTiles.cpp).
+  if (run_loc_smoke() != 0 || run_tiles_smoke() != 0) {
+    return 1;
+  }
   // Particles + 2D lighting (see SmokeFx.cpp).
   if (run_fx_smoke() != 0) {
     return 1;
@@ -1345,63 +1355,171 @@ int run_brand_book_app(const std::string& project, const std::string& graph) {
   return 0;
 }
 
-// Minimal PNG writer (stored deflate blocks; no extra dependency).
-bool write_png_rgba(const std::filesystem::path& path, int w, int h, const std::vector<unsigned char>& rgba) {
-  auto crc32 = [](const unsigned char* d, std::size_t n, std::uint32_t c) {
-    c = ~c;
-    for (std::size_t i = 0; i < n; ++i) {
-      c ^= d[i];
-      for (int k = 0; k < 8; ++k) c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1u)));
+
+// A throwaway project for --tiles-shot demo: two terrains, a sprite sheet
+// and en / fr / ja strings with a few gaps.
+std::string make_tiles_demo_project() {
+  namespace fs = std::filesystem;
+  const fs::path dir = fs::temp_directory_path() / "ts_tiles_demo";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir / "strings");
+  fs::create_directories(dir / "scripts");
+  const unsigned char grass[4] = {104, 150, 64, 255}, grass_rim[4] = {64, 98, 38, 255};
+  const unsigned char water[4] = {58, 112, 160, 255}, foam[4] = {196, 222, 236, 255};
+  std::string err;
+  const std::string a = editor::AutoTilePanel::create_terrain(dir.string(), "Prairie", AutoTileMode::Blob47, 32,
+                                                              grass, grass_rim, &err);
+  editor::AutoTilePanel::create_terrain(dir.string(), "Creek", AutoTileMode::Wang16, 32, water, foam, &err);
+  editor::AutoTilePanel::create_terrain(dir.string(), "Fence", AutoTileMode::Rules, 32, grass_rim, foam, &err);
+  // Sprite sheet: 2 rows (walk 6, jump 4) of a little rider with a hat.
+  const int fw = 24, fh = 32, W = fw * 6, H = fh * 2;
+  std::vector<unsigned char> px(static_cast<std::size_t>(W) * H * 4, 0);
+  auto put = [&](int x, int y, unsigned char r, unsigned char g, unsigned char b) {
+    if (x < 0 || y < 0 || x >= W || y >= H) return;
+    unsigned char* q = &px[(static_cast<std::size_t>(y) * W + x) * 4];
+    q[0] = r; q[1] = g; q[2] = b; q[3] = 255;
+  };
+  for (int row = 0; row < 2; ++row) {
+    for (int f = 0; f < (row == 0 ? 6 : 4); ++f) {
+      const int ox = f * fw, oy = row * fh;
+      const int lift = row == 1 ? (f == 1 || f == 2 ? 5 : 2) : (f % 3 == 1 ? 1 : 0);
+      const int swing = row == 0 ? (f % 3) - 1 : 0;
+      for (int y = 0; y < 4; ++y)
+        for (int x = -6; x <= 6; ++x) put(ox + 12 + x, oy + 5 - lift + y, 92, 58, 32);  // hat
+      for (int y = 0; y < 6; ++y)
+        for (int x = -3; x <= 3; ++x) put(ox + 12 + x, oy + 10 - lift + y, 232, 186, 140);  // head
+      for (int y = 0; y < 9; ++y)
+        for (int x = -4; x <= 4; ++x) put(ox + 12 + x, oy + 16 - lift + y, 176, 70, 44);  // shirt
+      for (int y = 0; y < 5; ++y) {
+        put(ox + 10 + swing * (y / 2), oy + 25 - lift + y, 60, 70, 110);
+        put(ox + 14 - swing * (y / 2), oy + 25 - lift + y, 60, 70, 110);
+      }
     }
-    return ~c;
+  }
+  fs::create_directories(dir / "assets");
+  write_png_rgba((dir / "assets/rider.png").string(), W, H, px);
+  auto put_file = [&](const char* rel, const std::string& text) {
+    std::ofstream(dir / rel, std::ios::binary) << text;
   };
-  std::string raw;
-  raw.reserve(static_cast<std::size_t>(h) * (w * 4 + 1));
-  for (int y = 0; y < h; ++y) {
-    raw.push_back('\0');
-    raw.append(reinterpret_cast<const char*>(rgba.data()) + static_cast<std::size_t>(y) * w * 4, w * 4);
+  put_file("strings/en.json",
+           "{\"language.name\": \"English\", \"menu.start\": \"Ride out\", \"menu.quit\": \"Leave town\","
+           " \"hud.gold\": \"Gold: {0}\", \"ui.pause.resume\": \"Resume\", \"npc.sheriff.greet\": \"Howdy, {0}.\"}");
+  put_file("strings/strings.csv",
+           "key,fr,ja\n"
+           "language.name,Fran\xC3\xA7" "ais,\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E\n"
+           "menu.start,En selle,\xE5\x87\xBA\xE7\x99\xBA\n"
+           "menu.quit,Quitter la ville,\n"
+           "hud.gold,Or : {0},\xE9\x87\x91: {0}\n"
+           "ui.pause.resume,Reprendre,\xE5\x86\x8D\xE9\x96\x8B\n");
+  put_file("scripts/sheriff.lua", "function on_start() toast(tr('npc.sheriff.greet', 'stranger')) "
+                                  "log(tr('npc.deputy.greet')) end\n");
+  (void)a;
+  return dir.string();
+}
+
+// ts_admin --tiles-shot <project dir | demo> <out.png>: Autotiles, Sprite
+// Slicer and Strings panels (Dusk theme) in one window, saved as a PNG.
+int run_tiles_shot(std::string project, const std::string& png) {
+  if (project == "demo") project = make_tiles_demo_project();
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
   }
-  std::string z = "\x78\x01";
-  std::uint32_t a = 1, b = 0;
-  for (unsigned char c : raw) {
-    a = (a + c) % 65521;
-    b = (b + a) % 65521;
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+  const int W = 1600, H = 940;
+  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Tiles", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
   }
-  for (std::size_t off = 0; off < raw.size() || off == 0;) {
-    const std::size_t n = std::min<std::size_t>(65535, raw.size() - off);
-    const bool last = off + n >= raw.size();
-    z.push_back(last ? 1 : 0);
-    z.push_back(static_cast<char>(n & 0xff));
-    z.push_back(static_cast<char>(n >> 8));
-    z.push_back(static_cast<char>(~n & 0xff));
-    z.push_back(static_cast<char>((~n >> 8) & 0xff));
-    z.append(raw, off, n);
-    off += n;
-    if (last) break;
+  glfwMakeContextCurrent(window);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGui::GetIO().IniFilename = nullptr;
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  static gfx::GlTextureUploader gl_uploader;
+  gfx::set_texture_uploader(&gl_uploader);
+  Settings defaults;
+  apply_theme(defaults);
+  const std::string name = std::filesystem::path(project).filename().string();
+  editor::AutoTilePanel& tiles = editor::AutoTilePanel::get();
+  tiles.open(project, name);
+  if (!tiles.sets().empty()) {
+    tiles.select_brush(tiles.sets().front().find("prairie") != std::string::npos ? tiles.sets().front()
+                                                                                  : tiles.sets().back());
+    for (const std::string& s : tiles.sets()) {
+      if (s.find("prairie") != std::string::npos) tiles.select_brush(s);
+    }
+    tiles.paint_demo();
   }
-  const std::uint32_t adler = (b << 16) | a;
-  for (int i = 3; i >= 0; --i) z.push_back(static_cast<char>((adler >> (i * 8)) & 0xff));
-  std::ofstream out(path, std::ios::binary | std::ios::trunc);
-  auto be = [&](std::uint32_t v) {
-    const char c[4] = {char(v >> 24), char(v >> 16), char(v >> 8), char(v)};
-    out.write(c, 4);
-  };
-  auto chunk = [&](const char* type, const std::string& data) {
-    be(static_cast<std::uint32_t>(data.size()));
-    std::string td = std::string(type, 4) + data;
-    out.write(td.data(), static_cast<std::streamsize>(td.size()));
-    be(crc32(reinterpret_cast<const unsigned char*>(td.data()), td.size(), 0));
-  };
-  out.write("\x89PNG\r\n\x1a\n", 8);
-  std::string ihdr;
-  for (std::uint32_t v : {static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h)}) {
-    for (int i = 3; i >= 0; --i) ihdr.push_back(static_cast<char>((v >> (i * 8)) & 0xff));
+  editor::SpriteSlicerPanel& slicer = editor::SpriteSlicerPanel::get();
+  slicer.open(project, std::filesystem::exists(std::filesystem::path(project) / "assets/rider.png")
+                           ? "assets/rider.png"
+                           : "");
+  slicer.set_auto_detect(true);
+  if (slicer.clips().size() >= 2) {
+    slicer.clips()[0].name = "walk";
+    slicer.clips()[1].name = "jump";
+    slicer.clips()[1].mode = AnimMode::Once;
   }
-  ihdr += std::string("\x08\x06\x00\x00\x00", 5);
-  chunk("IHDR", ihdr);
-  chunk("IDAT", z);
-  chunk("IEND", "");
-  return static_cast<bool>(out);
+  editor::StringsPanel& strings = editor::StringsPanel::get();
+  strings.open(project, name);
+  int fw = 0, fh = 0;
+  std::vector<unsigned char> px;
+  for (int frame = 0; frame < 10 && !glfwWindowShouldClose(window); ++frame) {
+    glfwPollEvents();
+    glfwGetFramebufferSize(window, &fw, &fh);
+    editor::StringsPanel::apply_pending_fonts();
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    const float lw = std::floor(fw * 0.44f);
+    tiles.pin(0, 0, lw, static_cast<float>(fh));
+    slicer.pin(lw, 0, fw - lw, std::floor(fh * 0.58f));
+    strings.pin(lw, std::floor(fh * 0.58f), fw - lw, fh - std::floor(fh * 0.58f));
+    tiles.draw();
+    slicer.draw();
+    strings.draw();
+    ImGui::Render();
+    glViewport(0, 0, fw, fh);
+    const ImVec4 clear = editor::theme::Charcoal();
+    glClearColor(clear.x, clear.y, clear.z, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    if (frame == 9) {
+      px.assign(static_cast<std::size_t>(fw) * fh * 4, 0);
+      glPixelStorei(GL_PACK_ALIGNMENT, 1);
+      glReadBuffer(GL_BACK);
+      glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    }
+    glfwSwapBuffers(window);
+  }
+  tiles.close();
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  gfx::set_texture_uploader(nullptr);
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  if (px.empty()) return 1;
+  std::vector<unsigned char> flipped(px.size());
+  for (int y = 0; y < fh; ++y) {
+    std::memcpy(&flipped[static_cast<std::size_t>(y) * fw * 4],
+                &px[static_cast<std::size_t>(fh - 1 - y) * fw * 4], static_cast<std::size_t>(fw) * 4);
+  }
+  for (std::size_t i = 3; i < flipped.size(); i += 4) flipped[i] = 255;
+  if (!write_png_rgba(png, fw, fh, flipped)) {
+    std::cerr << "cannot write " << png << '\n';
+    return 1;
+  }
+  std::cout << "Tiles screenshot: " << png << " (" << fw << "x" << fh << ")\n";
+  return 0;
 }
 
 // ts_admin --freight-shot <project dir | sample:<id>> <out.png>: the Freight
@@ -1544,6 +1662,7 @@ int run_imgui_app() {
     profiler::Profiler::get().begin_frame();
     glfwPollEvents();
 
+    editor::StringsPanel::apply_pending_fonts();  // non-Latin glyphs for the Strings panel
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
@@ -1644,6 +1763,15 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--freight-shot") == 0 && i + 2 < argc) {
       return run_freight_shot(argv[i + 1], argv[i + 2]);
+    }
+    if (std::strcmp(argv[i], "--smoke-loc") == 0) {
+      return run_loc_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-tiles") == 0) {
+      return run_tiles_smoke();
+    }
+    if (std::strcmp(argv[i], "--tiles-shot") == 0 && i + 2 < argc) {
+      return run_tiles_shot(argv[i + 1], argv[i + 2]);
     }
     if (std::strcmp(argv[i], "--smoke-installer") == 0) {
       return ts::tombstone::run_installer_smoke();

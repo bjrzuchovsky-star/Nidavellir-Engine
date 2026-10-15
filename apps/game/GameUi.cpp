@@ -1,3 +1,4 @@
+#include "core/Localization.h"
 #include "GameUi.h"
 
 #include "GameRenderer.h"
@@ -55,6 +56,12 @@ GameUi::~GameUi() {
 }
 
 void GameUi::load(const std::string& project_dir) {
+  // Strings first so documents bind their text keys in the right language.
+  loc::load_project(project_dir);
+  if (loc::languages().size() > 0) {
+    std::cout << "[loc] " << loc::languages().size() << " language(s), playing in "
+              << loc::language() << '\n';
+  }
   ui_.clear();
   std::string errors;
   const std::string dir = (std::filesystem::path(project_dir) / "ui").string();
@@ -214,6 +221,12 @@ GameUi::Frame GameUi::update(GLFWwindow* win, double dt, ts::audio::Engine* a) {
           a->set_bus_volume(b, v);
           settings_dirty_ = true;
         }
+        break;
+      }
+      case ui::PauseMenu::Action::Language: {
+        std::string err;
+        if (!loc::save_language_choice(&err)) std::cerr << "[ui] could not save language: " << err << '\n';
+        std::cout << "[loc] language " << loc::language() << '\n';
         break;
       }
       case ui::PauseMenu::Action::None:

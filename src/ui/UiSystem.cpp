@@ -1,6 +1,7 @@
 // ts_ui: the retained UI system (documents, input, navigation) and the
 // built-in pause menu.
 
+#include "core/Localization.h"
 #include "ui/Ui.h"
 
 #include <algorithm>
@@ -77,7 +78,20 @@ int UiSystem::load_dir(const std::string& dir, std::string* errors) {
   return n;
 }
 
+namespace {
+int bind_keys(Widget& w) {
+  int n = 0;
+  if (!w.text_key.empty()) {
+    w.text = loc::tr(w.text_key, w.text_fallback.empty() ? w.text_key : w.text_fallback);
+    ++n;
+  }
+  for (Widget& c : w.children) n += bind_keys(c);
+  return n;
+}
+}  // namespace
+
 void UiSystem::add(Document doc) {
+  bind_keys(doc.root);
   for (Document& d : docs_) {
     if (d.name == doc.name) {
       d = std::move(doc);
@@ -161,7 +175,22 @@ bool UiSystem::set_text(const std::string& id, const std::string& text) {
   Widget* w = find(id);
   if (!w) return false;
   w->text = text;
+  w->text_key.clear();  // a script's text wins over the key from now on
   return true;
+}
+
+
+int UiSystem::apply_language() {
+  loc_version_ = loc::version();
+  int n = 0;
+  for (Document& d : docs_) n += bind_keys(d.root);
+  if (docs_.size() && has("pause")) PauseMenu::refresh_language_button(*this);
+  // The default atlas learns the glyphs this language needs.
+  if (atlas_ == &default_atlas()) {
+    request_glyphs(loc::all_text(loc::language()), loc::fallback_fonts(loc::project_dir()));
+    default_atlas();
+  }
+  return n;
 }
 
 bool UiSystem::set_value(const std::string& id, float value) {
@@ -276,6 +305,7 @@ Widget* UiSystem::hit(Document& d, float x, float y) { return hit_widget(d.root,
 
 std::vector<UiEvent> UiSystem::update(const UiInput& in, float w, float h) {
   std::vector<UiEvent> ev;
+  if (loc_version_ != loc::version()) apply_language();
   clock_ += in.dt;
   last_w_ = std::max(1.0f, w);
   last_h_ = std::max(1.0f, h);
@@ -454,21 +484,22 @@ const char* kPauseJson = R"JSON({
     "type": "panel", "id": "pause_root", "anchor": [0.5, 0.5], "pivot": [0.5, 0.5],
     "size": [440, 0], "layout": "stack", "padding": 26, "gap": 14,
     "children": [
-      {"type": "label", "id": "pause_title", "text": "Paused", "font": "display",
+      {"type": "label", "id": "pause_title", "text": "Paused", "text_key": "ui.pause.title", "font": "display",
        "font_size": 56, "style": "title", "anchor": [0.5, 0]},
       {"type": "panel", "id": "pause_main", "style": "clear", "layout": "stack", "gap": 10,
        "stretch": [true, false], "children": [
-        {"type": "button", "id": "resume", "text": "Resume", "font_size": 24, "stretch": [true, false], "style": "accent"},
-        {"type": "button", "id": "settings", "text": "Settings", "font_size": 24, "stretch": [true, false]},
-        {"type": "button", "id": "quit", "text": "Quit", "font_size": 24, "stretch": [true, false]}
+        {"type": "button", "id": "resume", "text": "Resume", "text_key": "ui.pause.resume", "font_size": 24, "stretch": [true, false], "style": "accent"},
+        {"type": "button", "id": "settings", "text": "Settings", "text_key": "ui.pause.settings", "font_size": 24, "stretch": [true, false]},
+        {"type": "button", "id": "quit", "text": "Quit", "text_key": "ui.pause.quit", "font_size": 24, "stretch": [true, false]}
       ]},
       {"type": "panel", "id": "pause_settings", "style": "clear", "layout": "stack", "gap": 10,
        "stretch": [true, false], "visible": false, "children": [
-        {"type": "label", "text": "Volume", "style": "muted", "font_size": 18},
-        {"type": "slider", "id": "vol_master", "text": "Master", "value": 1, "stretch": [true, false]},
-        {"type": "slider", "id": "vol_music", "text": "Music", "value": 1, "stretch": [true, false]},
-        {"type": "slider", "id": "vol_sfx", "text": "Effects", "value": 1, "stretch": [true, false]},
-        {"type": "button", "id": "settings_back", "text": "Back", "font_size": 22, "stretch": [true, false]}
+        {"type": "label", "text": "Volume", "text_key": "ui.pause.volume", "style": "muted", "font_size": 18},
+        {"type": "slider", "id": "vol_master", "text": "Master", "text_key": "ui.pause.master", "value": 1, "stretch": [true, false]},
+        {"type": "slider", "id": "vol_music", "text": "Music", "text_key": "ui.pause.music", "value": 1, "stretch": [true, false]},
+        {"type": "slider", "id": "vol_sfx", "text": "Effects", "text_key": "ui.pause.effects", "value": 1, "stretch": [true, false]},
+        {"type": "button", "id": "language", "text": "Language", "font_size": 22, "stretch": [true, false], "visible": false},
+        {"type": "button", "id": "settings_back", "text": "Back", "text_key": "ui.pause.back", "font_size": 22, "stretch": [true, false]}
       ]}
     ]
   }
@@ -493,10 +524,19 @@ void PauseMenu::open(UiSystem& ui, float master, float music, float sfx) {
   ui.set_value("pause.vol_sfx", sfx);
   ui.set_visible("pause.pause_main", true);
   ui.set_visible("pause.pause_settings", false);
+  refresh_language_button(ui);
   ui.show("pause");
 }
 
 void PauseMenu::close(UiSystem& ui) { ui.hide("pause"); }
+
+void PauseMenu::refresh_language_button(UiSystem& ui) {
+  Widget* w = ui.find("pause.language");
+  if (!w) return;
+  const std::vector<std::string> langs = loc::languages();
+  w->visible = langs.size() >= 2;
+  w->text = loc::tr("ui.pause.language", "Language") + ": " + loc::display_name(loc::language());
+}
 
 PauseMenu::Action PauseMenu::handle(UiSystem& ui, const UiEvent& ev, std::string* bus,
                                     float* value) {
@@ -524,6 +564,17 @@ PauseMenu::Action PauseMenu::handle(UiSystem& ui, const UiEvent& ev, std::string
     if (ev.widget == "quit") return Action::Quit;
     if (ev.widget == "settings") main_view(false);
     if (ev.widget == "settings_back") main_view(true);
+    if (ev.widget == "language") {
+      const std::vector<std::string> langs = loc::languages();
+      if (langs.size() < 2) return Action::None;
+      std::size_t i = 0;
+      while (i < langs.size() && langs[i] != loc::language()) ++i;
+      const std::string next = langs[(i + 1) % langs.size()];
+      loc::set_language(next);
+      ui.apply_language();
+      if (bus) *bus = next;
+      return Action::Language;
+    }
     return Action::None;
   }
   if (ev.kind == UiEventKind::Change && ev.widget.rfind("vol_", 0) == 0) {

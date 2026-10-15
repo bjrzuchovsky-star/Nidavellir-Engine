@@ -53,7 +53,7 @@ namespace TombStone
         }
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-        public static int Abi() => 2;
+        public static int Abi() => 3;
 
         // Loads the project's script assembly from bytes (the file stays
         // free for the next build). Generation id, 0 on error (text in err).

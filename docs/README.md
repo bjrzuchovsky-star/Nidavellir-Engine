@@ -12,6 +12,8 @@ These pages are written from the source in this repository (`src/`, `apps/`, `sd
 | [Scripting](scripting.md) | Lua, visual graphs (Brand Book), C++ scripts with hot reload, C# |
 | [Audio](audio.md) | `ts_audio`, buses, Audio Source, Lua `audio.*`, the Saloon Band mixer |
 | [UI and fonts](ui-and-fonts.md) | `ts_ui`, fonts, widgets, `.ui.json`, Lua `ui.*` |
+| [Localisation](localisation.md) | String tables (JSON / CSV), `tr()` in Lua / graphs / C++ / C#, UI `text_key`, font fallback, the Strings panel, the language picker |
+| [Autotiles and the sprite slicer](autotiles-and-sprite-slicer.md) | 47-blob, Wang 16 and rule-tile terrain brushes for TileMaps; slicing sprite sheets into `.anim.json` clips |
 | [Particles and lighting](particles-and-lighting.md) | `ts_fx` emitters and presets, 2D lighting, 3D lights |
 | [Export and the Freight Office](export.md) | Export UI and CLI, profiles, `.tspak`, the output folder |
 | [Distributing a game](distribution.md) | Windows setup installer (Inno Setup), portable zip, app-local VC++ runtime, dependency check, GPU check |

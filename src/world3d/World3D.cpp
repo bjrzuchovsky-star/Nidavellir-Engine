@@ -1,3 +1,4 @@
+#include "core/Localization.h"
 #include "profiler/Profiler.h"
 #include "world3d/World3D.h"
 
@@ -92,6 +93,7 @@ void World3D::script_log(LogEntry entry) {
 
 bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_dir,
                     std::string* error) {
+  loc::load_project(project_dir);  // tr() / lang.* in 3D scripts
   stop();
   authored_ = scene;
   ents_ = scene.entities;

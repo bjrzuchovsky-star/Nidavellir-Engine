@@ -1,3 +1,5 @@
+#include "editor/tools/SpriteSlicerPanel.h"
+#include "editor/tools/StringsPanel.h"
 #include "editor/plugins/PluginPanelHost.h"
 #include "editor/plugins/ProfilerPanels.h"
 #include "editor/fx/FxInspector.h"
@@ -161,6 +163,8 @@ void Editor3DScreen::draw_ui() {
   draw_vr_mirror();
   FreightOffice::get().draw();
   BrandBook::get().draw();
+  StringsPanel::get().draw();
+  SpriteSlicerPanel::get().draw();
 }
 
 void Editor3DScreen::draw_menu_bar() {
@@ -179,6 +183,8 @@ void Editor3DScreen::draw_menu_bar() {
     if (ImGui::MenuItem("Export... (Freight Office)", nullptr, false, !playing()))
       FreightOffice::get().open(project_.path, project_.name);
     if (ImGui::MenuItem("Brand Book... (visual scripts)")) BrandBook::get().open(project_.path, project_.name);
+    if (ImGui::MenuItem("Strings... (localisation)")) StringsPanel::get().open(project_.path, project_.name);
+    if (ImGui::MenuItem("Sprite Slicer...")) SpriteSlicerPanel::get().open(project_.path);
     ImGui::Separator();
     if (ImGui::MenuItem("Back to Claims")) request_back_to_projects();
     if (ImGui::MenuItem("Quit")) request_quit();

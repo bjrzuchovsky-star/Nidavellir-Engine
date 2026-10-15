@@ -31,6 +31,10 @@ namespace TombStone.Native
         public delegate* unmanaged[Cdecl]<IntPtr, int, byte*, byte*, double, void> Ui;
         public delegate* unmanaged[Cdecl]<IntPtr, int, uint> Buttons;
         public delegate* unmanaged[Cdecl]<IntPtr, byte*, byte*, byte*, byte*, int, int> PluginCall;
+        // ABI 3: localisation.
+        public delegate* unmanaged[Cdecl]<IntPtr, byte*, byte*, byte*, int, int> Translate;
+        public delegate* unmanaged[Cdecl]<IntPtr, byte*, int> LangSet;
+        public delegate* unmanaged[Cdecl]<IntPtr, byte*, int, int> LangGet;
     }
 
     internal static unsafe class Utf8

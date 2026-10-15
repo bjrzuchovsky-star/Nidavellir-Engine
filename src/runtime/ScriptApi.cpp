@@ -2,12 +2,14 @@
 // the shared globals (log, after, toast, spawn...). Everything goes through
 // ScriptWorld; nothing here touches files, the OS or the clock.
 
+#include "core/Localization.h"
 #include "runtime/ScriptState.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace ts {
 namespace tombstone {
@@ -788,6 +790,52 @@ int p_start(lua_State* L) {
 }
 int u_on_change(lua_State* L) { return add_ui_handler(L, true); }
 
+// tr(key, ...): the current language's text for key ({0}.. = the extra
+// arguments, or the items of one table argument).
+int g_tr(lua_State* L) {
+  const std::string key = luaL_checkstring(L, 1);
+  std::vector<std::string> args;
+  const int top = lua_gettop(L);
+  if (top == 2 && lua_istable(L, 2)) {
+    const lua_Integer n = luaL_len(L, 2);
+    for (lua_Integer i = 1; i <= n; ++i) {
+      lua_geti(L, 2, i);
+      args.emplace_back(luaL_tolstring(L, -1, nullptr));
+      lua_pop(L, 2);
+    }
+  } else {
+    for (int i = 2; i <= top; ++i) {
+      args.emplace_back(luaL_tolstring(L, i, nullptr));
+      lua_pop(L, 1);
+    }
+  }
+  const std::string out = loc::format(loc::tr(key), args);
+  lua_pushlstring(L, out.data(), out.size());
+  return 1;
+}
+int l_set(lua_State* L) {
+  lua_pushboolean(L, loc::set_language(luaL_checkstring(L, 1)));
+  return 1;
+}
+int l_current(lua_State* L) {
+  lua_pushstring(L, loc::language().c_str());
+  return 1;
+}
+int l_list(lua_State* L) {
+  const std::vector<std::string> l = loc::languages();
+  lua_createtable(L, static_cast<int>(l.size()), 0);
+  for (std::size_t i = 0; i < l.size(); ++i) {
+    lua_pushstring(L, l[i].c_str());
+    lua_rawseti(L, -2, static_cast<lua_Integer>(i + 1));
+  }
+  return 1;
+}
+int l_name(lua_State* L) {
+  const std::string n = loc::display_name(luaL_optstring(L, 1, loc::language().c_str()));
+  lua_pushstring(L, n.c_str());
+  return 1;
+}
+
 void open_script_api(lua_State* L) {
   // Entity handles: full userdata holding the id, methods via __index.
   const luaL_Reg methods[] = {
@@ -819,8 +867,14 @@ void open_script_api(lua_State* L) {
       {"after", g_after},   {"every", g_every},       {"cancel", g_cancel},
       {"toast", g_toast},   {"find", g_find},         {"player", g_player},
       {"spawn", g_spawn},   {"duplicate", g_duplicate},
-      {"tick", g_tick},     {"time", g_time},         {nullptr, nullptr}};
+      {"tick", g_tick},     {"time", g_time},         {"tr", g_tr},
+      {nullptr, nullptr}};
   luaL_setfuncs(L, globals, 0);
+
+  const luaL_Reg lang_fns[] = {
+      {"set", l_set}, {"current", l_current}, {"list", l_list}, {"name", l_name}, {nullptr, nullptr}};
+  luaL_newlib(L, lang_fns);
+  lua_setfield(L, -2, "lang");
 
   const luaL_Reg audio_fns[] = {
       {"play", a_play},           {"music", a_music},

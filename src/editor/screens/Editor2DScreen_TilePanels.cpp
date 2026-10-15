@@ -1,5 +1,6 @@
 // Tile Palette + Supply Wagon panels, toolbar tool strip and the Inspector's
 // TileMap / Sprite sections.
+#include "editor/tools/AutoTilePanel.h"
 #include "editor/screens/Editor2DScreen.h"
 
 #include "editor/assets/AssetLibrary.h"
@@ -186,6 +187,38 @@ void Editor2DScreen::draw_tile_palette() {
     if (theme::ToggleButton(label, &on, ImVec2(40, 0))) {
       set_brush_size(n);
     }
+  }
+
+  {
+    AutoTilePanel& at = AutoTilePanel::get();
+    if (at.sets().empty() || !at.is_open()) {
+      // Keep the list current without making the user open the panel.
+      static std::string scanned;
+      if (scanned != project_.path) {
+        scanned = project_.path;
+        const bool was_open = at.is_open();
+        at.open(project_.path, project_.name);
+        if (!was_open) at.close();
+      }
+    }
+    ImGui::TextDisabled("Terrain");
+    ImGui::SameLine();
+    const std::string cur = at.brush_path().empty() ? "Plain tiles" : at.brush_path();
+    ImGui::SetNextItemWidth(-28);
+    if (ImGui::BeginCombo("##terrain", cur.c_str())) {
+      if (ImGui::Selectable("Plain tiles", at.brush_path().empty())) at.clear_brush();
+      for (const std::string& p : at.sets()) {
+        const AutoTileSet* s = at.set(p);
+        const std::string label = s ? s->name + "  (" + to_string(s->mode) + ")" : p;
+        if (ImGui::Selectable(label.c_str(), p == at.brush_path(), s ? 0 : ImGuiSelectableFlags_Disabled)) {
+          at.select_brush(p);
+        }
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("...##autotiles")) at.open(project_.path, project_.name);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Autotiles panel: new terrains, slots, preview");
   }
 
   if (!target) {

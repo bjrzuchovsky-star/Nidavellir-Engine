@@ -151,6 +151,35 @@ namespace TombStone
         }
         public bool Held(Button b, int slot1 = 1) => (api->Buttons(W, slot1 - 1) & (uint)b) != 0;
 
+        // Localisation: Tr("menu.start"), Tr("gold.count", "12") fills {0}.
+        public string Tr(string key, params string[] args)
+        {
+            if (api->Translate == null) return key;
+            string enc = args.Length == 0 ? "" : string.Join("\n", args) + "\n";
+            byte[] buf = new byte[256];
+            int n;
+            fixed (byte* k = Utf8.Z(key)) fixed (byte* a = Utf8.Z(enc))
+            {
+                fixed (byte* bp = buf) n = api->Translate(W, k, a, bp, buf.Length);
+                if (n > buf.Length)
+                {
+                    buf = new byte[n];
+                    fixed (byte* bp = buf) n = api->Translate(W, k, a, bp, buf.Length);
+                }
+            }
+            return n <= 0 ? "" : System.Text.Encoding.UTF8.GetString(buf, 0, n);
+        }
+        public bool SetLanguage(string lang) { fixed (byte* p = Utf8.Z(lang)) return api->LangSet != null && api->LangSet(W, p) != 0; }
+        public string Language
+        {
+            get
+            {
+                byte* b = stackalloc byte[64];
+                int n = api->LangGet == null ? 0 : api->LangGet(W, b, 64);
+                return Utf8.Read(b, Math.Min(n, 64));
+            }
+        }
+
         // Plugin call bridge: table.fn(args...) on a plugin's Lua table.
         // .Type 'x' when the call failed (the error is in the Telegraph).
         public Value Plugin(string table, string fn, params Value[] args)

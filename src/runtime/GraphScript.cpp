@@ -1,3 +1,4 @@
+#include "core/Localization.h"
 #include "runtime/GraphScript.h"
 
 #include "runtime/Input.h"
@@ -82,6 +83,8 @@ std::vector<GraphNodeDef> build_catalog() {
   pure("Values", "value.text", "Text", {{"value", T("")}}, {"value"}, "a constant text");
   pure("Values", "value.bool", "Bool", {{"value", B(false)}}, {"value"}, "a constant flag");
   pure("Values", "text.join", "Join Text", {{"a", T("")}, {"b", T("")}}, {"value"}, "a .. b");
+  pure("Values", "text.tr", "Translate", {{"key", T("")}, {"arg0", T("")}, {"arg1", T("")}}, {"value"},
+       "the current language's text for key ({0} {1} = args; Strings panel)");
   pure("Values", "prop.get", "Get Prop", {{"name", T("")}}, {"value"}, "the entity's prop");
   pure("Variables", "var.get", "Get Variable", {{"name", T("")}}, {"value"}, "instance variable");
   fl("var.set", "Set Variable", {"out"}, {{"name", T("")}, {"value", N(0)}}, {"value"},
@@ -545,6 +548,9 @@ struct GraphScriptHost::Impl {
     if (t == "logic.not") return B(!truthy(I("a")));
     if (t == "value.number" || t == "value.text" || t == "value.bool") return I("value");
     if (t == "text.join") return ScriptValue::of_text(text(I("a")) + text(I("b")));
+    if (t == "text.tr") {
+      return ScriptValue::of_text(loc::format(loc::tr(text(I("key"))), {text(I("arg0")), text(I("arg1"))}));
+    }
     if (t == "prop.get") return prop(in, text(I("name")));
     if (t == "var.get") {
       const auto it = in.vars.find(text(I("name")));

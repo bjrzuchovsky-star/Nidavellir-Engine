@@ -34,6 +34,7 @@ add_executable(ts_admin
   SmokePhysics.cpp
   SmokePhysics2D.cpp
   SmokePhysicsEditor.cpp
+  SmokeLocTiles.cpp
 )
 
 target_link_libraries(ts_admin

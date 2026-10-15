@@ -178,6 +178,26 @@ class Script {
     r.number = r.type == 'b' ? (r.text == "1" ? 1.0 : 0.0) : r.type == 'n' ? std::atof(r.text.c_str()) : 0.0;
     return r;
   }
+  // Localisation: tr("menu.start"), tr("gold.count", {"12"}) fills {0}.
+  std::string tr(const std::string& key, const std::vector<std::string>& args = {}) const {
+    if (!api_->translate) return key;
+    std::string enc;
+    for (const std::string& a : args) enc += a + "\n";
+    std::string buf(256, '\0');
+    int n = api_->translate(api_->world, key.c_str(), enc.c_str(), buf.data(), 256);
+    if (n > 256) {
+      buf.assign(static_cast<std::size_t>(n), '\0');
+      n = api_->translate(api_->world, key.c_str(), enc.c_str(), buf.data(), n);
+    }
+    buf.resize(static_cast<std::size_t>(n > 0 ? n : 0));
+    return buf;
+  }
+  bool set_language(const std::string& lang) { return api_->lang_set && api_->lang_set(api_->world, lang.c_str()) != 0; }
+  std::string language() const {
+    char b[64];
+    const int n = api_->lang_get ? api_->lang_get(api_->world, b, sizeof(b)) : 0;
+    return std::string(b, static_cast<std::size_t>(n > 0 && n <= 64 ? n : 0));
+  }
   bool held(Button b, int slot1 = 1) const { return (api_->buttons(api_->world, slot1 - 1) & b) != 0; }
   // Props (scene overrides of the defaults you pass).
   double prop(const std::string& name, double fallback) const {

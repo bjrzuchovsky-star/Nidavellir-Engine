@@ -1,3 +1,4 @@
+#include "core/Localization.h"
 #include "profiler/Profiler.h"
 #include "runtime/World.h"
 
@@ -83,6 +84,7 @@ bool World::build(const std::vector<Entity2D>& entities,
 
 bool World::load_project(const std::string& project_dir,
                          std::string* error_out) {
+  loc::load_project(project_dir);  // tr() / lang.* in scripts
   scene_json::SceneDoc doc;
   if (!scene_json::load_file(scene_json::scene_path_for_project(project_dir),
                              &doc, error_out)) {
