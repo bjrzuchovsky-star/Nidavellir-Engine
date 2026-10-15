@@ -15,14 +15,13 @@ Use **Trading Post** in the Project Manager, or **Visit the Trading Post...** in
 
 Entries come from four kinds of source (`TradingPost::refresh`):
 
-- **Built-ins** from the plugin catalog.
+- **Built-ins** from the plugin catalog (including `ts.ai`, Pathfinder (AI Toolkit); see the root README).
 - **Local folders** that hold plugin libraries.
 - **Remote indexes** over `file://` or `http(s)://`. The README notes that https is supported on Windows.
 - **Coming soon** roadmap entries, hard-coded in `TradingPost.cpp`:
   - `ts.quests`: Bounty Board
   - `ts.dialogue`: Parley
   - `ts.steam`: Steam Hitch
-  - `ts.ai`: Pathfinder (AI Toolkit)
   - `ts.profiler`: Assay Office
 
 ## Plugin cache and configuration

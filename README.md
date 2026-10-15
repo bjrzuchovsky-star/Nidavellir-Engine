@@ -326,6 +326,96 @@ Parts turn in quarter steps. An engine pushes toward its front (rotation 0 = the
 - Clients draw the last state they received, without interpolation (30 Hz).
 - The designer is an editor panel. Inside `ts_game` you fly saved designs but can't edit them.
 
+## Pathfinder AI toolkit (ts.ai)
+
+`ts.ai` is an optional built-in plugin, listed in the Trading Post as **Pathfinder (AI Toolkit)**. It is off by default; switch it on per project in the Plugins panel or with `"plugins": "ts.ai"` in `project.json`. The Ghost Town 3D sample ships with it on.
+
+**Pieces.**
+- `src/ai` (`ts_ai`, no engine dependencies):
+  - grid A*, jump point search and Dijkstra;
+  - HPA* (`HierGrid`) for big chunked worlds, path smoothing and flow fields;
+  - steering (seek / arrive / separation / avoidance, `SteerCrowd`);
+  - a Recast/Detour navmesh and crowd. recastnavigation v1.6.0 is fetched by SHA-256 in `cmake/FetchRecast.cmake`;
+  - behaviour trees, a blackboard and utility scoring;
+  - perception (sight cone, hearing) and a `StateMachine` helper;
+  - `AgentBrain`, the BT host both 2D and 3D share.
+- `src/plugins/ai` (`AiPlugin`): agents in 2D worlds, the Lua `ai` table, a debug draw layer and Frontier coyote pathing.
+- `src/ai3d` (`ts_ai3d`): a `World3DExtension`. On Play it bakes a navmesh from the scene's static colliders plus `nav_link` off-mesh links, puts every entity with an `agent` component into a Detour crowd, and runs its tree.
+- `src/editor/plugins/AiPanels.cpp`: the **Behaviour Trees** panel (View menu).
+
+**Behaviour trees (`*.bt.json`).**
+```json
+{"name": "Guard", "blackboard": {"goal": [560, 0, 120]},
+ "root": {"type": "selector", "reactive": true, "children": [
+   {"type": "sequence", "children": [{"type": "can_see", "target": "any"}, {"type": "chase", "key": "target"}, {"type": "attack"}]},
+   {"type": "sequence", "children": [{"type": "wander", "radius": 160}, {"type": "wait", "seconds": 1, "max": 3}]}]}}
+```
+- **Composites:** `sequence`, `selector` (memory, or `"reactive": true`), `parallel`, `random`, and `utility` (picks the child with the best score, with hysteresis).
+- **Decorators:** `inverter`, `succeeder`, `failer`, `repeat`, `retry`, `cooldown`, `timeout`, `if`.
+- **Conditions:** `check`, `chance`, `can_see`, `heard`, `near`.
+- **Actions:**
+  - **Movement:** `move_to`, `wander`, `chase`, `flee`, `stop`.
+  - **Combat and animation:** `attack`, `face`, `play_anim`.
+  - **Flow and data:** `wait`, `set`, `inc`, `log`, `succeed`, `fail`, `running`.
+- **Blackboard keys** hold numbers (entity ids), text (entity names), bools or positions (`[x, y, z]`).
+- **Determinism:** each instance has its own seeded RNG, so a tree replays identically for the same seed.
+
+**Behaviour Trees panel.**
+- Lists, opens, creates and saves the project's `*.bt.json` files.
+- Has a palette coloured by node kind, and lets you add, move and remove nodes, edit parameters, and see lint warnings.
+- During Play it shows the watched agent's live node states, its running branch (`selector > stroll > wander`), its blackboard and its senses.
+- Its checkbox turns on the debug overlay: in 2D, paths, blocked cells, BT state and facing; in 3D, navmesh edges, links, paths, BT state posts and sight cones.
+
+**2D (Lua `ai`, positions in px).**
+- **Agents:**
+  - `ai.agent(e, {speed=, radius=, avoidance=, bt=, sight=, fov=, hearing=})`, `ai.remove(e)`;
+  - `ai.bt(e, path)`, `ai.state(e)`, `ai.set_bb(e, k, v[, y])`, `ai.get_bb(e, k)`;
+  - `ai.can_see(e, target)`, `ai.heard(e[, within])`.
+- **Movement:** `ai.move_to(e, x, y)`, `ai.stop(e)`, `ai.moving(e)`.
+- **Paths and flow fields:** `ai.path(x0, y0, x1, y1)` returns a table of `{x, y}`, `ai.path_length(...)` returns the length or -1, and `ai.flow(gx, gy, x, y)` returns `dx, dy`.
+- **World:** `ai.noise(x, y[, loudness, what])`, `ai.grid(cell_px)`, `ai.invalidate()`, `ai.debug(on)`, `ai.count()`.
+- **Walls and paths:** static solid colliders and solid tiles are walls. Paths use JPS for short hops and HPA* for long ones.
+- **Senses:** agents see riders and hear positional sound events.
+- **Multiplayer:** AI runs on Local and Server worlds only. Clients get positions through normal replication.
+
+**3D (Lua `ai`, metres, y up).**
+- **`agent` component:** `{speed, radius, height, avoidance, bt, wander_radius}`. `nav_link` is `{to, radius, bidirectional}`. Both are scene.json **v13**.
+- **Lua:**
+  - `ai.agent(e, {...})`, `ai.bt`, `ai.state`, `ai.set_bb` / `ai.get_bb`, `ai.can_see`, `ai.debug`, `ai.count`;
+  - `ai.move_to(e, x, y, z)`, `ai.stop`, `ai.moving`;
+  - `ai.path_length(x0, y0, z0, x1, y1, z1)`, `ai.noise(x, y, z[, loudness, what])`.
+- **Movement:** the crowd drives position and yaw, and feeds the animator's `speed` parameter.
+- **Old Hank** in the Ghost Town wanders the street with `ai/hank.bt.json`. He stops and faces riders he can see, and hears shots.
+- **Hosts:** the editor's 3D Play and `ts_game` attach the extension when the project enables `ts.ai`.
+
+**Graphs, C++ and C#.**
+- **Graph nodes** (AI category): Make Agent, Run Behaviour Tree, AI Move To, AI Stop, Set / Get Blackboard and AI State. Plugin Call reaches the rest.
+- **C++:** `#include <tombstone/ai.h>`, then `ts::ai::agent(*this, self(), 120)`, `ts::ai::move_to(...)`, `ts::ai::state(...)` and so on.
+- **C#:** `this.AiAgent(Self, 120)`, `this.AiMoveTo(...)`, `this.AiState(...)` and so on.
+- All of them go through the plugin bridge to the same `ai` table.
+
+**Frontier.** With `ts.ai` on, chasing coyotes plan a short JPS path around fences and walls, replanning twice a second, instead of running straight into them. Shipyard pirates are unchanged.
+
+**Smoke.** `ts_admin --smoke-ai` (also part of `--smoke`) checks:
+- **Grids:** A* = JPS = Dijkstra on random maps, weighted costs, HPA* within 1.25× optimal on 512², and flow fields.
+- **Navmesh and crowds:** navmesh build plus paths, raycast and off-mesh links; Detour and steering crowds with no overlap.
+- **Behaviour trees, perception and the state machine:** BT semantics, a determinism trace and round trips; perception and the FSM.
+- **The plugin in a 2D world:**
+  - a BT guard, a Lua agent and a graph agent go round a wall;
+  - an agent hears a positional gunshot;
+  - the bridge works, and clients don't simulate;
+  - coyotes steer around fences;
+  - the BT panel draws headless.
+- **3D:** v13 round trip, crowd crossing, a climber taking a `nav_link`, and Old Hank wandering and hearing.
+
+**Caveats.**
+- The 3D navmesh is baked once when Play starts, from static colliders as boxes. Moving or toggled colliders do not re-bake it, and capsules count as boxes.
+- In 2D, the walkable grid is cached per world. Call `ai.invalidate()` after moving static solids or editing tiles from script.
+- World3D has no network roles yet, so 3D AI runs wherever the world runs. VR rides and `ts_game` VR don't attach it.
+- The agent and nav_link components have no inspector UI yet. Edit them in scene.json or set them from Lua `ai.agent`.
+- The `lua` BT action isn't wired to entity scripts yet (it fails). Use the blackboard from scripts instead.
+- 2D agent avoidance is positional separation; agents may brush by up to ~1 px.
+
 ## Audio (ts_audio)
 
 Sound runs on [miniaudio](https://miniaud.io) 0.11.21 (wav / mp3 / flac) plus

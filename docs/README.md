@@ -14,12 +14,12 @@ These pages are written from the source in this repository (`src/`, `apps/`, `sd
 | [Particles and lighting](particles-and-lighting.md) | `ts_fx` emitters and presets, 2D lighting, 3D lights |
 | [Export and the Freight Office](export.md) | Export UI and CLI, profiles, `.tspak`, the output folder |
 | [3D, VR and animation](3d-vr-animation.md) | `ts_render3d`, the 3D editor, VR / OpenXR, 2D sprite and 3D skeletal animation |
+| AI toolkit (`ts.ai`) | See "Pathfinder AI toolkit (ts.ai)" in the root `README.md`: behaviour trees, 2D grid / 3D navmesh paths, crowds, perception, the BT panel |
 | [Multiplayer (the posse)](multiplayer.md) | `ts_server`, `ts_client`, protocol, prediction, Play with Posse |
 
 ## Coming soon
 
 - **Physics (Jolt / Box2D):** in progress, not documented yet. Right now `src/physics/Physics2D.h` is only a stub class (`init`, `shutdown`, `step`), and the repository contains no Jolt or Box2D code. 2D collision currently lives in `src/runtime/World_Collision.cpp` (see the editor guide). 3D collision is a capsule against static box / capsule colliders in `World3D`.
-- **AI (`ts.ai`):** in progress. Its only appearance in the source is a "Coming soon" entry in the Trading Post (`Pathfinder (AI Toolkit)`, `src/store/TradingPost.cpp`).
 
 ## Note on the top-level README
 
