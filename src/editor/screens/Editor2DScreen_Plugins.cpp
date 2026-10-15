@@ -2,6 +2,7 @@
 // and drawing what loaded plugins contribute (panels, menu entries,
 // toolbar buttons). See editor/plugins/EditorPlugins.h.
 
+#include "editor/plugins/PluginPanelHost.h"
 #include "editor/screens/Editor2DScreen.h"
 
 #include "editor/ui/Theme.h"
@@ -74,29 +75,11 @@ void Editor2DScreen::draw_plugins_window() {
 }
 
 void Editor2DScreen::draw_plugin_view_items() {
-  if (!plugins_.is_open()) return;
-  for (const auto& p : plugins_.manager().editor_panels()) {
-    bool* open = p.item.open ? p.item.open : &plugin_panel_open_[p.item.id];
-    ImGui::MenuItem(p.item.menu_label.c_str(), nullptr, open);
-  }
+  draw_plugin_panel_menu_items(plugins_, plugin_panel_open_);
 }
 
 void Editor2DScreen::draw_plugin_panels() {
-  if (!plugins_.is_open()) return;
-  // Copy: a draw callback may change plugin state (never unloads, though:
-  // reloads wait for idle and happen outside the panel loop).
-  for (const auto& p : plugins_.manager().editor_panels()) {
-    bool* open = p.item.open ? p.item.open : &plugin_panel_open_[p.item.id];
-    if (!*open) continue;
-    if (p.item.before_begin) p.item.before_begin();
-    const std::string title = p.item.title + "###plugin_" + p.item.id;
-    // The posse's Network panel keeps its old window id for saved layouts.
-    const char* window = p.item.title == "Network" ? "Network" : title.c_str();
-    if (ImGui::Begin(window, open)) {
-      p.item.draw();
-    }
-    ImGui::End();
-  }
+  draw_open_plugin_panels(plugins_, plugin_panel_open_);
 }
 
 void Editor2DScreen::draw_plugin_menu_items(const std::string& menu) {

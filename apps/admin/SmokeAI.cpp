@@ -18,6 +18,7 @@
 namespace ai = ts::ai;
 
 int run_ai_world_smoke();  // SmokeAIWorld.cpp
+int run_ai_menu_smoke();   // SmokeAIMenu.cpp
 
 namespace {
 
@@ -524,6 +525,7 @@ int run_ai_smoke() {
   if (behaviour_trees() != 0) return 1;
   if (perception_fsm() != 0) return 1;
   if (run_ai_world_smoke() != 0) return 1;
+  if (run_ai_menu_smoke() != 0) return 1;
   std::printf("[smoke] ai OK\n");
   return 0;
 }

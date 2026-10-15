@@ -207,7 +207,7 @@ void live_section(plugins::AiPlugin& p, BtPanelState& s) {
     if (ai3d::AiWorld3D* a3 = ai3d::AiWorld3D::latest()) a3->set_debug(dbg);
   }
   if (rows.empty()) {
-    ImGui::TextColored(theme::TextMuted(), "No agents riding. Hit Play to watch trees run live.");
+    ImGui::TextColored(theme::TextMuted(), "No agents riding. Give an entity an agent (ai.agent in Lua / an agent component) and Play to watch its tree live.");
     return;
   }
   ImGui::SetNextItemWidth(220.0f);

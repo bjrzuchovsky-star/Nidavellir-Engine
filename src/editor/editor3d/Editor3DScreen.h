@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 
 // The 3D editor ("dimension": "3d" claims). Docked panels in the Dusk
 // theme:
@@ -67,6 +68,7 @@ class Editor3DScreen final : public IScreen {
   void request_quit() { quit_requested_ = true; }
   const ProjectInfo& project() const { return project_; }
   EditorPlugins& plugins() { return plugins_; }
+  std::map<std::string, bool>& plugin_panel_open() { return plugin_panel_open_; }
 
   // ---- Scene + selection --------------------------------------------------
   const scene3d::Scene3D& scene() const { return scene_; }
@@ -318,6 +320,7 @@ class Editor3DScreen final : public IScreen {
   std::uint64_t hier_toggle_lock_ = 0, hier_toggle_hide_ = 0;
   // Last member: unhitched first.
   EditorPlugins plugins_;
+  std::map<std::string, bool> plugin_panel_open_;  // plugin panels without their own flag
 };
 
 // Animator inspector body (Editor3DScreen_Anim.cpp): params, layers with

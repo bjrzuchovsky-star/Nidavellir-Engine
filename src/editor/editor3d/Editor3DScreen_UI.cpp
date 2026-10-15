@@ -1,3 +1,4 @@
+#include "editor/plugins/PluginPanelHost.h"
 #include "editor/fx/FxInspector.h"
 #include "editor/export/FreightOffice.h"
 #include "editor/scripting/BrandBook.h"
@@ -129,6 +130,8 @@ void Editor3DScreen::draw_ui() {
     if (ImGui::Begin("Saloon Band (Mixer)", &show_mixer_)) draw_mixer_panel();
     ImGui::End();
   }
+  // Plugin panels (Behaviour Trees, ...): open in edit mode and during Play.
+  draw_open_plugin_panels(plugins_, plugin_panel_open_);
   if (anim_preview_.open) {
     ImGui::SetNextWindowSize(ImVec2(380, 420), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Animation Preview", &anim_preview_.open)) draw_anim_preview();
@@ -214,6 +217,11 @@ void Editor3DScreen::draw_menu_bar() {
     ImGui::MenuItem("Saloon Band (Mixer)", nullptr, &show_mixer_);
     ImGui::MenuItem("UI Preview", nullptr, &show_ui_preview_);
     ImGui::MenuItem("Animation Preview", nullptr, &anim_preview_.open);
+    if (plugins_.is_open() && !plugins_.manager().editor_panels().empty()) {
+      ImGui::Separator();
+      draw_plugin_panel_menu_items(plugins_, plugin_panel_open_);
+      ImGui::Separator();
+    }
     if (ImGui::MenuItem("Frame selection", "F")) frame_selection();
     ImGui::EndMenu();
   }
