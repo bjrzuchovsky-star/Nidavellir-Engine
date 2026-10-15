@@ -20,6 +20,7 @@
 #include "ExportCli.h"
 #include "SmokeGraph.h"
 #include "SmokeCSharp.h"
+#include "editor/scripting/BrandBook.h"
 #include "SmokeNative.h"
 #include "SmokeFx.h"
 #include "SmokeUi.h"
@@ -1250,6 +1251,65 @@ int run_console_smoke() {
   return flow.current_state() == AppState::Quit ? 0 : 1;
 }
 
+// ts_admin --brand-book <project> [scripts/x.graph.json]: the Brand Book on
+// its own (edit a claim's visual scripts without opening the editor).
+int run_brand_book_app(const std::string& project, const std::string& graph) {
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#if defined(__APPLE__)
+  glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+#endif
+  GLFWwindow* window = glfwCreateWindow(1440, 860, "TombStone Brand Book", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(window);
+  glfwSwapInterval(1);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO& io = ImGui::GetIO();
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+  io.IniFilename = nullptr;
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  Settings defaults;
+  apply_theme(defaults);
+  const std::string name = std::filesystem::path(project).filename().string();
+  editor::BrandBook& book = editor::BrandBook::get();
+  if (graph.empty()) book.open(project, name);
+  else book.open_graph(project, name, graph);
+  book.set_fill_viewport(true);
+  while (!glfwWindowShouldClose(window) && book.is_open()) {
+    glfwPollEvents();
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    book.draw();
+    ImGui::Render();
+    int w = 0, h = 0;
+    glfwGetFramebufferSize(window, &w, &h);
+    glViewport(0, 0, w, h);
+    const ImVec4 clear = editor::theme::Charcoal();
+    glClearColor(clear.x, clear.y, clear.z, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    glfwSwapBuffers(window);
+  }
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  return 0;
+}
+
 int run_imgui_app() {
   if (!glfwInit()) {
     std::cerr << "glfwInit failed\n";
@@ -1424,6 +1484,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-cpp") == 0) {
       return run_native_smoke();
+    }
+    if (std::strcmp(argv[i], "--brand-book") == 0 && i + 1 < argc) {
+      return run_brand_book_app(argv[i + 1], i + 2 < argc ? argv[i + 2] : "");
     }
     if (std::strcmp(argv[i], "--smoke-cs") == 0) {
       return run_csharp_smoke();

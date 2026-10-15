@@ -1,5 +1,6 @@
 #include "SmokeGraph.h"
 
+#include "editor/scripting/BrandBook.h"
 #include "runtime/GraphScript.h"
 #include "runtime/World.h"
 #include "runtime/WorldExtensions.h"
@@ -295,9 +296,20 @@ int run_graph_smoke() {
   if (int r = check_mixed()) return r;
   if (int r = check_budget_and_reload()) return r;
   if (int r = check_plugin_bridge()) return r;
+  {
+    // The Brand Book's starter graph is clean and round-trips.
+    const Graph g = ts::tombstone::editor::BrandBook::starter_graph();
+    std::vector<std::string> problems;
+    if (!check_graph(g, &problems)) return fail("Brand Book starter graph: " + (problems.empty() ? std::string() : problems[0]));
+    Graph back;
+    std::string err;
+    if (!parse_graph(write_graph(g), &back, &err) || write_graph(back) != write_graph(g)) {
+      return fail("Brand Book starter graph round trip: " + err);
+    }
+  }
   std::cout << "[smoke] graph OK (" << graph_node_catalog().size()
             << " node types, round trip, events / flow / delay / for / button edge, "
                "variables, budget stop, reload keeps vars, deterministic x2 ("
-            << a.size() << " trace lines), mixed Lua + graph, plugin call bridge)\n";
+            << a.size() << " trace lines), mixed Lua + graph, plugin call bridge, Brand Book starter)\n";
   return 0;
 }

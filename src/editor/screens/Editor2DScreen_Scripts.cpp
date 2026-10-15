@@ -6,6 +6,8 @@
 #include "editor/screens/Editor2DScreen.h"
 
 #include "editor/launch/OpenWithOs.h"
+#include "editor/scripting/BrandBook.h"
+#include "runtime/CSharpScript.h"
 #include "editor/ui/Theme.h"
 #include "runtime/Script.h"
 #include "scene/SampleScripts.h"
@@ -130,6 +132,11 @@ bool Editor2DScreen::create_script(const std::string& name,
 bool Editor2DScreen::open_script(const std::string& rel) {
   if (project_.path.empty() || !runtime::valid_script_path(rel)) {
     return false;
+  }
+  if (rel.size() > 11 && rel.compare(rel.size() - 11, 11, ".graph.json") == 0) {
+    BrandBook::get().open_graph(project_.path, project_.name, rel);
+    note("Opened " + rel + " in the Brand Book. Save it and the ride picks it up.");
+    return true;
   }
   std::string err;
   const std::string full = (fs::path(project_.path) / rel).string();
@@ -407,6 +414,9 @@ void Editor2DScreen::draw_scripts_panel() {
   }
   ImGui::EndDisabled();
 
+  if (theme::SecondaryButton("Brand Book (visual scripts)", ImVec2(-1, 0))) {
+    BrandBook::get().open(project_.path, project_.name);
+  }
   theme::SectionHeader("Scripts", playing ? "saves hot-reload mid-ride"
                                           : "double-click to open");
   if (scripts_.empty()) {
@@ -434,6 +444,17 @@ void Editor2DScreen::draw_scripts_panel() {
     return;
   }
   const std::string rel = scripts_selected_;
+  if (rel.size() > 3 && rel.compare(rel.size() - 3, 3, ".cs") == 0) {
+    // C# without the SDK: say how to switch it on (the Telegraph says it too).
+    static int cs_ok = -1;
+    if (cs_ok < 0) cs_ok = runtime::csharp_scripts::sdk_available(nullptr) ? 1 : 0;
+    if (!cs_ok) {
+      ImGui::PushStyleColor(ImGuiCol_Text, theme::Warning());
+      ImGui::TextWrapped("C# scripts are disabled here: install the .NET 8 SDK to enable C#.");
+      ImGui::PopStyleColor();
+      ImGui::TextDisabled("https://dotnet.microsoft.com/download/dotnet/8.0");
+    }
+  }
   const ScriptInfo info = script_info(rel);
   if (info.ok) {
     std::string props;

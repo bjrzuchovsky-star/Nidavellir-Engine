@@ -58,6 +58,7 @@ add_library(ts_editor
   templates/TemplateStore.cpp
   screens/ProjectManager_Templates.cpp
   store/TradingPostPanel.cpp
+  scripting/BrandBook.cpp
 )
 
 # Engine templates: the source tree's templates/ is the fallback when no
