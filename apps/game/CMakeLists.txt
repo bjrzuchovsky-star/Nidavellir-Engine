@@ -20,6 +20,7 @@ add_executable(ts_game
   GameUi.cpp
   Game3D.cpp
   GameVR.cpp
+  GameManifest.cpp
 )
 
 target_include_directories(ts_game PRIVATE ${ts_stb_easy_font_SOURCE_DIR})
@@ -37,6 +38,8 @@ target_link_libraries(ts_game
     ts_audio3d
     ts_xr
     ts_ui
+    ts_vfs
+    ts_stb_image
     glfw
     OpenGL::GL
 )
@@ -45,4 +48,7 @@ target_compile_features(ts_game PRIVATE cxx_std_20)
 
 if(MSVC)
   target_compile_definitions(ts_game PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+  # Version resource (the exporter stamps each game's icon into its copy).
+  configure_file(ts_game.rc.in ${CMAKE_CURRENT_BINARY_DIR}/ts_game.rc @ONLY)
+  target_sources(ts_game PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/ts_game.rc)
 endif()

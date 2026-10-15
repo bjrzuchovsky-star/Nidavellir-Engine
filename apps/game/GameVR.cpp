@@ -3,6 +3,7 @@
 // mirror window, the headless VR smoke and the --xr-probe check.
 
 #include "Game3D.h"
+#include "GameManifest.h"
 #include "GameUi.h"
 
 #include "core/JsonMini.h"
@@ -290,12 +291,13 @@ int run_window_vr(const std::string& dir, const std::string& name, long frames, 
     return 1;
   }
   render3d::hint_gl33_core();
-  GLFWwindow* win = glfwCreateWindow(1280, 720, (name + " | TombStone VR").c_str(), nullptr, nullptr);
+  GLFWwindow* win = glfwCreateWindow(game::window_width(), game::window_height(), (name + " | TombStone VR").c_str(), nullptr, nullptr);
   if (!win) {
     std::cerr << "[ts_game] could not open a GL 3.3 core window\n";
     glfwTerminate();
     return 1;
   }
+  game::apply_window_icon(win, dir);
   glfwMakeContextCurrent(win);
   int code = 0;
   {

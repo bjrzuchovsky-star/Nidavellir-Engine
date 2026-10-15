@@ -1,6 +1,7 @@
 #include "audio/GameAudio.h"
 #include "audio/SoundStage3D.h"
 #include "Game3D.h"
+#include "GameManifest.h"
 #include "GameUi.h"
 
 #include "render3d/GlRenderer3D.h"
@@ -146,13 +147,14 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
     return 1;
   }
   render3d::hint_gl33_core();
-  GLFWwindow* win = glfwCreateWindow(1280, 720, (name + " | TombStone 3D").c_str(), nullptr,
+  GLFWwindow* win = glfwCreateWindow(game::window_width(), game::window_height(), (name + " | TombStone 3D").c_str(), nullptr,
                                      nullptr);
   if (!win) {
     std::cerr << "[ts_game] could not open a GL 3.3 core window\n";
     glfwTerminate();
     return 1;
   }
+  game::apply_window_icon(win, dir);
   glfwMakeContextCurrent(win);
   glfwSwapInterval(1);
   int code = 0;

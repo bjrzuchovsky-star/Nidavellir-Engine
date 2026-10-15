@@ -14,6 +14,7 @@
 #include "Game3D.h"
 #include "GameRenderer.h"
 #include "GameUi.h"
+#include "GameManifest.h"
 #include "HudText.h"
 
 #include "core/JsonMini.h"
@@ -53,9 +54,11 @@ using game::GameRenderer;
 using game::GameUi;
 
 constexpr const char* kUsage =
-    "Usage: ts_game --project <dir> [--smoke] [--frames N] [--collision]\n"
+    "Usage: ts_game [--project <dir>] [--smoke] [--frames N] [--collision]\n"
     "               [--log <file>]\n"
-    "  --project <dir>  TombStone project folder (holds scene.json)\n"
+    "  --project <dir>  TombStone project folder (holds scene.json), or an\n"
+    "                   export folder (game.json + game.tspak); omitted =\n"
+    "                   the executable's folder when it holds game.json\n"
     "  --smoke          headless check: load, ride 60 ticks, verify, exit\n"
     "  --frames N       quit after N rendered frames (testing)\n"
     "  --collision      start with the collision overlay on (K)\n"
@@ -545,13 +548,15 @@ int run_window(const Options& opt, Telegraph& telegraph) {
     return 1;
   }
   // Default (compatibility) context: the renderer is fixed-function GL.
-  GLFWwindow* win = glfwCreateWindow(1280, 720, (name + " | TombStone").c_str(),
+  GLFWwindow* win = glfwCreateWindow(game::window_width(), game::window_height(),
+                                     (name + " | TombStone").c_str(),
                                      nullptr, nullptr);
   if (!win) {
     std::cerr << "[ts_game] could not open a window\n";
     glfwTerminate();
     return 1;
   }
+  game::apply_window_icon(win, opt.project);
   glfwMakeContextCurrent(win);
   glfwSwapInterval(1);
 
@@ -725,8 +730,10 @@ int main(int argc, char** argv) {
   if (opt.xr_probe) {
     return game::run_xr_probe();
   }
-  if (opt.project.empty()) {
-    std::cerr << "ts_game needs a project.\n" << kUsage;
+  // Exported games: game.json next to the exe (or in --project) mounts
+  // the .tspak through ts_vfs and hands its folder to the loaders.
+  if (!game::resolve_launch(argc > 0 ? argv[0] : nullptr, &opt.project, &err)) {
+    std::cerr << err << '\n' << kUsage;
     return 2;
   }
   if (!fs::is_directory(opt.project)) {
