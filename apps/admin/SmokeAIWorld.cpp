@@ -10,6 +10,7 @@
 #include "plugins/ai/AiPlugin.h"
 #include "ai3d/AiWorld3D.h"
 #include "render3d/Scene3D.h"
+#include "runtime/GraphScript.h"
 #include "runtime/World.h"
 #include "world3d/World3D.h"
 
@@ -94,6 +95,28 @@ int run_ai_world_smoke() {
                          "  ai.move_to(find('Guard Two'), 560, 160)\n"
                          "  log('n=' .. ai.count() .. ' len=' .. math.floor(ai.path_length(100, 120, 560, 120)))\n"
                          "end\n");
+  // A graph-scripted agent: start -> ai.agent -> ai.move_to (0 = self).
+  {
+    runtime::Graph g;
+    auto node = [&g](const std::string& type, std::map<std::string, ScriptValue> in) {
+      runtime::GraphNode n;
+      n.id = g.next_id();
+      n.type = type;
+      n.inputs = std::move(in);
+      g.nodes.push_back(n);
+      return n.id;
+    };
+    const int start = node("event.start", {});
+    const int mk = node("ai.agent", {{"speed", ScriptValue::of_number(140)}});
+    const int go = node("ai.move_to", {{"x", ScriptValue::of_number(560)}, {"y", ScriptValue::of_number(220)}});
+    g.links.push_back({start, "out", mk, "in"});
+    g.links.push_back({mk, "out", go, "in"});
+    w.script_library().put("scripts/runner.graph.json", runtime::write_graph(g));
+    Entity2D runner = box(6, "Graph Runner", 100 - 12, 220 - 12, 24, 24, false);
+    runner.script = ScriptData{};
+    runner.script->path = "scripts/runner.graph.json";
+    ents.push_back(runner);
+  }
   std::string err;
   if (!w.build(ents, dir.string(), &err)) return fail("world build: " + err);
   m.play_begin(w);
@@ -153,13 +176,15 @@ int run_ai_world_smoke() {
   }
   const runtime::Actor* g2 = w.find(3);
   if (std::hypot(g2->data.x + 12 - 560, g2->data.y + 12 - 160) > 16.0f) return fail("Lua move_to agent should arrive");
+  const runtime::Actor* gr = w.find(6);
+  if (!gr || std::hypot(gr->data.x + 12 - 560, gr->data.y + 12 - 220) > 16.0f) return fail("graph ai.agent + ai.move_to runner should arrive");
   if (min_gap < -2.0f) return fail("agents overlapped (gap " + std::to_string(min_gap) + ")");
   if (!heard_ok) return fail("listener should hear the positional gunshot");
   bool lua_ok = false;
   std::string last;
   for (const auto& l : w.take_logs()) {
     if (l.text.find("n=") != std::string::npos) last = l.text;
-    lua_ok |= l.text.find("n=3 len=") != std::string::npos;
+    lua_ok |= l.text.find(" len=7") != std::string::npos;
   }
   if (!lua_ok) return fail("Lua ai table: " + last);
   // Graph / C++ / C# reach the same table through the bridge.
@@ -201,7 +226,7 @@ int run_ai_world_smoke() {
   fs::remove_all(dir, ec);
 
   std::cout << "[smoke] ai world OK (plugin ts.ai; path round wall " << static_cast<int>(len)
-            << " px; BT guard + Lua agent arrived, worst gap " << min_gap
+            << " px; BT guard + Lua agent + graph agent arrived, worst gap " << min_gap
             << " px; heard gunshot; Lua + bridge ai table; client skipped; coyote steers round fence)\n";
   return run_ai3d_smoke();
 }

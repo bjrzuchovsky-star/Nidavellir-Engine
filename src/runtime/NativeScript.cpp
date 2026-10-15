@@ -129,7 +129,7 @@ BuildResult build(const std::string& project, bool force) {
   }
   // SDK copy (the module builds without the engine source tree).
   const fs::path sdk = sdk_dir();
-  for (const char* f : {"script_abi.h", "script_sdk.h"}) {
+  for (const char* f : {"script_abi.h", "script_sdk.h", "ai.h"}) {
     write_if_changed(dir / "sdk" / "tombstone" / f, read_all(sdk / "tombstone" / f));
   }
   write_if_changed(dir / "module_main.cpp",

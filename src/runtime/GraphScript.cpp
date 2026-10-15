@@ -123,6 +123,18 @@ std::vector<GraphNodeDef> build_catalog() {
       "blend to a state over seconds");
   act("Animation", "anim.set_param", "Set Anim Param", {{"id", N(0)}, {"name", T("speed")}, {"value", N(0)}}, {},
       "animator parameter (bools: 0 / 1)");
+  // ts.ai (the ai table through the plugin bridge; 0 = self). 2D: x, y px
+  // (z unused); 3D: metres, y up.
+  act("AI", "ai.agent", "Make Agent", {{"id", N(0)}, {"speed", N(0)}}, {"value"},
+      "AI agent (2D speed px/s; 3D: Agent component)");
+  act("AI", "ai.bt", "Run Behaviour Tree", {{"id", N(0)}, {"path", T("ai/")}}, {"value"}, "load a .bt.json");
+  act("AI", "ai.move_to", "AI Move To", {{"id", N(0)}, {"x", N(0)}, {"y", N(0)}, {"z", N(0)}}, {"value"},
+      "path there (false = unreachable)");
+  act("AI", "ai.stop", "AI Stop", {{"id", N(0)}}, {}, "stop moving");
+  act("AI", "ai.set_bb", "Set Blackboard", {{"id", N(0)}, {"key", T("")}, {"value", N(0)}}, {},
+      "behaviour tree blackboard");
+  act("AI", "ai.get_bb", "Get Blackboard", {{"id", N(0)}, {"key", T("")}}, {"value"}, "blackboard value");
+  act("AI", "ai.state", "AI State", {{"id", N(0)}}, {"value"}, "running branch of the tree");
   act("Plugins", "plugin.call", "Plugin Call",
       {{"table", T("")}, {"fn", T("")}, {"a", N(0)}, {"b", N(0)}, {"c", N(0)}}, {"value"},
       "table.fn(a, b, c) on a plugin's Lua table");
@@ -473,7 +485,7 @@ struct GraphScriptHost::Impl {
     auto I = [&](const char* p) { return input(in, n, p, depth); };
     const auto stored = in.outs.find({node_id, pin});
     if (t.rfind("event.", 0) == 0 || t == "flow.for" || t == "var.set" || t == "var.add" || t == "plugin.call" ||
-        t == "entity.spawn") {
+        t == "entity.spawn" || t.rfind("ai.", 0) == 0) {
       return stored == in.outs.end() ? N(0) : stored->second;
     }
     if (t.rfind("math.", 0) == 0) {
@@ -645,6 +657,22 @@ struct GraphScriptHost::Impl {
         if (!world->script_plugin_call("anim", t.substr(5),
                                        {N(static_cast<double>(e ? e : in.entity)), I("name"), I(third)}, &r,
                                        &err)) {
+          log(LogLevel::Error, err, &in, 0);
+        }
+      } else if (t.rfind("ai.", 0) == 0) {
+        const std::uint64_t e0 = id_of(I("id"));
+        std::vector<ScriptValue> args{N(static_cast<double>(e0 ? e0 : in.entity))};
+        if (t == "ai.agent") args.push_back(I("speed"));
+        else if (t == "ai.bt") args.push_back(I("path"));
+        else if (t == "ai.move_to") args.insert(args.end(), {I("x"), I("y"), I("z")});
+        else if (t == "ai.set_bb") args.insert(args.end(), {I("key"), I("value")});
+        else if (t == "ai.get_bb") args.push_back(I("key"));
+        ScriptValue r;
+        std::string err;
+        if (world->script_plugin_call("ai", t.substr(3), args, &r, &err)) {
+          in.outs[{n.id, "value"}] = r;
+        } else {
+          in.outs[{n.id, "value"}] = B(false);
           log(LogLevel::Error, err, &in, 0);
         }
       } else if (t == "plugin.call") {
