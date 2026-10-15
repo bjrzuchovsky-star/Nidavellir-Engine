@@ -38,6 +38,7 @@
 #include "SmokeRuntime.h"
 #include "SmokeAI.h"
 #include "SmokeProfiler.h"
+#include "SmokeMmo.h"
 #include "SmokeStory.h"
 #include "SmokeAnim3D.h"
 #include "SmokeTemplates.h"
@@ -1233,6 +1234,11 @@ int run_console_smoke() {
     std::cerr << "TombStone Admin smoke FAILED (profiler)\n";
     return 1;
   }
+  // Persistent world (see SmokeMmo.cpp).
+  if (run_mmo_smoke() != 0) {
+    std::cerr << "TombStone Admin smoke FAILED (mmo)\n";
+    return 1;
+  }
   if (run_anim3d_smoke() != 0) {
     std::cerr << "TombStone Admin smoke FAILED (3D animation)\n";
     return 1;
@@ -1781,6 +1787,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-ai") == 0) {
       return run_ai_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-mmo") == 0) {
+      return run_mmo_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-profiler") == 0) {
       return run_profiler_smoke();

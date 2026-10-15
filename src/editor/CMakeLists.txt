@@ -52,6 +52,7 @@ add_library(ts_editor
   plugins/PluginPanelHost.cpp
   plugins/StoryPanels.cpp
   plugins/ProfilerPanels.cpp
+  plugins/TownHallPanel.cpp
   screens/Editor2DScreen_Posse.cpp
   screens/Editor2DScreen_Audio.cpp
   console/TelegraphLog.cpp
@@ -90,6 +91,7 @@ target_link_libraries(ts_editor
     ts_runtime
     ts_net
     ts_mp
+    ts_mmo
     ts_plugin
     ts_plugins_builtin
     ts_render3d

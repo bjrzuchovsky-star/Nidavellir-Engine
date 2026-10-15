@@ -203,7 +203,7 @@ constexpr const char* kClientExe = "ts_client";
 
 // Start `exe args...` detached (it outlives the editor).
 bool spawn_detached(const std::string& exe, const std::vector<std::string>& args,
-                    std::string* error_out) {
+                    std::string* error_out, bool new_console = false) {
   std::error_code ec;
   if (exe.empty() || !fs::is_regular_file(fs::path(exe), ec)) {
     if (error_out) *error_out = "not found: " + exe;
@@ -216,8 +216,8 @@ bool spawn_detached(const std::string& exe, const std::vector<std::string>& args
   STARTUPINFOW si{};
   si.cb = sizeof(si);
   PROCESS_INFORMATION pi{};
-  if (!CreateProcessW(exe_w.c_str(), cmd.data(), nullptr, nullptr, FALSE, 0, nullptr,
-                      nullptr, &si, &pi)) {
+  if (!CreateProcessW(exe_w.c_str(), cmd.data(), nullptr, nullptr, FALSE,
+                      new_console ? CREATE_NEW_CONSOLE : 0, nullptr, nullptr, &si, &pi)) {
     if (error_out) {
       *error_out = "CreateProcess failed (error " +
                    std::to_string(static_cast<unsigned long>(GetLastError())) + ")";
@@ -296,6 +296,42 @@ bool spawn_client(const std::string& exe, const std::string& endpoint,
     args.push_back(clean_project_path(project_dir).string());
   }
   return spawn_detached(exe, args, error_out);
+}
+
+#if defined(_WIN32)
+constexpr const char* kServerExe = "ts_server.exe";
+#else
+constexpr const char* kServerExe = "ts_server";
+#endif
+
+std::vector<std::string> server_executable_candidates() {
+  std::vector<std::string> out;
+  const std::string self = self_executable_path();
+  if (self.empty()) return out;
+  const fs::path dir = fs::path(self).parent_path();
+  out.push_back((dir / kServerExe).string());
+  out.push_back((dir.parent_path() / "server" / kServerExe).string());
+  if (dir.has_parent_path()) {
+    out.push_back(
+        (dir.parent_path().parent_path() / "server" / dir.filename() / kServerExe).string());
+  }
+  return out;
+}
+
+std::string find_server_executable() {
+  for (const std::string& c : server_executable_candidates()) {
+    std::error_code ec;
+    if (fs::is_regular_file(fs::path(c), ec)) return c;
+  }
+  return {};
+}
+
+bool spawn_mmo_server(const std::string& exe, const std::string& project_dir, int port,
+                      std::string* error_out) {
+  const std::vector<std::string> args = {"--mmo", "--project", clean_project_path(project_dir).string(),
+                                         "--port", std::to_string(port)};
+  // Its own console window on Windows: the admin console reads its stdin.
+  return spawn_detached(exe, args, error_out, true);
 }
 
 }  // namespace launcher

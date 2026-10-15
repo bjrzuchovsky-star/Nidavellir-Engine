@@ -504,8 +504,8 @@ int editor_checks() {
     for (const auto& p : scr.plugins().manager().editor_panels()) n += p.owner == owner;
     return n;
   };
-  if (!scr.plugins().loaded("ts.posse") || panels_of("ts.posse") != 1) {
-    return fail("the posse plugin should contribute the Network panel");
+  if (!scr.plugins().loaded("ts.posse") || panels_of("ts.posse") != 2) {
+    return fail("the posse plugin should contribute the Network and Town Hall panels");
   }
   if (!scr.set_plugin_enabled("ts.posse", false) || scr.plugins().loaded("ts.posse") ||
       panels_of("ts.posse") != 0 || !scr.plugins().manager().menu_items().empty()) {

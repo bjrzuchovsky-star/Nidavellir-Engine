@@ -8,12 +8,15 @@
 #include "editor/plugins/AiPanels.h"
 #include "editor/plugins/ProfilerPanels.h"
 #include "editor/plugins/StoryPanels.h"
+#include "editor/plugins/TownHallPanel.h"
 #include "editor/plugins/FrontierPanels.h"
 #include "editor/plugins/ShipyardPanels.h"
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/ui/Theme.h"
 
 #include <imgui.h>
+
+#include <memory>
 
 namespace ts {
 namespace tombstone {
@@ -66,6 +69,26 @@ class PossePlugin final : public plugin::Plugin {
     panel.draw = [s]() { s->draw_network_panel(); };
     reg.add_editor_panel(std::move(panel));
 
+    // Town Hall: the persistent world (ts_mmo) on this machine.
+    town_hall_ = std::make_shared<TownHallState>();
+    town_hall_->project_dir = s->project().path;
+    {
+      auto th = town_hall_;
+      plugin::EditorPanel hall;
+      hall.id = "posse.town_hall";
+      hall.title = "Town Hall";
+      hall.menu_label = "Town Hall (Persistent World)";
+      hall.open = &th->open;
+      hall.before_begin = [] { ImGui::SetNextWindowSize(ImVec2(900, 640), ImGuiCond_FirstUseEver); };
+      hall.draw = [th] { draw_town_hall_panel(*th); };
+      reg.add_editor_panel(std::move(hall));
+      plugin::EditorMenuItem item;
+      item.menu = "Play";
+      item.label = "Town Hall (persistent world server)...";
+      item.action = [th] { th->open = true; };
+      reg.add_menu_item(std::move(item));
+    }
+
     plugin::EditorMenuItem play;
     play.menu = "Play";
     play.draw = [s]() { s->draw_posse_menu_items(); };
@@ -81,11 +104,16 @@ class PossePlugin final : public plugin::Plugin {
     if (screen_ && screen_->posse_running()) {
       screen_->stop_posse();
     }
+    if (town_hall_) town_hall_->host.stop();
+    town_hall_.reset();
     screen_ = nullptr;
   }
 
+  TownHallState* town_hall() { return town_hall_.get(); }
+
  private:
   Editor2DScreen* screen_ = nullptr;
+  std::shared_ptr<TownHallState> town_hall_;
 };
 
 }  // namespace editor

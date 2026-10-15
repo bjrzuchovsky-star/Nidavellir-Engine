@@ -33,6 +33,14 @@ bool spawn_client(const std::string& exe, const std::string& endpoint,
                   const std::string& name, const std::string& project_dir,
                   std::string* error_out = nullptr);
 
+// ts_server next to ts_admin (build/apps/server), like ts_game above.
+std::vector<std::string> server_executable_candidates();
+std::string find_server_executable();
+// Start `exe --mmo --project <dir> --port <port>` as its own process (the
+// Town Hall persistent world, in a console window of its own on Windows).
+bool spawn_mmo_server(const std::string& exe, const std::string& project_dir, int port,
+                      std::string* error_out = nullptr);
+
 }  // namespace launcher
 }  // namespace editor
 }  // namespace tombstone
