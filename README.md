@@ -281,6 +281,7 @@ Parts turn in quarter steps. An engine pushes toward its front (rotation 0 = the
 - **Physics:** each ship is a 2D rigid body. Mass, centre of mass and inertia come from the parts.
   - Thrust allocation: every powered engine fires when its push lines up with the helm, or when its torque matches the turn asked for.
   - Linear damping is 0.55/s and angular damping 1.1/s, at a fixed 60 Hz tick.
+  - Ships pass through each other by default. Set `"hull_physics": "box2d"` in sky.json to give the hulls Box2D bodies so they collide (see Physics).
 - **Steam and crew:** boilers feed engines first, then guns, then shields, in part order. Parts that miss out go offline (dimmed). With `"crew": true` (the default), parts that need hands also need bunks.
 - **Combat:**
   - Turrets aim with lead and fire shot.
@@ -532,6 +533,64 @@ campfires and night instead of the old glow squares.
 
 Smoke: `ts_admin --smoke-fx` (also part of `--smoke`).
 
+## Physics (Jolt 3D / VR, Box2D 2D)
+
+Both engines are fetched by hash and are deterministic: the smokes check the same state hash on Linux (GCC) and Windows (MSVC).
+
+### 3D and VR (Jolt Physics v5.3.0)
+- **Components** (Scene3D v14), in the 3D inspector:
+  - **Collider:** box, capsule, sphere, convex hull or mesh, with compound parts, a trigger flag and a collision layer.
+  - **Rigid Body:** static, kinematic or dynamic, plus mass, friction, restitution, damping and gravity scale.
+  - **Joint:** fixed, hinge, slider, distance or ball, with a target entity, anchor, axis and limits.
+- **Physics Settings** (View > Physics Settings): gravity, sub-steps, layer names, a symmetric collision matrix, and "debug draw in Play". All edits are undoable.
+- **Gizmos** (View > Colliders + joints): static colliders are green, dynamic orange, kinematic blue and triggers yellow. Joints show the anchor and the hinge or slider axis. Hull and mesh colliders are drawn as their model bounds.
+- **VR:** held objects are kinematic bodies that follow the hand. They knock things over, hit each other, and keep the hand's velocity when thrown. Impacts fire `on_impact`, sounds and dust.
+- **Desktop physics gun** (editor Play and ts_game):
+
+  | Input | Action |
+  |---|---|
+  | Hold F (or left mouse in ts_game) | Carry the body under the crosshair |
+  | G, or left click while carrying | Throw it |
+
+### 2D (Box2D v3.1.1)
+- **Rigid Body** and **Joint** components (scene.json v10) sit in the 2D inspector under the collider.
+  - Joints: weld, revolute, prismatic, distance, with limits.
+  - Colliders turn with the entity and can be a box, circle or capsule.
+- **Units:** px, y down, degrees clockwise, 32 px per metre, gravity 980 px/s².
+- **Riders:** the platformer player stays on its own solver. It stands on bodies and shoves them through kinematic proxies.
+- **Collision overlay:** draws the real rotated boxes, circles and capsules, with a centre dot and heading tick on each body. It follows the bodies in Play.
+
+### Scripting
+The same API is available in every language:
+
+| Language | Access |
+|---|---|
+| Lua | `physics` table (`physics3d` in 3D) |
+| Graphs | Physics nodes |
+| C++ | `tombstone/physics.h`, via `s.plugin(...)` |
+| C# | `TombStone.Scripting.Physics` |
+
+Calls include:
+- `apply_force`, `apply_impulse`, `apply_torque`
+- `set_velocity`, `velocity`, `speed`
+- `raycast`, `ray_distance`
+- `joint`, `unjoint`, `joint_value`
+- `bodies`
+
+### Airship Works hulls (opt-in)
+Set `"hull_physics": "box2d"` in `shipyard/sky.json` to fly hulls as Box2D bodies built from the part boxes.
+- Ships and wrecks then collide.
+- Mass and inertia still come from the parts, so the handling is unchanged.
+- The default (`"builtin"`) keeps the original integrator with no hull contact, and the same determinism hashes.
+
+### Smokes
+`ts_admin --smoke-physics` covers the 3D core, the VR saloon, the 2D world and the headless editor panels. `--smoke-shipyard` covers the Box2D hulls.
+
+### Limits
+- 2D gravity is fixed.
+- 2D circle and capsule bodies block riders as boxes.
+- Plugin blockers are not in Box2D.
+
 ## Project Goals
 
 - Deliver a fast, stable, and fully custom C++ engine  
@@ -579,6 +638,8 @@ src/input/              # Input stubs
 src/net/                # Transport interface + ENet backend, link simulator (lag / jitter / loss), byte codec
 src/mp/                 # Multiplayer: wire protocol, GameServer, GameClient (prediction + interpolation), LocalPosse, posse smoke
 src/physics/            # 2D physics stubs
+src/physics2d/          # Box2D v3 wrapper (px units): 2D rigid bodies, joints, Airship hulls
+src/physics3d/          # Jolt wrapper: 3D / VR rigid bodies, joints, character, casts
 src/scene/              # Scene data: Entity2D + components, TileMap, scene.json read/write (no UI, no GL)
 src/runtime/            # Game runtime: World, PlaySession (60 Hz fixed step), abstract input, Lua script host, Telegraph log (no UI, no GL)
 src/gfx/                # stb_image TextureCache + OpenGL texture uploader (admin + game)
