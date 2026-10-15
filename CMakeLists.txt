@@ -82,6 +82,11 @@ if(TS_BUILD_ADMIN OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
   add_subdirectory(src/net)
   # Multiplayer game layer (protocol, GameServer, GameClient, LocalPosse).
   add_subdirectory(src/mp)
+  # MMO backbone (ts_mmo): persistent world server, accounts (Monocypher
+  # Argon2i), SQLite persistence, interest management, chat, bots.
+  include(FetchMonocypher)
+  include(FetchSQLite)
+  add_subdirectory(src/mmo)
 endif()
 
 # Editor / Admin UI module (screens + AppFlow). Admin-only.
@@ -89,7 +94,7 @@ if(TS_BUILD_ADMIN)
   # Ship It: export pipeline (ts_export) used by the Freight Office + CLI.
   add_subdirectory(src/export)
   # Project templates + Trading Post plumbing (JSON, hashes, signatures, fetch).
-  include(FetchMonocypher)
+  # (Monocypher is fetched with the networking block above.)
   add_subdirectory(src/store)
   add_subdirectory(src/editor)
   add_subdirectory(apps/admin)

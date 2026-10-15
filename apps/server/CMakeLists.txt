@@ -11,6 +11,7 @@ target_link_libraries(ts_server
     ts_runtime
     ts_net
     ts_mp
+    ts_mmo
     ts_plugin
     ts_plugins_builtin
 )

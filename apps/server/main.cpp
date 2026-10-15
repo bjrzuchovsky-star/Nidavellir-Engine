@@ -1,11 +1,16 @@
-// ts_server: the authoritative TombStone multiplayer server. Loads
+// ts_server: the authoritative TombStone multiplayer server (the posse), and
+// with --mmo the Town Hall persistent-world server (see docs/mmo.md). Loads
 // <project>/scene.json into a runtime::World, runs it at a fixed 60 Hz and
 // seats up to four riders over UDP (ENet). Clients get snapshots
 // (unreliable) and events (reliable: joins, leaves, toasts, Telegraph).
 //
 //   ts_server --project <dir> [--port N]     open for business
 //   ts_server --smoke [--project <dir>]      headless loopback check
+//   ts_server --mmo --project <dir>          persistent world (Town Hall)
+//   ts_server --mmo-loadtest N [...]         simulated riders
 
+#include "mmo/MmoLoadTest.h"
+#include "mmo/MmoServer.h"
 #include "mp/GameServer.h"
 #include "mp/PosseSmoke.h"
 #include "net/Net.h"
@@ -17,7 +22,9 @@
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
+#include <deque>
 #include <iostream>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -38,7 +45,18 @@ constexpr const char* kUsage =
     "  --seconds S           close after S seconds (testing)\n"
     "  --smoke               headless check: loopback server + 2 and 4 clients under\n"
     "                        simulated lag, convergence, toasts, spawns, join / leave\n"
-    "  --riders N            with --smoke: one run of N riders on the --lag line\n";
+    "  --riders N            with --smoke: one run of N riders on the --lag line\n"
+    "\n"
+    "Town Hall (persistent world, docs/mmo.md):\n"
+    "       ts_server --mmo --project <dir> [--port N] [--db <file>] [--seconds S]\n"
+    "                 [--admin <user> <password>]\n"
+    "       ts_server --mmo-sample <dir>      write a sample mmo.json (two zones) there\n"
+    "       ts_server --mmo-loadtest N [--connect host:port | --project <dir>] [--seconds S]\n"
+    "  --mmo                 persistent world: accounts, SQLite, zones, chat (default port 24650)\n"
+    "  --db <file>           SQLite database (default <project>/mmo/world.db)\n"
+    "  --admin <user> <pw>   create an admin account first when it does not exist\n"
+    "  Admin console: type commands on stdin (help, who, stats, kick, ban, tp, give,\n"
+    "  announce, save, account, shutdown ...).\n";
 
 std::atomic<bool> g_quit{false};
 
@@ -53,6 +71,13 @@ struct Options {
   bool smoke = false;
   int riders = 0;  // --smoke: one custom run with this many riders
   bool help = false;
+  bool mmo = false;
+  std::string db;
+  std::string admin_user, admin_pass;
+  std::string sample;
+  int loadtest = 0;
+  std::string connect;
+  bool port_set = false;
 };
 
 bool parse_args(int argc, char** argv, Options* o, std::string* err) {
@@ -63,6 +88,7 @@ bool parse_args(int argc, char** argv, Options* o, std::string* err) {
       o->project = argv[++i];
     } else if (a == "--port" && has) {
       o->port = std::atoi(argv[++i]);
+      o->port_set = true;
       if (o->port < 0 || o->port > 65535) {
         *err = "--port must be 0..65535";
         return false;
@@ -79,6 +105,19 @@ bool parse_args(int argc, char** argv, Options* o, std::string* err) {
       o->seconds = std::atof(argv[++i]);
     } else if (a == "--riders" && has) {
       o->riders = std::atoi(argv[++i]);
+    } else if (a == "--mmo") {
+      o->mmo = true;
+    } else if (a == "--db" && has) {
+      o->db = argv[++i];
+    } else if (a == "--admin" && i + 2 < argc) {
+      o->admin_user = argv[++i];
+      o->admin_pass = argv[++i];
+    } else if (a == "--mmo-sample" && has) {
+      o->sample = argv[++i];
+    } else if (a == "--mmo-loadtest" && has) {
+      o->loadtest = std::atoi(argv[++i]);
+    } else if (a == "--connect" && has) {
+      o->connect = argv[++i];
     } else if (a == "--smoke") {
       o->smoke = true;
     } else if (a == "--help" || a == "-h") {
@@ -188,6 +227,91 @@ int run_server(const Options& opt) {
   return 0;
 }
 
+// stdin -> admin console lines (read on a detached thread).
+std::mutex g_stdin_mu;
+std::deque<std::string> g_stdin;
+
+void read_stdin() {
+  std::string line;
+  while (std::getline(std::cin, line)) {
+    std::lock_guard<std::mutex> lock(g_stdin_mu);
+    g_stdin.push_back(line);
+  }
+}
+
+int run_mmo(const Options& opt) {
+  mmo::MmoServer server;
+  mmo::MmoServerConfig cfg;
+  cfg.project_dir = opt.project;
+  cfg.db_path = opt.db;
+  cfg.port = static_cast<std::uint16_t>(opt.port_set ? opt.port : mmo::kMmoDefaultPort);
+  std::string err;
+  if (!server.start(std::move(cfg), &err)) {
+    std::cerr << "[town hall] " << err << '\n';
+    return 1;
+  }
+  if (!opt.admin_user.empty() && !server.store().account(opt.admin_user)) {
+    if (server.create_account(opt.admin_user, opt.admin_pass, true, {}, &err))
+      std::cout << "[town hall] admin account " << opt.admin_user << " created\n";
+    else
+      std::cerr << "[town hall] admin account: " << err << '\n';
+  }
+  std::signal(SIGINT, on_signal);
+  std::signal(SIGTERM, on_signal);
+  std::thread(read_stdin).detach();
+  std::cout << "[town hall] type 'help' for admin commands\n";
+  using Clock = std::chrono::steady_clock;
+  const auto t0 = Clock::now();
+  auto last = t0;
+  auto report_at = t0;
+  while (!g_quit && !server.shutdown_requested()) {
+    const auto now = Clock::now();
+    server.update(std::chrono::duration<double>(now - last).count());
+    last = now;
+    std::deque<std::string> lines;
+    {
+      std::lock_guard<std::mutex> lock(g_stdin_mu);
+      lines.swap(g_stdin);
+    }
+    for (const std::string& l : lines) {
+      if (l == "quit" || l == "exit") {
+        g_quit = true;
+        break;
+      }
+      const std::string out = server.admin(l, "console");
+      if (!out.empty()) std::cout << out << (out.back() == '\n' ? "" : "\n");
+    }
+    for (const std::string& l : server.take_log()) std::cout << "[town hall] " << l << '\n';
+    if (now - report_at >= std::chrono::seconds(30)) {
+      report_at = now;
+      std::cout << "[town hall] " << server.admin("stats") << '\n';
+    }
+    std::cout.flush();
+    if (opt.seconds >= 0.0 && std::chrono::duration<double>(now - t0).count() >= opt.seconds) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  server.stop();
+  for (const std::string& l : server.take_log()) std::cout << "[town hall] " << l << '\n';
+  return 0;
+}
+
+int run_loadtest(const Options& opt) {
+  mmo::LoadTestOptions lo;
+  lo.bots = opt.loadtest;
+  lo.seconds = opt.seconds > 0 ? opt.seconds : 20.0;
+  lo.connect = opt.connect;
+  lo.project_dir = opt.project.empty() ? (fs::temp_directory_path() / "ts_mmo_loadtest").string() : opt.project;
+  lo.db_path = opt.db.empty() ? (fs::path(lo.project_dir) / "mmo" / "loadtest.db").string() : opt.db;
+  lo.progress = [](const std::string& s) { std::cout << "[loadtest] " << s << std::endl; };
+  const mmo::LoadTestResult r = mmo::run_load_test(lo);
+  std::cout << "[loadtest] " << r.summary << '\n';
+  if (!r.ok) {
+    std::cerr << "[loadtest] FAILED: " << r.failure << '\n';
+    return 1;
+  }
+  return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -203,6 +327,16 @@ int main(int argc, char** argv) {
   }
   std::cout << "TombStone Server\n";
   if (opt.smoke) return run_smoke(opt);
+  if (!opt.sample.empty()) {
+    std::string err;
+    if (!mmo::write_sample_world(opt.sample, &err)) {
+      std::cerr << err << '\n';
+      return 1;
+    }
+    std::cout << "Wrote " << (fs::path(opt.sample) / "mmo.json").string() << '\n';
+    return 0;
+  }
+  if (opt.loadtest > 0) return run_loadtest(opt);
   if (opt.project.empty()) {
     std::cerr << "ts_server needs a project.\n" << kUsage;
     return 2;
@@ -211,5 +345,5 @@ int main(int argc, char** argv) {
     std::cerr << "No project folder at " << opt.project << '\n';
     return 2;
   }
-  return run_server(opt);
+  return opt.mmo ? run_mmo(opt) : run_server(opt);
 }
