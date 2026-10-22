@@ -1,4 +1,5 @@
 #include "editor/scripting/ScriptComponents.h"
+#include "editor/ux/EmptyState.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
 
@@ -1177,6 +1178,7 @@ StackResult draw_script_stack(std::vector<ScriptData>& stack, const ScriptStackH
         ImGui::TextDisabled("No props. Declare some in the file to tune them here.");
       }
       ImGui::BeginDisabled(host.read_only);
+      ux::AutoTipSection("ScriptProp");  // prop names come from the script itself
       for (const ScriptProp& d : info.defaults) {
         const ScriptProp* o = s.find(d.name);
         const bool overridden = o && o->value.type == d.value.type;
@@ -1212,6 +1214,8 @@ StackResult draw_script_stack(std::vector<ScriptData>& stack, const ScriptStackH
             break;
           }
         }
+        ux::TipText(d.name + ": a prop declared in " + s.path + " (file default " + describe(d.value) +
+                    ").\nTuned here per object; amber means changed from the file.");
         if (overridden) {
           ImGui::PopStyleColor();
           ImGui::SameLine();
@@ -1243,6 +1247,7 @@ StackResult draw_script_stack(std::vector<ScriptData>& stack, const ScriptStackH
         }
       }
       ImGui::EndDisabled();
+      ux::AutoTipSection("Script");
       ImGui::Unindent(8.0f);
     }
     ImGui::PopID();
@@ -1396,7 +1401,14 @@ void draw_scripts_panel_body(ScriptsPanelState& st, const ScriptsPanelHost& host
   theme::SectionHeader("Scripts", host.playing ? "saves hot-reload mid-ride" : "drag onto an entity to attach");
   const std::vector<std::string> none;
   const std::vector<std::string>& scripts = host.stack.scripts ? *host.stack.scripts : none;
-  if (scripts.empty()) ImGui::TextDisabled("No scripts in this claim yet.");
+  if (scripts.empty()) {
+    ux::EmptyState("scripts", {{"Write a starter script", [&] {
+                                  if (host.create) host.create(st.name[0] ? st.name : "my_script", lang,
+                                                               tmpl[static_cast<std::size_t>(*st.templ)].id);
+                                }, "Writes scripts/my_script with the template picked above (or the name you typed)", host.create != nullptr},
+                               {"Brand Book", [&] { BrandBook::get().open(host.stack.project_dir, host.stack.project_name); },
+                                "Visual scripting: wire nodes instead of writing code"}});
+  }
   const float list_h =
       std::min(220.0f, ImGui::GetTextLineHeightWithSpacing() * static_cast<float>(std::max<std::size_t>(scripts.size(), 1)) + 8.0f);
   ImGui::BeginChild("##script_list", ImVec2(0, list_h), ImGuiChildFlags_Borders);

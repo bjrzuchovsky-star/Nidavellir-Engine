@@ -1,4 +1,5 @@
 #include "editor/tools/SpriteSlicerPanel.h"
+#include "editor/ux/EmptyState.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
 #include "editor/tools/StringsPanel.h"
@@ -78,7 +79,9 @@ void Editor3DScreen::setup_dock_layout(unsigned int dockspace_id) {
 void Editor3DScreen::draw_ui() {
   handle_shortcuts();
   draw_menu_bar();
+  ux::BeginAutoTips("Toolbar3D");
   draw_toolbar();
+  ux::EndAutoTips();
   draw_status_bar();
 
   const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -146,7 +149,9 @@ void Editor3DScreen::draw_ui() {
   ImGui::End();
   if (ImGui::Begin(kInspector)) {
     ImGui::BeginDisabled(locked);
+    ux::BeginAutoTips("Inspector3D");
     draw_inspector();
+    ux::EndAutoTips();
     ImGui::EndDisabled();
   }
   ImGui::End();
@@ -841,14 +846,25 @@ void Editor3DScreen::draw_hierarchy() {
   hier_toggle_lock_ = hier_toggle_hide_ = 0;
   std::string needle = hier_filter_;
   for (char& c : needle) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  std::size_t rows = 0;
   for (const scene3d::Entity3D& e : scene_.entities) {
     if (filtering) {
       std::string name = e.name;
       for (char& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-      if (name.find(needle) != std::string::npos) draw_hierarchy_row(e, 0);
+      if (name.find(needle) != std::string::npos) draw_hierarchy_row(e, 0), ++rows;
     } else if (e.parent == 0) {
       draw_hierarchy_row(e, 0);
+      ++rows;
     }
+  }
+  if (rows == 0 && filtering) {
+    const std::string body = std::string("Nothing in the scene is named like \"") + hier_filter_ + "\".";
+    ux::EmptyState("search", {{"Clear search", [this] { hier_filter_[0] = '\0'; }}}, body.c_str());
+  } else if (rows == 0) {
+    const Vec3 t = scene_.editor_camera.target;
+    ux::EmptyState("hierarchy3d", {{"Create Cube", [this, t] { create_primitive("cube", {t.x, 0.0f, t.z}); }},
+                                   {"Create Camera", [this] { create_camera(); }},
+                                   {"Create Light", [this, t] { create_light(false, {t.x, 2.5f, t.z}); }}});
   }
   // Empty space below the rows: drop = unparent, RMB = create menu.
   const ImVec2 rest = ImGui::GetContentRegionAvail();
@@ -1102,6 +1118,7 @@ void Editor3DScreen::draw_assets() {
 }
 
 void Editor3DScreen::draw_telegraph() {
+  if (log_.empty()) ux::EmptyState("telegraph", {{"Play (F5)", [this] { if (!playing()) play_start(); }, nullptr, !playing()}});
   for (const runtime::LogEntry& e : log_) {
     const ImVec4 col = e.level == runtime::LogLevel::Error  ? theme::Danger()
                        : e.level == runtime::LogLevel::Warn ? theme::Warning()

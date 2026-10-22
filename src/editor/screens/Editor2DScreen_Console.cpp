@@ -4,6 +4,7 @@
 // auto-scroll, click-to-select and a status-bar badge.
 
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/EmptyState.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/plugins/ProfilerPanels.h"
 
@@ -105,11 +106,14 @@ void Editor2DScreen::draw_console() {
                     ImVec2(0, cmd_line ? -ImGui::GetFrameHeightWithSpacing() : 0.0f),
                     ImGuiChildFlags_None,
                     ImGuiWindowFlags_HorizontalScrollbar);
-  if (rows.empty()) {
-    ImGui::TextDisabled(log.size() == 0
-                            ? "Quiet on the wire. Press Play and the scripts "
-                              "will report in here."
-                            : "Nothing matches the filter.");
+  if (rows.empty() && log.size() == 0) {
+    ux::EmptyState("telegraph", {{"Play (F5)", [this] { if (!is_playing()) toggle_play(); }, nullptr, !is_playing()}});
+  } else if (rows.empty()) {
+    ux::EmptyState("telegraph_filter", {{"Show everything", [this, &log] {
+                                           telegraph_search_[0] = '\0';
+                                           log.search.clear();
+                                           log.show_info = log.show_warn = log.show_error = true;
+                                         }}});
   }
   ImGuiListClipper clipper;
   clipper.Begin(static_cast<int>(rows.size()));

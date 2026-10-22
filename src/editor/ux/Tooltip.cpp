@@ -8,7 +8,9 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <cctype>
 #include <cstdarg>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -22,6 +24,7 @@ struct Scope {
   std::string name;
   std::string section;
   ImGuiWindow* root = nullptr;
+  bool adopt = false;  // begun outside the window it covers
 };
 
 std::vector<Scope> g_scopes;
@@ -86,7 +89,12 @@ void on_item(ImGuiContext* ctx, ImGuiID id, const char* label, ImGuiItemStatusFl
   ImGuiWindow* w = g.CurrentWindow;
   if (!w || id == w->ID) return;  // the window registering itself
   Scope& s = g_scopes.back();
-  if (w->RootWindow != s.root) return;  // popups and other windows
+  // Items in the scope's window; a scope opened outside any panel (toolbar)
+  // takes the windows drawn inside it. Popups and tooltips never count.
+  if (w->RootWindow != s.root) {
+    if (!s.adopt) return;
+    if (w->RootWindow->Flags & (ImGuiWindowFlags_Popup | ImGuiWindowFlags_Tooltip)) return;
+  }
   std::string key;
   if (label[0] == '\0' || inner_part(label)) {
     key = parent_label(w);
@@ -99,8 +107,12 @@ void on_item(ImGuiContext* ctx, ImGuiID id, const char* label, ImGuiItemStatusFl
     // A component header: it names the section the fields under it live in.
     s.section = key;
     key = "Header/" + key;
+    // The audit opens every header so the fields under it get checked too.
+    if (g_audit && !(flags & ImGuiItemStatusFlags_Opened) && w->DC.StateStorage)
+      w->DC.StateStorage->SetInt(id, 1);
   }
-  const char* tip = lookup(s.section, key);
+  const char* tip = dictionary_text(s.name + "/" + key);  // "Inspector2D/Speed": units differ
+  if (!tip) tip = lookup(s.section, key);
   if (g_audit) {
     const std::string sig = s.name + "|" + s.section + "|" + key;
     if (g_seen_keys.insert(sig).second) g_seen.push_back(SeenItem{s.name, s.section, key, tip != nullptr});
@@ -160,6 +172,15 @@ std::string label_key(const char* label) {
     return "#" + s.substr(dbl + 2);
   }
   while (!s.empty() && s.back() == ' ') s.pop_back();
+  // "Events (3)": counts change, the key doesn't.
+  if (s.size() > 3 && s.back() == ')') {
+    const std::size_t open = s.rfind(" (");
+    if (open != std::string::npos && open + 2 < s.size() - 1) {
+      bool digits = true;
+      for (std::size_t i = open + 2; i + 1 < s.size(); ++i) digits &= std::isdigit(static_cast<unsigned char>(s[i])) != 0;
+      if (digits) s.erase(open);
+    }
+  }
   return s;
 }
 
@@ -171,7 +192,10 @@ void install_hook() {
 void BeginAutoTips(const char* scope) {
   install_hook();
   ImGuiWindow* w = ImGui::GetCurrentWindow();
-  g_scopes.push_back(Scope{scope ? scope : "", "", w ? w->RootWindow : nullptr});
+  Scope sc{scope ? scope : "", "", w ? w->RootWindow : nullptr};
+  // Opened between windows (the implicit "Debug" window): adopt what follows.
+  sc.adopt = !w || w->IsFallbackWindow;
+  g_scopes.push_back(sc);
   g_hover_id = 0;
   g_hover_tip.clear();
 }
@@ -212,7 +236,10 @@ const char* lookup(const std::string& section, const std::string& key) {
   if (!section.empty()) {
     if (const char* t = dictionary_text(section + "/" + key)) return t;
   }
-  return dictionary_text(key);
+  if (const char* t = dictionary_text(key)) return t;
+  // "ScriptProp/*": fields whose names come from the claim (script props).
+  if (!section.empty()) return dictionary_text(section + "/*");
+  return nullptr;
 }
 
 }  // namespace ts::tombstone::editor::ux

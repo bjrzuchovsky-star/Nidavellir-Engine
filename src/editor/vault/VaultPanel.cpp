@@ -1,4 +1,5 @@
 #include "editor/vault/VaultPanel.h"
+#include "editor/ux/EmptyState.h"
 #include "editor/ux/Tooltip.h"
 
 #include "editor/settings/Settings.h"
@@ -481,9 +482,27 @@ void VaultPanel::draw_grid() {
   }
   if (shown == 0) {
     if (!loaded_) theme::StatusInfo("Opening the library...");
-    else if (items_.empty() && host_.manager) theme::StatusInfo("The Vault is empty. Add files... or drop files on this window.");
-    else if (items_.empty()) theme::StatusInfo("The Vault is empty. Right-click an asset in the Asset Browser > Send to Vault.");
-    else theme::StatusInfo("Nothing matches.");
+    else if (items_.empty() && host_.manager)
+      ux::EmptyState("vault", {{"Add files...", [this] {
+                                  if (filepick::available()) {
+                                    const std::vector<std::string> picked = filepick::open_files("Add files to the Vault");
+                                    if (!picked.empty()) add_files(picked);
+                                  } else {
+                                    add_files({});
+                                  }
+                                }},
+                               {"Vault settings", [this] { open_settings_ = true; }, "Pick a local folder or a shared Vault server"}},
+                     "The Vault keeps assets you share between claims. Add files here, or drop them on this window.");
+    else if (items_.empty())
+      ux::EmptyState("vault", {{"Send selected asset", [this] { send_to_vault(host_.selected_asset ? host_.selected_asset() : ""); },
+                                "Send the asset selected in the Asset Browser"},
+                               {"Vault settings", [this] { open_settings_ = true; }, "Pick a local folder or a shared Vault server"}});
+    else
+      ux::EmptyState("vault_search", {{"Clear filters", [this] {
+                                         search_[0] = '\0';
+                                         tag_[0] = '\0';
+                                         kind_filter_ = dim_filter_ = 0;
+                                       }}});
   }
 }
 

@@ -1,4 +1,5 @@
 #include "editor/assets/AssetBrowser.h"
+#include "editor/ux/EmptyState.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
 #include "editor/scripting/ScriptComponents.h"
@@ -536,11 +537,24 @@ void AssetBrowser::draw_grid() {
       ++shown;
     }
   }
-  if (shown == 0) {
-    theme::StatusInfo(db_.entries().empty()
-                          ? "No assets yet. Drop .png / .jpg / .gltf / .glb / .wav / .ogg / .mp3 / "
-                            ".ttf files into the project's assets/ folder."
-                          : "Nothing matches.");
+  if (shown == 0 && db_.entries().empty() && (!host_.scripts || host_.scripts().empty())) {
+    ux::EmptyState("assets", {{"Import file...", [this] {
+                                 import_pick_folder_ = false;
+                                 import_picker_.open_file({}, {}, "Pick a file to import");
+                               }, "Images (.png .jpg), models (.gltf .glb .fbx .obj .blend), sounds (.wav .ogg .mp3), fonts (.ttf)"},
+                              {"Import folder...", [this] {
+                                 import_pick_folder_ = true;
+                                 import_picker_.open({});
+                               }, "A model pack: the model and its textures together"},
+                              {"Rescan", [this] { rescan(); }, "Look again for files copied into assets/ outside the editor"}});
+  } else if (shown == 0) {
+    const bool narrowed = !q.empty() || filter_ != 0 || !folder_.empty();
+    ux::EmptyState("asset_search", {{"Show all assets", [this] {
+                                       search_[0] = '\0';
+                                       filter_ = 0;
+                                       folder_.clear();
+                                     }, nullptr, narrowed}},
+                   !q.empty() ? "Nothing matches the search here. Clear it, or try another folder or type filter." : nullptr);
   }
 }
 

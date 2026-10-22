@@ -2,6 +2,7 @@
 // one undo step is pushed when a widget is released after an edit.
 #include "render3d/ColliderFit.h"
 #include "editor/ux/Tooltip.h"
+#include "editor/ux/EmptyState.h"
 #include "editor/fx/FxInspector.h"
 #include "editor/editor3d/Editor3DScreen.h"
 
@@ -46,7 +47,14 @@ bool edit_text(const char* label, std::string* s) {
 void Editor3DScreen::draw_inspector() {
   const scene3d::Entity3D* cur = find(primary());
   if (!cur) {
-    ImGui::TextDisabled("Select something in the viewport or Hierarchy.");
+    ux::EmptyState("inspector3d", {{"Create Cube", [this] {
+                                      const render3d::Vec3 t = scene_.editor_camera.target;
+                                      create_primitive("cube", {t.x, 0.0f, t.z});
+                                    }},
+                                   {"Create Light", [this] {
+                                      const render3d::Vec3 t = scene_.editor_camera.target;
+                                      create_light(false, {t.x, 2.5f, t.z});
+                                    }}});
     return;
   }
   scene3d::Entity3D e = *cur;

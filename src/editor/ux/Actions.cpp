@@ -87,6 +87,19 @@ bool record(const char* label, const char* shortcut, bool checkable, bool checke
   a.checked = checked;
   a.enabled = enabled && !currently_disabled();
   if (const char* t = lookup("Menu", key)) a.tip = t;
+  else if (const char* t2 = lookup("Menu", a.label)) a.tip = t2;  // "Undo###EditUndo"
+  else {
+    // Lists of scene objects ("Attach to.../Snap to target/Crate"): the
+    // submenu explains them all, "Menu/Snap to target/*".
+    std::string p = a.path;
+    while (a.tip.empty() && !p.empty()) {
+      const std::size_t slash = p.rfind('/');
+      const std::string leaf = slash == std::string::npos ? p : p.substr(slash + 1);
+      if (const char* t3 = dictionary_text("Menu/" + leaf + "/*")) a.tip = t3;
+      if (slash == std::string::npos) break;
+      p.erase(slash);
+    }
+  }
   const bool fire = a.enabled && !g_invoke.empty() && a.id == g_invoke;
   if (fire) {
     g_reg->note_ran(a.id);

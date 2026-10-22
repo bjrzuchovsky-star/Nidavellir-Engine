@@ -4,6 +4,7 @@ add_library(ts_editor
   ux/UxPrefs.cpp
   ux/UxStrings.cpp
   ux/Tooltip.cpp
+  ux/EmptyState.cpp
   ux/Actions.cpp
   ux/CommandPalette.cpp
   ux/EditorUx.cpp

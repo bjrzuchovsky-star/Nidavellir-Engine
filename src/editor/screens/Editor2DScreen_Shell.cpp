@@ -511,15 +511,9 @@ void Editor2DScreen::draw_toolbar() {
   if (theme::CopperButton("Duplicate", ImVec2(84, 0))) {
     duplicate_selected();
   }
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ux::SetTooltip("Ctrl+D");
-  }
   ImGui::SameLine();
   if (theme::DangerButton("Delete", ImVec2(70, 0))) {
     delete_selected();
-  }
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ux::SetTooltip("Del");
   }
   ImGui::EndDisabled();
 
@@ -889,7 +883,9 @@ void Editor2DScreen::draw_ui() {
     update_posse(ImGui::GetIO().DeltaTime, poll_play_input().slot(0));
   }
   draw_menu_bar();
+  ux::BeginAutoTips("Toolbar2D");
   draw_toolbar();
+  ux::EndAutoTips();
   draw_status_bar();
 
   const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -961,7 +957,9 @@ void Editor2DScreen::draw_ui() {
       if (const Entity2D* pe = workspace_.selected(); pe && pe->prefab) {
         draw_prefab_inspector(pe->id);
       }
+      ux::BeginAutoTips("Inspector2D");
       draw_inspector();
+      ux::EndAutoTips();
       ImGui::EndDisabled();
     }
     ImGui::End();

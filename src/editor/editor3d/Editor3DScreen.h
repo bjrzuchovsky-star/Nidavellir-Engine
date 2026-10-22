@@ -420,6 +420,7 @@ class Editor3DScreen final : public IScreen {
   VaultPanel& vault_panel() { return vault_panel_; }
 
   const std::deque<runtime::LogEntry>& log() const { return log_; }
+  void clear_log() { log_.clear(); }
   void note(const std::string& text, runtime::LogLevel level = runtime::LogLevel::Info);
 
  private:

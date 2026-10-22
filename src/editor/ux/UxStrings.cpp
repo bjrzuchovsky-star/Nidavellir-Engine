@@ -31,8 +31,11 @@ const std::vector<std::string>& dictionary_labels() {
   static const std::vector<std::string> labels = [] {
     std::set<std::string> s;
     for (const auto& [k, v] : table()) {
-      const std::size_t slash = k.rfind('/');
-      s.insert(slash == std::string::npos ? k : k.substr(slash + 1));
+      // "Inspector3D/Position" -> "Position"; but "Size s/m/e" is a label
+      // with slashes in it, so keep every candidate (matching is by hash).
+      s.insert(k);
+      const std::size_t first = k.find('/');
+      if (first != std::string::npos) s.insert(k.substr(first + 1));
     }
     return std::vector<std::string>(s.begin(), s.end());
   }();
@@ -45,20 +48,21 @@ EmptyText empty_text(const std::string& id) {
   static const std::unordered_map<std::string, EmptyText> t = {
       {"hierarchy2d",
        {"No objects yet.",
-        "Use Create Entity, Create Camera or Create TileMap below (also in Edit), or drag an image "
-        "from the Supply Wagon or Asset Browser into the viewport."}},
+        "Create an entity, camera or tile map below (also in the Edit menu), or drag an image from "
+        "the Supply Wagon or Asset Browser into the viewport."}},
       {"hierarchy3d",
        {"No objects yet.",
-        "Use Create > Camera, Cube or Light below (also in the Create menu), or drag a model from "
-        "the Assets panel into the viewport."}},
+        "Add a cube, camera or light below (more in the Create menu), or drag a model from the "
+        "Assets panel into the viewport."}},
       {"assets",
        {"No assets in this claim yet.",
-        "Import brings in images, models, sounds and scripts (or drop files onto the window). "
-        "Pull from the Vault to reuse assets from your other claims."}},
+        "Import brings in images, models, sounds and fonts (or drop files onto the window). Files "
+        "copied into the claim's assets folder show up after Rescan. Pull from the Vault to reuse "
+        "assets from your other claims."}},
       {"scripts",
        {"No scripts yet.",
-        "Scripts make objects do things in Play. Create one here, then attach it from an object's "
-        "Inspector with Add Component."}},
+        "Scripts make objects do things in Play. Write one here (name, language and template "
+        "above), then drag it onto an object or attach it with Add Component in the Inspector."}},
       {"vault",
        {"The Vault is empty.",
         "The Vault keeps assets you share between claims. Right-click an asset in the Asset "
@@ -66,15 +70,25 @@ EmptyText empty_text(const std::string& id) {
       {"telegraph",
        {"Nothing on the wire yet.",
         "Script messages, warnings and errors show here. Press Play (F5) and anything your scripts "
-        "log will appear."}},
+        "log will appear. Hover an error for what it means and how to fix it."}},
       {"inspector2d",
        {"Nothing selected.",
-        "Click an object in the viewport or the Hierarchy to edit it here. Ctrl+click adds to the "
-        "selection."}},
+        "Click an object in the viewport or the Hierarchy to edit it here. Ctrl+click or drag a box "
+        "to select several."}},
       {"inspector3d",
        {"Nothing selected.",
         "Click an object in the viewport or the Hierarchy to edit its transform and components "
         "here."}},
+      {"search",
+       {"No matches.", "Nothing in the scene matches the search."}},
+      {"asset_search",
+       {"Nothing here.",
+        "This folder or filter has no assets. Show all, or drop files on this panel to import them "
+        "into the folder."}},
+      {"vault_search",
+       {"No matches.", "Nothing in the Vault matches the search, tag or filters."}},
+      {"telegraph_filter",
+       {"Nothing matches the filter.", "Lines are hidden by the search or the Info / Warn / Error toggles."}},
       {"prefabs",
        {"No prefabs yet.",
         "A prefab is a saved object you can stamp out again. Select an object and use Make Prefab "

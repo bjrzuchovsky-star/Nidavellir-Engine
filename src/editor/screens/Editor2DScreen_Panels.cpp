@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/EmptyState.h"
 #include "editor/ux/Tooltip.h"
 
 #include "editor/ui/Theme.h"
@@ -87,14 +88,24 @@ void Editor2DScreen::draw_hierarchy() {
       }
       ImGui::EndDragDropTarget();
     }
+    std::size_t rows = 0;
     for (const Entity2D& e : workspace_.entities()) {
       if (filtering) {
-        if (hierarchy_row_visible(e)) draw_hierarchy_row(e, 0);
+        if (hierarchy_row_visible(e)) draw_hierarchy_row(e, 0), ++rows;
       } else if (e.parent == 0) {
         draw_hierarchy_row(e, 0);
+        ++rows;
       }
     }
     ImGui::TreePop();
+    if (rows == 0 && filtering) {
+      const std::string body = std::string("Nothing in the scene matches \"") + hierarchy_filter_ + "\" (name, id or component).";
+      ux::EmptyState("search", {{"Clear search", [this] { hierarchy_filter_[0] = '\0'; }}}, body.c_str());
+    } else if (rows == 0) {
+      ux::EmptyState("hierarchy2d", {{"Create Entity", [this] { create_entity("Entity"); }},
+                                     {"Create Camera", [this] { create_camera_2d(); }},
+                                     {"Create TileMap", [this] { create_tilemap(); }}});
+    }
   }
 
   // Queued row actions (safe now that iteration is over).
@@ -383,9 +394,9 @@ void Editor2DScreen::draw_inspector() {
   if (!e) {
     theme::SectionHeader("Inspector", "nothing selected");
     ImGui::Spacing();
-    theme::StatusInfo(
-        "Nothing in the crosshairs. Click an entity in the viewport or the "
-        "Scene list. Ctrl+click or drag a box to round up several.");
+    const bool any = !workspace_.entities().empty();
+    ux::EmptyState("inspector2d", {{"Select all", [this] { workspace_.select_all(); }, nullptr, any},
+                                   {"Create Entity", [this] { create_entity("Entity"); }}});
   } else {
     char sel_caption[48];
     std::snprintf(sel_caption, sizeof(sel_caption), "%zu selected", count);
