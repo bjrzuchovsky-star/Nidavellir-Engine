@@ -5,6 +5,8 @@
 #include <sqlite3.h>
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -490,6 +492,12 @@ bool VaultStore::publish(const Item& meta, const Version& v_in, PublishResult* o
     out->created = false;
   } else {
     out->version = versions.empty() ? 1 : versions.back().version + 1;
+    // Never reuse the number of a deleted version (claims may still hold it).
+    {
+      Stmt r(db_, "SELECT v FROM info WHERE k = ?");
+      r.text(1, "retired:" + meta.id);
+      if (r.row()) out->version = std::max(out->version, std::atoi(r.col(0).c_str()) + 1);
+    }
     out->created = true;
     v.version = out->version;
     v.created = now;
@@ -514,6 +522,132 @@ bool VaultStore::publish(const Item& meta, const Version& v_in, PublishResult* o
     return fail(std::string("cannot record the item: ") + sqlite3_errmsg(db_));
   }
   return true;
+}
+
+// ---- management ------------------------------------------------------------------
+
+std::vector<std::string> VaultStore::dependents(const std::string& id, int version) const {
+  std::vector<std::string> out;
+  Stmt s(db_, "SELECT v.item, v.version, v.manifest, i.name FROM versions v LEFT JOIN items i ON i.id = v.item"
+              " WHERE v.item <> ? ORDER BY i.name, v.version");
+  s.text(1, id);
+  while (s.row()) {
+    Version v;
+    from_json(parse_or(s.col(2), Value::object()), &v);
+    for (const Dep& d : v.deps) {
+      if (d.item == id && (version == 0 || d.version == version)) {
+        out.push_back((s.col(3).empty() ? s.col(0) : s.col(3)) + " v" + std::to_string(s.num(1)));
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+bool VaultStore::update_item(const Item& meta, Item* out, std::string* error) {
+  std::lock_guard<std::recursive_mutex> lock(mu_);
+  Item cur;
+  if (!db_ || !read_item_row(meta.id, &cur)) {
+    if (error) *error = "no such item: " + meta.id;
+    return false;
+  }
+  std::string name = meta.name;
+  while (!name.empty() && std::isspace(static_cast<unsigned char>(name.back()))) name.pop_back();
+  while (!name.empty() && std::isspace(static_cast<unsigned char>(name.front()))) name.erase(name.begin());
+  if (name.empty()) {
+    if (error) *error = "an item needs a name";
+    return false;
+  }
+  if (!Stmt(db_, "UPDATE items SET name = ?2, author = ?3, licence = ?4, description = ?5, tags = ?6, dims = ?7,"
+                 " updated = ?8 WHERE id = ?1")
+           .text(1, meta.id).text(2, name).text(3, meta.author).text(4, meta.licence).text(5, meta.description)
+           .text(6, json_text(strings_json(meta.tags))).text(7, json_text(strings_json(normalise_dims(meta.dims))))
+           .text(8, utc_now_iso()).run()) {
+    if (error) *error = std::string("cannot update the item: ") + sqlite3_errmsg(db_);
+    return false;
+  }
+  return out ? get(meta.id, out, error) : true;
+}
+
+bool VaultStore::remove_item(const std::string& id, bool* conflict, std::string* error) {
+  if (conflict) *conflict = false;
+  std::lock_guard<std::recursive_mutex> lock(mu_);
+  Item cur;
+  if (!db_ || !read_item_row(id, &cur)) {
+    if (error) *error = "no such item: " + id;
+    return false;
+  }
+  const std::vector<std::string> users = dependents(id, 0);
+  if (!users.empty()) {
+    if (conflict) *conflict = true;
+    if (error) *error = cur.name + " is still needed by " + join(users) + " (delete those first)";
+    return false;
+  }
+  if (!exec("BEGIN IMMEDIATE", error)) return false;
+  int retired = cur.latest;
+  {
+    Stmt r(db_, "SELECT v FROM info WHERE k = ?");
+    r.text(1, "retired:" + id);
+    if (r.row()) retired = std::max(retired, std::atoi(r.col(0).c_str()));
+  }
+  const bool ok = Stmt(db_, "DELETE FROM versions WHERE item = ?").text(1, id).run() &&
+                  Stmt(db_, "INSERT OR REPLACE INTO info(k, v) VALUES(?, ?)")
+                      .text(1, "retired:" + id).text(2, std::to_string(retired)).run() &&
+                  Stmt(db_, "DELETE FROM items WHERE id = ?").text(1, id).run();
+  if (!ok) {
+    exec("ROLLBACK", nullptr);
+    if (error) *error = std::string("cannot delete the item: ") + sqlite3_errmsg(db_);
+    return false;
+  }
+  return exec("COMMIT", error);
+}
+
+bool VaultStore::remove_version(const std::string& id, int version, bool* conflict, std::string* error) {
+  if (conflict) *conflict = false;
+  std::lock_guard<std::recursive_mutex> lock(mu_);
+  Item cur;
+  if (!db_ || !read_item_row(id, &cur)) {
+    if (error) *error = "no such item: " + id;
+    return false;
+  }
+  std::vector<Version> versions;
+  load_versions(id, false, &versions);
+  const auto it = std::find_if(versions.begin(), versions.end(), [&](const Version& v) { return v.version == version; });
+  if (it == versions.end()) {
+    if (error) *error = cur.name + " has no v" + std::to_string(version);
+    return false;
+  }
+  if (versions.size() == 1) {
+    if (error) *error = "v" + std::to_string(version) + " is the only version of " + cur.name + ": delete the item instead";
+    return false;
+  }
+  const std::vector<std::string> users = dependents(id, version);
+  if (!users.empty()) {
+    if (conflict) *conflict = true;
+    if (error) *error = cur.name + " v" + std::to_string(version) + " is still needed by " + join(users);
+    return false;
+  }
+  versions.erase(it);
+  const Version& newest = versions.back();
+  const std::string thumb = newest.thumbnail.empty() ? cur.thumbnail : newest.thumbnail;
+  if (!exec("BEGIN IMMEDIATE", error)) return false;
+  int retired = version;
+  {
+    Stmt r(db_, "SELECT v FROM info WHERE k = ?");
+    r.text(1, "retired:" + id);
+    if (r.row()) retired = std::max(retired, std::atoi(r.col(0).c_str()));
+  }
+  const bool ok = Stmt(db_, "DELETE FROM versions WHERE item = ? AND version = ?").text(1, id).integer(2, version).run() &&
+                  Stmt(db_, "INSERT OR REPLACE INTO info(k, v) VALUES(?, ?)")
+                      .text(1, "retired:" + id).text(2, std::to_string(retired)).run() &&
+                  Stmt(db_, "UPDATE items SET latest = ?2, thumb = ?3, updated = ?4 WHERE id = ?1")
+                      .text(1, id).integer(2, newest.version).text(3, thumb).text(4, utc_now_iso()).run();
+  if (!ok) {
+    exec("ROLLBACK", nullptr);
+    if (error) *error = std::string("cannot delete the version: ") + sqlite3_errmsg(db_);
+    return false;
+  }
+  return exec("COMMIT", error);
 }
 
 // ---- keys ------------------------------------------------------------------------

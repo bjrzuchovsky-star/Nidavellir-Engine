@@ -39,6 +39,12 @@ class Backend {
   // Writes the blob to `dest` (tmp + rename) after checking its SHA-256.
   virtual bool download(const std::string& sha, const std::string& dest, std::string* error) = 0;
   virtual bool publish(const Item& meta, const Version& v, PublishResult* out, std::string* error) = 0;
+  // Library management (needs a write key on a server). update_item edits
+  // name / author / licence / description / tags / dims; out = the item
+  // after the edit. Deletes are refused while another item depends on it.
+  virtual bool update_item(const Item& meta, Item* out, std::string* error) = 0;
+  virtual bool remove_item(const std::string& id, std::string* error) = 0;
+  virtual bool remove_version(const std::string& id, int version, std::string* error) = 0;
 };
 
 class LocalBackend : public Backend {
@@ -56,6 +62,9 @@ class LocalBackend : public Backend {
               std::string* error) override;
   bool download(const std::string& sha, const std::string& dest, std::string* error) override;
   bool publish(const Item& meta, const Version& v, PublishResult* out, std::string* error) override;
+  bool update_item(const Item& meta, Item* out, std::string* error) override;
+  bool remove_item(const std::string& id, std::string* error) override;
+  bool remove_version(const std::string& id, int version, std::string* error) override;
   const std::string& dir() const { return dir_; }
 
  private:
@@ -96,6 +105,9 @@ class RemoteBackend : public Backend {
               std::string* error) override;
   bool download(const std::string& sha, const std::string& dest, std::string* error) override;
   bool publish(const Item& meta, const Version& v, PublishResult* out, std::string* error) override;
+  bool update_item(const Item& meta, Item* out, std::string* error) override;
+  bool remove_item(const std::string& id, std::string* error) override;
+  bool remove_version(const std::string& id, int version, std::string* error) override;
 
   RemoteOptions& options() { return opt_; }
   const RemoteStats& stats() const { return stats_; }

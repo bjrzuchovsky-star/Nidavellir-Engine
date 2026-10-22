@@ -82,6 +82,16 @@ class VaultStore {
   // `meta` carries the descriptive fields (name, kind, tags...); `v` the files,
   // deps, note, uploader and thumbnail. Every blob must already be stored.
   bool publish(const Item& meta, const Version& v, PublishResult* out, std::string* error);
+  // Library management (the Vault manager in the Project Manager).
+  // update_item: name, author, licence, description, tags and dims of an
+  // existing item (kind, versions and files stay); `out` gets the result.
+  // remove_item / remove_version: refused when another item's version still
+  // depends on it (*conflict = true, the error names who). The last version
+  // can only go with its item. Blobs stay on disk (content-addressed and
+  // possibly shared with other items).
+  bool update_item(const Item& meta, Item* out, std::string* error);
+  bool remove_item(const std::string& id, bool* conflict, std::string* error);
+  bool remove_version(const std::string& id, int version, bool* conflict, std::string* error);
 
   // API keys (server). The key itself is returned once and stored hashed.
   std::string add_key(const std::string& name, bool can_write, std::string* error);
@@ -93,6 +103,8 @@ class VaultStore {
   bool exec(const char* sql, std::string* error) const;
   bool load_versions(const std::string& id, bool with_files, std::vector<Version>* out) const;
   bool read_item_row(const std::string& id, Item* out) const;
+  // "name vN" of other items' versions that depend on id (version 0 = any).
+  std::vector<std::string> dependents(const std::string& id, int version) const;
 
   std::string root_;
   sqlite3* db_ = nullptr;

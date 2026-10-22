@@ -133,6 +133,33 @@ void VaultServer::handle(const HttpRequest& req, HttpResponse* res) {
       if (!store_.get(r[1], &it, &err)) return error_reply(res, 404, err);
       return reply(res, 200, to_json(it, true, true));
     }
+    if (r.size() == 2 && req.method == "PATCH") {
+      if (!need_write()) return;
+      Value body;
+      if (!parse_body(&body)) return;
+      Item meta;
+      from_json(body, &meta);
+      meta.id = r[1];
+      Item after;
+      if (!store_.update_item(meta, &after, &err)) {
+        return error_reply(res, err.rfind("no such item", 0) == 0 ? 404 : 422, err);
+      }
+      if (log_) log_("edited " + meta.id + " by " + who.name);
+      return reply(res, 200, to_json(after, true, true));
+    }
+    if ((r.size() == 2 || (r.size() == 4 && r[2] == "versions")) && req.method == "DELETE") {
+      if (!need_write()) return;
+      bool conflict = false;
+      const int ver = r.size() == 4 ? std::atoi(r[3].c_str()) : 0;
+      if (r.size() == 4 && ver <= 0) return error_reply(res, 400, "bad version number");
+      const bool ok = r.size() == 2 ? store_.remove_item(r[1], &conflict, &err)
+                                    : store_.remove_version(r[1], ver, &conflict, &err);
+      if (!ok) return error_reply(res, conflict ? 409 : (err.rfind("no such item", 0) == 0 ? 404 : 422), err);
+      if (log_) log_("deleted " + r[1] + (ver ? " v" + std::to_string(ver) : std::string()) + " by " + who.name);
+      Value out = Value::object();
+      out.set("ok", Value::boolean(true));
+      return reply(res, 200, out);
+    }
     if (r.size() == 3 && r[2] == "versions" && req.method == "POST") {
       if (!need_write()) return;
       Value body;
