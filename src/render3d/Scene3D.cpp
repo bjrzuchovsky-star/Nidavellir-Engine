@@ -512,6 +512,13 @@ const Entity3D* Scene3D::find_named(const std::string& name) const {
   return nullptr;
 }
 std::uint64_t Scene3D::next_id() const {
+  if (id_hi > id_lo) {
+    std::uint64_t r = id_lo;
+    for (const Entity3D& e : entities) {
+      if (e.id >= id_lo && e.id < id_hi) r = std::max(r, e.id + 1);
+    }
+    return r;
+  }
   std::uint64_t m = 0;
   for (const Entity3D& e : entities) m = std::max(m, e.id);
   return m + 1;

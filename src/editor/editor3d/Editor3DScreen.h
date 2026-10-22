@@ -34,6 +34,7 @@
 #include "editor/assets/PrefabLibrary.h"
 #include "editor/vault/VaultPanel.h"
 #include "editor/ProjectInfo.h"
+#include "editor/team/TeamSession.h"
 #include "editor/editor3d/Gizmo3D.h"
 #include "editor/plugins/EditorPlugins.h"
 #include "editor/plugins/PluginsPanel.h"
@@ -431,6 +432,21 @@ class Editor3DScreen final : public IScreen {
   // Last member: unhitched first.
   EditorPlugins plugins_;
   std::map<std::string, bool> plugin_panel_open_;  // plugin panels without their own flag
+ public:
+  // Live Team Claims (src/editor/team, docs/team-claims.md).
+  TeamSession& team();
+  bool has_team() const { return team_ != nullptr; }
+  bool team_panel_open() const { return show_team_; }
+  void set_team_panel_open(bool on) { show_team_ = on; }
+  // Called by on_update; public so --smoke-team can drive headless editors.
+  void tick_team(float dt);
+
+ private:
+  friend class Team3DBinding;
+  void draw_team_panel();
+  bool show_team_ = false;
+  // Last member: destroyed first (its binding points back at this screen).
+  std::unique_ptr<TeamSession> team_;
 };
 
 // Animator inspector body (Editor3DScreen_Anim.cpp): params, layers with

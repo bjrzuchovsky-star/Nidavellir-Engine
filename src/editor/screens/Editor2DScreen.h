@@ -4,6 +4,7 @@
 #include "debugtools/DebugTools.h"
 #include "editor/plugins/ProfilerPanels.h"
 #include "editor/ProjectInfo.h"
+#include "editor/team/TeamSession.h"
 #include "editor/assets/AssetBrowser.h"
 #include "editor/assets/PrefabLibrary.h"
 #include "editor/assets/TextureCache.h"
@@ -692,6 +693,21 @@ class Editor2DScreen final : public IScreen {
   // Last member: destroyed first, so plugins unhitch while the rest of the
   // screen (the posse they may stop) is still alive.
   EditorPlugins plugins_;
+ public:
+  // Live Team Claims (src/editor/team, docs/team-claims.md).
+  TeamSession& team();
+  bool has_team() const { return team_ != nullptr; }
+  bool team_panel_open() const { return show_team_; }
+  void set_team_panel_open(bool on) { show_team_ = on; }
+  // Called by on_update; public so --smoke-team can drive headless editors.
+  void tick_team(float dt);
+
+ private:
+  friend class Team2DBinding;
+  void draw_team_panel();
+  bool show_team_ = false;
+  // Last member: destroyed first (its binding points back at this screen).
+  std::unique_ptr<TeamSession> team_;
 };
 
 }  // namespace editor

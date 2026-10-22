@@ -5,6 +5,9 @@ add_library(ts_editor
   projects/ProjectStore.cpp
   projects/ProjectStore_Delete.cpp
   workspace/Workspace2D.cpp
+  team/TeamSession.cpp
+  team/Team2D.cpp
+  team/Team3D.cpp
   workspace/Workspace2D_History.cpp
   workspace/Workspace2D_Tiles.cpp
   workspace/Workspace2D_Tools.cpp
@@ -121,6 +124,7 @@ target_link_libraries(ts_editor
     ts_ui
     ts_export
     ts_vault_lib
+    ts_team
 )
 
 target_compile_features(ts_editor PUBLIC cxx_std_20)

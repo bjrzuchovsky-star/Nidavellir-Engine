@@ -522,7 +522,8 @@ void Editor2DScreen::cancel_rename() {
   renaming_ = false;
 }
 
-AppState Editor2DScreen::on_update(float /*delta_seconds*/) {
+AppState Editor2DScreen::on_update(float delta_seconds) {
+  tick_team(delta_seconds);
   if (ImGui::GetCurrentContext() != nullptr) {
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
       std::string err;

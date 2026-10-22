@@ -143,6 +143,7 @@ void Editor3DScreen::collect_problems() {
 }
 
 AppState Editor3DScreen::on_update(float delta_seconds) {
+  tick_team(delta_seconds);
   if (vr_previewing()) {
     vr_preview_frame(delta_seconds);
     for (const world3d::Toast3D& t : world_.take_toasts()) toasts_.push_back({t.text, t.seconds});
