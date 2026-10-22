@@ -23,6 +23,7 @@ add_executable(ts_admin
   SmokeStory.cpp
   SmokeVR.cpp
   SmokeTools.cpp
+  SmokeTransform.cpp
   SmokePrefab.cpp
   SmokeAssets.cpp
   SmokeMeta.cpp

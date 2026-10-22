@@ -12,6 +12,7 @@
 #include "editor/assets/AssetLibrary.h"
 #include "editor/assets/ImportSort.h"
 #include "editor/assets/TextureCache.h"
+#include "editor/editor3d/Editor3DScreen.h"
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/settings/Settings.h"
 #include "editor/workspace/SceneIO.h"
@@ -34,6 +35,7 @@
 #endif
 #include "SmokePrefab.h"
 #include "SmokeTools.h"
+#include "SmokeTransform.h"
 #include "SmokeVR.h"
 #include "SmokePlugins.h"
 #include "SmokeAudio.h"
@@ -1292,6 +1294,10 @@ int run_console_smoke() {
   if (run_tools_smoke() != 0) {
     return 1;
   }
+  // Modal G / R / S, pivots, gizmos (see SmokeTransform.cpp).
+  if (run_transform_smoke() != 0) {
+    return 1;
+  }
   // Asset database, importers, Asset Browser (see SmokeAssets.cpp).
   if (run_assets_smoke() != 0) {
     return 1;
@@ -1588,6 +1594,152 @@ int run_tiles_shot(std::string project, const std::string& png) {
     return 1;
   }
   std::cout << "Tiles screenshot: " << png << " (" << fw << "x" << fh << ")\n";
+  return 0;
+}
+
+// ts_admin --gizmo-shot <3d | 2d> <out.png>: the 3D or 2D editor (Dusk
+// theme) on a throwaway claim with the Blender-style Transform gizmo on
+// the selection (docs/transforms.md screenshot). Never touches imgui.ini.
+int run_gizmo_shot(const std::string& which, const std::string& png) {
+  namespace fs = std::filesystem;
+  const bool three = which == "3d";
+  if (!three && which != "2d") {
+    std::cerr << "--gizmo-shot wants 3d or 2d\n";
+    return 1;
+  }
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+  GLFWwindow* window = glfwCreateWindow(1600, 940, "TombStone Gizmos", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(window);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO& io = ImGui::GetIO();
+  io.IniFilename = nullptr;
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  static gfx::GlTextureUploader gl_uploader;
+  gfx::set_texture_uploader(&gl_uploader);
+  Settings defaults;
+  apply_theme(defaults);
+
+  const fs::path dir = fs::temp_directory_path() / (three ? "ts_gizmo_shot_3d" : "ts_gizmo_shot_2d");
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  editor::ProjectInfo info;
+  info.id = three ? "gizmo_shot_3d" : "gizmo_shot_2d";
+  info.name = three ? "Gizmo Gulch (3D)" : "Gizmo Gulch (2D)";
+  info.kind = three ? editor::ProjectKind::ThreeD : editor::ProjectKind::TwoD;
+  info.path = dir.string();
+  std::unique_ptr<editor::IScreen> screen;
+  std::uint64_t wagon2d = 0;
+  editor::Editor3DScreen* e3 = nullptr;
+  editor::Editor2DScreen* e2 = nullptr;
+  if (three) {
+    auto e = std::make_unique<editor::Editor3DScreen>(info);
+    e3 = e.get();
+    screen = std::move(e);
+  } else {
+    auto e = std::make_unique<editor::Editor2DScreen>(info);
+    e2 = e.get();
+    screen = std::move(e);
+  }
+  screen->on_enter();
+  if (e3) {
+    if (const auto* crate = e3->scene().find_named("Crate")) {
+      render3d::Transform t = crate->transform;
+      t.rotation = render3d::Quat::axis_angle({0, 1, 0}, 0.45f);
+      e3->set_transform(crate->id, t, "Turn");
+      e3->select(crate->id);
+    }
+    e3->gizmo().mode = editor::GizmoMode::Transform;
+    e3->set_orientation(editor::XformSpace::Local);
+  } else {
+    auto box = [&](const char* name, float x, float y, float w, float h, float rot, const float c[3]) {
+      const std::uint64_t id = e2->create_entity(name);
+      if (Entity2D* en = e2->workspace().find(id)) {
+        en->x = x;
+        en->y = y;
+        en->w = w;
+        en->h = h;
+        en->rotation = rot;
+        en->color[0] = c[0];
+        en->color[1] = c[1];
+        en->color[2] = c[2];
+      }
+      return id;
+    };
+    const float sand[3] = {0.80f, 0.62f, 0.38f}, rust[3] = {0.62f, 0.30f, 0.20f},
+                sage[3] = {0.46f, 0.56f, 0.40f};
+    const std::uint64_t saloon = box("Saloon", -300, -60, 180, 120, 0, sand);
+    const std::uint64_t tower = box("Water Tower", 220, -140, 90, 150, 0, sage);
+    wagon2d = box("Wagon", -40, 40, 140, 70, 20, rust);
+    // Frame all three first (frame 4), then select just the wagon.
+    e2->workspace().select(saloon);
+    e2->workspace().add_to_selection(tower);
+    e2->workspace().add_to_selection(wagon2d);
+    e2->set_gizmo_mode(editor::GizmoMode::Transform);
+    e2->set_orientation(editor::XformSpace::Local);
+    e2->set_cursor2d(-200, 160);
+  }
+  int fw = 0, fh = 0;
+  std::vector<unsigned char> px;
+  for (int frame = 0; frame < 24; ++frame) {
+    glfwPollEvents();
+    glfwGetFramebufferSize(window, &fw, &fh);
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    screen->on_update(1.0f / 60.0f);
+    if (e2 && frame == 4) e2->frame_selected();
+    if (e2 && frame == 6) e2->workspace().select(wagon2d);
+    ImGui::Render();
+    glViewport(0, 0, fw, fh);
+    const ImVec4 clear = editor::theme::Charcoal();
+    glClearColor(clear.x, clear.y, clear.z, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    if (frame == 23) {
+      px.assign(static_cast<std::size_t>(fw) * fh * 4, 0);
+      glPixelStorei(GL_PACK_ALIGNMENT, 1);
+      glReadBuffer(GL_BACK);
+      glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    }
+    glfwSwapBuffers(window);
+  }
+  screen->on_exit();
+  screen.reset();
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  gfx::set_texture_uploader(nullptr);
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  fs::remove_all(dir, ec);
+  if (px.empty()) return 1;
+  std::vector<unsigned char> flipped(px.size());
+  for (int y = 0; y < fh; ++y) {
+    std::memcpy(&flipped[static_cast<std::size_t>(y) * fw * 4],
+                &px[static_cast<std::size_t>(fh - 1 - y) * fw * 4], static_cast<std::size_t>(fw) * 4);
+  }
+  for (std::size_t i = 3; i < flipped.size(); i += 4) flipped[i] = 255;
+  if (!write_png_rgba(png, fw, fh, flipped)) {
+    std::cerr << "cannot write " << png << '\n';
+    return 1;
+  }
+  std::cout << "Gizmo screenshot (" << which << "): " << png << " (" << fw << "x" << fh << ")\n";
   return 0;
 }
 
@@ -2422,6 +2574,9 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-tiles") == 0) {
       return run_tiles_smoke();
     }
+    if (std::strcmp(argv[i], "--gizmo-shot") == 0 && i + 2 < argc) {
+      return run_gizmo_shot(argv[i + 1], argv[i + 2]);
+    }
     if (std::strcmp(argv[i], "--tiles-shot") == 0 && i + 2 < argc) {
       return run_tiles_shot(argv[i + 1], argv[i + 2]);
     }
@@ -2489,6 +2644,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-prefab") == 0) {
       // Just the prefab checks (2D + 3D).
       return run_prefab_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-transform") == 0) {
+      // Just the modal transform / gizmo checks (2D + 3D).
+      return run_transform_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-tools") == 0) {
       // Just the editor tools checks (2D + 3D).
