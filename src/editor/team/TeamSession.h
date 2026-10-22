@@ -15,9 +15,11 @@
 #include "editor/ProjectInfo.h"
 #include "team/TeamClient.h"
 #include "team/TeamServer.h"
+#include "vault/VaultBackend.h"
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -58,6 +60,8 @@ struct TeamHostSettings {
   std::uint16_t port = 24650;  // UDP
   std::string pass;            // optional passcode
   std::string user;            // display name
+  std::string vault_url;       // optional: project files travel through this Vault
+  std::string vault_key;
 };
 
 struct TeamJoinSettings {
@@ -67,6 +71,9 @@ struct TeamJoinSettings {
   std::string pass;  // passcode (editor-hosted)
   std::string user;
   std::string claim = "*";  // "*" = whatever the host is running
+  // Project files travel through this Vault ("" = the API key's server is
+  // not known: assets stay local). ts_vault --team: http://host:<http port>.
+  std::string vault_url;
   // Tests: wrap the transport (net::SimTransport latency).
   std::function<std::unique_ptr<net::Transport>(std::unique_ptr<net::Transport>)> wrap_transport;
 };
@@ -79,6 +86,7 @@ struct TeamUiState {
   char key[128] = "";
   char pass[64] = "";
   char user[64] = "";
+  char vault_url[160] = "";  // optional: files travel through this Vault
   int mode = 0;  // 0 = join, 1 = host
   std::string last_error;
 };
@@ -116,6 +124,15 @@ class TeamSession {
   std::uint32_t lock_holder(std::uint64_t id) const;
   const team::RemoteMember* holder_member(std::uint64_t id) const;
 
+  // Assets (docs/team-claims.md, 4): project files under assets/ go up to
+  // the Vault by SHA-256 and come down where they differ. Scanned every 2 s
+  // while joined; sync_assets() runs one pass now.
+  void set_asset_backend(std::shared_ptr<vault::Backend> backend) { assets_ = std::move(backend); }
+  bool has_asset_backend() const { return assets_ != nullptr; }
+  void sync_assets();
+  std::uint64_t assets_sent() const { return assets_up_; }
+  std::uint64_t assets_fetched() const { return assets_down_; }
+
   std::vector<std::string> take_notes();
   std::string status_line() const;
   std::uint64_t resyncs() const { return resyncs_; }
@@ -141,6 +158,17 @@ class TeamSession {
   double presence_clock_ = 0.0, heartbeat_clock_ = 0.0, resync_clock_ = 0.0;
   std::uint64_t resyncs_ = 0, remote_applied_ = 0, sent_ = 0;
   std::vector<std::string> notes_;
+  struct LocalFile {
+    long long mtime = 0;
+    std::uint64_t size = 0;
+    std::string sha;
+  };
+  std::shared_ptr<vault::Backend> assets_;
+  std::map<std::string, LocalFile> files_;     // project-relative path -> last scan
+  std::map<std::string, std::string> synced_;  // path -> sha known to match the session
+  double asset_clock_ = 0.0;
+  bool first_asset_pass_ = true;  // joining: the session's files win
+  std::uint64_t assets_up_ = 0, assets_down_ = 0;
 };
 
 }  // namespace editor

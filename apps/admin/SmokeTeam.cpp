@@ -9,6 +9,12 @@
 #include "scene/SceneJson.h"
 #include "team/TeamClient.h"
 #include "team/TeamServer.h"
+#include "vault/Sha256.h"
+#include "vault/VaultServer.h"
+#include "vault/VaultStore.h"
+
+#include <fstream>
+#include <sstream>
 
 #include <chrono>
 #include <filesystem>
@@ -340,6 +346,88 @@ int check_2d() {
   return 0;
 }
 
+// ---- Assets: files travel through a Vault by SHA-256 ----
+
+std::string slurp(const fs::path& p) {
+  std::ifstream f(p, std::ios::binary);
+  std::stringstream ss;
+  ss << f.rdbuf();
+  return ss.str();
+}
+
+int check_assets() {
+  namespace tv = ts::tombstone::vault;
+  const fs::path vroot = fs::temp_directory_path() / "ts_team_smoke_vault";
+  std::error_code ec;
+  fs::remove_all(vroot, ec);
+  tv::VaultStore store;
+  std::string err;
+  if (!store.open(vroot.string(), &err)) return fail("vault open: " + err);
+  const std::string key = store.add_key("annie", true, &err);
+  tv::VaultServer vs(store);
+  tv::ServerOptions vo;
+  vo.port = 0;
+  if (key.empty() || !vs.start(vo, &err)) return fail("vault start: " + err);
+  const std::string url = "http://127.0.0.1:" + std::to_string(vs.port());
+  int rc = 0;
+  {
+    tc::TeamServer server;
+    tc::ServerOptions so;
+    so.port = 0;
+    so.check_key = [&store](const std::string& k, std::string* name, bool* can_write) {
+      ts::tombstone::vault::KeyInfo info;
+      if (!store.check_key(k, &info)) return false;
+      *name = info.name;
+      *can_write = info.can_write;
+      return true;
+    };
+    if (!server.start(so, &err)) return fail("asset team server: " + err);
+    ed::Editor2DScreen a(fresh("_team_assets_a", ed::ProjectKind::TwoD));
+    ed::Editor2DScreen b(fresh("_team_assets_b", ed::ProjectKind::TwoD));
+    a.on_enter();
+    b.on_enter();
+    const fs::path pa(a.team().project().path), pb(b.team().project().path);
+    fs::create_directories(pa / "assets", ec);
+    std::ofstream(pa / "assets" / "wanted.txt", std::ios::binary) << "WANTED: one ghost, dead or alive";
+    std::vector<Tick> ticks = {[&](float) { server.poll(); }, [&](float dt) { a.tick_team(dt); },
+                               [&](float dt) { b.tick_team(dt); }};
+    ed::TeamJoinSettings j;
+    j.port = server.port();
+    j.key = key;
+    j.vault_url = url;
+    j.claim = "_team_assets";
+    j.user = "Annie";
+    if (!a.team().join(j, &err) || !pump(ticks, [&] { return a.team().joined(); }, 5)) return fail("asset A join");
+    j.claim = "*";
+    j.user = "Wyatt";
+    if (!b.team().join(j, &err) || !pump(ticks, [&] { return b.team().joined(); }, 5)) return fail("asset B join");
+    const fs::path got = pb / "assets" / "wanted.txt";
+    if (!pump(ticks, [&] { return fs::exists(got) && slurp(got) == slurp(pa / "assets" / "wanted.txt"); }, 10)) {
+      rc = fail("asset reached B through the Vault");
+    }
+    const std::string sha = tv::sha256_file((pa / "assets" / "wanted.txt").string());
+    if (!rc && !fs::exists(vroot / "blobs" / sha.substr(0, 2) / sha)) rc = fail("blob stored by SHA-256");
+    // B changes it; A gets the new version.
+    if (!rc) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      std::ofstream(got, std::ios::binary | std::ios::trunc) << "REWARD: 500 dollars";
+      if (!pump(ticks, [&] { return slurp(pa / "assets" / "wanted.txt") == "REWARD: 500 dollars"; }, 10)) {
+        rc = fail("changed asset reached A");
+      }
+    }
+    if (!rc) {
+      std::cout << "[smoke] team assets: OK (A sent " << a.team().assets_sent() << ", B fetched "
+                << b.team().assets_fetched() << ", A fetched " << a.team().assets_fetched() << ")\n";
+    }
+    b.team().leave();
+    a.team().leave();
+    server.stop();
+  }
+  vs.stop();
+  fs::remove_all(vroot, ec);
+  return rc;
+}
+
 // ---- 3D: Host from my editor + a joiner ----
 
 int check_3d() {
@@ -416,6 +504,7 @@ namespace tombstone {
 int run_team_smoke() {
   if (!net::net_startup()) return fail("net startup");
   int rc = check_2d();
+  if (rc == 0) rc = check_assets();
   if (rc == 0) rc = check_3d();
   net::net_shutdown();
   if (rc == 0) std::cout << "[smoke] team (Live Team Claims): OK\n";

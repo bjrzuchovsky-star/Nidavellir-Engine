@@ -45,6 +45,8 @@ void host_now(TeamSession& t) {
   s.port = static_cast<std::uint16_t>(std::clamp(t.ui.host_port, 1, 65535));
   s.pass = t.ui.pass;
   s.user = t.ui.user;
+  s.vault_url = t.ui.vault_url;
+  s.vault_key = t.ui.key;
   std::string err;
   t.ui.last_error.clear();
   if (!t.host(s, &err)) t.ui.last_error = "Could not host: " + err;
@@ -65,6 +67,7 @@ void join_now(TeamSession& t) {
   s.key = t.ui.key;
   s.pass = t.ui.pass;
   s.user = t.ui.user;
+  s.vault_url = t.ui.vault_url;
   std::string err;
   t.ui.last_error.clear();
   if (!t.join(s, &err)) t.ui.last_error = "Could not ride out: " + err;
@@ -121,13 +124,17 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
       ImGui::InputInt("Port (UDP)", &t.ui.join_port);
       ImGui::InputText("Vault API key", t.ui.key, sizeof(t.ui.key), ImGuiInputTextFlags_Password);
       ImGui::InputText("Passcode", t.ui.pass, sizeof(t.ui.pass), ImGuiInputTextFlags_Password);
+      ImGui::InputText("Vault URL (files)", t.ui.vault_url, sizeof(t.ui.vault_url));
       ImGui::TextDisabled("ts_vault --team: use your Vault key. LAN host: the passcode, if any.");
+      ImGui::TextDisabled("With a Vault URL, files under assets/ travel by SHA-256.");
       ImGui::TextDisabled("Joining swaps this claim's scene for the posse's.");
       if (ImGui::Button("Ride out (Join)")) join_now(t);
     } else {
       ImGui::InputInt("Port (UDP)", &t.ui.host_port);
       ImGui::InputText("Passcode (optional)", t.ui.pass, sizeof(t.ui.pass),
                        ImGuiInputTextFlags_Password);
+      ImGui::InputText("Vault URL (files)", t.ui.vault_url, sizeof(t.ui.vault_url));
+      ImGui::InputText("Vault API key", t.ui.key, sizeof(t.ui.key), ImGuiInputTextFlags_Password);
       ImGui::TextDisabled("Others join with this PC's address and the port.");
       if (ImGui::Button("Open the claim (Host)")) host_now(t);
     }
@@ -141,6 +148,11 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
     }
     ImGui::Text("Edits: %llu sent, seq %llu", static_cast<unsigned long long>(t.batches_sent()),
                 static_cast<unsigned long long>(c.seq()));
+    if (t.has_asset_backend()) {
+      ImGui::Text("Files via the Vault: %llu sent, %llu fetched",
+                  static_cast<unsigned long long>(t.assets_sent()),
+                  static_cast<unsigned long long>(t.assets_fetched()));
+    }
     ImGui::Spacing();
     theme::SectionHeader("Posse");
     // Me first.

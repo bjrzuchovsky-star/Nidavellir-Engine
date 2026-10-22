@@ -2,6 +2,9 @@
 
 #include "render3d/Scene3D.h"
 #include "scene/SceneJson.h"
+#include "vault/Sha256.h"
+
+#include <filesystem>
 
 #include <algorithm>
 #include <cstdio>
@@ -60,6 +63,9 @@ bool TeamSession::host(const TeamHostSettings& s, std::string* error) {
   o.pass = s.pass;
   o.seed[binding_->scene_key()] = binding_->capture();
   loaded_ = false;
+  if (!s.vault_url.empty()) {
+    assets_ = std::make_shared<vault::RemoteBackend>(s.vault_url, s.vault_key);
+  }
   if (!client_.join(o, error)) {
     server_.reset();
     return false;
@@ -77,6 +83,7 @@ bool TeamSession::join(const TeamJoinSettings& s, std::string* error) {
   o.pass = s.pass;
   o.claim = s.claim.empty() ? "*" : s.claim;
   o.wrap_transport = s.wrap_transport;
+  if (!s.vault_url.empty()) assets_ = std::make_shared<vault::RemoteBackend>(s.vault_url, s.key);
   // Seeds a session only if nobody is riding this claim yet (ts_vault).
   if (o.claim != "*") o.seed[binding_->scene_key()] = binding_->capture();
   loaded_ = false;
@@ -94,6 +101,8 @@ void TeamSession::leave() {
   binding_->set_id_range(0, 0);
   held_.clear();
   loaded_ = false;
+  files_.clear();
+  synced_.clear();
 }
 
 void TeamSession::drop_now() {
@@ -189,6 +198,8 @@ void TeamSession::tick(double dt) {
     }
     loaded_ = true;
     held_.clear();
+    first_asset_pass_ = true;
+    asset_clock_ = 2.0;  // first file pass on the next tick
     notes_.push_back(client_.session().str("claim_name", "the claim") + ": you ride as " +
                      client_.my_name() + ".");
     send_presence(true);
@@ -230,7 +241,8 @@ void TeamSession::tick(double dt) {
     const team::SceneDoc live = binding_->capture();
     auto it = client_.confirmed().find(scene);
     const team::SceneDoc empty;
-    const team::SceneDoc& truth = it == client_.confirmed().end() ? empty : it->second;
+    team::SceneDoc truth = it == client_.confirmed().end() ? empty : it->second;
+    truth.assets.clear();  // files sync on their own (sync_assets)
     if (!live.same_as(truth)) {
       const std::vector<team::Op> fix = team::diff(live, truth);
       if (std::getenv("TS_TEAM_DEBUG")) {
@@ -242,6 +254,12 @@ void TeamSession::tick(double dt) {
       binding_->apply(fix);
       ++resyncs_;
     }
+  }
+  // 3b. Project files through the Vault.
+  asset_clock_ += dt;
+  if (assets_ && !busy && asset_clock_ >= 2.0) {
+    asset_clock_ = 0.0;
+    sync_assets();
   }
   // 4. Locks = the selection.
   std::vector<std::string> keys;
@@ -255,6 +273,102 @@ void TeamSession::tick(double dt) {
     const bool beat = heartbeat_clock_ >= 1.0;
     if (beat) heartbeat_clock_ = 0.0;
     send_presence(beat);
+  }
+}
+
+void TeamSession::sync_assets() {
+  namespace fs = std::filesystem;
+  if (!assets_ || !client_.joined() || !loaded_) return;
+  const std::string scene = binding_->scene_key();
+  const fs::path root(project_.path);
+  std::error_code ec;
+  // Scan assets/ (mtime + size decide whether to re-hash).
+  std::map<std::string, LocalFile> now;
+  const fs::path dir = root / "assets";
+  if (fs::is_directory(dir, ec)) {
+    for (fs::recursive_directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+      if (!it->is_regular_file(ec)) continue;
+      const std::string rel = fs::relative(it->path(), root, ec).generic_string();
+      if (rel.empty() || rel.find(".team-part") != std::string::npos) continue;
+      LocalFile f;
+      f.size = static_cast<std::uint64_t>(it->file_size(ec));
+      f.mtime = static_cast<long long>(it->last_write_time(ec).time_since_epoch().count());
+      auto old = files_.find(rel);
+      if (old != files_.end() && old->second.mtime == f.mtime && old->second.size == f.size) {
+        f.sha = old->second.sha;
+      } else {
+        f.sha = vault::sha256_file(it->path().string());
+      }
+      if (!f.sha.empty()) now[rel] = std::move(f);
+    }
+  }
+  files_ = now;
+  auto cit = client_.confirmed().find(scene);
+  const std::map<std::string, team::AssetRef> none;
+  const std::map<std::string, team::AssetRef>& session =
+      cit == client_.confirmed().end() ? none : cit->second.assets;
+
+  auto fetch = [&](const std::string& rel, const team::AssetRef& a) {
+    const fs::path dest = root / fs::u8path(rel);
+    fs::create_directories(dest.parent_path(), ec);
+    const fs::path part = dest.string() + ".team-part";
+    std::string err;
+    if (!assets_->download(a.sha256, part.string(), &err)) {
+      notes_.push_back("Could not fetch " + rel + " from the Vault: " + err);
+      return;
+    }
+    fs::rename(part, dest, ec);
+    if (ec) {
+      fs::remove(dest, ec);
+      fs::rename(part, dest, ec);
+    }
+    LocalFile f;
+    f.size = a.size;
+    f.sha = a.sha256;
+    f.mtime = static_cast<long long>(fs::last_write_time(dest, ec).time_since_epoch().count());
+    files_[rel] = f;
+    synced_[rel] = a.sha256;
+    ++assets_down_;
+    notes_.push_back("Fetched " + rel + " from the Vault.");
+  };
+
+  std::vector<team::Op> ups;
+  for (const auto& [rel, f] : files_) {
+    auto s = session.find(rel);
+    if (s != session.end() && s->second.sha256 == f.sha) {
+      synced_[rel] = f.sha;
+      continue;
+    }
+    auto known = synced_.find(rel);
+    if (s != session.end() && (first_asset_pass_ || (known != synced_.end() && known->second == f.sha))) {
+      fetch(rel, s->second);  // unchanged here since the last sync: theirs is newer
+      continue;
+    }
+    if (!client_.can_write()) continue;
+    // Changed (or new) here: up to the Vault, then announce the hash.
+    std::string err;
+    std::vector<std::string> missing;
+    const std::string path = (root / fs::u8path(rel)).string();
+    if (!assets_->missing({f.sha}, &missing, &err)) {
+      notes_.push_back("Vault: " + err);
+      return;
+    }
+    if (!missing.empty() && !assets_->upload(path, f.sha, f.size, &err)) {
+      notes_.push_back("Could not send " + rel + " to the Vault: " + err);
+      continue;
+    }
+    ups.push_back(team::Op::asset(rel, f.sha, f.size));
+    synced_[rel] = f.sha;
+    ++assets_up_;
+  }
+  for (const auto& [rel, a] : session) {
+    if (!files_.count(rel) && !a.sha256.empty()) fetch(rel, a);
+  }
+  first_asset_pass_ = false;
+  if (!ups.empty()) {
+    client_.submit(scene, ups.size() == 1 ? "Asset " + ups.front().key
+                                          : "Assets (" + std::to_string(ups.size()) + ")",
+                   std::move(ups));
   }
 }
 
