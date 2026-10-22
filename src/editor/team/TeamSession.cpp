@@ -108,6 +108,7 @@ bool TeamSession::active() const {
 }
 
 void TeamSession::set_cursor(float x, float y, float z, bool valid) {
+  if (cursor_pinned_) return;
   cursor_[0] = x;
   cursor_[1] = y;
   cursor_[2] = z;

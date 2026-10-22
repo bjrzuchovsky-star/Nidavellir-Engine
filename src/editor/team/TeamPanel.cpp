@@ -96,7 +96,10 @@ void draw_menu(TeamSession& t, bool* show_panel) {
 
 void draw_panel(TeamSession& t, bool* open, const char* window_id) {
   default_user(t.ui);
-  ImGui::SetNextWindowSize(ImVec2(360, 420), ImGuiCond_FirstUseEver);
+  // First open: over the top of the viewport, clear of Hierarchy / Inspector.
+  const ImVec2 ds = ImGui::GetIO().DisplaySize;
+  ImGui::SetNextWindowPos(ImVec2(std::max(0.0f, ds.x * 0.27f), 56.0f), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(340, 210), ImGuiCond_FirstUseEver);
   if (!ImGui::Begin(window_id, open)) {
     ImGui::End();
     return;

@@ -107,6 +107,11 @@ class TeamSession {
 
   // The viewport's cursor in scene space (presence); valid = over it.
   void set_cursor(float x, float y, float z, bool valid);
+  // Screenshots / demos: hold the cursor here (set_cursor is ignored).
+  void pin_cursor(float x, float y, float z) {
+    set_cursor(x, y, z, true);
+    cursor_pinned_ = true;
+  }
   // Another member holding entity `id` (0 = free or ours).
   std::uint32_t lock_holder(std::uint64_t id) const;
   const team::RemoteMember* holder_member(std::uint64_t id) const;
@@ -131,6 +136,7 @@ class TeamSession {
   bool loaded_ = false;
   float cursor_[3] = {0, 0, 0};
   bool cursor_valid_ = false;
+  bool cursor_pinned_ = false;
   std::string last_presence_;
   double presence_clock_ = 0.0, heartbeat_clock_ = 0.0, resync_clock_ = 0.0;
   std::uint64_t resyncs_ = 0, remote_applied_ = 0, sent_ = 0;

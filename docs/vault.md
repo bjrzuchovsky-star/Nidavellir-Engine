@@ -189,3 +189,7 @@ Use `--host 127.0.0.1` (and no firewall rule) to keep it on this PC only. For ac
   - a wrong chunk offset gets 409 and a bad hash gets 422.
 
 `ts_vault --smoke` starts the server on a free port and checks `health`, key auth and a blob round trip. `ts_admin --vault-shot out.png` renders the panel over a demo library.
+
+## Team sessions (Live Team Claims, 0.2.0)
+
+`ts_vault --team` also hosts live team editing sessions on UDP (default: the HTTP port + 1) with the same API keys, so one self-hosted server does the asset library and the posse. See [team-claims.md](team-claims.md).

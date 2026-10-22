@@ -16,6 +16,25 @@ One self-hosted server does both jobs: `ts_vault` already keeps the asset librar
 
 ---
 
+## Riding together (how to use stage 1)
+
+**On a LAN, no server:** open the claim, **Team > Host from my editor...**, pick a UDP port (default 24650) and an optional passcode, **Open the claim**. Everyone else opens any claim of the same kind (2D or 3D), **Team > Join a posse...**, types the host PC's address (`192.168.1.20` or `192.168.1.20:24650`) and the passcode, **Ride out**. Joining swaps their open scene for the posse's (their scene.json is autosaved with every edit from then on).
+
+**Through your Vault server:** run it with team sessions on:
+
+```
+ts_vault --root /srv/ts_vault --host 0.0.0.0 --port 8740 --team          # team UDP 8741
+ts_vault --root /srv/ts_vault --team-port 9000                             # pick the UDP port
+```
+
+The first rider joins with their Vault API key and their claim's id, which opens the session from their scene; the rest join with `*` (whatever claim the server runs, when it runs one) or the same id. The key's name is the rider's name unless they type one. Read-only keys ride as viewers. `GET /api/v1/team` (with a key) lists the open sessions. Team sessions listen on every interface; open the UDP port in the firewall only where you need it.
+
+**While riding:** the **Team** panel lists the posse with colours, the scene each is in and how many locks each holds. Selecting an entity locks it for you; others see a coloured `[locked: name]` badge in the Hierarchy and your outline in the viewport, and an edit they make to it is turned back ("Edit undone: Locked by Annie"). Remote cursors show as coloured arrows with names. Ctrl+Z undoes only your own steps. **Leave** (or closing the editor) releases your locks at once; a crashed editor's locks go after 15 s.
+
+**Checks:** `ts_admin --smoke-team` (in `--smoke` too) and `ts_vault --smoke`. `ts_admin --team-shot out.png` renders two editors riding together (docs screenshot).
+
+---
+
 ## 1. Goals and non-goals
 
 **Stage 1 goals**
