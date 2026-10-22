@@ -234,14 +234,26 @@ Value entity_json(const Entity3D& e) {
   if (e.joint) o.set("joint", physics_json::joint(*e.joint));
   if (e.prefab) o.set("prefab", prefab::link_to_json(*e.prefab));
   if (e.script) {
-    Value s = Value::object();
-    s.set("path", Value::string(e.script->path));
-    if (!e.script->props.empty()) {
-      Value props = Value::object();
-      for (const ScriptProp& p : e.script->props) props.set(p.name, script_value(p.value));
-      s.set("props", std::move(props));
+    // One enabled script: the v6-style "script" object (unchanged); a
+    // stack or a disabled script: "scripts" (v17), every one in order.
+    auto one = [](const ScriptData& sd) {
+      Value s = Value::object();
+      s.set("path", Value::string(sd.path));
+      if (!sd.props.empty()) {
+        Value props = Value::object();
+        for (const ScriptProp& p : sd.props) props.set(p.name, script_value(p.value));
+        s.set("props", std::move(props));
+      }
+      if (!sd.enabled) s.set("enabled", Value::boolean(false));
+      return s;
+    };
+    if (e.extra_scripts.empty() && e.script->enabled) {
+      o.set("script", one(*e.script));
+    } else {
+      Value list = Value::array();
+      for (const ScriptData& sd : script_stack(e)) list.push(one(sd));
+      o.set("scripts", std::move(list));
     }
-    o.set("script", std::move(s));
   }
   if (e.audio) {
     const AudioSourceData& a = *e.audio;
@@ -396,17 +408,28 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     g.throw_scale = std::clamp(v.flt("throw_scale", g.throw_scale), 0.0f, 5.0f);
     e.grabbable = g;
   }
-  if (o["script"].is_object()) {
-    const Value& v = o["script"];
-    ScriptData s;
-    s.path = v.str("path");
-    for (const auto& [k, pv] : v["props"].members()) {
-      if (pv.is_bool()) s.set(k, ScriptValue::of_bool(pv.as_bool()));
-      else if (pv.is_number()) s.set(k, ScriptValue::of_number(pv.as_number()));
-      else if (pv.is_string()) s.set(k, ScriptValue::of_text(pv.as_string()));
+  {
+    auto read_one = [](const Value& v) {
+      ScriptData s;
+      s.path = v.str("path");
+      for (const auto& [k, pv] : v["props"].members()) {
+        if (pv.is_bool()) s.set(k, ScriptValue::of_bool(pv.as_bool()));
+        else if (pv.is_number()) s.set(k, ScriptValue::of_number(pv.as_number()));
+        else if (pv.is_string()) s.set(k, ScriptValue::of_text(pv.as_string()));
+      }
+      s.enabled = v.flag("enabled", true);
+      normalize_script(s);
+      return s;
+    };
+    std::vector<ScriptData> stack;
+    if (o["scripts"].is_array()) {  // v17 stack
+      for (const Value& v : o["scripts"].items()) {
+        if (v.is_object()) stack.push_back(read_one(v));
+      }
+    } else if (o["script"].is_object()) {  // v6 .. v16: one script
+      stack.push_back(read_one(o["script"]));
     }
-    normalize_script(s);
-    e.script = s;
+    set_script_stack(e, std::move(stack));
   }
   if (o["audio"].is_object()) {
     const Value& v = o["audio"];

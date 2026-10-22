@@ -39,8 +39,11 @@ using render3d::Vec3;
 // overrides; see scene/Prefab.h).
 // v16 adds the heightmap terrain component ("terrain": data file, size,
 // LOD, splat layers, foliage types, collider) and environment fog / wind.
-// v7 .. v15 files still load.
-inline constexpr int kScene3DVersion = 16;
+// v17 lets an entity carry several scripts: "scripts" (an array of
+// {path, props, enabled}) when there is more than one or one is disabled;
+// a single enabled script is still written as "script".
+// v7 .. v16 files still load.
+inline constexpr int kScene3DVersion = 17;
 
 // ts.ai navmesh agent (v13): walks the baked navmesh with crowd avoidance,
 // optionally driven by a behaviour tree (*.bt.json).
@@ -335,6 +338,8 @@ struct Entity3D {
   std::optional<Collider3D> collider;
   std::optional<Player3D> player;
   std::optional<ScriptData> script;
+  // v17: scripts 2..n in Inspector order (see script_stack in SceneData.h).
+  std::vector<ScriptData> extra_scripts;
   std::optional<VrRig3D> vr_rig;           // v8
   std::optional<Grabbable3D> grabbable;    // v8
   // v9: parent entity id (0 = scene root). Transforms stay world-space;

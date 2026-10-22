@@ -65,6 +65,7 @@ bool parse_script(const std::string& raw, ScriptData* out) {
     return false;
   }
   out->path = map_string(*obj, "path", "");
+  out->enabled = map_bool(*obj, "enabled", true);  // v12
   out->props.clear();
   const auto props = inner_nested.find("props");
   if (props == inner_nested.end()) {
@@ -268,7 +269,22 @@ bool apply_components(Entity2D& e, const FlatMap& nested, std::string* why) {
   } else if (nested.count("animator")) {
     return bad("bad animator object");
   }
-  if (const auto sc = nested.find("script"); sc != nested.end()) {
+  if (const auto list = nested.find("scripts"); list != nested.end()) {
+    // v12: the whole stack, in Inspector order ("script" is then ignored).
+    std::vector<std::string> items;
+    if (!split_object_array(list->second, &items)) {
+      return bad("bad scripts array");
+    }
+    std::vector<ScriptData> stack;
+    for (const std::string& item : items) {
+      ScriptData data;
+      if (!parse_script(item, &data)) {
+        return bad("bad script object");
+      }
+      stack.push_back(std::move(data));
+    }
+    set_script_stack(e, std::move(stack));
+  } else if (const auto sc = nested.find("script"); sc != nested.end()) {
     ScriptData data;
     if (!parse_script(sc->second, &data)) {
       return bad("bad script object");
@@ -513,27 +529,43 @@ void write_entity(std::ostringstream& out, const Entity2D& e) {
         << ", \"playing\": " << (a.playing ? "true" : "false") << "}";
   }
   if (e.script) {
-    const ScriptData& sc = *e.script;
-    out << ",\n      \"script\": {\"path\": \"" << escape_string(sc.path)
-        << "\", \"props\": [";
-    for (std::size_t k = 0; k < sc.props.size(); ++k) {
-      const ScriptProp& p = sc.props[k];
-      out << (k > 0 ? ", " : "") << "{\"name\": \"" << escape_string(p.name)
-          << "\", ";
-      switch (p.value.type) {
-        case ScriptValue::Type::Bool:
-          out << "\"bool\": " << (p.value.flag ? "true" : "false");
-          break;
-        case ScriptValue::Type::Number:
-          out << "\"number\": " << format_double(p.value.number);
-          break;
-        case ScriptValue::Type::Text:
-          out << "\"text\": \"" << escape_string(p.value.text) << "\"";
-          break;
+    // One enabled script: the v6 "script" object, byte for byte. A stack
+    // (or a disabled script): v12 "scripts", every one in Inspector order.
+    auto one = [&out](const ScriptData& sc) {
+      out << "{\"path\": \"" << escape_string(sc.path) << "\", \"props\": [";
+      for (std::size_t k = 0; k < sc.props.size(); ++k) {
+        const ScriptProp& p = sc.props[k];
+        out << (k > 0 ? ", " : "") << "{\"name\": \"" << escape_string(p.name)
+            << "\", ";
+        switch (p.value.type) {
+          case ScriptValue::Type::Bool:
+            out << "\"bool\": " << (p.value.flag ? "true" : "false");
+            break;
+          case ScriptValue::Type::Number:
+            out << "\"number\": " << format_double(p.value.number);
+            break;
+          case ScriptValue::Type::Text:
+            out << "\"text\": \"" << escape_string(p.value.text) << "\"";
+            break;
+        }
+        out << "}";
       }
+      out << "]";
+      if (!sc.enabled) out << ", \"enabled\": false";
       out << "}";
+    };
+    if (e.extra_scripts.empty() && e.script->enabled) {
+      out << ",\n      \"script\": ";
+      one(*e.script);
+    } else {
+      out << ",\n      \"scripts\": [";
+      const std::vector<ScriptData> stack = script_stack(e);
+      for (std::size_t k = 0; k < stack.size(); ++k) {
+        out << (k > 0 ? ", " : "");
+        one(stack[k]);
+      }
+      out << "]";
     }
-    out << "]}";
   }
   if (e.audio) {
     const AudioSourceData& a = *e.audio;
@@ -853,6 +885,9 @@ bool parse(const std::string& text, SceneDoc* doc, std::string* error_out,
 std::string write(const SceneDoc& doc) {
   std::ostringstream out;
   out << "{\n";
+  // v12: optional per-entity "scripts" stack (several scripts, each with
+  // its own props and an "enabled" flag); a single enabled script is still
+  // written as "script", and v11 files load as-is.
   // v11: optional per-entity "prefab" link; v10 files load as-is.
   // v9: optional per-entity "particles" / "light" and the scene
   // "lighting" block; v8 files load as-is.

@@ -17,7 +17,8 @@ bool operator==(const Entity2D& a, const Entity2D& b) {
          a.tilemap == b.tilemap && a.sprite == b.sprite &&
          a.player == b.player && a.camera == b.camera && a.spawn == b.spawn &&
          a.collider == b.collider && a.animator == b.animator &&
-         a.script == b.script && a.rotation == b.rotation &&
+         a.script == b.script && a.extra_scripts == b.extra_scripts &&
+         a.rotation == b.rotation &&
          a.parent == b.parent && a.locked == b.locked && a.hidden == b.hidden &&
          a.audio == b.audio && a.body == b.body && a.joint == b.joint &&
          a.prefab == b.prefab;
@@ -229,9 +230,7 @@ void normalize_components(Entity2D& e) {
     }
     an.speed = std::min(an.speed, AnimatorData::kMaxSpeed);
   }
-  if (e.script) {
-    normalize_script(*e.script);
-  }
+  normalize_script_stack(e);
 }
 
 const Entity2D* find_entity(const std::vector<Entity2D>& entities,

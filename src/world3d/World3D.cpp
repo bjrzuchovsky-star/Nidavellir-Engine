@@ -641,7 +641,10 @@ const Entity2D* World3D::script_entity(std::uint64_t id) const {
   p.y = e->transform.position.z;
   p.w = e->transform.scale.x;
   p.h = e->transform.scale.z;
-  if (e->script) p.script = e->script;
+  if (e->script) {
+    p.script = e->script;
+    p.extra_scripts = e->extra_scripts;  // the rest of its script stack
+  }
   if (e->player) {
     PlayerControllerData pc;
     p.player = pc;

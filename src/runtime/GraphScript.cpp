@@ -392,11 +392,13 @@ struct Delay {
   std::uint64_t due = 0;
   std::uint64_t seq = 0;
   std::uint64_t entity = 0;
+  int slot = 0;
   int node = 0;
 };
 
 struct Instance {
   std::uint64_t entity = 0;
+  int slot = 0;  // place in the entity's script stack
   std::string path;
   std::string name;
   std::uint64_t version = 0;
@@ -423,20 +425,29 @@ struct GraphScriptHost::Impl {
   std::string abort_reason;
   int abort_node = 0;
 
-  Instance* find(std::uint64_t e) {
-    for (auto& in : instances) if (in->entity == e && !in->gone) return in.get();
+  Instance* find(std::uint64_t e, int slot) {
+    for (auto& in : instances) if (in->entity == e && in->slot == slot && !in->gone) return in.get();
     return nullptr;
   }
-  const Instance* find(std::uint64_t e) const {
+  const Instance* find(std::uint64_t e, int slot) const {
+    for (const auto& in : instances) if (in->entity == e && in->slot == slot && !in->gone) return in.get();
+    return nullptr;
+  }
+  const Instance* find_any(std::uint64_t e) const {
     for (const auto& in : instances) if (in->entity == e && !in->gone) return in.get();
     return nullptr;
   }
 
+  // Errors name the object and the graph: `"Gate" (scripts/gate.graph.json)`.
   void log(LogLevel level, const std::string& msg, const Instance* in, int node) {
     LogEntry e;
     e.level = level;
     e.channel = "script";
     e.text = node ? msg + " (node " + std::to_string(node) + ")" : msg;
+    if (in && level >= LogLevel::Warn) {
+      const Entity2D* ent = world->script_entity(in->entity);
+      e.text += " -- \"" + (ent ? ent->name : in->name) + "\" (" + in->path + ")";
+    }
     e.file = in ? in->path : std::string();
     e.entity = in ? in->entity : 0;
     e.tick = world->script_tick();
@@ -600,7 +611,7 @@ struct GraphScriptHost::Impl {
         const double secs = std::max(0.0, num(I("seconds")));
         const auto ticks = static_cast<std::uint64_t>(std::llround(secs * kScriptTickRate));
         delays.push_back({world->script_tick() + std::max<std::uint64_t>(1, ticks), ++delay_seq,
-                          in.entity, n.id});
+                          in.entity, in.slot, n.id});
         return;
       } else if (t == "flow.for") {
         const long long from = std::llround(num(I("from")));
@@ -780,8 +791,8 @@ struct GraphScriptHost::Impl {
     }
   }
   template <class Match>
-  void dispatch_one(std::uint64_t entity, const char* type, Match&& match) {
-    if (Instance* in = find(entity)) {
+  void dispatch_one(std::uint64_t entity, int slot, const char* type, Match&& match) {
+    if (Instance* in = find(entity, slot)) {
       if (in->started) dispatch(*in, type, match);
     }
     sweep();
@@ -803,39 +814,42 @@ GraphScriptHost::GraphScriptHost(ScriptWorld& world, ScriptLibrary& library, std
 
 GraphScriptHost::~GraphScriptHost() = default;
 
-bool GraphScriptHost::attach(const Entity2D& e) {
-  if (!e.script || m_->find(e.id)) return false;
+bool GraphScriptHost::attach(const Entity2D& e, int slot) {
+  if (!e.script || m_->find(e.id, slot)) return false;
   auto in = std::make_unique<Instance>();
   in->entity = e.id;
+  in->slot = slot;
   in->path = e.script->path;
   in->name = e.name;
   in->overrides = e.script->props;
   std::string err;
   in->loaded = m_->load(*in, &err);
-  if (!in->loaded) m_->log(LogLevel::Error, err + " (" + e.name + ")", in.get(), 0);
+  if (!in->loaded) m_->log(LogLevel::Error, err, in.get(), 0);
   m_->instances.push_back(std::move(in));
   return m_->instances.back()->loaded;
 }
 
 void GraphScriptHost::detach(std::uint64_t entity) {
-  if (Instance* in = m_->find(entity)) {
-    in->gone = true;
-    m_->delays.erase(std::remove_if(m_->delays.begin(), m_->delays.end(),
-                                    [&](const Delay& d) { return d.entity == entity; }),
-                     m_->delays.end());
+  for (auto& in : m_->instances) {
+    if (in->entity == entity) in->gone = true;
   }
+  m_->delays.erase(std::remove_if(m_->delays.begin(), m_->delays.end(),
+                                  [&](const Delay& d) { return d.entity == entity; }),
+                   m_->delays.end());
   m_->sweep();
 }
 
-bool GraphScriptHost::has(std::uint64_t entity) const { return m_->find(entity) != nullptr; }
+bool GraphScriptHost::has(std::uint64_t entity, int slot) const {
+  return m_->find(entity, slot) != nullptr;
+}
 
-bool GraphScriptHost::running(std::uint64_t entity) const {
-  const Instance* in = m_->find(entity);
+bool GraphScriptHost::running(std::uint64_t entity, int slot) const {
+  const Instance* in = m_->find(entity, slot);
   return in && in->loaded && in->enabled;
 }
 
-bool GraphScriptHost::has_hook(std::uint64_t entity, const char* hook) {
-  const Instance* in = m_->find(entity);
+bool GraphScriptHost::has_hook(std::uint64_t entity, int slot, const char* hook) {
+  const Instance* in = m_->find(entity, slot);
   if (!in || !in->graph) return false;
   const std::string h = hook;
   for (const GraphNode& n : in->graph->nodes) {
@@ -860,38 +874,38 @@ bool GraphScriptHost::has_hook(std::uint64_t entity, const char* hook) {
 
 std::size_t GraphScriptHost::instance_count() const { return m_->instances.size(); }
 
-void GraphScriptHost::start_pending() {
+void GraphScriptHost::start_pending(int slot) {
   for (std::size_t i = 0; i < m_->instances.size(); ++i) {
     Instance& in = *m_->instances[i];
-    if (in.started || in.gone || !in.loaded || !in.enabled) continue;
+    if (in.slot != slot || in.started || in.gone || !in.loaded || !in.enabled) continue;
     in.started = true;
     m_->dispatch(in, "event.start", [](const GraphNode&) { return true; });
   }
   m_->sweep();
 }
 
-void GraphScriptHost::trigger(bool enter, std::uint64_t trigger, std::uint64_t other) {
+void GraphScriptHost::trigger(bool enter, std::uint64_t trigger, int slot, std::uint64_t other) {
   const char* type = enter ? "event.trigger_enter" : "event.trigger_exit";
-  if (Instance* in = m_->find(trigger)) {
+  if (Instance* in = m_->find(trigger, slot)) {
     for (const GraphNode& n : in->graph ? in->graph->nodes : std::vector<GraphNode>{}) {
       if (n.type == type) in->outs[{n.id, "other"}] = N(static_cast<double>(other));
     }
   }
-  m_->dispatch_one(trigger, type, [](const GraphNode&) { return true; });
+  m_->dispatch_one(trigger, slot, type, [](const GraphNode&) { return true; });
 }
 
-void GraphScriptHost::interact(std::uint64_t target, std::uint64_t rider) {
-  if (Instance* in = m_->find(target)) {
+void GraphScriptHost::interact(std::uint64_t target, int slot, std::uint64_t rider) {
+  if (Instance* in = m_->find(target, slot)) {
     for (const GraphNode& n : in->graph ? in->graph->nodes : std::vector<GraphNode>{}) {
       if (n.type == "event.interact") in->outs[{n.id, "rider"}] = N(static_cast<double>(rider));
     }
   }
-  m_->dispatch_one(target, "event.interact", [](const GraphNode&) { return true; });
+  m_->dispatch_one(target, slot, "event.interact", [](const GraphNode&) { return true; });
 }
 
-void GraphScriptHost::hand_event(std::uint64_t target, const char* hook, const std::string& txt,
-                                 double number) {
-  Instance* in = m_->find(target);
+void GraphScriptHost::hand_event(std::uint64_t target, int slot, const char* hook,
+                                 const std::string& txt, double number) {
+  Instance* in = m_->find(target, slot);
   if (!in || !in->graph) return;
   const std::string h = hook;
   auto match = [&](const GraphNode& n) {
@@ -904,20 +918,23 @@ void GraphScriptHost::hand_event(std::uint64_t target, const char* hook, const s
       in->outs[{n.id, "number"}] = N(number);
     }
   }
-  m_->dispatch_one(target, "event.vr", match);
+  m_->dispatch_one(target, slot, "event.vr", match);
 }
 
-void GraphScriptHost::broadcast(const char* hook, const std::string& txt, double number) {
+void GraphScriptHost::broadcast(int slot, const char* hook, const std::string& txt,
+                                double number) {
   const std::string h = hook;
   auto match = [&](const GraphNode& n) {
     const auto it = n.inputs.find("hook");
     return (it == n.inputs.end() ? std::string("on_quest_completed") : text(it->second)) == h;
   };
   std::vector<std::uint64_t> ids;
-  for (const auto& in : m_->instances) if (in->started && in->graph) ids.push_back(in->entity);
+  for (const auto& in : m_->instances) {
+    if (in->started && in->graph && in->slot == slot) ids.push_back(in->entity);
+  }
   std::sort(ids.begin(), ids.end());
   for (std::uint64_t id : ids) {
-    Instance* in = m_->find(id);
+    Instance* in = m_->find(id, slot);
     if (!in || !in->started || !in->graph) continue;
     const std::shared_ptr<const Graph> keep = in->graph;
     for (const GraphNode& n : keep->nodes) {
@@ -965,7 +982,7 @@ void GraphScriptHost::run_timers(std::uint64_t tick) {
     if (best == m_->delays.end()) break;
     const Delay d = *best;
     m_->delays.erase(best);
-    Instance* in = m_->find(d.entity);
+    Instance* in = m_->find(d.entity, d.slot);
     if (!in || !in->enabled || !in->graph || !in->graph->node(d.node)) continue;
     m_->steps = 0;
     m_->aborted = false;
@@ -978,24 +995,24 @@ void GraphScriptHost::run_timers(std::uint64_t tick) {
   m_->sweep();
 }
 
-void GraphScriptHost::tick(double dt) {
+void GraphScriptHost::tick(double dt, int slot) {
   const std::size_t n = m_->instances.size();
   for (std::size_t i = 0; i < n && i < m_->instances.size(); ++i) {
     Instance& in = *m_->instances[i];
-    if (!in.started || !in.graph) continue;
+    if (in.slot != slot || !in.started || !in.graph) continue;
     const std::shared_ptr<const Graph> g = in.graph;
     // Buttons: rising edges per On Button node.
     for (const GraphNode& node : g->nodes) {
       if (node.type != "event.key") continue;
       const auto si = node.inputs.find("slot");
       const auto bi = node.inputs.find("button");
-      const int slot = si == node.inputs.end() ? 1 : static_cast<int>(num(si->second));
+      const int rider = si == node.inputs.end() ? 1 : static_cast<int>(num(si->second));
       const std::uint32_t bit = button_bit(bi == node.inputs.end() ? "action" : text(bi->second));
-      const std::uint32_t now = m_->world->script_buttons(slot - 1) & bit;
+      const std::uint32_t now = m_->world->script_buttons(rider - 1) & bit;
       const std::uint32_t was = in.prev_buttons[node.id];
       in.prev_buttons[node.id] = now;
       if (now && !was) {
-        in.outs[{node.id, "slot"}] = N(slot);
+        in.outs[{node.id, "slot"}] = N(rider);
         const int id = node.id;
         m_->dispatch(in, "event.key", [id](const GraphNode& x) { return x.id == id; });
       }
@@ -1047,7 +1064,7 @@ bool GraphScriptHost::reload(const std::string& rel) {
 }
 
 const ScriptValue* GraphScriptHost::variable(std::uint64_t entity, const std::string& name) const {
-  const Instance* in = m_->find(entity);
+  const Instance* in = m_->find_any(entity);
   if (!in) return nullptr;
   const auto it = in->vars.find(name);
   return it == in->vars.end() ? nullptr : &it->second;

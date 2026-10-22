@@ -66,21 +66,21 @@ class CompiledScriptHost : public ScriptLanguageHost {
   ~CompiledScriptHost() override;
 
   const char* language() const override;
-  bool attach(const Entity2D& e) override;
+  bool attach(const Entity2D& e, int slot) override;
   void detach(std::uint64_t entity) override;
-  bool has(std::uint64_t entity) const override;
-  bool running(std::uint64_t entity) const override;
-  bool has_hook(std::uint64_t entity, const char* hook) override;
+  bool has(std::uint64_t entity, int slot) const override;
+  bool running(std::uint64_t entity, int slot) const override;
+  bool has_hook(std::uint64_t entity, int slot, const char* hook) override;
   std::size_t instance_count() const override;
-  void start_pending() override;
-  void trigger(bool enter, std::uint64_t trigger, std::uint64_t other) override;
-  void interact(std::uint64_t target, std::uint64_t rider) override;
-  void hand_event(std::uint64_t target, const char* hook, const std::string& text,
+  void start_pending(int slot) override;
+  void trigger(bool enter, std::uint64_t trigger, int slot, std::uint64_t other) override;
+  void interact(std::uint64_t target, int slot, std::uint64_t rider) override;
+  void hand_event(std::uint64_t target, int slot, const char* hook, const std::string& text,
                   double number) override;
   void ui_event(const std::string& widget, bool change, double value,
                 const std::string& text) override;
-  void broadcast(const char* hook, const std::string& text, double number) override;
-  void tick(double dt) override;
+  void broadcast(int slot, const char* hook, const std::string& text, double number) override;
+  void tick(double dt, int slot) override;
   // Rebuilds + reloads when the sources changed (in the background unless
   // blocking). 1 when it swapped a new module in.
   int reload_changed() override;
