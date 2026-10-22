@@ -78,6 +78,7 @@ Every system is built with performance as the primary goal:
 - Viewport: orbit (RMB or Alt+LMB), pan (MMB), zoom (wheel), fly (hold RMB + WASD / Q E), F frames the selection.
 - Selection: click to pick, Ctrl+click to add or remove.
 - Gizmos (Blender style): Q Tweak, W Move, E Rotate, T Scale, Y Transform. G / R / S move, rotate and scale with the mouse (X / Y / Z lock an axis, type a value, Enter / Esc). Snap is on the toolbar (Shift+G; Ctrl flips it while dragging); steps are 0.5 m, 15° and 0.25 by default. See [docs/transforms.md](docs/transforms.md).
+- Cameras are scene objects (Create > Camera): Play looks through the active one with the highest priority, scripts switch with `camera.set_active`, Numpad0 looks through and Ctrl+Alt+Numpad0 aligns to the view. Attach to / Follow / Snap to / Copy transform / Align to surface are on the context menus and the Object menu. See [docs/camera.md](docs/camera.md).
 - Panels: Hierarchy, Inspector for every component, Assets (primitives, `.gltf` / `.glb`, images), Environment (sky, sun, shadows, ambient), Telegraph and Plugins.
 - Assets: drag a model into the viewport to place it on the ground with a collider fitted to it. Drop an image on an entity to make it the albedo texture.
 - Every edit is one undo step (Ctrl+Z / Ctrl+Y) and autosaves `scene.json`.
@@ -694,6 +695,7 @@ Editor2D runs in an ImGui **Docking** layout (Hierarchy over Supply Wagon and Sc
 | Nudge | Arrows (1 px, or 1 cell with snap); Shift+Arrows (10 px, or 4 cells) |
 | Snap / grid | Shift+G (or Shift+Tab) snap, `'` grid, `[` `]` halve/double cell size, or toolbar cell field |
 | Move / rotate / scale | G / R / S over the viewport (Blender style, [docs/transforms.md](docs/transforms.md)) |
+| Cameras / attach tools | Create > Camera; Object menu or right-click > Attach to... / Follow... / Snap to object ([docs/camera.md](docs/camera.md)) |
 | Select all / clear / rename | Ctrl+A / Esc / F2 |
 
 When snap is on, drag moves, nudges, duplicates, and Inspector X/Y/W/H edits all land on the grid. In a group drag the primary snaps and the others keep their spacing. The Inspector edits the primary selection (amber outline) and shows the selection count. Every tool autosaves `scene.json`. `--smoke` covers snap, nudge, multi-select, box select, duplicate, and delete, plus autosave and persistence.

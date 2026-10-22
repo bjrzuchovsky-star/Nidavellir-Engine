@@ -18,6 +18,13 @@ Work in progress for 0.2.0. Optional features ship as Trading Post plugins rathe
 - `ts_admin --smoke-camera` (also in `--smoke`); `ts_admin --camera-shot camera <out.png>`. Docs: [docs/camera.md](docs/camera.md).
 - Not yet: the 2D editor shows the camera's view rectangle rather than a rendered preview inset.
 
+### Attach, follow and snap tools (2D and 3D)
+- On the viewport and Hierarchy context menus and the new **Object** menu: **Attach to...** (keep current position or snap to the target), **Attach to bone...** (3D; rides the animated bone), **Detach** (keeps the world transform), **Follow...** (position, rotation or both, keeping the offset, editable in the Inspector), **Remove Follow**, **Snap to object**, **Copy transform from** (position / rotation / scale checkboxes) and **Align to surface** (3D: rays down plus the surface normal; 2D: onto the top of the tile or collider below).
+- Pick the target from a list, with the **eyedropper** (click it in the viewport or Hierarchy, Esc cancels), or by dragging in the Hierarchy (**Alt+drag** snaps).
+- Every tool works on the whole selection as one undo step and refuses loops. Locked objects are not moved.
+- Scene format: 3D v18 adds `"follow"`, `"parent_bone"` and `"bone_offset"`; 2D v13 adds `"follow"`.
+- `ts_admin --smoke-attach` (also in `--smoke`); `ts_admin --camera-shot attach <out.png>`. Docs: [docs/transforms.md](docs/transforms.md#attach-follow-and-snap-tools).
+
 ### Script components: several scripts per object (2D and 3D)
 - Objects carry any number of scripts (up to 16) in any mix of Lua, visual graph, C++ and C#, like Unity components. Each one is an Inspector section with its own properties, an on/off checkbox, move up / down and remove, all undoable. Properties are saved per object, per script.
 - Order: on one object, events reach scripts in Inspector order; across the world each phase runs stack position by stack position, keeping lua, graph, cpp, cs within a position. Single-script claims behave as before.

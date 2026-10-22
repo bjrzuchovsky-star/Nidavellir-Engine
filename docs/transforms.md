@@ -83,6 +83,27 @@ These keys used to do something else:
 
 Keys that are unchanged: Delete, Ctrl+Z / Ctrl+Y, Ctrl+D, Ctrl+G, F, H, End (3D), arrows, and the tile tools V / B / E / U / I. X is an axis key only while a transform runs; the rest of the time Ctrl+X still cuts. None of these keys fire while you type in a text field or rename something.
 
+## Attach, follow and snap tools
+
+In both editors these tools are on the viewport and Hierarchy context menus and on the **Object** menu. Each acts on the whole selection (children come along with their parent) and is one undo step. Locked objects are not moved.
+
+| Tool | What it does |
+|---|---|
+| **Attach to... > Keep current position** | Parents the selection to the target without moving it |
+| **Attach to... > Snap to target** | Parents it and moves it onto the target's origin, taking the target's rotation |
+| **Attach to bone...** (3D) | Parents to a bone of a skinned model. Each tick the object rides the animated bone. Tick **Snap to bone** to move it onto the bone |
+| **Detach** | Back to the scene root, keeping the world transform |
+| **Follow... > Position and rotation / Position only / Rotation only** | A constraint rather than a parent. In Play the object follows the target's position, rotation or both, keeping its current offset (in the target's frame when rotation follows too). The offsets can be edited in the Inspector's **Follow** section. **Remove Follow** drops it |
+| **Snap to object** | Moves the selection onto the target's position and rotation without parenting |
+| **Copy transform from** | Copies the target's position, rotation and / or scale (checkboxes) |
+| **Align to surface** | 3D: casts down onto whatever is below (meshes, terrain, ground), rests the object's bottom on the hit and tilts it to the surface normal. 2D: drops the object onto the top of the first solid tile or collider below it and stands it upright |
+
+**Choosing the target.** Every target menu lists the scene's objects. **Pick in viewport (eyedropper)** lets you click the target in the viewport or the Hierarchy instead; Esc cancels. In the Hierarchy, dragging a row onto another attaches it keeping its position, and **Alt+drag** snaps it to the target. You can't attach an object to itself or to one of its own children; the editor refuses.
+
+Cameras are ordinary objects, so these tools work on them too, for example to follow the rider's position only, or ride a cart. See [camera.md](camera.md).
+
+Tests: `ts_admin --smoke-attach` (also part of `--smoke`) covers keep and snap with multi-select, loop refusal, detach, the eyedropper, snap to, copy transform, align to surface in 2D and 3D, follow in Play (position, rotation, both), a bone attachment riding Old Hank's wave animation, and undo for every one. `ts_admin --camera-shot attach <out.png>` renders the context menu with **Attach to...** open.
+
 ## Not yet
 
 - Mirroring with a negative scale is clamped at a small positive size.

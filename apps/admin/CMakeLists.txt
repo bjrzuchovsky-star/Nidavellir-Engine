@@ -26,6 +26,7 @@ add_executable(ts_admin
   SmokeTools.cpp
   SmokeTransform.cpp
   SmokeCamera.cpp
+  SmokeAttach.cpp
   SmokePrefab.cpp
   SmokeAssets.cpp
   SmokeMeta.cpp

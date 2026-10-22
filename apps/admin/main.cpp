@@ -1301,8 +1301,11 @@ int run_console_smoke() {
   if (run_transform_smoke() != 0) {
     return 1;
   }
-  // Scene cameras (see SmokeCamera.cpp).
+  // Scene cameras + attach tools (see SmokeCamera.cpp / SmokeAttach.cpp).
   if (run_camera_smoke() != 0) {
+    return 1;
+  }
+  if (run_attach_smoke() != 0) {
     return 1;
   }
   // Asset database, importers, Asset Browser (see SmokeAssets.cpp).
@@ -2918,6 +2921,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-camera") == 0) {
       // Just the scene camera checks (2D + 3D, migration).
       return run_camera_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-attach") == 0) {
+      // Just the attach / follow / snap / align checks (2D + 3D).
+      return run_attach_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-transform") == 0) {
       // Just the modal transform / gizmo checks (2D + 3D).
