@@ -170,13 +170,28 @@ struct PhysicsSettings3D {
   bool operator==(const PhysicsSettings3D& o) const = default;
 };
 
-// Third-person rider: WASD relative to the camera, jump, gravity.
+// The rider: WASD relative to the camera, jump, gravity. ThirdPerson: an
+// orbit camera behind and above (camera_distance / camera_height; Q / Z or
+// right-drag turn it). FirstPerson: the camera rides at eye_height above
+// the rider's feet (or on a child entity with a `camera` component) and
+// looks where the rider faces; right-drag / mouse looks up and down.
 struct Player3D {
+  enum class View : std::uint8_t { ThirdPerson, FirstPerson };
   float speed = 4.5f;        // m/s
   float jump_speed = 5.5f;   // m/s up
   float camera_distance = 6.0f;
   float camera_height = 2.5f;
+  View view = View::ThirdPerson;  // "view": "first_person" in scene.json
+  float eye_height = 1.6f;        // first person: metres above the feet
   bool operator==(const Player3D& o) const = default;
+};
+
+// A play camera (scene.json "camera"). With no rider in the scene, Play
+// looks through the first one (its position, looking down its -Z). A
+// child of a first-person rider marks the eye point instead.
+struct PlayCamera3D {
+  float fov = 60.0f;  // vertical, degrees
+  bool operator==(const PlayCamera3D& o) const = default;
 };
 
 // VR player rig ("dimension": "vr"): the headset's floor origin starts at
@@ -322,6 +337,7 @@ struct Entity3D {
   std::optional<Joint3D> joint;              // v14
   std::optional<prefab::Link> prefab;        // v15
   std::optional<terrain::Terrain3D> terrain; // v16
+  std::optional<PlayCamera3D> camera;        // v16 (optional, additive)
   bool operator==(const Entity3D& o) const = default;
 };
 

@@ -184,7 +184,16 @@ Value entity_json(const Entity3D& e) {
     p.set("jump_speed", Value::number(e.player->jump_speed));
     p.set("camera_distance", Value::number(e.player->camera_distance));
     p.set("camera_height", Value::number(e.player->camera_height));
+    if (e.player->view == Player3D::View::FirstPerson) {
+      p.set("view", Value::string("first_person"));
+      p.set("eye_height", Value::number(e.player->eye_height));
+    }
     o.set("player", std::move(p));
+  }
+  if (e.camera) {
+    Value c = Value::object();
+    c.set("fov", Value::number(e.camera->fov));
+    o.set("camera", std::move(c));
   }
   if (e.vr_rig) {
     const VrRig3D& r = *e.vr_rig;
@@ -334,7 +343,14 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     p.jump_speed = std::clamp(v.flt("jump_speed", p.jump_speed), 0.0f, 100.0f);
     p.camera_distance = std::clamp(v.flt("camera_distance", p.camera_distance), 1.0f, 100.0f);
     p.camera_height = std::clamp(v.flt("camera_height", p.camera_height), -20.0f, 50.0f);
+    if (v.str("view") == "first_person") p.view = Player3D::View::FirstPerson;
+    p.eye_height = std::clamp(v.flt("eye_height", p.eye_height), 0.1f, 10.0f);
     e.player = p;
+  }
+  if (o["camera"].is_object()) {
+    PlayCamera3D c;
+    c.fov = std::clamp(o["camera"].flt("fov", c.fov), 10.0f, 150.0f);
+    e.camera = c;
   }
   if (o["vr_rig"].is_object()) {
     const Value& v = o["vr_rig"];

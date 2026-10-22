@@ -83,6 +83,7 @@ struct Input3D {
   float move_right = 0.0f;    // -1 .. 1
   float move_forward = 0.0f;  // -1 .. 1 (away from the camera)
   float turn = 0.0f;          // camera yaw, degrees this tick (+ = left)
+  float look = 0.0f;          // first person: pitch, degrees this tick (+ = up)
   bool jump = false;
   bool action = false;
   // Desktop physics-gun: hold `grab` to pick up the dynamic body in front of
@@ -179,6 +180,7 @@ class World3D final : public runtime::ScriptWorld {
   Vec3 player_velocity() const { return vel_; }
   const render3d::Camera3D& camera() const { return camera_; }
   float camera_yaw() const { return cam_yaw_; }
+  float camera_pitch() const { return cam_pitch_; }
   std::size_t static_colliders() const { return statics_.size(); }
   std::size_t contacts_last_tick() const { return contacts_; }
   std::size_t script_count() const;
@@ -433,6 +435,7 @@ class World3D final : public runtime::ScriptWorld {
   bool action_latched_ = false;
   bool jump_latched_ = false;
   float cam_yaw_ = 0.0f;
+  float cam_pitch_ = 0.0f;  // first person only, degrees (-85..85)
   std::size_t contacts_ = 0;
   std::uint64_t trigger_events_ = 0;
   std::uint64_t tick_ = 0;

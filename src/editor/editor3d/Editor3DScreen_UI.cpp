@@ -409,6 +409,8 @@ world3d::Input3D Editor3DScreen::poll_play_input() const {
                     (down(ImGuiKey_S) || down(ImGuiKey_DownArrow) ? 1.0f : 0.0f);
   in.turn = (down(ImGuiKey_Q) ? -1.0f : 0.0f) +
             (down(ImGuiKey_Z) ? 1.0f : 0.0f);
+  // First-person riders look up / down.
+  in.look = (down(ImGuiKey_PageUp) ? 1.0f : 0.0f) - (down(ImGuiKey_PageDown) ? 1.0f : 0.0f);
   in.jump = down(ImGuiKey_Space);
   in.action = ImGui::IsKeyPressed(ImGuiKey_E, false);
   // Physics gun: hold F to carry the body ahead, G (or left click while

@@ -66,6 +66,10 @@ struct Actor {
   Facing dir = Facing::Down;  // four-way heading; kept while idle
   float in_x = 0.0f;    // move intent of the latest tick (-1..1)
   float in_y = 0.0f;
+  // Platformer riders: vertical speed carried between ticks (px / s, down
+  // is +) and whether the latest tick ended standing on something solid.
+  float fall_vy = 0.0f;
+  bool grounded = false;
   AnimState anim;
   // Script-driven state (World_Script.cpp).
   bool hidden = false;   // hide(): skipped by the draw list
@@ -183,7 +187,7 @@ class World final : public ScriptWorld {
 
   // Build from authored entities (copied). Each PlayerController whose
   // slot has a SpawnPoint starts centred on it. project_dir anchors the
-  // project-relative image paths. False (with a reason) for an empty scene.
+  // project-relative image paths. An empty scene builds (an empty ride).
   bool build(const std::vector<Entity2D>& entities,
              const std::string& project_dir = std::string(),
              std::string* error_out = nullptr);

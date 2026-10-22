@@ -346,6 +346,23 @@ void Editor3DScreen::draw_inspector() {
     t.after("Camera");
     ImGui::DragFloat("Cam height", &p.camera_height, 0.05f, 0.0f, 50.0f);
     t.after("Camera");
+    int view = p.view == scene3d::Player3D::View::FirstPerson ? 1 : 0;
+    if (ImGui::Combo("View", &view, "Third person (orbit camera)\0First person\0")) {
+      p.view = view == 1 ? scene3d::Player3D::View::FirstPerson
+                         : scene3d::Player3D::View::ThirdPerson;
+      t.activated = true;
+      t.commit = "Player view";
+    }
+    if (p.view == scene3d::Player3D::View::FirstPerson) {
+      ImGui::DragFloat("Eye height", &p.eye_height, 0.01f, 0.1f, 10.0f, "%.2f m");
+      t.after("Eye height");
+    }
+  }
+  if (component("Camera", e.camera.has_value(), [&] { e.camera = scene3d::PlayCamera3D{}; },
+                [&] { e.camera.reset(); })) {
+    ImGui::DragFloat("FOV", &e.camera->fov, 0.2f, 10.0f, 150.0f, "%.0f deg");
+    t.after("Camera FOV");
+    ImGui::TextDisabled("Play looks through it when there is no rider.");
   }
   if (component("Animator", e.animator.has_value(),
                 [&] { e.animator = scene3d::default_locomotion_animator(); },

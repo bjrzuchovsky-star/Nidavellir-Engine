@@ -136,11 +136,26 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
   phys_build();
   // Camera starts behind the rider, looking the way the editor camera did.
   cam_yaw_ = scene.editor_camera.yaw;
+  cam_pitch_ = 0.0f;
   camera_.position = {0, 3, 8};
   camera_.target = {0, 1, 0};
+  camera_.fov_y_degrees = 60.0f;
   follow_camera(true);
+  const Entity3D* play_cam = nullptr;
+  for (const Entity3D& e : ents_) {
+    if (e.camera && (!player_ || e.parent != player_)) {
+      play_cam = &e;
+      break;
+    }
+  }
   if (vr_) {
     vr_update_poses();
+  } else if (!player_ && play_cam) {
+    // No rider: look through the scene's camera entity.
+    camera_.position = play_cam->transform.position;
+    camera_.target = play_cam->transform.position +
+                     play_cam->transform.rotation.rotate(Vec3{0.0f, 0.0f, -1.0f});
+    camera_.fov_y_degrees = play_cam->camera->fov;
   } else if (!player_) {
     const float yaw = render3d::radians(scene.editor_camera.yaw);
     const float pitch = render3d::radians(scene.editor_camera.pitch);
@@ -254,6 +269,37 @@ void World3D::follow_camera(bool snap) {
   const Entity3D* p = find(player_);
   if (!p) return;
   const scene3d::Player3D cfg = p->player ? *p->player : scene3d::Player3D{};
+  if (cfg.view == scene3d::Player3D::View::FirstPerson) {
+    // Eyes: a child camera entity when there is one, else eye_height
+    // above the bottom of the rider's capsule.
+    Vec3 eye;
+    bool from_child = false;
+    for (const Entity3D& c : ents_) {
+      if (c.parent == p->id && c.camera) {
+        eye = c.transform.position;
+        camera_.fov_y_degrees = c.camera->fov;
+        from_child = true;
+        break;
+      }
+    }
+    if (!from_child) {
+      float h = 2.0f;
+      Vec3 off;
+      if (p->collider) {
+        h = p->collider->size.y;
+        off = p->collider->offset;
+      }
+      eye = p->transform.position + off + Vec3{0.0f, cfg.eye_height - 0.5f * h, 0.0f};
+    }
+    const float yaw = render3d::radians(cam_yaw_);
+    const float pitch = render3d::radians(cam_pitch_);
+    const Vec3 look{-std::sin(yaw) * std::cos(pitch), std::sin(pitch),
+                    -std::cos(yaw) * std::cos(pitch)};
+    camera_.position = eye;
+    camera_.target = eye + look;
+    (void)snap;
+    return;
+  }
   const float yaw = render3d::radians(cam_yaw_);
   const Vec3 target = p->transform.position + Vec3{0, 1.0f, 0};
   Vec3 want = p->transform.position +
@@ -283,6 +329,8 @@ void World3D::move_player(const Input3D& in) {
   if (!p) return;
   const scene3d::Player3D cfg = p->player ? *p->player : scene3d::Player3D{};
   cam_yaw_ += in.turn;
+  const bool first_person = cfg.view == scene3d::Player3D::View::FirstPerson;
+  if (first_person) cam_pitch_ = std::clamp(cam_pitch_ + in.look, -85.0f, 85.0f);
   const float yaw = render3d::radians(cam_yaw_);
   const Vec3 fwd{-std::sin(yaw), 0.0f, -std::cos(yaw)};
   const Vec3 right{std::cos(yaw), 0.0f, -std::sin(yaw)};
@@ -294,7 +342,9 @@ void World3D::move_player(const Input3D& in) {
   const float accel = grounded_ ? 1.0f : 0.15f;
   vel_.x += (wish.x * cfg.speed - vel_.x) * accel;
   vel_.z += (wish.z * cfg.speed - vel_.z) * accel;
-  if (render3d::length(wish) > 0.05f) {
+  if (first_person) {
+    p->transform.rotation = Quat::axis_angle({0, 1, 0}, yaw);  // faces the view
+  } else if (render3d::length(wish) > 0.05f) {
     p->transform.rotation = Quat::axis_angle({0, 1, 0}, std::atan2(-wish.x, -wish.z));
   }
   if (in.jump && grounded_) {

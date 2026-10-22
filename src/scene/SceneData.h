@@ -27,8 +27,19 @@ struct PlayerControllerData {
   static constexpr float kMinSpeed = 1.0f;
   static constexpr float kMaxSpeed = 5000.0f;
 
+  static constexpr float kMaxGravity = 20000.0f;
+  static constexpr float kMaxJumpSpeed = 10000.0f;
+
+  // TopDown: the stick moves on both axes (the default). Platformer: the
+  // stick moves left / right, gravity pulls down and up / action jumps
+  // while standing on something solid (scene.json "mode": "platformer").
+  enum class Mode : std::uint8_t { TopDown, Platformer };
+
   int slot = 0;          // 0..kMaxPlayers-1
   float speed = 160.0f;  // world px per second at full stick
+  Mode mode = Mode::TopDown;
+  float gravity = 1400.0f;    // px / s^2 (platformer)
+  float jump_speed = 560.0f;  // px / s take-off speed (platformer)
 
   bool operator==(const PlayerControllerData& o) const = default;
 };

@@ -702,6 +702,30 @@ void Editor2DScreen::draw_inspector_gameplay(std::uint64_t id) {
       }
       track_inspector_item("Edit Speed");
     }
+    int mode = e->player->mode == PlayerControllerData::Mode::Platformer ? 1 : 0;
+    if (ImGui::Combo("Movement", &mode, "Top-down\0Platformer (gravity, jump)\0")) {
+      edit("Player Movement", "", [&](Entity2D& t) {
+        if (t.player) {
+          t.player->mode = mode == 1 ? PlayerControllerData::Mode::Platformer
+                                     : PlayerControllerData::Mode::TopDown;
+        }
+      });
+    }
+    if (Entity2D* t = workspace_.find(id);
+        t && t->player && t->player->mode == PlayerControllerData::Mode::Platformer) {
+      if (ImGui::DragFloat("Gravity", &t->player->gravity, 10.0f, 0.0f,
+                           PlayerControllerData::kMaxGravity, "%.0f px/s2",
+                           ImGuiSliderFlags_AlwaysClamp)) {
+        mark_dirty();
+      }
+      track_inspector_item("Edit Gravity");
+      if (ImGui::DragFloat("Jump Speed", &t->player->jump_speed, 5.0f, 0.0f,
+                           PlayerControllerData::kMaxJumpSpeed, "%.0f px/s",
+                           ImGuiSliderFlags_AlwaysClamp)) {
+        mark_dirty();
+      }
+      track_inspector_item("Edit Jump Speed");
+    }
     if (theme::DangerButton("Remove Player", ImVec2(120, 0))) {
       edit("Remove Player", "Unsaddled", [](Entity2D& t) { t.player.reset(); });
     }

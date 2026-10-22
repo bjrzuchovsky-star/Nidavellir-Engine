@@ -186,6 +186,11 @@ void normalize_components(Entity2D& e) {
     }
     e.player->speed =
         std::min(e.player->speed, PlayerControllerData::kMaxSpeed);
+    if (!(e.player->gravity >= 0.0f)) e.player->gravity = 0.0f;
+    e.player->gravity = std::min(e.player->gravity, PlayerControllerData::kMaxGravity);
+    if (!(e.player->jump_speed >= 0.0f)) e.player->jump_speed = 0.0f;
+    e.player->jump_speed =
+        std::min(e.player->jump_speed, PlayerControllerData::kMaxJumpSpeed);
   }
   if (e.camera) {
     Camera2DData& c = *e.camera;

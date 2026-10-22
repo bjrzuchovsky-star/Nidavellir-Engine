@@ -41,10 +41,9 @@ bool World::build(const std::vector<Entity2D>& entities,
   clear();
   solidity_ = solidity;
   project_dir_ = project_dir;
-  if (entities.empty()) {
-    if (error_out) *error_out = "The scene is empty. Nothing to ride.";
-    return false;
-  }
+  // An empty scene rides too (a Truly Blank claim): no actors, the camera
+  // stays at the origin and ticks still count.
+  (void)error_out;
   actors_.reserve(entities.size());
   for (const Entity2D& e : entities) {
     Actor a;
@@ -328,6 +327,40 @@ void World::move_rider(Actor& a, const PlayerInput& in) {
   a.in_y = my;
   const float x0 = a.data.x;
   const float y0 = a.data.y;
+  if (a.data.player->mode == PlayerControllerData::Mode::Platformer) {
+    // Side-on: the stick walks, gravity pulls, up / action jumps off the
+    // ground. Collision is the same axis-at-a-time sweep as top-down.
+    const PlayerControllerData& pc = *a.data.player;
+    const float walk = std::clamp(in.move_x, -1.0f, 1.0f);
+    a.in_x = walk;
+    a.in_y = 0.0f;
+    const bool jump = in.move_y < -0.5f || in.held(kButtonAction);
+    if (jump && a.grounded) {
+      a.fall_vy = -pc.jump_speed;
+      a.grounded = false;
+    }
+    a.fall_vy = std::min(a.fall_vy + pc.gravity * dt, 2400.0f);
+    const float want_dy = a.fall_vy * dt;
+    move_body(a, walk * pc.speed * dt, 0.0f);
+    const float before = a.data.y;
+    move_body(a, 0.0f, want_dy);
+    const float got_dy = a.data.y - before;
+    a.grounded = false;
+    if (want_dy > 0.0f && got_dy < want_dy - 0.01f) {
+      a.grounded = true;  // landed
+      a.fall_vy = 0.0f;
+    } else if (want_dy < 0.0f && got_dy > want_dy + 0.01f) {
+      a.fall_vy = 0.0f;   // bumped a ceiling
+    }
+    a.vx = (a.data.x - x0) / dt;
+    a.vy = (a.data.y - y0) / dt;
+    if (walk > 0.0f) {
+      a.facing = 1;
+    } else if (walk < 0.0f) {
+      a.facing = -1;
+    }
+    return;
+  }
   move_body(a, mx * a.data.player->speed * dt, my * a.data.player->speed * dt);
   // Report what actually happened (0 when stopped flush on a wall).
   a.vx = (a.data.x - x0) / dt;
@@ -341,6 +374,8 @@ void World::move_rider(Actor& a, const PlayerInput& in) {
 
 void World::step(const InputFrame& input) {
   if (actors_.empty()) {
+    input_ = input;
+    ++tick_;
     return;
   }
   TS_PROFILE_SCOPE("world.step");

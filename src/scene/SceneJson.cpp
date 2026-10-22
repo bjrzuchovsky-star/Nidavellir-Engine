@@ -204,6 +204,11 @@ bool apply_components(Entity2D& e, const FlatMap& nested, std::string* why) {
     PlayerControllerData p;
     p.slot = map_int(*pl, "slot", 0);
     p.speed = map_float(*pl, "speed", p.speed);
+    if (map_string(*pl, "mode", "") == "platformer") {
+      p.mode = PlayerControllerData::Mode::Platformer;
+    }
+    p.gravity = map_float(*pl, "gravity", p.gravity);
+    p.jump_speed = map_float(*pl, "jump_speed", p.jump_speed);
     e.player = p;
   } else if (nested.count("player")) {
     return bad("bad player object");
@@ -460,7 +465,13 @@ void write_entity(std::ostringstream& out, const Entity2D& e) {
   }
   if (e.player) {
     out << ",\n      \"player\": {\"slot\": " << e.player->slot
-        << ", \"speed\": " << format_float(e.player->speed) << "}";
+        << ", \"speed\": " << format_float(e.player->speed);
+    // Top-down riders keep the old two-field object (byte-identical files).
+    if (e.player->mode == PlayerControllerData::Mode::Platformer) {
+      out << ", \"mode\": \"platformer\", \"gravity\": " << format_float(e.player->gravity)
+          << ", \"jump_speed\": " << format_float(e.player->jump_speed);
+    }
+    out << "}";
   }
   if (e.camera) {
     const Camera2DData& c = *e.camera;

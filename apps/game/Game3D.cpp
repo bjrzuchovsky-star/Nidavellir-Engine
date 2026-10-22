@@ -256,7 +256,9 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
         glfwGetCursorPos(win, &mx, &my);
         if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
           in.turn -= static_cast<float>(mx - mx0) * 0.3f;
+          in.look -= static_cast<float>(my - my0) * 0.3f;  // first person
         }
+        in.look += (key(GLFW_KEY_PAGE_UP) ? 2.0f : 0.0f) - (key(GLFW_KEY_PAGE_DOWN) ? 2.0f : 0.0f);
         mx0 = mx;
         my0 = my;
         in.jump = key(GLFW_KEY_SPACE);
