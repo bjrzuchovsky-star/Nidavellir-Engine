@@ -1,6 +1,7 @@
 // Model import smokes. All test assets are generated below (our own tiny
 // box / hat / bar / quad models and textures) in a temp folder.
 #include "SmokeModels.h"
+#include "SmokeBounds.h"
 
 #include "editor/assets/AssetDb.h"
 #include "editor/assets/AssetImport.h"
@@ -10,6 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -214,6 +216,26 @@ SourceSet build_source(int version, bool wide_strips, float box_scale) {
       h.f32(o + 96 + (r * 4 + 3) * 4, -mpos[r]);
     }
     h.f32(o + 156, 1.0f);  // qAlignment w
+  }
+  // Hitbox set "default": a body box on the root, a head box (group 1,
+  // named) on the arm bone, in bone space.
+  {
+    const std::size_t hset = h.alloc(12);
+    h.i32(172, 1);
+    h.i32(176, static_cast<std::int32_t>(hset));
+    const std::size_t hbs = h.alloc(2 * 68);
+    h.i32(hset + 4, 2);
+    h.i32(hset + 8, static_cast<std::int32_t>(hbs - hset));
+    h.i32(hbs, 0);
+    h.i32(hbs + 4, 3);
+    h.vec3(hbs + 8, -8, -16, 0);
+    h.vec3(hbs + 20, 8, 16, 32);
+    h.i32(hbs + 68, 1);
+    h.i32(hbs + 68 + 4, 1);
+    h.vec3(hbs + 68 + 8, 4, 4, 8);   // min / max swapped on purpose
+    h.vec3(hbs + 68 + 20, -4, -4, 0);
+    h.str_rel(hset, hset, "default");
+    h.str_rel(hbs + 68, hbs + 68 + 32, "head_box");
   }
   // Animation "idle": 2 frames at 10 fps; bone 0 raw position, bone 1 raw
   // rotation + an RLE position track (z: 0 then 16 on top of 32).
@@ -649,6 +671,33 @@ int check_source_model(const fs::path& mdl, int version) {
   if (m.lods != 2 || m.skin_families != 2 || m.body_groups.size() != 2 || m.body_groups[1].options.size() != 2) {
     return fail(W, tag + "lods / skins / body groups");
   }
+  // Hitboxes: per-bone boxes; the head box sits 32..40 inches up (Source
+  // Z) = 0.8128..1.016 m (Y up) in the rest pose, x +-4 inches.
+  if (m.hitbox_set != "default" || m.hitboxes.size() != 2 || m.hitboxes[1].bone != 1 ||
+      m.hitboxes[1].bone_name != "arm" || m.hitboxes[1].group != 1 || m.hitboxes[1].name != "head_box" ||
+      m.hitboxes[0].group != 3) {
+    return fail(W, tag + "hitbox set (" + std::to_string(m.hitboxes.size()) + " boxes)");
+  }
+  {
+    std::vector<r3::Mat4> hm;
+    r3::hitbox_matrices(m, nullptr, &hm);
+    const r3::Aabb head = r3::Aabb{m.hitboxes[1].min, m.hitboxes[1].max}.transformed(hm[1]);
+    if (!near(head.min.y, 0.8128f) || !near(head.max.y, 1.016f) || !near(head.max.x, 0.1016f) ||
+        !near(head.min.x, -0.1016f)) {
+      return fail(W, tag + "head hitbox rest placement y " + std::to_string(head.min.y) + ".." +
+                         std::to_string(head.max.y));
+    }
+    // Posed: the idle clip's frame 1 lifts the arm 16 inches; the head box follows.
+    r3::Pose pose = r3::rest_pose(m.skeleton);
+    r3::sample_clip(m.clips[ci], 0.1f, false, &pose);
+    std::vector<r3::Mat4> pal;
+    r3::skin_palette(m.skeleton, pose, &pal);
+    r3::hitbox_matrices(m, &pal, &hm);
+    const r3::Aabb lifted_head = r3::Aabb{m.hitboxes[1].min, m.hitboxes[1].max}.transformed(hm[1]);
+    if (!near(lifted_head.min.y, 0.8128f + 0.4064f)) {
+      return fail(W, tag + "head hitbox posed y " + std::to_string(lifted_head.min.y));
+    }
+  }
   return 0;
 }
 
@@ -993,6 +1042,7 @@ const char* kX =
 
 int run_models_smoke() {
   if (int r = run_mdl_smoke()) return r;
+  if (int r = run_bounds_smoke()) return r;
   const char* W = "models";
   std::error_code ec;
   const fs::path dir = fs::temp_directory_path(ec) / "ts_smoke_models" / "formats";
@@ -1101,9 +1151,45 @@ int run_models_smoke() {
     o.blender_path = (dir / "no_blender_here" / "blender.exe").string();
     r3::Model m;
     std::string err;
-    if (r3::load_model((dir / "thing.blend").string(), o, &m, &err) || err.find("Install Blender") == std::string::npos ||
-        err.find("glTF") == std::string::npos) {
+    if (r3::load_model((dir / "thing.blend").string(), o, &m, &err) || err.find("Blender executable") == std::string::npos ||
+        err.find("glTF") == std::string::npos || err.find("Looked in") == std::string::npos) {
       return fail(W, ".blend without Blender should explain (" + err + ")");
+    }
+  }
+  // Steam libraryfolders.vdf (new layout with "path" keys and escapes, the
+  // old one with numbered values) and the editor's Blender setting.
+  {
+    const std::string vdf_new =
+        "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"C:\\\\Program Files (x86)\\\\Steam\"\n"
+        "\t\t\"label\"\t\t\"\"\n\t\t\"apps\"\n\t\t{\n\t\t\t\"365670\"\t\t\"1234\"\n\t\t}\n\t}\n"
+        "\t\"1\"\n\t{\n\t\t\"path\"\t\t\"E:\\\\SteamLibrary\"\n\t\t\"totalsize\"\t\t\"0\"\n\t}\n}\n";
+    const std::string vdf_old =
+        "\"LibraryFolders\"\n{\n\t\"TimeNextStatsReport\"\t\t\"1700000000\"\n\t\"ContentStatsID\"\t\t\"-123\"\n"
+        "\t\"1\"\t\t\"D:\\\\Games\\\\Steam Library\"\n\t\"2\"\t\t\"/mnt/games/steam\"\n}\n";
+    const auto a = r3::steam_library_folders_from_vdf(vdf_new);
+    const auto b = r3::steam_library_folders_from_vdf(vdf_old);
+    if (a.size() != 2 || a[0] != "C:\\Program Files (x86)\\Steam" || a[1] != "E:\\SteamLibrary") {
+      return fail(W, "libraryfolders.vdf (new layout): " + std::to_string(a.size()) + " folders" +
+                         (a.empty() ? std::string() : ", first " + a[0]));
+    }
+    if (b.size() != 2 || b[0] != "D:\\Games\\Steam Library" || b[1] != "/mnt/games/steam") {
+      return fail(W, "libraryfolders.vdf (old layout): " + std::to_string(b.size()) + " folders");
+    }
+    if (r3::steam_library_folders_from_vdf("").size() != 0) return fail(W, "empty vdf");
+    const char* tsb = std::getenv("TS_BLENDER");
+    if (!tsb || !*tsb) {
+#ifdef _WIN32
+      const fs::path fake = dir / "Steam Library" / "steamapps" / "common" / "Blender" / "blender.exe";
+#else
+      const fs::path fake = dir / "Steam Library" / "steamapps" / "common" / "Blender" / "blender";
+#endif
+      fs::create_directories(fake.parent_path(), ec);
+      spit(fake, "not really blender");
+      r3::set_blender_setting(fake.parent_path().string());  // a folder works too
+      std::vector<std::string> looked;
+      const std::string got = r3::find_blender("", &looked);
+      r3::set_blender_setting("");
+      if (fs::path(got) != fake) return fail(W, "Blender setting not used (" + got + ")");
     }
   }
   std::cout << "[smoke] models OK (" << formats << "; .blend without Blender explains itself"

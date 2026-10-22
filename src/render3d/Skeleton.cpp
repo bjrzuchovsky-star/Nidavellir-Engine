@@ -171,7 +171,8 @@ void joint_matrices(const Skeleton& skel, const Pose& pose, std::vector<Mat4>* o
 
 void skin_palette(const Skeleton& skel, const Pose& pose, std::vector<Mat4>* out) {
   joint_matrices(skel, pose, out);
-  if (out->size() > static_cast<std::size_t>(kMaxBones)) out->resize(kMaxBones);
+  // Every joint (the renderer takes kMaxBones per draw; primitives of
+  // bigger skeletons carry a joint_map, see ModelPrimitive).
   for (std::size_t i = 0; i < out->size(); ++i) (*out)[i] = (*out)[i] * skel.joints[i].inverse_bind;
 }
 

@@ -275,6 +275,7 @@ void Editor3DScreen::draw_menu_bar() {
   if (ImGui::BeginMenu("View")) {
     ImGui::MenuItem("Grid", "G", &scene_.show_grid);
     ImGui::MenuItem("Colliders + joints", nullptr, &show_colliders_);
+    ImGui::MenuItem("Hitboxes (model $hbox)", nullptr, &show_hitboxes_);
     ImGui::MenuItem("Physics Settings", nullptr, &show_physics_);
     ImGui::MenuItem("Terrain + Foliage", nullptr, &show_terrain_);
     if (ImGui::MenuItem("Physics debug draw (Play)", nullptr, scene_.physics.debug_draw, !playing())) {

@@ -143,6 +143,14 @@ bool import_asset(const std::string& abs_path, Kind kind, const Value& settings,
         o.set("body_groups", groups);
       }
       if (!m.collision_hulls.empty()) o.set("hulls", Value::number(static_cast<double>(m.collision_hulls.size())));
+      if (!m.hitboxes.empty()) {
+        o.set("hitboxes", Value::number(static_cast<double>(m.hitboxes.size())));
+        o.set("hitbox_set", Value::string(m.hitbox_set));
+      }
+      // Bumped when what the importer reports changes (2: bounds of what
+      // is drawn - rest pose, import scale, no collision / LOD meshes);
+      // older .meta info is reimported on the next scan.
+      o.set("importer_version", Value::number(assetdb::kModelImporterVersion));
       if (!m.clips.empty()) {
         Value names = Value::array();
         for (const render3d::Clip& c : m.clips) names.push(Value::string(c.name));

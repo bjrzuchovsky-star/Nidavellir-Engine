@@ -84,6 +84,7 @@ Settings SettingsStore::load(std::string* error_out) {
   s.update_last_check = json_mini::get_string(*parsed, "update_last_check", s.update_last_check);
   s.update_cached_version = json_mini::get_string(*parsed, "update_cached_version", s.update_cached_version);
   s.update_cached_url = json_mini::get_string(*parsed, "update_cached_url", s.update_cached_url);
+  s.blender_path = json_mini::get_string(*parsed, "blender_path", s.blender_path);
 
   if (s.projects_root.empty()) {
     s.projects_root = default_projects_root();
@@ -134,6 +135,7 @@ bool SettingsStore::save(const Settings& settings, std::string* error_out) {
           {"update_last_check", normalized.update_last_check},
           {"update_cached_version", normalized.update_cached_version},
           {"update_cached_url", normalized.update_cached_url},
+          {"blender_path", normalized.blender_path},
       },
       {
           {"auto_login_dev", normalized.auto_login_dev},

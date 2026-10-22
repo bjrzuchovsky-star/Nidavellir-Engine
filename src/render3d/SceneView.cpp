@@ -233,6 +233,22 @@ void SceneView::draw_box(const Mat4& world, const Aabb& b, const float* rgba, bo
   for (const auto& e : edges) r_->draw_line(c[e[0]], c[e[1]], rgba, !on_top);
 }
 
+void SceneView::draw_hitboxes(const scene3d::Entity3D& e) {
+  if (!r_ || !e.mesh) return;
+  const Model* m = model(e.mesh->source);
+  if (!m || m->hitboxes.empty()) return;
+  const std::vector<Mat4>* pal = (e.skin_palette && !e.skin_palette->empty()) ? e.skin_palette.get() : nullptr;
+  std::vector<Mat4> mats;
+  hitbox_matrices(*m, pal, &mats);
+  const Mat4 world = e.transform.matrix();
+  for (std::size_t i = 0; i < m->hitboxes.size(); ++i) {
+    const ModelHitbox& h = m->hitboxes[i];
+    // Head (group 1) red, everything else teal.
+    const float head[4] = {1.0f, 0.3f, 0.25f, 0.95f}, body[4] = {0.3f, 0.9f, 0.95f, 0.85f};
+    draw_box(world * mats[i], Aabb{h.min, h.max}, h.group == 1 ? head : body, true);
+  }
+}
+
 void SceneView::draw_circle(const Mat4& world, const Vec3& c, float r, int plane, const float* rgba) {
   constexpr int kSeg = 20;
   Vec3 prev;
@@ -383,9 +399,17 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
       }
       if (m.model->primitives[i].mesh.skinned()) {
         // Posed by the animator this tick, else the rest pose.
-        const std::vector<Mat4>& pal =
+        const std::vector<Mat4>& full =
             (e.skin_palette && !e.skin_palette->empty()) ? *e.skin_palette : m.rest_palette;
-        r_->draw_skinned(m.meshes[i], mat, world, pal.data(), pal.size(), e.mesh->cast_shadows);
+        const ModelPrimitive& prim = m.model->primitives[i];
+        if (prim.joint_map.empty()) {
+          r_->draw_skinned(m.meshes[i], mat, world, full.data(), full.size(), e.mesh->cast_shadows);
+        } else {
+          // Big skeleton: this primitive's own <= kMaxBones palette.
+          primitive_palette(prim, full, &prim_palette_);
+          r_->draw_skinned(m.meshes[i], mat, world, prim_palette_.data(), prim_palette_.size(),
+                           e.mesh->cast_shadows);
+        }
       } else {
         r_->draw_matrix(m.meshes[i], mat, world, e.mesh->cast_shadows);
       }
@@ -417,6 +441,7 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
       draw_box(world, local_bounds(e), sel, true);
     }
     if (opt.colliders && e.collider) draw_collider(world, e);
+    if (opt.hitboxes && e.mesh && !e.mesh->is_primitive()) draw_hitboxes(e);
     if (opt.colliders && e.joint) draw_joint(world, e, entities);
     if (opt.light_gizmos && e.light) {
       const float col[4] = {1.0f, 0.85f, 0.35f, 0.9f};

@@ -5,6 +5,8 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <set>
 #include <sstream>
 
 namespace ts {
@@ -137,6 +139,9 @@ json::Value default_model_settings(const std::string& path) {
   s.set("material_path", Value::string(""));
   s.set("lod", Value::number(0));
   s.set("generate_collider", Value::boolean(true));
+  // Collider a placed model gets (render3d/ColliderFit.h): auto / box /
+  // capsule / convex / mesh / none.
+  s.set("collider", Value::string("auto"));
   s.set("import_animations", Value::boolean(true));
   if (source) s.set("skin", Value::number(0));
   if (ext_of(path) == ".blend") s.set("blender_path", Value::string(""));
@@ -202,26 +207,296 @@ std::shared_ptr<const Image> missing_texture_image() {
   return img;
 }
 
+void primitive_palette(const ModelPrimitive& p, const std::vector<Mat4>& full,
+                       std::vector<Mat4>* out) {
+  if (p.joint_map.empty()) {
+    *out = full;
+    return;
+  }
+  out->resize(p.joint_map.size());
+  for (std::size_t i = 0; i < p.joint_map.size(); ++i) {
+    const int j = p.joint_map[i];
+    (*out)[i] = (j >= 0 && static_cast<std::size_t>(j) < full.size()) ? full[static_cast<std::size_t>(j)] : Mat4{};
+  }
+}
+
+namespace {
+
+// Rest-pose model-space positions of one primitive (rigid: as stored).
+void posed_positions(const Model& m, const ModelPrimitive& p, const std::vector<Mat4>& rest,
+                     std::vector<Vec3>* out) {
+  out->resize(p.mesh.vertices.size());
+  if (!p.mesh.skinned() || m.skeleton.empty()) {
+    for (std::size_t v = 0; v < p.mesh.vertices.size(); ++v) (*out)[v] = p.mesh.vertices[v].position;
+    return;
+  }
+  std::vector<Mat4> pal;
+  primitive_palette(p, rest, &pal);
+  for (std::size_t v = 0; v < p.mesh.vertices.size(); ++v) {
+    (*out)[v] = skin_point(pal, p.mesh.skin[v].joints, p.mesh.skin[v].weights, p.mesh.vertices[v].position);
+  }
+}
+
+std::vector<Mat4> rest_palette(const Model& m) {
+  std::vector<Mat4> rest;
+  if (m.skinned()) skin_palette(m.skeleton, rest_pose(m.skeleton), &rest);
+  return rest;
+}
+
+}  // namespace
+
 void update_bounds(Model* m) {
   Aabb b;
   bool any = false;
+  const std::vector<Mat4> rest = rest_palette(*m);
+  std::vector<Vec3> pos;
   for (const ModelPrimitive& p : m->primitives) {
-    for (const Vertex3D& v : p.mesh.vertices) {
+    posed_positions(*m, p, rest, &pos);
+    // Only vertices a triangle uses (stray / unused vertices, often at the
+    // origin or far away in exported files, do not count).
+    for (std::uint32_t i : p.mesh.indices) {
+      if (i >= pos.size()) continue;
+      const Vec3& q = pos[i];
+      if (!std::isfinite(q.x) || !std::isfinite(q.y) || !std::isfinite(q.z)) continue;
       if (!any) {
-        b.min = b.max = v.position;
+        b.min = b.max = q;
         any = true;
       }
-      b.min = {std::min(b.min.x, v.position.x), std::min(b.min.y, v.position.y),
-               std::min(b.min.z, v.position.z)};
-      b.max = {std::max(b.max.x, v.position.x), std::max(b.max.y, v.position.y),
-               std::max(b.max.z, v.position.z)};
+      b.min = vmin(b.min, q);
+      b.max = vmax(b.max, q);
     }
   }
   m->bounds = any ? b : Aabb{};
 }
 
+Aabb legacy_vertex_bounds(const Model& m) {
+  Aabb b;
+  bool any = false;
+  for (const ModelPrimitive& p : m.primitives) {
+    for (const Vertex3D& v : p.mesh.vertices) {
+      if (!any) {
+        b.min = b.max = v.position;
+        any = true;
+      }
+      b.min = vmin(b.min, v.position);
+      b.max = vmax(b.max, v.position);
+    }
+  }
+  return any ? b : Aabb{};
+}
+
+void rest_pose_mesh(const Model& m, MeshData* out) {
+  *out = MeshData{};
+  const std::vector<Mat4> rest = rest_palette(m);
+  std::vector<Vec3> pos;
+  for (const ModelPrimitive& p : m.primitives) {
+    posed_positions(m, p, rest, &pos);
+    const std::uint32_t base = static_cast<std::uint32_t>(out->vertices.size());
+    for (std::size_t v = 0; v < pos.size(); ++v) {
+      Vertex3D vx = p.mesh.vertices[v];
+      vx.position = pos[v];
+      out->vertices.push_back(vx);
+    }
+    for (std::uint32_t i : p.mesh.indices) out->indices.push_back(base + i);
+  }
+}
+
+namespace {
+
+std::vector<std::string> name_parts(const ModelPrimitive& p) {
+  std::vector<std::string> parts;
+  std::string cur;
+  for (char c : p.node) {
+    if (c == '/') {
+      if (!cur.empty()) parts.push_back(lower(cur));
+      cur.clear();
+    } else {
+      cur += c;
+    }
+  }
+  if (!cur.empty()) parts.push_back(lower(cur));
+  if (!p.mesh.name.empty()) parts.push_back(lower(p.mesh.name));
+  return parts;
+}
+
+bool ends_with(const std::string& s, const std::string& t) {
+  return s.size() >= t.size() && s.compare(s.size() - t.size(), t.size(), t) == 0;
+}
+
+bool collision_name(const std::string& n) {
+  for (const char* pre : {"ucx_", "ubx_", "ucp_", "usp_", "umb_"}) {
+    if (n.rfind(pre, 0) == 0) return true;
+  }
+  for (const char* suf : {"-colonly", "_colonly", "_collision", "-collision", ".collision", "_collider"}) {
+    if (ends_with(n, suf)) return true;
+  }
+  return n == "collision" || n == "collisions" || n == "collider" || n == "colliders";
+}
+
+// "body_lod1" / "lod2" / "body.lod0" / "body lod3" -> 1 / 2 / 0 / 3; -1 = none.
+int lod_level(const std::string& n) {
+  const std::size_t at = n.rfind("lod");
+  if (at == std::string::npos) return -1;
+  if (at > 0) {
+    const char c = n[at - 1];
+    if (c != '_' && c != '-' && c != '.' && c != ' ' && c != ':') return -1;
+  }
+  std::size_t i = at + 3;
+  if (i < n.size() && (n[i] == '_' || n[i] == ' ')) ++i;
+  if (i >= n.size() || !std::isdigit(static_cast<unsigned char>(n[i]))) return -1;
+  int v = 0;
+  while (i < n.size() && std::isdigit(static_cast<unsigned char>(n[i])) && v < 100) v = v * 10 + (n[i++] - '0');
+  return i == n.size() ? v : -1;  // digits must end the name
+}
+
+}  // namespace
+
+int split_special_meshes(Model* m, int lod, bool keep_hulls) {
+  const std::vector<Mat4> rest = rest_palette(*m);
+  std::vector<int> level(m->primitives.size(), -1);
+  std::vector<bool> collision(m->primitives.size(), false);
+  int max_lod = -1;
+  std::vector<bool> present(101, false);
+  for (std::size_t i = 0; i < m->primitives.size(); ++i) {
+    for (const std::string& part : name_parts(m->primitives[i])) {
+      if (collision_name(part)) collision[i] = true;
+      const int l = lod_level(part);
+      if (l >= 0) level[i] = l;  // the deepest tag wins
+    }
+    if (!collision[i] && level[i] >= 0) {
+      max_lod = std::max(max_lod, level[i]);
+      present[static_cast<std::size_t>(level[i])] = true;
+    }
+  }
+  // The requested LOD when it exists, else the finest one there is.
+  int keep = -1;
+  if (max_lod >= 0) {
+    keep = std::clamp(lod, 0, max_lod);
+    if (!present[static_cast<std::size_t>(keep)]) {
+      for (int l = 0; l <= max_lod; ++l) {
+        if (present[static_cast<std::size_t>(l)]) {
+          keep = l;
+          break;
+        }
+      }
+    }
+    m->lods = std::max(m->lods, max_lod + 1);
+  }
+  std::vector<ModelPrimitive> out;
+  int removed = 0;
+  std::vector<Vec3> pos;
+  for (std::size_t i = 0; i < m->primitives.size(); ++i) {
+    ModelPrimitive& p = m->primitives[i];
+    if (collision[i]) {
+      if (keep_hulls) {
+        posed_positions(*m, p, rest, &pos);
+        if (pos.size() >= 4) m->collision_hulls.push_back(pos);
+      }
+      ++removed;
+      continue;
+    }
+    if (level[i] >= 0 && level[i] != keep) {
+      ++removed;
+      continue;
+    }
+    out.push_back(std::move(p));
+  }
+  // Never leave a model with nothing to draw.
+  if (out.empty()) return 0;
+  m->primitives = std::move(out);
+  return removed;
+}
+
+void limit_skin_joints(Model* m) {
+  if (!m->skinned()) return;
+  const std::size_t limit = static_cast<std::size_t>(kMaxBones);
+  bool needed = m->skeleton.joints.size() > limit;
+  if (!needed) return;
+  std::vector<ModelPrimitive> out;
+  for (ModelPrimitive& p : m->primitives) {
+    if (!p.mesh.skinned() || !p.joint_map.empty()) {
+      out.push_back(std::move(p));
+      continue;
+    }
+    auto used_of = [&](std::uint32_t v, std::vector<int>* js) {
+      const SkinVertex& s = p.mesh.skin[v];
+      for (int k = 0; k < 4; ++k) {
+        if (s.weights[k] > 0.0f || k == 0) js->push_back(static_cast<int>(s.joints[k]));
+      }
+    };
+    // Greedy: triangles in order, a new chunk when the joint set would
+    // pass the limit.
+    std::vector<std::vector<std::uint32_t>> chunks(1);
+    std::vector<std::set<int>> sets(1);
+    for (std::size_t t = 0; t + 2 < p.mesh.indices.size(); t += 3) {
+      std::vector<int> js;
+      for (int c = 0; c < 3; ++c) used_of(p.mesh.indices[t + c], &js);
+      std::set<int> merged = sets.back();
+      merged.insert(js.begin(), js.end());
+      if (merged.size() > limit && !chunks.back().empty()) {
+        chunks.emplace_back();
+        sets.emplace_back();
+        merged = std::set<int>(js.begin(), js.end());
+      }
+      sets.back() = std::move(merged);
+      for (int c = 0; c < 3; ++c) chunks.back().push_back(p.mesh.indices[t + c]);
+    }
+    for (std::size_t c = 0; c < chunks.size(); ++c) {
+      if (chunks[c].empty()) continue;
+      ModelPrimitive q;
+      q.material = p.material;
+      q.node = p.node;
+      q.mesh.name = p.mesh.name;
+      std::map<int, int> local;
+      for (int j : sets[c]) {
+        local[j] = static_cast<int>(q.joint_map.size());
+        q.joint_map.push_back(j);
+      }
+      std::map<std::uint32_t, std::uint32_t> vmap;
+      for (std::uint32_t v : chunks[c]) {
+        auto it = vmap.find(v);
+        if (it == vmap.end()) {
+          const std::uint32_t nv = static_cast<std::uint32_t>(q.mesh.vertices.size());
+          q.mesh.vertices.push_back(p.mesh.vertices[v]);
+          SkinVertex s = p.mesh.skin[v];
+          for (int k = 0; k < 4; ++k) {
+            auto l = local.find(static_cast<int>(s.joints[k]));
+            if (l != local.end()) {
+              s.joints[k] = static_cast<float>(l->second);
+            } else {
+              s.joints[k] = 0.0f;
+              s.weights[k] = 0.0f;
+            }
+          }
+          q.mesh.skin.push_back(s);
+          it = vmap.emplace(v, nv).first;
+        }
+        q.mesh.indices.push_back(it->second);
+      }
+      out.push_back(std::move(q));
+    }
+  }
+  m->primitives = std::move(out);
+}
+
+void hitbox_matrices(const Model& m, const std::vector<Mat4>* palette, std::vector<Mat4>* out) {
+  out->resize(m.hitboxes.size());
+  for (std::size_t i = 0; i < m.hitboxes.size(); ++i) {
+    const ModelHitbox& h = m.hitboxes[i];
+    const bool posed = palette && h.bone >= 0 && static_cast<std::size_t>(h.bone) < palette->size() &&
+                       static_cast<std::size_t>(h.bone) < m.skeleton.joints.size();
+    // Joint (model space) = palette * bind (inverse of the inverse bind).
+    (*out)[i] = posed ? (*palette)[static_cast<std::size_t>(h.bone)] *
+                            m.skeleton.joints[static_cast<std::size_t>(h.bone)].inverse_bind.inverse()
+                      : h.bind;
+  }
+}
+
 void bake_import_transform(Model* m, float scale, bool z_up) {
-  if (scale == 1.0f && !z_up) return;
+  if (scale == 1.0f && !z_up) {
+    update_bounds(m);
+    return;
+  }
   // Z up -> Y up: -90 degrees about X, (x, y, z) -> (x, z, -y).
   const Quat r = z_up ? Quat::axis_angle({1, 0, 0}, -kPi * 0.5f) : Quat{};
   const Mat4 c = Mat4::rotate(r) * Mat4::scale({scale, scale, scale});
@@ -243,6 +518,7 @@ void bake_import_transform(Model* m, float scale, bool z_up) {
   for (auto& hull : m->collision_hulls) {
     for (Vec3& p : hull) p = c.transform_point(p);
   }
+  for (ModelHitbox& h : m->hitboxes) h.bind = c * h.bind;
   update_bounds(m);
 }
 
@@ -295,8 +571,14 @@ bool load_model(const std::string& path, const ModelImportOptions& opt, Model* o
   }
   out->source = path;
   if (!opt.animations) out->clips.clear();
+  if (out->format != "source-mdl") {
+    // Collision (UCX_...) and LOD > chosen meshes: not drawn, not bounds.
+    split_special_meshes(out, opt.lod, opt.collision);
+  }
   if (!opt.collision) out->collision_hulls.clear();
   bake_import_transform(out, opt.unit_scale, z_up);
+  limit_skin_joints(out);
+  update_bounds(out);
   if (out->primitives.empty()) {
     if (error) *error = path + ": no meshes";
     return false;

@@ -123,6 +123,16 @@ class Editor3DScreen final : public IScreen {
   std::uint64_t create_empty(const render3d::Vec3& pos);
   // Drop an Assets entry: a model (.gltf / .glb or "primitive:...") makes
   // an entity at pos; an image onto `target` sets its albedo texture.
+  // Model colliders fitted at import (Collider3D::fit) follow their model:
+  // refit to the current bounds. `migrate` also refits boxes that were
+  // sized from the pre-fix raw-vertex bounds (scenes from before the
+  // bounds fix). One undo step; returns how many changed.
+  int refit_model_colliders(bool migrate);
+  // Inspector "Fit to mesh": fit one entity's collider with `fit`
+  // ("auto" / "box" / "capsule" / "convex" / "mesh"). False = no model.
+  bool fit_collider_to_mesh(std::uint64_t id, const std::string& fit);
+  bool show_hitboxes() const { return show_hitboxes_; }
+  void set_show_hitboxes(bool on) { show_hitboxes_ = on; }
   std::uint64_t drop_asset(const std::string& rel, const render3d::Vec3& pos,
                            std::uint64_t target = 0);
   std::size_t duplicate_selected();
@@ -419,6 +429,7 @@ class Editor3DScreen final : public IScreen {
   bool viewport_hovered_ = false;
   bool viewport_focused_ = false;
   bool show_colliders_ = true;
+  bool show_hitboxes_ = false;  // View > Hitboxes (Source $hbox)
   bool show_physics_ = false;  // Physics Settings window
   void draw_physics_settings();
   float viewport_w_ = 1280.0f, viewport_h_ = 720.0f;

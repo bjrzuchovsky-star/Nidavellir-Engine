@@ -40,11 +40,32 @@ Select any model in the Asset Browser. The same settings appear for every format
 | LOD | `lod` | `0` | Source models with more than one LOD |
 | Skin | `skin` | `0` | Source skin family |
 | Body groups | `body_groups` | first option | Source, one combo per body group |
-| Collider | `generate_collider` | on | Source `.phy` hulls become Jolt convex hulls |
+| LOD | | | also picks between `_LOD0` / `_LOD1` / `LOD2` meshes in glTF / FBX / OBJ... (see *Bounds, colliders and hitboxes*) |
+| Collider | `collider` | `auto` | the collider a dropped model gets: **Auto** (the model's own hulls when it has them, a **capsule** for skinned / character models, else a **tight box**), **Tight box**, **Capsule**, **Convex hull**, **Mesh**, **None**. *None* also sets `generate_collider` off, which skips `.phy` / `UCX_` hulls |
 | Animations | `import_animations` | on | |
 | Blender path | `blender_path` | empty | `.blend` only; a `blender.exe` or its folder |
 
 Body groups and skins are chosen per asset. To place the same model with two different skins, copy the model files under a second name.
+
+## Bounds, colliders and hitboxes
+
+A model's bounds (the orange selection box, picking, focus, drop to ground, align, and fitted colliders) are the box around **what is drawn**:
+
+- only vertices that triangles use (stray or unused vertices don't count);
+- after the unit scale and up axis are applied;
+- skinned meshes in their **rest pose**, posed by the same skinning palette the renderer uses. Raw bind-space vertices can be at a very different scale or place: FBX rigs in centimetres with a 0.01 armature, or rigs whose bind pose isn't their rest pose;
+- without collision or extra-LOD meshes. Meshes or nodes named `UCX_*`, `UBX_*`, `UCP_*`, `USP_*`, `UMB_*` (Unreal), `*-colonly` / `*_colonly` (Godot), `*_collision`, `*_collider`, or under a node called `collision` / `colliders` aren't drawn. They become the model's convex collision hulls instead (when *Collider* isn't *None*). For meshes tagged `_LOD<n>` / `LOD<n>`, only the chosen *LOD* is kept, falling back to the finest one present.
+- Bones, empties and helper nodes never count, however far away they are.
+
+**Blender FBX and bone-parented meshes.** Blender's FBX exporter writes a mesh that is parented to a bone (a prop in a hand, armour plates, eyes, a jaw) relative to the *armature* plus the bone's length along +Y, while FBX says it should be relative to the bone. Read literally, such a rig comes in exploded: parts float metres from the body and the box grows to cover them. When the file's creator is Blender, the importer tries both readings and uses the armature one when it puts clearly more of those meshes on the skeleton. The import note then says *"Blender FBX: N bone-parented meshes placed relative to the armature"*. The bone length isn't in the file. It's taken from a connected child bone (Blender's *Add Leaf Bones* `_end` bones give it exactly). Without one, it's estimated, so parts on bones without a connected child (often the head) can be a few percent off in depth. Exporting with *Add Leaf Bones* on, or *Apply Transform* / joining props into the skinned mesh, avoids that. Files from other tools are read as written.
+
+**Fitted colliders.** When you drop a model, its collider is fitted using the asset's *Collider* setting and remembers that it was fitted (`"fit"` in the scene's collider JSON). The capsule fit is upright: it's as tall as the bind pose, and its radius covers most vertices (the 80th percentile of distance from the vertical axis), so T-pose arms don't make it a barrel. The inspector's Collider section has a fit mode and a **Fit to mesh** button. Fitted colliders are refit when the model is reimported or the scene is opened. Editing the size, offset or shape by hand makes the collider manual (*(manual)* in the inspector), and reimports then leave it alone.
+
+**Existing scenes and assets.** Model `.meta` info written by an older importer (`importer_version` below 2) is reimported on the next asset scan. When a scene opens, any box collider whose size and offset match the old raw-vertex bounds of its model exactly is refit as **Auto**. This happens automatically, in one undo step, and is reported in the Telegraph. Colliders you sized by hand are not touched.
+
+**Big skeletons.** A draw skins at most 128 bones. For models with more (many GMod player models with finger and face bones), the importer gives each skinned primitive its own palette of at most 128 bones and splits primitives that use more, so every vertex is skinned. Before this fix, vertices on bones past 128 collapsed towards the origin.
+
+**Hitboxes (Source).** The default hitbox set of a `.mdl` (`$hbox`, studiohdr hitbox set 0) is imported as per-bone boxes: bone, hit group (1 = head, 2 = chest, 3 = stomach, 4 / 5 = arms, 6 / 7 = legs), name and bone-space min / max. You get them in code through `Model::hitboxes` and `render3d::hitbox_matrices(model, palette)`, which give bone-to-model matrices for the rest pose or for any animated palette. **View > Hitboxes** draws them in the 3D editor (head red, the rest teal) and follows the animation preview. The Asset Browser shows how many a model has. Only data from your own files is used; no Valve or GMod content ships with the engine.
 
 ## Hot reload
 
@@ -52,21 +73,34 @@ Every model's content hash and timestamp include the files it reads: `.vvd`, `.v
 
 ## Blender
 
-For `.blend`, the importer looks for Blender in this order: the *Blender path* setting, the `TS_BLENDER` environment variable, `PATH`, the registry (the `.blend` open command and `HKLM\SOFTWARE\BlenderFoundation`), `Program Files\Blender Foundation\Blender *` (newest first), Steam, and the usual Linux and macOS paths. It runs `blender -b <file> --python <script>` to export a `.glb` into `%TEMP%\tombstone_blend\` (keyed by path and timestamp; 300 s timeout), then loads that. Without Blender the asset shows: *"Blender was not found. Install Blender (blender.org) or export the file to glTF / FBX"*.
+`.blend` files are opened by Blender itself. The importer uses the first Blender it finds, in this order:
+
+1. the asset's *Blender path* import setting (an exe or its folder; if set, nothing else is tried);
+2. the `TS_BLENDER` environment variable;
+3. **Settings > Tools > Blender executable** in the editor (type a path or use **Browse...**; it's saved in `TombStoneConfig/settings.json` as `blender_path`);
+4. `PATH`;
+5. the registry: the `.blend` open command, `HKLM` / `HKCU\SOFTWARE\BlenderFoundation` (and `Blender Foundation\*`) install folders, and *Add or remove programs* (Uninstall) entries whose name contains "Blender";
+6. `Program Files\Blender Foundation\Blender *` (newest first) and readable Microsoft Store packages;
+7. Microsoft Store and winget: `%LOCALAPPDATA%\Microsoft\WindowsApps\blender.exe`, `WinGet\Links\blender.exe` and `WinGet\Packages\BlenderFoundation.Blender*`;
+8. **Steam**: the Steam folder from `HKCU\Software\Valve\Steam\SteamPath`, `HKLM\SOFTWARE\WOW6432Node\Valve\Steam\InstallPath` and `Program Files (x86)\Steam`. Every library listed in its `steamapps\libraryfolders.vdf` is checked for `<library>\steamapps\common\Blender\blender.exe`, so a Blender installed to a second drive (e.g. `E:\SteamLibrary`) is found. On Linux and macOS, `~/.steam/steam`, `~/.local/share/Steam` and `~/Library/Application Support/Steam` are checked;
+9. the usual Linux and macOS places (`/usr/bin`, `/snap/bin`, flatpak, `/Applications/Blender.app`).
+
+Settings shows the Blender it found when the field is empty. The importer runs `blender -b <file> --python <script>` to export a `.glb` into `%TEMP%\tombstone_blend\` (keyed by path and timestamp; 300 s timeout), then loads that. If no Blender is found, the asset's error lists every place it looked and points to **Settings > Tools > Blender executable** (or `TS_BLENDER`).
 
 ## Source models: details
 
 - Coordinates: Source is Z-up in inches. With the defaults a model is rotated to Y-up and scaled to metres. Triangles are wound to match the vertex normals.
-- Single-bone models load rigid; models with more bones get a skeleton (at most 128 bones), weights from the `.vvd`, and the bind pose from the bone table.
+- Single-bone models load rigid; models with more bones get a skeleton (any number of bones; see *Big skeletons*), weights from the `.vvd`, and the bind pose from the bone table.
+- Hitbox set 0 becomes `Model::hitboxes` (see *Hitboxes*).
 - Sequences become clips named after the sequence (the first animation of each). RLE, Quaternion48 and Quaternion64, Vector48, raw positions and rotations, and sectioned animations are decoded.
 - `.phy`: each `COLLIDE_POLY` convex ledge becomes a hull, placed by its bone. When the collider is a ConvexHull (the default when a model with hulls is dropped), each hull becomes its own Jolt convex shape.
 - LODs come from the `.vvd` fixups and the `.vtx` LOD tables; if the asked-for LOD doesn't exist, the last one is used.
 
 ## Limits
 
-- Source: flexes (face morphs), eyeballs, eye and mouth shaders, jigglebones, attachments, hitboxes and ragdoll constraints are not imported. Delta (additive) animations, animations in `.ani` blocks and `$includemodel` animations are skipped with a warning; blended sequences use their first animation. MDL versions outside 44 to 49 are refused (v53 is Titanfall / CS:GO-era).
+- Source: flexes (face morphs), eyeballs, eye and mouth shaders, jigglebones, attachments, hitbox sets other than the first, and ragdoll constraints are not imported. Delta (additive) animations, animations in `.ani` blocks and `$includemodel` animations are skipped with a warning; blended sequences use their first animation. MDL versions outside 44 to 49 are refused (v53 is Titanfall / CS:GO-era).
 - VTF: only the largest mip of frame 0, face 0, slice 0 is used; the ATI formats (ATI1N / ATI2N) and palette lookups for P8 are not supported. VMT proxies, `$detail`, `$envmap` and `$phong` are ignored.
-- Skins are limited to 128 bones and 4 weights per vertex.
+- 4 weights per vertex (Source: 3). More than 128 bones are split into per-primitive palettes.
 - Assimp: DDS textures show magenta. Morph targets and cameras or lights in the file are not imported. FBX files in centimetres get a warning; set *Unit scale* to `0.01`.
 - `.blend` needs Blender on every machine that loads it, including players' machines. For a shipped game, export to glTF.
 - Files found only through a material search path outside the project are not exported with the game.
@@ -80,4 +114,6 @@ The Source reader was written from public descriptions of the formats: the Valve
 
 - `TS_AUDIO=null ts_admin --smoke-mdl` builds a synthetic Source model (2 bones, body groups, 2 skins, 2 LODs, a sequence, a `.phy` hull, DXT1 and BGRA8888 VTFs) and checks the vertex, bone, material and hull counts for MDL v44, v48 and v49, the `.dx80` fallback, every setting, 9 more VTF formats, and the asset database (siblings, hot reload, moves).
 - `TS_AUDIO=null ts_admin --smoke-models` runs the above and then writes tiny OBJ + MTL + TGA, Collada (skinned and animated, Z-up), ASCII FBX, PLY, STL and DirectX `.x` files, imports each, checks hot reload from the `.mtl`, and checks the `.blend` message without Blender.
-- Both are part of `ts_admin --smoke`.
+- `TS_AUDIO=null ts_admin --smoke-bounds` (also run by `--smoke-models`) checks bounds against the drawn vertex extents. Its cases: a skinned rig with a 0.01 armature, a helper bone 500 m away and a stray vertex at 10 km; the same rig as Collada through Assimp at two unit scales; glTF with a unit scale; OBJ with `UCX_` and `_LOD1` meshes; a 200-joint skeleton split into palettes of 128 or fewer that pose exactly like the full one; and the box / capsule / convex collider fits. `--smoke-mdl` also checks the Source hitbox set: a named head box, swapped min / max, and placement at rest and posed.
+- `--smoke-models` also checks the Steam `libraryfolders.vdf` parser on canned files (the current layout with `"path"` keys and escaped backslashes, and the old numbered layout), checks that the editor's Blender setting is used, and checks the "not found" message.
+- All of these are part of `ts_admin --smoke`.

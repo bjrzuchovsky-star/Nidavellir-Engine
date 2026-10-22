@@ -1,3 +1,4 @@
+#include "render3d/ModelImport.h"
 #include "editor/AppFlow.h"
 
 #include "editor/plugins/EditorPlugins.h"
@@ -35,6 +36,7 @@ void AppFlow::start() {
 
   std::string load_err;
   settings_ = SettingsStore::load(&load_err);
+  render3d::set_blender_setting(settings_.blender_path);
   if (!load_err.empty()) {
     std::cout << "[AppFlow] settings load warning: " << load_err << '\n';
   }
@@ -109,6 +111,7 @@ bool AppFlow::try_apply_settings_from_screen() {
   draft.update_cached_version = settings_.update_cached_version;
   draft.update_cached_url = settings_.update_cached_url;
   settings_ = std::move(draft);
+  render3d::set_blender_setting(settings_.blender_path);
   persist_settings();
   if (!reload_projects()) {
     status_message_ = last_error_;

@@ -227,10 +227,11 @@ bool load_gltf(const std::string& path, Model* out, std::string* error) {
   const cgltf_skin* skin = data->skins_count > 0 ? &data->skins[0] : nullptr;
   std::map<const cgltf_node*, int> joint_of;  // node -> skeleton index
   std::vector<int> remap;                     // skin joint index -> skeleton index
-  if (skin && skin->joints_count > static_cast<cgltf_size>(kMaxBones)) {
+  // Skins bigger than a draw's palette (kMaxBones) are split per
+  // primitive at import (ModelImport limit_skin_joints).
+  if (skin && skin->joints_count > 4096) {
     if (warn.empty()) {
-      warn = "skin has " + std::to_string(skin->joints_count) + " joints (max " +
-             std::to_string(kMaxBones) + "); drawn unskinned";
+      warn = "skin has " + std::to_string(skin->joints_count) + " joints (max 4096); drawn unskinned";
     }
     skin = nullptr;
   }
@@ -316,7 +317,8 @@ bool load_gltf(const std::string& path, Model* out, std::string* error) {
     }
   }
 
-  auto add_mesh = [&](const cgltf_mesh& mesh, const Mat4& world, bool skinned) -> bool {
+  auto add_mesh = [&](const cgltf_mesh& mesh, const Mat4& world, bool skinned,
+                      const std::string& node_path) -> bool {
     Mat4 normal_m = world.inverse();
     // transpose of the inverse (upper 3x3) for normals
     Mat4 nt;
@@ -344,6 +346,7 @@ bool load_gltf(const std::string& path, Model* out, std::string* error) {
       const bool skin_this = skinned && joints && weights;
       ModelPrimitive mp;
       mp.mesh.name = mesh.name ? mesh.name : "mesh";
+      mp.node = node_path;
       const cgltf_size n = pos->count;
       mp.mesh.vertices.resize(n);
       if (skin_this) mp.mesh.skin.resize(n);
@@ -436,11 +439,16 @@ bool load_gltf(const std::string& path, Model* out, std::string* error) {
     const bool skinned = skin && node.skin == skin && !model.skeleton.empty();
     Mat4 world;
     if (!skinned) cgltf_node_transform_world(&node, world.m);
-    if (!add_mesh(*node.mesh, world, skinned)) return false;
+    std::string node_path;
+    for (const cgltf_node* q = &node; q; q = q->parent) {
+      const std::string nm = q->name ? q->name : "";
+      node_path = node_path.empty() ? nm : nm + "/" + node_path;
+    }
+    if (!add_mesh(*node.mesh, world, skinned, node_path)) return false;
   }
   if (!any_node) {
     for (cgltf_size i = 0; i < data->meshes_count; ++i) {
-      if (!add_mesh(data->meshes[i], Mat4{}, false)) return false;
+      if (!add_mesh(data->meshes[i], Mat4{}, false, std::string())) return false;
     }
   }
   bool any_skinned = false;

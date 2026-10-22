@@ -17,6 +17,18 @@ All notable changes to TombStone Engine. The version number lives in the `VERSIO
 - `scene.json` fields are all optional, and only non-default values are written, so there's no version bump: Player `look`, `mouse_sensitivity`, `invert_y`, `look_smoothing`, `capture_cursor`, and 2D `face_mouse`.
 - `ts_admin --smoke-mouselook` (also in `--smoke-templates`) drives synthetic mouse deltas through yaw, pitch, the pitch clamp, invert Y, smoothing, the right stick, the third-person orbit, zoom and wall pull-in, and the top-down facing angle.
 
+### Model import
+- Fixed: the selection box ("hit box") and auto colliders of imported character models were far bigger than the model. Bounds came from the raw bind-space vertices of every mesh, while skinned meshes are drawn through the skeleton. FBX-style rigs in centimetres with a 0.01 armature were boxed 100x too big, and on Source models with more than 128 bones, vertices on the extra bones collapsed while the box stayed full size. Bounds now cover what is drawn: the vertices triangles use, in the rest pose, after the unit scale and up axis. Bones, empties and helpers don't count.
+- Fixed: FBX files from Blender with meshes parented to bones (props, armour plates, eyes and jaws on a character rig) came in exploded, parts metres from the body, and the box grew to cover them. Blender writes those meshes relative to the armature plus the bone's length, not relative to the bone. When the file says Blender made it and that reading puts the parts on the skeleton, the importer now uses it (an import note says how many meshes it moved).
+- Collision meshes (`UCX_` / `UBX_` / `UCP_` / `USP_` / `UMB_`, `-colonly`, `_collision`) become convex collision hulls instead of being drawn. Meshes tagged `_LOD<n>` keep only the chosen LOD.
+- Skeletons with more than 128 bones get a palette per primitive (split as needed), so every vertex is skinned.
+- New *Collider* import setting: Auto (model hulls, else a capsule for skinned models, else a tight box) / Tight box / Capsule / Convex hull / Mesh / None. The inspector has a fit mode and **Fit to mesh**. Fitted colliders (`"fit"` in the scene JSON) follow model reimports. Old scenes' box colliders that were sized from the old bounds are refit automatically when the scene opens (one undo step).
+- Source `.mdl` hitbox sets (`$hbox`) are imported as per-bone hitboxes (`Model::hitboxes`, `hitbox_matrices`), and **View > Hitboxes** shows them in the 3D editor.
+- Model `.meta` info carries `importer_version` (now 2). Older info is reimported on the next scan.
+- Physics hulls and triangle colliders of skinned models use the rest pose too.
+- `ts_admin --smoke-bounds` (also in `--smoke-models` / `--smoke`) and Source hitbox checks in `--smoke-mdl`.
+- `.blend` import finds Blender in more places: Steam libraries on any drive (parsed from `libraryfolders.vdf`; Steam found through the registry), *Add or remove programs* entries, Microsoft Store / winget installs and the `Blender Foundation\*` registry keys. There's a new editor setting, **Settings > Tools > Blender executable** (Browse..., saved), and `TS_BLENDER` still overrides it. The "not found" error lists where it looked and points to the setting.
+
 ### Release tooling
 - `build_release.ps1` also writes `TombStone-<ver>-update.exe`: same AppId, upgrades in place with a minimal wizard, and keeps claims, settings and the Vault. It's listed in `SHA256SUMS.txt`, and `-TestInstall` runs it over the test install.
 
