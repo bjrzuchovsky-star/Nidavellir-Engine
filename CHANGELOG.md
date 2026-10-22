@@ -27,6 +27,7 @@ All notable changes to TombStone Engine. The version number lives in the `VERSIO
 - Model `.meta` info carries `importer_version` (now 2). Older info is reimported on the next scan.
 - Physics hulls and triangle colliders of skinned models use the rest pose too.
 - `ts_admin --smoke-bounds` (also in `--smoke-models` / `--smoke`) and Source hitbox checks in `--smoke-mdl`.
+- `.blend` import finds Blender in more places: Steam libraries on any drive (parsed from `libraryfolders.vdf`; Steam found through the registry), *Add or remove programs* entries, Microsoft Store / winget installs and the `Blender Foundation\*` registry keys. There's a new editor setting, **Settings > Tools > Blender executable** (Browse..., saved), and `TS_BLENDER` still overrides it. The "not found" error lists where it looked and points to the setting.
 
 ### Release tooling
 - `build_release.ps1` also writes `TombStone-<ver>-update.exe`: same AppId, upgrades in place with a minimal wizard, and keeps claims, settings and the Vault. It's listed in `SHA256SUMS.txt`, and `-TestInstall` runs it over the test install.

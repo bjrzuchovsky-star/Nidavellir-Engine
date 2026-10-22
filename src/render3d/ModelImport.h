@@ -69,9 +69,21 @@ std::string model_format_name(const std::string& path);
 std::vector<std::string> model_dependencies(const std::string& path);
 
 bool assimp_available();
-// Blender executable: override, TS_BLENDER, PATH, the registry (Windows)
-// and the usual install folders. "" when none.
-std::string find_blender(const std::string& override_path);
+// Blender executable, first hit of: `override_path` (the asset's Blender
+// path), TS_BLENDER, the editor's "Blender executable" setting
+// (set_blender_setting), PATH, the registry (.blend open command,
+// BlenderFoundation, Uninstall entries), Program Files\Blender Foundation\*,
+// Microsoft Store / winget, Steam (every library in libraryfolders.vdf),
+// the usual Linux / macOS places. "" when none; `looked` (optional) gets
+// every place tried, for the error message.
+std::string find_blender(const std::string& override_path,
+                         std::vector<std::string>* looked = nullptr);
+// The editor setting (Settings > Tools > Blender executable).
+void set_blender_setting(const std::string& path);
+std::string blender_setting();
+// Library folders from a Steam libraryfolders.vdf (old and new layouts:
+// "path" keys, or "1" "D:\\SteamLibrary" entries), unescaped.
+std::vector<std::string> steam_library_folders_from_vdf(const std::string& vdf_text);
 
 // Bake uniform scale and Z-up -> Y-up into a model (vertices, normals,
 // tangents, skeleton roots / inverse binds, hulls, bounds).

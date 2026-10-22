@@ -55,6 +55,10 @@ class SettingsScreen final : public IScreen {
   std::string validation_error_;
   char projects_root_buf_[512]{};
   char username_buf_[128]{};
+  char blender_buf_[512]{};
+  FolderBrowser blender_browser_;
+  bool blender_probed_ = false;   // auto-detect once per visit (it walks the disk)
+  std::string blender_found_;
   int theme_index_ = 0;  // 0=dark, 1=light
   FolderBrowser folder_browser_;
 };

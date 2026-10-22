@@ -1,3 +1,4 @@
+#include "render3d/ModelImport.h"
 #include "editor/screens/SettingsScreen.h"
 
 #include "editor/update/UpdateService.h"
@@ -8,6 +9,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <vector>
 #include <iostream>
 
 namespace ts {
@@ -36,12 +38,15 @@ void SettingsScreen::sync_buffers_from_draft() {
                sizeof(projects_root_buf_) - 1);
   std::strncpy(username_buf_, draft_.username.c_str(),
                sizeof(username_buf_) - 1);
+  std::memset(blender_buf_, 0, sizeof(blender_buf_));
+  std::strncpy(blender_buf_, draft_.blender_path.c_str(), sizeof(blender_buf_) - 1);
   theme_index_ = theme_to_index(draft_.theme);
 }
 
 void SettingsScreen::sync_draft_from_buffers() {
   draft_.projects_root = projects_root_buf_;
   draft_.username = username_buf_;
+  draft_.blender_path = blender_buf_;
   draft_.theme = index_to_theme(theme_index_);
 }
 
@@ -50,6 +55,8 @@ void SettingsScreen::on_enter() {
   cancel_requested_ = false;
   validation_error_.clear();
   folder_browser_.close();
+  blender_browser_.close();
+  blender_probed_ = false;
   sync_buffers_from_draft();
   std::cout << "[Settings] edit config\n";
 }
@@ -118,6 +125,45 @@ void SettingsScreen::draw_ui() {
     ImGui::TextDisabled("Skipping v%s", draft_.update_skip_version.c_str());
     ImGui::SameLine();
     if (ImGui::SmallButton("Stop skipping")) draft_.update_skip_version.clear();
+  }
+
+  theme::SectionHeader("Tools", "outside programs");
+  ImGui::SetNextItemWidth(-110.0f);
+  ImGui::InputTextWithHint("Blender executable##blender", "auto (TS_BLENDER, PATH, registry, Steam...)",
+                           blender_buf_, sizeof(blender_buf_));
+  ImGui::SameLine();
+  if (theme::SecondaryButton("Browse...##blender", ImVec2(100, 0))) {
+#ifdef _WIN32
+    blender_browser_.open_file(blender_buf_, {".exe"}, "Pick blender.exe");
+#else
+    blender_browser_.open_file(blender_buf_, {""}, "Pick the blender executable");
+#endif
+  }
+  if (blender_browser_.draw("Select Blender executable")) {
+    const std::string picked = blender_browser_.take_result();
+    if (!picked.empty()) {
+      std::memset(blender_buf_, 0, sizeof(blender_buf_));
+      std::strncpy(blender_buf_, picked.c_str(), sizeof(blender_buf_) - 1);
+    }
+  }
+  {
+    const std::string want = blender_buf_;
+    if (want.empty() && !blender_probed_) {
+      // Auto-detect only (the setting itself is what is being edited).
+      const std::string keep = render3d::blender_setting();
+      render3d::set_blender_setting("");
+      blender_found_ = render3d::find_blender("");
+      render3d::set_blender_setting(keep);
+      blender_probed_ = true;
+    }
+    const std::string found = want.empty() ? blender_found_ : std::string();
+    if (!want.empty()) {
+      theme::StatusInfo("Used for .blend import (TS_BLENDER, when set, still wins).");
+    } else if (!found.empty()) {
+      ImGui::TextDisabled("Found: %s", found.c_str());
+    } else {
+      theme::StatusInfo("Blender not found automatically; pick blender.exe (Steam: <library>\\steamapps\\common\\Blender).");
+    }
   }
 
   if (!draft_.last_project_path.empty()) {

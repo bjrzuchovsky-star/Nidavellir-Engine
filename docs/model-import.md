@@ -73,7 +73,19 @@ Every model's content hash and timestamp include the files it reads: `.vvd`, `.v
 
 ## Blender
 
-For `.blend`, the importer looks for Blender in this order: the *Blender path* setting, the `TS_BLENDER` environment variable, `PATH`, the registry (the `.blend` open command and `HKLM\SOFTWARE\BlenderFoundation`), `Program Files\Blender Foundation\Blender *` (newest first), Steam, and the usual Linux and macOS paths. It runs `blender -b <file> --python <script>` to export a `.glb` into `%TEMP%\tombstone_blend\` (keyed by path and timestamp; 300 s timeout), then loads that. Without Blender the asset shows: *"Blender was not found. Install Blender (blender.org) or export the file to glTF / FBX"*.
+`.blend` files are opened by Blender itself. The importer uses the first Blender it finds, in this order:
+
+1. the asset's *Blender path* import setting (an exe or its folder; if set, nothing else is tried);
+2. the `TS_BLENDER` environment variable;
+3. **Settings > Tools > Blender executable** in the editor (type a path or use **Browse...**; it's saved in `TombStoneConfig/settings.json` as `blender_path`);
+4. `PATH`;
+5. the registry: the `.blend` open command, `HKLM` / `HKCU\SOFTWARE\BlenderFoundation` (and `Blender Foundation\*`) install folders, and *Add or remove programs* (Uninstall) entries whose name contains "Blender";
+6. `Program Files\Blender Foundation\Blender *` (newest first) and readable Microsoft Store packages;
+7. Microsoft Store and winget: `%LOCALAPPDATA%\Microsoft\WindowsApps\blender.exe`, `WinGet\Links\blender.exe` and `WinGet\Packages\BlenderFoundation.Blender*`;
+8. **Steam**: the Steam folder from `HKCU\Software\Valve\Steam\SteamPath`, `HKLM\SOFTWARE\WOW6432Node\Valve\Steam\InstallPath` and `Program Files (x86)\Steam`. Every library listed in its `steamapps\libraryfolders.vdf` is checked for `<library>\steamapps\common\Blender\blender.exe`, so a Blender installed to a second drive (e.g. `E:\SteamLibrary`) is found. On Linux and macOS, `~/.steam/steam`, `~/.local/share/Steam` and `~/Library/Application Support/Steam` are checked;
+9. the usual Linux and macOS places (`/usr/bin`, `/snap/bin`, flatpak, `/Applications/Blender.app`).
+
+Settings shows the Blender it found when the field is empty. The importer runs `blender -b <file> --python <script>` to export a `.glb` into `%TEMP%\tombstone_blend\` (keyed by path and timestamp; 300 s timeout), then loads that. If no Blender is found, the asset's error lists every place it looked and points to **Settings > Tools > Blender executable** (or `TS_BLENDER`).
 
 ## Source models: details
 
@@ -103,4 +115,5 @@ The Source reader was written from public descriptions of the formats: the Valve
 - `TS_AUDIO=null ts_admin --smoke-mdl` builds a synthetic Source model (2 bones, body groups, 2 skins, 2 LODs, a sequence, a `.phy` hull, DXT1 and BGRA8888 VTFs) and checks the vertex, bone, material and hull counts for MDL v44, v48 and v49, the `.dx80` fallback, every setting, 9 more VTF formats, and the asset database (siblings, hot reload, moves).
 - `TS_AUDIO=null ts_admin --smoke-models` runs the above and then writes tiny OBJ + MTL + TGA, Collada (skinned and animated, Z-up), ASCII FBX, PLY, STL and DirectX `.x` files, imports each, checks hot reload from the `.mtl`, and checks the `.blend` message without Blender.
 - `TS_AUDIO=null ts_admin --smoke-bounds` (also run by `--smoke-models`) checks bounds against the drawn vertex extents. Its cases: a skinned rig with a 0.01 armature, a helper bone 500 m away and a stray vertex at 10 km; the same rig as Collada through Assimp at two unit scales; glTF with a unit scale; OBJ with `UCX_` and `_LOD1` meshes; a 200-joint skeleton split into palettes of 128 or fewer that pose exactly like the full one; and the box / capsule / convex collider fits. `--smoke-mdl` also checks the Source hitbox set: a named head box, swapped min / max, and placement at rest and posed.
+- `--smoke-models` also checks the Steam `libraryfolders.vdf` parser on canned files (the current layout with `"path"` keys and escaped backslashes, and the old numbered layout), checks that the editor's Blender setting is used, and checks the "not found" message.
 - All of these are part of `ts_admin --smoke`.

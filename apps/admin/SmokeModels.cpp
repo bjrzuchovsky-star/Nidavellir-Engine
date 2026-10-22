@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -1150,9 +1151,45 @@ int run_models_smoke() {
     o.blender_path = (dir / "no_blender_here" / "blender.exe").string();
     r3::Model m;
     std::string err;
-    if (r3::load_model((dir / "thing.blend").string(), o, &m, &err) || err.find("Install Blender") == std::string::npos ||
-        err.find("glTF") == std::string::npos) {
+    if (r3::load_model((dir / "thing.blend").string(), o, &m, &err) || err.find("Blender executable") == std::string::npos ||
+        err.find("glTF") == std::string::npos || err.find("Looked in") == std::string::npos) {
       return fail(W, ".blend without Blender should explain (" + err + ")");
+    }
+  }
+  // Steam libraryfolders.vdf (new layout with "path" keys and escapes, the
+  // old one with numbered values) and the editor's Blender setting.
+  {
+    const std::string vdf_new =
+        "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"C:\\\\Program Files (x86)\\\\Steam\"\n"
+        "\t\t\"label\"\t\t\"\"\n\t\t\"apps\"\n\t\t{\n\t\t\t\"365670\"\t\t\"1234\"\n\t\t}\n\t}\n"
+        "\t\"1\"\n\t{\n\t\t\"path\"\t\t\"E:\\\\SteamLibrary\"\n\t\t\"totalsize\"\t\t\"0\"\n\t}\n}\n";
+    const std::string vdf_old =
+        "\"LibraryFolders\"\n{\n\t\"TimeNextStatsReport\"\t\t\"1700000000\"\n\t\"ContentStatsID\"\t\t\"-123\"\n"
+        "\t\"1\"\t\t\"D:\\\\Games\\\\Steam Library\"\n\t\"2\"\t\t\"/mnt/games/steam\"\n}\n";
+    const auto a = r3::steam_library_folders_from_vdf(vdf_new);
+    const auto b = r3::steam_library_folders_from_vdf(vdf_old);
+    if (a.size() != 2 || a[0] != "C:\\Program Files (x86)\\Steam" || a[1] != "E:\\SteamLibrary") {
+      return fail(W, "libraryfolders.vdf (new layout): " + std::to_string(a.size()) + " folders" +
+                         (a.empty() ? std::string() : ", first " + a[0]));
+    }
+    if (b.size() != 2 || b[0] != "D:\\Games\\Steam Library" || b[1] != "/mnt/games/steam") {
+      return fail(W, "libraryfolders.vdf (old layout): " + std::to_string(b.size()) + " folders");
+    }
+    if (r3::steam_library_folders_from_vdf("").size() != 0) return fail(W, "empty vdf");
+    const char* tsb = std::getenv("TS_BLENDER");
+    if (!tsb || !*tsb) {
+#ifdef _WIN32
+      const fs::path fake = dir / "Steam Library" / "steamapps" / "common" / "Blender" / "blender.exe";
+#else
+      const fs::path fake = dir / "Steam Library" / "steamapps" / "common" / "Blender" / "blender";
+#endif
+      fs::create_directories(fake.parent_path(), ec);
+      spit(fake, "not really blender");
+      r3::set_blender_setting(fake.parent_path().string());  // a folder works too
+      std::vector<std::string> looked;
+      const std::string got = r3::find_blender("", &looked);
+      r3::set_blender_setting("");
+      if (fs::path(got) != fake) return fail(W, "Blender setting not used (" + got + ")");
     }
   }
   std::cout << "[smoke] models OK (" << formats << "; .blend without Blender explains itself"

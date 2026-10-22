@@ -33,6 +33,9 @@ struct Settings {
   std::string update_last_check;        // unix seconds of the last check ("" = never)
   std::string update_cached_version;    // latest release seen then (e.g. "0.2.0")
   std::string update_cached_url;        // its release page (html_url)
+  // Tools: Blender for .blend import ("" = find it: TS_BLENDER, PATH,
+  // registry, Program Files, Store / winget, Steam libraries).
+  std::string blender_path;
 };
 
 class SettingsStore {
