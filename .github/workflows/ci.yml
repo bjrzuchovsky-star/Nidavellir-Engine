@@ -42,6 +42,11 @@ jobs:
       - name: Smoke (prefab)
         working-directory: build/apps/admin/Release
         run: ./ts_admin.exe --smoke-prefab
+      - name: Smoke (The Vault)
+        shell: pwsh
+        run: |
+          Push-Location build/apps/vault/Release; ./ts_vault.exe --smoke; if ($LASTEXITCODE) { exit $LASTEXITCODE }; Pop-Location
+          Push-Location build/apps/admin/Release; ./ts_admin.exe --smoke-vault; if ($LASTEXITCODE) { exit $LASTEXITCODE }; Pop-Location
       - name: Smoke (full ts_admin --smoke)
         working-directory: build/apps/admin/Release
         run: ./ts_admin.exe --smoke
@@ -69,6 +74,10 @@ jobs:
       - name: Smoke (prefab)
         working-directory: build/apps/admin
         run: ./ts_admin --smoke-prefab
+      - name: Smoke (The Vault)
+        run: |
+          (cd build/apps/vault && ./ts_vault --smoke)
+          (cd build/apps/admin && ./ts_admin --smoke-vault)
       - name: Smoke (full ts_admin --smoke, under Xvfb)
         working-directory: build/apps/admin
         run: xvfb-run -a -s "-screen 0 1280x800x24" ./ts_admin --smoke

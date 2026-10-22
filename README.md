@@ -533,6 +533,10 @@ campfires and night instead of the old glow squares.
 
 Smoke: `ts_admin --smoke-fx` (also part of `--smoke`).
 
+## The Vault (asset library)
+
+The Vault is an asset library shared by every claim: send a texture, model, sound, font or prefab to it from the Asset Browser (right-click > **Send to Vault...**), then pull it into any other claim from the **Vault** panel in the 2D or 3D editor. The panel has thumbnails, search, kind / tag / 2D / 3D / VR filters, versions, pins and update badges. A pull copies the files together with their `.meta`, so the GUID and references stay the same in every claim, and dependencies come along (a model brings its textures). The library is a local folder (default `Documents\TombStone\Vault`) or `ts_vault`, a small self-hosted HTTP server with API keys, SHA-256 content addressing, resumable chunked uploads and a SQLite index. Exports leave out pulled assets the game doesn't use. CLI: `ts_admin --vault push|pull|list|status|update`. Smoke: `ts_admin --smoke-vault` and `ts_vault --smoke`. See [docs/vault.md](docs/vault.md), including hosting `ts_vault` on Linux and Windows. You are responsible for having the rights to anything you upload to a Vault.
+
 ## Physics (Jolt 3D / VR, Box2D 2D)
 
 Both engines are fetched by hash and are deterministic: the smokes check the same state hash on Linux (GCC) and Windows (MSVC).
@@ -642,12 +646,13 @@ src/physics2d/          # Box2D v3 wrapper (px units): 2D rigid bodies, joints, 
 src/physics3d/          # Jolt wrapper: 3D / VR rigid bodies, joints, character, casts
 src/scene/              # Scene data: Entity2D + components, TileMap, scene.json read/write (no UI, no GL)
 src/runtime/            # Game runtime: World, PlaySession (60 Hz fixed step), abstract input, Lua script host, Telegraph log (no UI, no GL)
+src/vault/               # The Vault: SHA-256 blob store + SQLite index, HTTP client / server, local + remote backends, project lock
 src/gfx/                # stb_image TextureCache + OpenGL texture uploader (admin + game)
 src/editor/             # Admin UI (AppFlow, settings, projects, workspace, Play mode, launcher, ui, screens)
 cmake/FetchImGuiDeps.cmake  # FetchContent GLFW + stb_image (admin + game) and Dear ImGui (admin only)
 cmake/FetchLua.cmake    # FetchContent Lua 5.4.8 (hash-pinned, core + pure libs only, built as C++)
 cmake/FetchENet.cmake   # FetchContent ENet 1.3.18 (hash-pinned; ws2_32 + winmm on Windows)
-apps/admin|client|game|server/ # Build targets controlled by TS_BUILD_*
+apps/admin|client|game|server|vault/ # Build targets controlled by TS_BUILD_* (vault = ts_vault, the self-hosted Vault server)
 ```
 
 ### Admin flow (ImGui)

@@ -30,6 +30,9 @@ The browser polls the project every 1.5 s. Changed files are reimported (for mod
 ## Find references / deletion
 Find references lists every scene, prefab and script that uses an asset. Deleting an asset that's in use asks for confirmation and shows the users.
 
+## The Vault
+Right-click an asset > **Send to Vault...** puts it, with its `.meta` and dependencies, into the asset library shared by all your claims. Assets pulled from the Vault keep their GUIDs and show a **V** badge (**UPD** when a newer version is waiting). See [vault.md](vault.md).
+
 ## Smoke
 `TS_AUDIO=null ts_admin --smoke-assets` (also part of `--smoke`). Model formats: `--smoke-models` and `--smoke-mdl`.
 
