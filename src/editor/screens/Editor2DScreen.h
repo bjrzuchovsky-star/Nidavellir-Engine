@@ -7,6 +7,7 @@
 #include "editor/assets/AssetBrowser.h"
 #include "editor/assets/PrefabLibrary.h"
 #include "editor/assets/TextureCache.h"
+#include "editor/vault/VaultPanel.h"
 #include "editor/console/TelegraphLog.h"
 #include "editor/plugins/EditorPlugins.h"
 #include "editor/plugins/PluginsPanel.h"
@@ -120,6 +121,7 @@ class Editor2DScreen final : public IScreen {
   PrefabLibrary& prefabs() { return prefabs_; }
   // Asset Browser (shared with the 3D editor; docs/assets.md).
   AssetBrowser& asset_browser() { return asset_browser_; }
+  VaultPanel& vault_panel() { return vault_panel_; }
   // Reload scene.json from disk (after the browser rewrote references).
   bool reload_scene_from_disk();
 
@@ -483,6 +485,11 @@ class Editor2DScreen final : public IScreen {
   AssetBrowser asset_browser_;
   bool show_asset_browser_ = true;
   void open_asset_browser();
+  // Pull a Vault item dropped on the viewport, then place it there.
+  void drop_vault_item(const std::string& item, float wx, float wy);
+  // The Vault (asset library shared by every claim).
+  VaultPanel vault_panel_;
+  bool show_vault_ = true;
   bool show_prefabs_ = true;
   char prefab_name_[64] = "Prefab";
   double prefab_poll_time_ = 0.0;

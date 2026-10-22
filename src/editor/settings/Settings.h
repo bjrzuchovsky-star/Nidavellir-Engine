@@ -21,6 +21,11 @@ struct Settings {
   bool auto_login_dev = false;          // DEV_LOGIN on Admin start when true
   std::string theme = "dark";           // "dark" | "light" stub
   std::string last_project_path;        // last opened project folder
+  // The Vault (asset library shared by every claim; see docs/vault.md).
+  std::string vault_backend = "local";  // "local" | "remote"
+  std::string vault_local_dir;          // "" = Documents/TombStone/Vault
+  std::string vault_url;                // ts_vault server, e.g. https://vault.example.com
+  std::string vault_api_key;            // sent as a Bearer token; never logged
 };
 
 class SettingsStore {

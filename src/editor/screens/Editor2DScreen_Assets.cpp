@@ -42,7 +42,38 @@ void Editor2DScreen::open_asset_browser() {
     return e.meta.kind == assetdb::Kind::Texture ? assets::kDragPayload : kAssetAnyPayload;
   };
   host.note = [this](const std::string& m) { note(m); };
+  host.send_to_vault = [this](const std::string& rel) {
+    show_vault_ = true;
+    vault_panel_.send_to_vault(rel);
+  };
+  host.vault_badge = [this](const std::string& rel) { return vault_panel_.badge(rel); };
+  host.vault_origin = [this](const std::string& rel) { return vault_panel_.origin_label(rel); };
+  host.on_vault_drop = [this](const std::string& item) { vault_panel_.pull_then(item, {}); };
   asset_browser_.open(project_.path, std::move(host));
+
+  VaultHost vh;
+  vh.db = [this] { return &asset_browser_.db(); };
+  vh.selected_asset = [this] { return asset_browser_.selected(); };
+  vh.prefabs = [this] { return prefabs_.list(); };
+  vh.after_pull = [this] {
+    asset_browser_.rescan();
+    refresh_assets();
+  };
+  vh.note = [this](const std::string& m) { note(m); };
+  vh.dimension = "2d";
+  vault_panel_.open(project_.path, std::move(vh));
+}
+
+void Editor2DScreen::drop_vault_item(const std::string& item, float wx, float wy) {
+  vault_panel_.pull_then(item, [this, wx, wy](const vaultp::PullResult& r) {
+    if (r.kind == "texture") {
+      create_sprite_at(r.main, wx, wy);
+    } else if (r.kind == "prefab") {
+      place_prefab(r.main, wx, wy);
+    } else {
+      note("Pulled " + r.main + " (only images and prefabs place in a 2D scene)");
+    }
+  });
 }
 
 }  // namespace editor

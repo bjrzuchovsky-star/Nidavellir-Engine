@@ -252,6 +252,11 @@ void Editor2DScreen::draw_viewport() {
       tool_ = TileTool::Select;
       create_sprite_at(rel, mouse_world.x, mouse_world.y);
     }
+    // A Vault tile: pull it into the claim, then place it here.
+    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kVaultItemPayload)) {
+      tool_ = TileTool::Select;
+      drop_vault_item(static_cast<const char*>(payload->Data), mouse_world.x, mouse_world.y);
+    }
     ImGui::EndDragDropTarget();
   }
 

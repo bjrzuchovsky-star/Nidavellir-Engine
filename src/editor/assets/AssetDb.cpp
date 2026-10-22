@@ -268,8 +268,8 @@ bool write_meta(const std::string& meta_abs, const Meta& m, std::string* error) 
 
 bool AssetDb::ignored_dir(const std::string& n) {
   return n == "build" || n == "export" || n == "exports" || n == ".git" || n == ".tombstone" ||
-         n == "TombStoneConfig" || n == "bin" || n == "obj" || n == ".vs" || n == "node_modules" ||
-         n == "Shipped";
+         n == ".vault" || n == "TombStoneConfig" || n == "bin" || n == "obj" || n == ".vs" ||
+         n == "node_modules" || n == "Shipped";
 }
 
 void AssetDb::open(const std::string& project_dir) {

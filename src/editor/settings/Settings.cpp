@@ -73,6 +73,12 @@ Settings SettingsStore::load(std::string* error_out) {
   s.last_project_path =
       json_mini::get_string(*parsed, "last_project_path", s.last_project_path);
 
+  s.vault_backend = json_mini::get_string(*parsed, "vault_backend", s.vault_backend);
+  if (s.vault_backend != "local" && s.vault_backend != "remote") s.vault_backend = "local";
+  s.vault_local_dir = json_mini::get_string(*parsed, "vault_local_dir", s.vault_local_dir);
+  s.vault_url = json_mini::get_string(*parsed, "vault_url", s.vault_url);
+  s.vault_api_key = json_mini::get_string(*parsed, "vault_api_key", s.vault_api_key);
+
   if (s.projects_root.empty()) {
     s.projects_root = default_projects_root();
   }
@@ -114,6 +120,10 @@ bool SettingsStore::save(const Settings& settings, std::string* error_out) {
           {"username", normalized.username},
           {"theme", normalized.theme},
           {"last_project_path", normalized.last_project_path},
+          {"vault_backend", normalized.vault_backend == "remote" ? "remote" : "local"},
+          {"vault_local_dir", normalized.vault_local_dir},
+          {"vault_url", normalized.vault_url},
+          {"vault_api_key", normalized.vault_api_key},
       },
       {
           {"auto_login_dev", normalized.auto_login_dev},

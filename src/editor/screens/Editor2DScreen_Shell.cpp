@@ -69,6 +69,7 @@ void Editor2DScreen::setup_default_dock_layout(unsigned int dockspace_id) {
   ImGui::DockBuilderDockWindow("Plugins", dock_left_bottom);
   ImGui::DockBuilderDockWindow("Telegraph", dock_bottom);
   ImGui::DockBuilderDockWindow("Asset Browser", dock_bottom);
+  ImGui::DockBuilderDockWindow("Vault", dock_bottom);
   ImGui::DockBuilderDockWindow("Viewport2D", dock_center);
   ImGui::DockBuilderDockWindow("Inspector", dock_right);
   ImGui::DockBuilderDockWindow("Tile Palette", dock_right_bottom);
@@ -276,6 +277,7 @@ void Editor2DScreen::draw_menu_bar() {
     ImGui::MenuItem("Supply Wagon", nullptr, &show_supply_wagon_);
     ImGui::MenuItem("Prefabs", nullptr, &show_prefabs_);
     ImGui::MenuItem("Asset Browser", nullptr, &show_asset_browser_);
+    ImGui::MenuItem("Vault", nullptr, &show_vault_);
     ImGui::MenuItem("Stable (Animation)", nullptr, &show_stable_);
     ImGui::MenuItem("UI Preview", nullptr, &show_ui_preview_);
     ImGui::MenuItem("Lighting", nullptr, &show_lighting_);
@@ -875,6 +877,15 @@ void Editor2DScreen::draw_ui() {
     if (ImGui::Begin("Asset Browser", &show_asset_browser_)) {
       ImGui::BeginDisabled(locked);
       asset_browser_.draw();
+      ImGui::EndDisabled();
+    }
+    ImGui::End();
+  }
+  if (show_vault_) {
+    ImGui::SetNextWindowSize(ImVec2(720, 320), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Vault", &show_vault_)) {
+      ImGui::BeginDisabled(locked);
+      vault_panel_.draw();
       ImGui::EndDisabled();
     }
     ImGui::End();

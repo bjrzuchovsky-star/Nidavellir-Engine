@@ -9,6 +9,7 @@
 #include "runtime/CSharpScript.h"
 #include "runtime/NativeScript.h"
 #include "scene/SceneJson.h"
+#include "vault/VaultLock.h"
 #include "vfs/Pak.h"
 
 #include <algorithm>
@@ -255,7 +256,15 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
     }
     r.report.notes.push_back("C# scripts: shipped dotnet/ProjectScripts.dll + TombStone.Scripting (needs the .NET 8+ runtime)");
   }
-  for (const std::string& rel : content_files(proj.string())) {
+  const std::vector<std::string> content = content_files(proj.string());
+  // The Vault: pulled items nothing in the game uses stay home.
+  const std::set<std::string> vault_unused = vault::unused_pulled_files(proj.string(), content);
+  if (!vault_unused.empty()) {
+    r.report.notes.push_back("Vault: left out " + std::to_string(vault_unused.size()) +
+                             " file(s) of pulled items the game does not use");
+  }
+  for (const std::string& rel : content) {
+    if (vault_unused.count(rel)) continue;
     if (rel.size() > 5 && rel.compare(rel.size() - 5, 5, ".meta") == 0) {
       // Editor import settings stay behind, except a model's: the runtime
       // importer reads its unit scale / up axis / LOD / skin from there.

@@ -67,6 +67,7 @@ void Editor3DScreen::setup_dock_layout(unsigned int dockspace_id) {
   ImGui::DockBuilderDockWindow(kViewport, center);
   ImGui::DockBuilderDockWindow(kTelegraph, bottom);
   ImGui::DockBuilderDockWindow("Asset Browser###AssetBrowser3D", bottom);
+  ImGui::DockBuilderDockWindow("Vault###Vault3D", bottom);
   ImGui::DockBuilderDockWindow(kInspector, right);
   ImGui::DockBuilderDockWindow(kEnvironment, right_bottom);
   ImGui::DockBuilderFinish(dockspace_id);
@@ -109,6 +110,14 @@ void Editor3DScreen::draw_ui() {
     if (ImGui::Begin("Asset Browser###AssetBrowser3D", &show_asset_browser_)) {
       ImGui::BeginDisabled(locked);
       asset_browser_.draw();
+      ImGui::EndDisabled();
+    }
+    ImGui::End();
+  }
+  if (show_vault_) {
+    if (ImGui::Begin("Vault###Vault3D", &show_vault_)) {
+      ImGui::BeginDisabled(locked);
+      vault_panel_.draw();
       ImGui::EndDisabled();
     }
     ImGui::End();
@@ -276,6 +285,7 @@ void Editor3DScreen::draw_menu_bar() {
     ImGui::MenuItem("Animation Preview", nullptr, &anim_preview_.open);
     ImGui::MenuItem("Prefabs", nullptr, &show_prefabs_);
     ImGui::MenuItem("Asset Browser", nullptr, &show_asset_browser_);
+    ImGui::MenuItem("Vault", nullptr, &show_vault_);
     if (plugins_.is_open() && !plugins_.manager().editor_panels().empty()) {
       ImGui::Separator();
       draw_plugin_panel_menu_items(plugins_, plugin_panel_open_);
@@ -495,6 +505,12 @@ void Editor3DScreen::draw_viewport() {
       Vec3 at = scene_.editor_camera.target;
       ground_point(mx, my, vw, vh, &at);
       drop_asset(rel, at, pick(mx, my, vw, vh));
+    }
+    // A Vault tile: pull it into the claim, then place it at the drop point.
+    if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kVaultItemPayload)) {
+      Vec3 at = scene_.editor_camera.target;
+      ground_point(mx, my, vw, vh, &at);
+      drop_vault_item(static_cast<const char*>(p->Data), at);
     }
     ImGui::EndDragDropTarget();
   }

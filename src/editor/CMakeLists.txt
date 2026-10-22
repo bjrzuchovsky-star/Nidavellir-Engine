@@ -74,6 +74,8 @@ add_library(ts_editor
   templates/TemplateStore.cpp
   screens/ProjectManager_Templates.cpp
   store/TradingPostPanel.cpp
+  vault/VaultProject.cpp
+  vault/VaultPanel.cpp
   scripting/BrandBook.cpp
   tools/StringsPanel.cpp
   tools/AutoTilePanel.cpp
@@ -114,6 +116,7 @@ target_link_libraries(ts_editor
     ts_audio3d
     ts_ui
     ts_export
+    ts_vault_lib
 )
 
 target_compile_features(ts_editor PUBLIC cxx_std_20)

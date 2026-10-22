@@ -536,7 +536,9 @@ AppState Editor2DScreen::on_update(float /*delta_seconds*/) {
       prefab_poll_time_ = ImGui::GetTime();
       prefab_poll();
     }
-    if (!is_playing()) asset_browser_.poll(ImGui::GetTime());
+    vault_panel_.update();
+    // Hold the browser's rescan while the Vault worker writes into the claim.
+    if (!is_playing() && !vault_panel_.busy()) asset_browser_.poll(ImGui::GetTime());
     draw_ui();
   }
 

@@ -24,7 +24,34 @@ void Editor3DScreen::open_asset_browser() {
     return e.meta.kind == assetdb::Kind::Font ? kAssetAnyPayload : "TS_ASSET3D";
   };
   host.note = [this](const std::string& m) { note(m); };
+  host.send_to_vault = [this](const std::string& rel) {
+    show_vault_ = true;
+    vault_panel_.send_to_vault(rel);
+  };
+  host.vault_badge = [this](const std::string& rel) { return vault_panel_.badge(rel); };
+  host.vault_origin = [this](const std::string& rel) { return vault_panel_.origin_label(rel); };
+  host.on_vault_drop = [this](const std::string& item) { vault_panel_.pull_then(item, {}); };
   asset_browser_.open(project_.path, std::move(host));
+
+  VaultHost vh;
+  vh.db = [this] { return &asset_browser_.db(); };
+  vh.selected_asset = [this] { return asset_browser_.selected(); };
+  vh.prefabs = [this] { return prefabs_.list(); };
+  vh.after_pull = [this] {
+    asset_browser_.rescan();
+    rescan_assets();
+  };
+  vh.note = [this](const std::string& m) { note(m); };
+  vh.dimension = "3d";
+  vault_panel_.open(project_.path, std::move(vh));
+}
+
+void Editor3DScreen::drop_vault_item(const std::string& item, const render3d::Vec3& pos) {
+  vault_panel_.pull_then(item, [this, pos](const vaultp::PullResult& r) {
+    if (r.kind == "prefab") drop_asset("prefab:" + r.main, pos);
+    else if (r.kind == "model" || r.kind == "audio") drop_asset(r.main, pos);
+    else note("Pulled " + r.main + " into the claim");
+  });
 }
 
 }  // namespace editor

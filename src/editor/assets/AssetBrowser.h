@@ -19,6 +19,8 @@ namespace editor {
 
 // ImGui payload the browser always accepts on folders (data = rel path).
 inline constexpr const char* kAssetAnyPayload = "TS_ASSET_ANY";
+// A Vault tile (data = NUL-terminated item id): dropped on the browser, it is pulled.
+inline constexpr const char* kVaultItemPayload = "TS_VAULT_ITEM";
 
 struct AssetBrowserHost {
   // Called before files are renamed / references rewritten (save the open
@@ -30,6 +32,12 @@ struct AssetBrowserHost {
   // Drag payload type for an asset (kAssetAnyPayload when nothing better).
   std::function<std::string(const assetdb::AssetDb::Entry&)> payload_type;
   std::function<void(const std::string&)> note;
+  // The Vault (editor/vault/VaultPanel.h): right-click > Send to Vault,
+  // origin / "update available" badges, and Vault tiles dropped here.
+  std::function<void(const std::string& rel)> send_to_vault;
+  std::function<int(const std::string& rel)> vault_badge;  // 0 none, 1 pulled, 2 update, 3 sent
+  std::function<std::string(const std::string& rel)> vault_origin;
+  std::function<void(const std::string& item)> on_vault_drop;
 };
 
 class AssetBrowser {
@@ -60,6 +68,7 @@ class AssetBrowser {
   void draw_settings(const assetdb::AssetDb::Entry& e);
   bool tile(const assetdb::AssetDb::Entry& e, float size);
   void accept_move_into(const std::string& folder);
+  void accept_vault_drop();
 
   assetdb::AssetDb db_;
   AssetBrowserHost host_;

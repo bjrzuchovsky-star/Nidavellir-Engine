@@ -160,7 +160,9 @@ AppState Editor3DScreen::on_update(float delta_seconds) {
     prefab_poll();
   }
   asset_poll_clock_ += delta_seconds;
-  if (asset_poll_clock_ > 1.5 && !playing()) {
+  vault_panel_.update();
+  // Hold the browser's rescan while the Vault worker writes into the claim.
+  if (asset_poll_clock_ > 1.5 && !playing() && !vault_panel_.busy()) {
     asset_poll_clock_ = 0.0;
     asset_browser_.rescan();
   }

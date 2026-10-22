@@ -143,6 +143,14 @@ void AssetBrowser::accept_move_into(const std::string& folder) {
   ImGui::EndDragDropTarget();
 }
 
+void AssetBrowser::accept_vault_drop() {
+  if (!host_.on_vault_drop || !ImGui::BeginDragDropTarget()) return;
+  if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kVaultItemPayload)) {
+    host_.on_vault_drop(std::string(static_cast<const char*>(p->Data)));
+  }
+  ImGui::EndDragDropTarget();
+}
+
 void AssetBrowser::draw() {
   thumbs_.poll_changes(ImGui::GetTime());
   // Toolbar.
@@ -180,6 +188,7 @@ void AssetBrowser::draw() {
   ImGui::SameLine();
   if (ImGui::BeginChild("##grid", ImVec2(0, body_h), ImGuiChildFlags_Borders)) draw_grid();
   ImGui::EndChild();
+  accept_vault_drop();  // a Vault tile dropped on the grid: pull it into the claim
   if (!selected_.empty()) {
     if (ImGui::BeginChild("##details", ImVec2(0, 0), ImGuiChildFlags_Borders)) draw_details();
     ImGui::EndChild();
@@ -210,6 +219,7 @@ void AssetBrowser::draw() {
 void AssetBrowser::draw_folders() {
   if (ImGui::Selectable("All assets", folder_.empty())) folder_.clear();
   accept_move_into("assets");
+  accept_vault_drop();
   for (const std::string& f : db_.folders()) {
     const int depth = static_cast<int>(std::count(f.begin(), f.end(), '/'));
     ImGui::Indent(10.0f * depth + 4.0f);
@@ -259,6 +269,15 @@ bool AssetBrowser::tile(const AssetDb::Entry& e, float size) {
                          kind_color(e.meta.kind), g);
   }
   if (!e.import_ok) dl->AddText(ImVec2(t0.x + 2, t0.y), ImGui::GetColorU32(theme::Danger()), "!");
+  // Vault origin: a marker for pulled / sent assets, a copper "UPD" when a newer version waits.
+  if (const int vb = host_.vault_badge ? host_.vault_badge(e.rel) : 0) {
+    const char* mark = vb == 2 ? "UPD" : "V";
+    const ImVec2 ms = ImGui::CalcTextSize(mark);
+    const ImVec4 col = vb == 2 ? theme::Copper() : (vb == 3 ? theme::Accent() : theme::Success());
+    dl->AddRectFilled(ImVec2(t1.x - ms.x - 7, t0.y + 1), ImVec2(t1.x - 1, t0.y + ms.y + 3),
+                      ImGui::GetColorU32(col), 3.0f);
+    dl->AddText(ImVec2(t1.x - ms.x - 4, t0.y + 2), ImGui::GetColorU32(theme::TextOnAccent()), mark);
+  }
   dl->AddRectFilled(ImVec2(t0.x, t1.y - 3), ImVec2(t1.x, t1.y), kind_color(e.meta.kind));
   std::string name = name_of(e.rel);
   const float max_w = size - 4;
@@ -286,6 +305,7 @@ bool AssetBrowser::tile(const AssetDb::Entry& e, float size) {
       refs_shown_ = db_.find_references(e.rel);
     }
     if (ImGui::MenuItem("Reimport")) db_.reimport(e.rel);
+    if (host_.send_to_vault && ImGui::MenuItem("Send to Vault...")) host_.send_to_vault(e.rel);
     if (ImGui::MenuItem("Delete")) {
       std::vector<assetdb::Ref> refs;
       if (!remove(e.rel, false, &refs)) {
@@ -491,6 +511,10 @@ void AssetBrowser::draw_details() {
   if (ImGui::BeginTable("##det", 2, ImGuiTableFlags_SizingStretchProp)) {
     ImGui::TableNextColumn();
     ImGui::TextDisabled("GUID %s", entry.meta.guid.c_str());
+    if (host_.vault_origin) {
+      const std::string origin = host_.vault_origin(entry.rel);
+      if (!origin.empty()) ImGui::TextColored(origin.find("update") != std::string::npos ? theme::Copper() : theme::Sand(), "%s", origin.c_str());
+    }
     if (entry.import_ok) {
       ImGui::Text("%s", assetdb::info_summary(entry.meta.info, entry.meta.kind).c_str());
     } else {
@@ -506,6 +530,10 @@ void AssetBrowser::draw_details() {
     }
     ImGui::SameLine();
     if (ImGui::Button("Reimport")) db_.reimport(entry.rel);
+    if (host_.send_to_vault) {
+      ImGui::SameLine();
+      if (ImGui::Button("Send to Vault")) host_.send_to_vault(entry.rel);
+    }
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Button, theme::CopperMuted());
     if (ImGui::Button("Delete")) {

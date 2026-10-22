@@ -24,6 +24,7 @@ target_link_libraries(ts_export
     ts_plugin
     ts_plugins_builtin
     ts_lua
+    ts_vault_lib
 )
 
 target_compile_features(ts_export PUBLIC cxx_std_20)

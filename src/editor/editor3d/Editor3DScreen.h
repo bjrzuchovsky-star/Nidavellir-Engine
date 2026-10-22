@@ -32,6 +32,7 @@
 #include "editor/AppState.h"
 #include "editor/assets/AssetBrowser.h"
 #include "editor/assets/PrefabLibrary.h"
+#include "editor/vault/VaultPanel.h"
 #include "editor/ProjectInfo.h"
 #include "editor/editor3d/Gizmo3D.h"
 #include "editor/plugins/EditorPlugins.h"
@@ -283,6 +284,7 @@ class Editor3DScreen final : public IScreen {
   std::vector<std::uint64_t> prefab_instance_members(std::uint64_t id) const;
   PrefabLibrary& prefabs() { return prefabs_; }
   AssetBrowser& asset_browser() { return asset_browser_; }
+  VaultPanel& vault_panel() { return vault_panel_; }
 
   const std::deque<runtime::LogEntry>& log() const { return log_; }
   void note(const std::string& text, runtime::LogLevel level = runtime::LogLevel::Info);
@@ -362,6 +364,11 @@ class Editor3DScreen final : public IScreen {
   bool show_asset_browser_ = true;
   double asset_poll_clock_ = 0.0;
   void open_asset_browser();
+  // Pull a Vault item dropped on the viewport, then place it there.
+  void drop_vault_item(const std::string& item, const render3d::Vec3& pos);
+  // The Vault (asset library shared by every claim).
+  VaultPanel vault_panel_;
+  bool show_vault_ = true;
   bool show_prefabs_ = true;
   char prefab_name_[64] = "Prefab";
   double prefab_poll_clock_ = 0.0;
