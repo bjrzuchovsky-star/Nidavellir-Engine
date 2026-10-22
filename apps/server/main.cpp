@@ -15,6 +15,7 @@
 #include "mp/PosseSmoke.h"
 #include "net/Net.h"
 #include "plugins/RuntimePlugins.h"
+#include "plugins/split/Split.h"
 #include "runtime/Log.h"
 
 #include <atomic>
@@ -131,6 +132,11 @@ bool parse_args(int argc, char** argv, Options* o, std::string* err) {
 }
 
 int run_smoke(const Options& opt) {
+  // The posse smoke claim rides with the 2D physics / movement plugins
+  // (0.2.0 split), as before the split.
+  plugins::offer_builtin_providers();
+  plugins::ProviderHold hold;
+  hold.hold({plugins::kBox2DId, plugins::kTopDownId, plugins::kPlatformerId});
   if (opt.riders > 0) {
     mp::PosseSmokeOptions one;
     one.riders = opt.riders;
@@ -240,6 +246,19 @@ void read_stdin() {
 }
 
 int run_mmo(const Options& opt) {
+  // Zone Worlds ride with the claim's physics / movement plugins (0.2.0
+  // split; the Town Hall loads no other plugins). Declared before the
+  // server so they outlive its worlds.
+  plugins::offer_builtin_providers();
+  plugins::ProviderHold split_hold;
+  {
+    const plugins::ProjectPluginList list = plugins::read_project_plugins(opt.project);
+    std::vector<std::string> ids;
+    for (const std::string& id : plugins::effective_plugins(opt.project, list.ids, list.listed, {})) {
+      if (plugins::is_split_plugin(id)) ids.push_back(id);
+    }
+    split_hold.hold(ids);
+  }
   mmo::MmoServer server;
   mmo::MmoServerConfig cfg;
   cfg.project_dir = opt.project;

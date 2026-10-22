@@ -18,6 +18,7 @@
 #include "net/Transport.h"
 #include "plugins/Builtins.h"
 #include "plugins/RuntimePlugins.h"
+#include "plugins/split/Split.h"
 #include "runtime/Log.h"
 #include "runtime/Input.h"
 #include "runtime/World.h"
@@ -142,7 +143,19 @@ std::vector<game::HudToast> client_toasts(const mp::GameClient& client) {
 // --smoke: an in-process posse (server + 2 clients over real ENet loopback,
 // 70 ms +- 20 ms, 8% loss), then this client's draw list must show every
 // rider where the server has it.
+// The 2D physics / movement plugins (0.2.0 split): the smoke's posse claim
+// and a client without --project ride with all of them, as before the
+// split (the server's world decides; prediction should match it).
+plugins::ProviderHold& all_2d_providers() {
+  static plugins::ProviderHold hold;
+  plugins::offer_builtin_providers();
+  hold.clear();
+  hold.hold({plugins::kBox2DId, plugins::kTopDownId, plugins::kPlatformerId});
+  return hold;
+}
+
 int run_smoke() {
+  all_2d_providers();
   mp::PosseSmokeOptions opt;
   opt.riders = 2;
   opt.sim = net::LinkSim{70, 20, 0.08f};
@@ -240,6 +253,8 @@ int run_window(const Options& opt) {
                 << (d.plugin.empty() ? "" : d.plugin + ": ") << d.text << '\n';
     });
     std::cout << "[ts_client] " << loaded << " plugin(s) riding\n";
+  } else {
+    all_2d_providers();
   }
   mp::GameClient client;
   rp.attach(client.world());
