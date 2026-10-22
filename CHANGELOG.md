@@ -8,6 +8,15 @@ All notable changes to TombStone Engine. The version number lives in the `VERSIO
 - "New update available" notice on the Project Manager. On open (at most every 6 hours, cached in settings), a background check asks GitHub for the latest release and compares it with the built-in `VERSION`. The notice has **Update** (downloads `TombStone-<ver>-update.exe`, falling back to `-setup.exe`, checks it against `SHA256SUMS.txt`, runs it and closes the editor), **Release notes**, **Later** and **Skip this version**. There's a Settings toggle, **Check for updates on start** (on by default). Errors and offline stay quiet (log only). The check uses the Vault's HTTP client (WinHTTP, Windows). `TS_FAKE_UPDATE=9.9.9` forces the notice for testing. See [docs/updates.md](docs/updates.md).
 - `ts_admin --smoke-update-check` (also in `--smoke`): canned release JSON and a loopback server, no internet.
 
+### Player movement
+- Mouse look for the built-in 3D Player, on by default. First person: the mouse turns the body and tilts the eyes (pitch clamped to ±89°), and WASD walks where you look. Third person: the mouse orbits the camera (clamped pitch) and the scroll wheel zooms. The rider walks relative to the camera and turns to face where it walks, and the camera is still pulled in front of static colliders.
+- Play captures the cursor (raw mouse motion where supported). In the editor, Esc, focus loss, Pause, Free cam or an in-game menu frees it, a click in the viewport takes it back, and a second Esc stops Play. In `ts_game`, the pause menu (Esc) and focus loss free it, and resuming or a click captures it again.
+- New Player inspector settings: **Look** (Mouse / Keys), **Sensitivity**, **Invert Y**, **Smoothing** (off by default) and **Capture cursor on Play**. Keys look keeps the old Q / Z, Page Up / Page Down and right-drag. Q / Z and a gamepad's right stick turn in both modes, and `ts_game` 3D also walks with pad 1's left stick and jumps with A.
+- 2D top-down **Face mouse**: the sprite turns toward the mouse cursor or the right stick, and the collider doesn't turn. It's on in the Empty 2D Top-down template. Platformer riders are unchanged.
+- The Empty 3D First-person, 3D Third-person and 2D Top-down templates and the Ghost Town 3D sample use mouse look. VR is unchanged (headset look).
+- `scene.json` fields are all optional, and only non-default values are written, so there's no version bump: Player `look`, `mouse_sensitivity`, `invert_y`, `look_smoothing`, `capture_cursor`, and 2D `face_mouse`.
+- `ts_admin --smoke-mouselook` (also in `--smoke-templates`) drives synthetic mouse deltas through yaw, pitch, the pitch clamp, invert Y, smoothing, the right stick, the third-person orbit, zoom and wall pull-in, and the top-down facing angle.
+
 ### Release tooling
 - `build_release.ps1` also writes `TombStone-<ver>-update.exe`: same AppId, upgrades in place with a minimal wizard, and keeps claims, settings and the Vault. It's listed in `SHA256SUMS.txt`, and `-TestInstall` runs it over the test install.
 

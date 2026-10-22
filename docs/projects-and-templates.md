@@ -82,14 +82,46 @@ Templates are searched in this order:
   - the platformer player lands on the ground and jumps;
   - the FPS camera sits at eye height and looks up and down;
   - the third-person camera orbits behind the player;
+  - mouse look (`--smoke-mouselook`, also run here): synthetic mouse deltas turn the FPS body and tilt the eyes, pitch stops at ±89°, invert Y and sensitivity apply, smoothing eases, the right stick turns, Keys look ignores the mouse; the third-person mouse orbit, its pitch clamp, scroll zoom and the pull-in in front of a wall; the top-down face-mouse angle; the `scene.json` round trips; and the Empty templates ship with it on;
   - VR snap turn and teleport work in the simulator.
 
 ## Empty-template features in the engine
 
 - **2D Player Controller: Platformer mode.** In the inspector, Movement is **Top-down** or **Platformer**. Platformer walks on the horizontal axis and falls with `gravity` (px/s², default 1400). It jumps with `jump_speed` (px/s, default 560) when grounded: press W, Up or the action button (Space / E / pad A). It collides with solid tiles and colliders. In `scene.json` this is `"mode": "platformer"`, plus `gravity` and `jump_speed`, all optional.
 - **2D empty scenes play.** A scene with no entities enters Play (an empty ride) instead of failing.
-- **3D Player: First person view.** The Player inspector's **View** is **Third person** (orbit camera, default) or **First person**. First person puts the camera at `eye_height`, or on a child entity with a Camera component. Look up and down with right-drag or PageUp/PageDown, clamped to ±85°. JSON: `"view": "first_person"`, `"eye_height"`.
+- **3D Player: First person view.** The Player inspector's **View** is **Third person** (orbit camera, default) or **First person**. First person puts the camera at `eye_height`, or on a child entity with a Camera component. Pitch is clamped to ±89°. JSON: `"view": "first_person"`, `"eye_height"`. How the rider looks about is set by **Look** (see below).
+- **2D top-down: Face mouse.** A top-down Player Controller can tick **Face mouse**. While riding, the sprite turns toward the mouse cursor (in world space, under the camera) or along a gamepad's right stick. Draw the art facing up. Only the drawn sprite turns; the collider keeps its authored rotation, so walls don't catch a turning player. The Empty 2D Top-down template has it on. JSON: `"face_mouse": true` in `"player"` (left out when off, so older files are unchanged). Platformer riders ignore it. The aim is local and isn't sent over the network.
 - **3D Camera component.** An entity with `"camera": { "fov": 60 }` is the Play camera when there is no player and no VR. In first person, a child camera of the player is the eye.
+
+## Mouse look (3D Player)
+
+The 3D Player component looks about with the mouse by default. Pick the mode under **Look** in the Player inspector:
+
+| Look | First person | Third person |
+| --- | --- | --- |
+| **Mouse** (default) | The mouse turns the body (yaw) and tilts the eyes (pitch, ±89°). WASD walks where you look. | The mouse orbits the camera round the rider (yaw, and pitch from 70° above to 30° below). The scroll wheel zooms. WASD walks relative to the camera and the rider turns to face where it walks. |
+| **Keys** | Q / Z turn, Page Up / Page Down look up and down, right-drag does both. The cursor is left alone. | Q / Z or right-drag orbit. |
+
+Q / Z, Page Up / Page Down and a gamepad's right stick (150°/s) work in both modes, so the keyboard is always a fallback.
+
+With **Mouse** you also get these settings:
+
+- **Sensitivity**: degrees per mouse count (default 0.15).
+- **Invert Y**: pushing the mouse (or stick) up looks down.
+- **Smoothing**: off by default. Up to 0.9 eases the view toward the mouse each tick.
+- **Capture cursor on Play** (on by default): hides and locks the cursor while riding, using raw mouse motion where the platform has it. With it off, the free cursor looks about as it moves over the view.
+
+**Taking the cursor back.**
+- *Editor Play (3D):* Play captures the cursor in the viewport and ImGui ignores the mouse while it's captured. The first **Esc** frees the cursor and the next one stops Play. Losing focus, ticking **Pause** or **Free cam (C)**, or an in-game menu also frees it. Click the view to look again; that click isn't passed on as a throw. The status bar says which state you're in.
+- *ts_game:* the cursor is captured from the start. **Esc** opens the pause menu and frees it, and so does losing focus. Resuming, or clicking in the window, captures it again; that click isn't a grab.
+
+**Third-person camera collision.** The orbit camera is pulled in front of any static collider (box or capsule bounds) between the rider and the camera. It never gets closer than 0.8 m.
+
+**scene.json.** All fields are optional, so the scene version stays at 16. A rider with no `"look"` looks with the mouse. Only values that differ from the defaults are written: `"look": "keys"`, `"mouse_sensitivity"`, `"invert_y": true`, `"look_smoothing"` and `"capture_cursor": false`.
+
+**Templates and samples.** Empty 3D First-person and Empty 3D Third-person ship with mouse look, and so does every sample with a 3D Player (Ghost Town 3D). VR is unchanged: the headset looks. A VR rig riding flat on the desktop (no headset) uses Keys look, so the cursor stays free.
+
+**Turning it off for a claim.** Select the Player and set **Look** to **Keys**, or untick **Capture cursor on Play** to keep mouse look with a free cursor. In `scene.json`, add `"look": "keys"` to the player object.
 
 ## Plugins per project
 

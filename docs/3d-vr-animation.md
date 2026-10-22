@@ -18,6 +18,7 @@ Source: `src/render3d/Scene3D.*`, `src/world3d/`.
 - **Entities** have a transform plus optional mesh, material, light, collider (box or capsule, optionally a trigger), player, script, audio, particles, animator, `vr_rig` and `grabbable` components. They can also have a `parent`.
 - **Play:** the rider is a capsule.
   - WASD to move, Space to jump, E to interact (within 2.5 m).
+  - The mouse looks about (Player **Look**: Mouse, the default, or Keys). See [mouse look](projects-and-templates.md#mouse-look-3d-player).
   - Collision is the capsule against static colliders, with gravity.
 - **Lua additions:** `pos3`, `set_pos3`, `move3`, `yaw`, `set_yaw`, `spin`, `scale3`, `set_scale3`.
 
