@@ -2,5 +2,5 @@
   "name": "Empty VR",
   "dimension": "3d",
   "vr": true,
-  "plugins": ""
+  "plugins": "ts.physics.jolt,ts.move.rider3d"
 }

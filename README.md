@@ -57,7 +57,7 @@ Every system is built with performance as the primary goal:
 
 - **Static:** `TS_PLUGIN_STATIC(sym, Class)` in the plugin, plus `TS_PLUGIN_DECLARE(sym)` / `TS_PLUGIN_LINK(sym, catalog, err)` in the host. The explicit link call works on MSVC because there are no global constructors for the linker to strip.
 - **Dynamic:** build a shared module and put `TS_DYNAMIC_PLUGIN(Class)` in it. It exports the C entry `ts_plugin_entry`, which is loaded with `LoadLibrary` on Windows and `dlopen` elsewhere. ABI, API and C++ runtime tags are checked, so a module must be built with the same compiler and runtime as the host. Search path: `$TS_PLUGIN_PATH`, `<project>/plugins`, then the build's `plugins/` directory. `sample.lantern` (`src/plugins/lantern`) is the sample.
-- **Built-ins:** `ts.posse` (multiplayer: Network panel, Play-menu entries, toolbar button; on by default), `ts.tumbleweed` (sample gameplay plugin: system, `tumbleweed` Lua table, `.tumble.json` asset type; off by default) and `ts.frontier` (Frontier Survival, below; off by default).
+- **Built-ins:** `ts.posse` (multiplayer: Network panel, Play-menu entries, toolbar button; on by default), `ts.tumbleweed` (sample gameplay plugin: system, `tumbleweed` Lua table, `.tumble.json` asset type; off by default) and `ts.frontier` (Frontier Survival, below; off by default). The physics and movement plugins (0.2.0) are built-ins too; see [docs/physics.md](docs/physics.md).
 
 **Per-project enablement.** The Outfitter's Wagon panel (Plugins tab) hitches and unhitches plugins. Hitching a plugin brings its dependencies along, and unhitching one also unhitches its dependents. The list is saved right away to `project.json` as `"plugins"`. Changes take effect when the editor is idle, or after Play or the posse stops (restart-of-play). Old projects without the key get the default built-ins. `ts_game`, `ts_server` and `ts_client` load the project's plugins too.
 
@@ -539,6 +539,8 @@ The Vault is an asset library shared by every claim: send a texture, model, soun
 
 ## Physics (Jolt 3D / VR, Box2D 2D)
 
+From 0.2.0 physics and the built-in player movement are Trading Post plugins (`ts.physics.jolt`, `ts.physics.box2d`, `ts.move.rider3d`, `ts.move.topdown`, `ts.move.platformer`): a claim switches on only what it uses, older claims get them on first open (with a backup), and a claim without them still opens and plays. See [docs/physics.md](docs/physics.md).
+
 Both engines are fetched by hash and are deterministic: the smokes check the same state hash on Linux (GCC) and Windows (MSVC).
 
 ### 3D and VR (Jolt Physics v5.3.0)
@@ -588,7 +590,7 @@ Set `"hull_physics": "box2d"` in `shipyard/sky.json` to fly hulls as Box2D bodie
 - The default (`"builtin"`) keeps the original integrator with no hull contact, and the same determinism hashes.
 
 ### Smokes
-`ts_admin --smoke-physics` covers the 3D core, the VR saloon, the 2D world and the headless editor panels. `--smoke-shipyard` covers the Box2D hulls.
+`ts_admin --smoke-physics` covers the 3D core, the VR saloon, the 2D world and the headless editor panels. `--smoke-shipyard` covers the Box2D hulls. `--smoke-plugin-split` covers the plugins: templates, migrating an old claim, play with and without them, and exports shipping only what they use.
 
 ### Limits
 - 2D gravity is fixed.

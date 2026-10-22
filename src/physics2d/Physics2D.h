@@ -1,6 +1,7 @@
 #pragma once
 
-// ts_physics2d: 2D rigid bodies on Box2D v3 (hidden behind this header) in
+// ts_physics2d: the 2D rigid-body interface (stock backend: Box2D v3 in the
+// ts.physics.box2d Trading Post plugin, hidden behind this header) in
 // the engine's own units: pixels, y down, angles in degrees clockwise on
 // screen (Box2D works in metres; pixels_per_metre converts). Bodies are
 // static / kinematic / dynamic with box (rotated), circle, capsule and
@@ -8,7 +9,10 @@
 // limits; ray casts; sensors; hit events with the approach speed; and a
 // state hash (Box2D v3 is cross-platform deterministic).
 
+#include "core/Providers.h"
+
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -86,65 +90,77 @@ struct JointDesc {
   float min = 0.0f, max = 0.0f;  // revolute: degrees; prismatic / distance: px
 };
 
+// The 2D physics world interface. The 2D World, scripts and the Shipyard
+// talk only to this; the ts.physics.box2d Trading Post plugin supplies
+// Box2DWorld. No physics plugin: create_world() returns nullptr and 2D
+// bodies stay where they were authored (riders / tiles keep the core AABB
+// collision).
 class World {
  public:
-  // gravity in px / s^2 (y down).
-  explicit World(Vec2 gravity = {0.0f, 980.0f}, float pixels_per_metre = 32.0f);
-  ~World();
+  World() = default;
+  virtual ~World() = default;
   World(const World&) = delete;
   World& operator=(const World&) = delete;
 
-  float pixels_per_metre() const;
-  void set_gravity(Vec2 g);
+  virtual float pixels_per_metre() const = 0;
+  virtual void set_gravity(Vec2 g) = 0;
 
-  BodyId create(const BodyDesc& desc, std::string* error = nullptr);
-  void destroy(BodyId id);
-  bool exists(BodyId id) const;
-  std::size_t body_count() const;
-  std::uint64_t user(BodyId id) const;
-  Motion motion(BodyId id) const;
+  virtual BodyId create(const BodyDesc& desc, std::string* error = nullptr) = 0;
+  virtual void destroy(BodyId id) = 0;
+  virtual bool exists(BodyId id) const = 0;
+  virtual std::size_t body_count() const = 0;
+  virtual std::uint64_t user(BodyId id) const = 0;
+  virtual Motion motion(BodyId id) const = 0;
 
-  Vec2 position(BodyId id) const;
-  float angle(BodyId id) const;
-  void set_transform(BodyId id, Vec2 p, float angle);
-  Vec2 velocity(BodyId id) const;
-  float angular_velocity(BodyId id) const;  // deg / s
-  void set_velocity(BodyId id, Vec2 v);
-  void set_angular_velocity(BodyId id, float deg_per_s);
+  virtual Vec2 position(BodyId id) const = 0;
+  virtual float angle(BodyId id) const = 0;
+  virtual void set_transform(BodyId id, Vec2 p, float angle) = 0;
+  virtual Vec2 velocity(BodyId id) const = 0;
+  virtual float angular_velocity(BodyId id) const = 0;  // deg / s
+  virtual void set_velocity(BodyId id, Vec2 v) = 0;
+  virtual void set_angular_velocity(BodyId id, float deg_per_s) = 0;
   // Kinematic: arrive at p / angle after dt (pushes dynamic bodies).
-  void move_kinematic(BodyId id, Vec2 p, float angle, float dt);
-  void add_force(BodyId id, Vec2 f);     // kg px / s^2
-  void add_impulse(BodyId id, Vec2 j);   // kg px / s
-  void add_torque(BodyId id, float t);   // kg px^2 / s^2
+  virtual void move_kinematic(BodyId id, Vec2 p, float angle, float dt) = 0;
+  virtual void add_force(BodyId id, Vec2 f) = 0;     // kg px / s^2
+  virtual void add_impulse(BodyId id, Vec2 j) = 0;   // kg px / s
+  virtual void add_torque(BodyId id, float t) = 0;   // kg px^2 / s^2
   // Override mass (kg) and rotational inertia (kg px^2) about the origin.
-  void set_mass(BodyId id, float mass, float inertia);
-  float mass(BodyId id) const;
-  bool awake(BodyId id) const;
+  virtual void set_mass(BodyId id, float mass, float inertia) = 0;
+  virtual float mass(BodyId id) const = 0;
+  virtual bool awake(BodyId id) const = 0;
 
-  bool raycast(Vec2 from, Vec2 dir, float max_dist, RayHit* hit) const;
+  virtual bool raycast(Vec2 from, Vec2 dir, float max_dist, RayHit* hit) const = 0;
 
-  JointId add_joint(const JointDesc& desc, std::string* error = nullptr);
-  void remove_joint(JointId id);
-  std::size_t joint_count() const;
+  virtual JointId add_joint(const JointDesc& desc, std::string* error = nullptr) = 0;
+  virtual void remove_joint(JointId id) = 0;
+  virtual std::size_t joint_count() const = 0;
   // Revolute: degrees; prismatic: px; distance: px.
-  float joint_value(JointId id) const;
+  virtual float joint_value(JointId id) const = 0;
 
-  void step(float dt, int sub_steps = 4);
-  const std::vector<Contact>& contacts() const;
-  const std::vector<SensorEvent>& sensor_events() const;
-  std::uint64_t state_hash() const;
+  virtual void step(float dt, int sub_steps = 4) = 0;
+  virtual const std::vector<Contact>& contacts() const = 0;
+  virtual const std::vector<SensorEvent>& sensor_events() const = 0;
+  virtual std::uint64_t state_hash() const = 0;
 
   struct DebugShape {
     std::vector<Vec2> points;  // closed outline, world px
     Motion motion = Motion::Static;
     bool sensor = false;
   };
-  std::vector<DebugShape> debug_shapes() const;
-
- private:
-  struct Impl;
-  std::unique_ptr<Impl> impl_;
+  virtual std::vector<DebugShape> debug_shapes() const = 0;
 };
+
+// Backend registry (core/Providers.h): a physics plugin offers a factory
+// under its id and holds the id while it is on for the claim.
+using WorldFactory = std::function<std::unique_ptr<World>(Vec2, float)>;
+using Backends = core::Providers<WorldFactory>;
+
+// The world of the active 2D physics plugin, or nullptr (no-op physics).
+std::unique_ptr<World> create_world(Vec2 gravity = {0.0f, 980.0f},
+                                    float pixels_per_metre = 32.0f,
+                                    std::string* backend = nullptr);
+std::string active_backend();
+inline constexpr const char* kBox2DPluginId = "ts.physics.box2d";
 
 }  // namespace physics2d
 }  // namespace tombstone

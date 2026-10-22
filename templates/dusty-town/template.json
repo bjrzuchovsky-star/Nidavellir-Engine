@@ -4,7 +4,8 @@
   "dimension": "2d",
   "description": "The 2D platformer sample: an animated rider, Dusty Town's starter scene and sample Lua scripts. Posse multiplayer on.",
   "plugins": [
-    "ts.posse"
+    "ts.posse",
+    "ts.move.topdown"
   ],
   "tags": [
     "sample",

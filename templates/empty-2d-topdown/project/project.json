@@ -1,5 +1,5 @@
 {
   "name": "Empty 2D Top-down",
   "dimension": "2d",
-  "plugins": ""
+  "plugins": "ts.move.topdown"
 }

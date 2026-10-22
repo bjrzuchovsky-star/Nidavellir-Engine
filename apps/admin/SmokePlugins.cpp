@@ -539,7 +539,9 @@ int editor_checks() {
   editor::ProjectInfo disk;
   std::string err;
   editor::ProjectStore::load_project_json(dir.string(), &disk, &err);
-  if (disk.plugins != std::vector<std::string>{"ts.posse"}) {
+  // The seeded rider switched on Top-down Rider (0.2.0 split).
+  if (disk.plugins != std::vector<std::string>{"ts.move.topdown", "ts.posse"} &&
+      disk.plugins != std::vector<std::string>{"ts.posse", "ts.move.topdown"}) {
     return fail("the editor should persist the list: " + join(disk.plugins));
   }
   scr.on_exit();

@@ -153,7 +153,24 @@ void World::setup_physics2d() {
     return;
   }
   if (!phys2d_) {
-    phys2d_ = std::make_unique<p2::World>(p2::Vec2{0.0f, 980.0f}, 32.0f);
+    // The ts.physics.box2d plugin's world; none = no-op physics (bodies
+    // stay where they were authored; static / kinematic ones still block
+    // riders through the core collision).
+    phys2d_ = p2::create_world(p2::Vec2{0.0f, 980.0f}, 32.0f);
+    if (!phys2d_) {
+      bodies2d_.clear();
+      joints2d_.clear();
+      tiles2d_ = 0;
+      contacts2d_.clear();
+      if (!phys2d_warned_) {
+        phys2d_warned_ = true;
+        post(LogLevel::Warn, "physics",
+             "This scene has rigid bodies but no 2D physics plugin is on; they stay put. "
+             "Switch on Box2D Physics (ts.physics.box2d) in the Trading Post.",
+             0);
+      }
+      return;
+    }
     bodies2d_.clear();
     joints2d_.clear();
     // Tiles never move: every solid run of every tilemap in one body.

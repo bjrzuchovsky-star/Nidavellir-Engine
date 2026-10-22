@@ -5,7 +5,7 @@
   "vr": true,
   "group": "empty",
   "description": "VR on: an XR rig with hands, teleport and snap turn, a ground plane. Rides flat on the desktop too.",
-  "plugins": [],
+  "plugins": ["ts.physics.jolt", "ts.move.rider3d"],
   "tags": ["empty", "vr", "player"],
   "order": 6,
   "thumbnail": "thumbnail.png",

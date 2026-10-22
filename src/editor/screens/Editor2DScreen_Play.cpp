@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/plugins/PluginNeeds.h"
 #include "plugins/profiler/ProfilerPlugin.h"
 #include "profiler/Profiler.h"
 #include "ui/UiScript.h"
@@ -92,6 +93,11 @@ bool Editor2DScreen::start_play() {
     mark_dirty_and_autosave();
   }
   std::string err;
+  // Added a Player / Rigid Body since the last ride? Switch on the movement
+  // / physics plugin it needs (0.2.0 split) before the world builds.
+  if (plugins_.is_open() && !plugins_.follow_needs(plugin_needs(workspace_.entities())).empty()) {
+    apply_plugin_changes_if_idle();
+  }
   // Plugin systems and Lua tables ride along (set before the world builds).
   play_.world().set_extensions(plugins_.manager().world_extensions());
   if (!play_.start(workspace_.entities(), workspace_.tile_solidity(),

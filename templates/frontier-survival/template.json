@@ -4,7 +4,8 @@
   "dimension": "2d",
   "description": "A 2D survival claim: gather, craft, build, day/night and hunger, with the Frontier Survival plugin on.",
   "plugins": [
-    "ts.frontier"
+    "ts.frontier",
+    "ts.move.topdown"
   ],
   "tags": [
     "sample",

@@ -1,4 +1,5 @@
 #include "editor/editor3d/Editor3DScreen.h"
+#include "editor/plugins/PluginNeeds.h"
 #include "terrain/TerrainView.h"
 #include "plugins/profiler/ProfilerPlugin.h"
 #include "profiler/Profiler.h"
@@ -71,6 +72,8 @@ void Editor3DScreen::on_enter() {
     if (!scene3d::save_file(path, scene_, &err)) {
       note("Could not write the starter scene: " + err, LogLevel::Error);
     } else {
+      // The starter rider / grabbables ride with Rider 3D + Jolt (0.2.0).
+      if (!plugins_.follow_needs(plugin_needs(scene_)).empty()) plugins_.apply();
       note(vr_project() ? "Staked a fresh VR claim: ground, crate, lamp, a table of things to "
                           "grab and the VR rig"
                         : "Staked a fresh 3D claim: ground, crate, lamp and a rider");
@@ -79,6 +82,7 @@ void Editor3DScreen::on_enter() {
     note(err, LogLevel::Error);
     scene_ = scene3d::Scene3D{};
   }
+  plugins_.set_needs_baseline(plugin_needs(scene_));
   undo_.clear();
   redo_.clear();
   prefabs_.set_project(project_.path);
@@ -754,6 +758,10 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
 
 bool Editor3DScreen::play_start() {
   if (playing()) return true;
+  // Added a Player / Rigid Body / Grabbable since the last ride? Switch on
+  // the plugin it needs (0.2.0 split) before the world starts.
+  plugins_.follow_needs(plugin_needs(scene_));
+  if (plugins_.pending()) plugins_.apply();
   if (vr_project()) return vr_preview_start(true);
   world_.set_vr(false);
   gizmo_cancel();

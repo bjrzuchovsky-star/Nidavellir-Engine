@@ -5,7 +5,7 @@
   "vr": false,
   "group": "empty",
   "description": "A player with top-down movement and a starter script, a follow camera and an empty tilemap.",
-  "plugins": [],
+  "plugins": ["ts.move.topdown"],
   "tags": ["empty", "top-down", "player"],
   "order": 1,
   "thumbnail": "thumbnail.png",

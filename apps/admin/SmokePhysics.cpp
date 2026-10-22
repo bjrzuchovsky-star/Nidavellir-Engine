@@ -1,6 +1,7 @@
 #include "SmokePhysics.h"
 
 #include "physics3d/Physics3D.h"
+#include "plugins/physics_jolt/JoltWorld.h"
 #include "render3d/Scene3D.h"
 #include "world3d/World3D.h"
 
@@ -47,7 +48,7 @@ std::string f3(r3::Vec3 v) {
 
 // Ten crates stacked on a floor; return the state hash after 4 s.
 int stacking(std::uint64_t* hash_out, std::string* why) {
-  p3::World w;
+  p3::JoltWorld w;
   w.create(box(p3::Motion::Static, {0, -0.5f, 0}, {40, 1, 40}));
   std::vector<p3::BodyId> crates;
   for (int i = 0; i < 10; ++i) {
@@ -75,7 +76,7 @@ int stacking(std::uint64_t* hash_out, std::string* why) {
 
 // A small pile hit by a thrown ball, then a hash: run twice, compare.
 std::uint64_t scatter_hash() {
-  p3::World w;
+  p3::JoltWorld w;
   w.create(box(p3::Motion::Static, {0, -0.5f, 0}, {40, 1, 40}));
   for (int x = 0; x < 4; ++x) {
     for (int y = 0; y < 4; ++y) {
@@ -98,7 +99,7 @@ std::uint64_t scatter_hash() {
 }
 
 int joints(std::string* report) {
-  p3::World w;
+  p3::JoltWorld w;
   w.create(box(p3::Motion::Static, {0, -0.5f, 0}, {40, 1, 40}));
   // Hinge door (+-0.5 rad) shoved hard.
   const p3::BodyId door = w.create(box(p3::Motion::Dynamic, {0.5f, 1.2f, 0}, {1.0f, 2.0f, 0.1f}));
@@ -190,7 +191,7 @@ int joints(std::string* report) {
 }
 
 int queries_and_events(std::string* report) {
-  p3::World w;
+  p3::JoltWorld w;
   const p3::BodyId floor = w.create(box(p3::Motion::Static, {0, -0.5f, 0}, {40, 1, 40}, 1));
   // Rotated static ramp (45 degrees about z) -> a ray down hits its slope.
   p3::BodyDesc ramp = box(p3::Motion::Static, {6, 1, 0}, {2, 0.2f, 2}, 2);

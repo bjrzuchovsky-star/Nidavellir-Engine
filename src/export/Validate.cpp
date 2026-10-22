@@ -7,6 +7,7 @@
 #include "plugin/PluginManager.h"
 #include "plugins/Builtins.h"
 #include "plugins/RuntimePlugins.h"
+#include "plugins/split/Split.h"
 #include "runtime/GraphScript.h"
 
 #include "lauxlib.h"
@@ -108,8 +109,10 @@ std::vector<PluginNeed> project_plugins(const std::string& project_dir,
   plugins::fill_catalog(catalog, project_dir, &errs);
   for (const std::string& d : extra_dirs) catalog.scan_folder(d, &errs);
   const plugins::ProjectPluginList list = plugins::read_project_plugins(project_dir);
-  const std::vector<std::string> ids =
-      list.listed ? list.ids : plugin::PluginManager::defaults(catalog, list.type);
+  // Effective list: a claim not migrated past the 0.2.0 split yet ships
+  // the physics / movement plugins its scenes use.
+  const std::vector<std::string> ids = plugins::effective_plugins(
+      project_dir, list.ids, list.listed, plugin::PluginManager::defaults(catalog, list.type));
   std::vector<PluginNeed> out;
   for (const std::string& id : ids) {
     PluginNeed n;

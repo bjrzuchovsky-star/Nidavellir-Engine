@@ -467,10 +467,29 @@ void ShipSim::allocate_thrust(Ship& s, float* fx, float* fy, float* torque) cons
   }
 }
 
+struct ShipSim::Hulls {
+  // The ts.physics.box2d plugin's world (null: hulls keep the built-in
+  // movement; see physics_box2d()).
+  std::unique_ptr<physics2d::World> owned = physics2d::create_world({0.0f, 0.0f}, 32.0f);
+  struct Entry {
+    physics2d::BodyId body = 0;
+    std::uint64_t sig = 0;
+  };
+  std::map<std::uint32_t, Entry> bodies;
+};
+
 void ShipSim::physics() {
   if (sky_.box2d_hulls) {
-    physics_box2d();
-    return;
+    // Box2D hulls need the ts.physics.box2d plugin; without it the ships
+    // keep the built-in movement below.
+    if (!hulls_) {
+      auto h = std::make_shared<Hulls>();
+      if (h->owned) hulls_ = std::move(h);
+    }
+    if (hulls_) {
+      physics_box2d();
+      return;
+    }
   }
   for (Ship& s : ships_) {
     apply_power(s);
@@ -506,20 +525,11 @@ void ShipSim::physics() {
 // unchanged; Box2D adds hull-on-hull contact. A changed layout (damage,
 // split) rebuilds the body in place keeping its velocity.
 
-struct ShipSim::Hulls {
-  physics2d::World world{{0.0f, 0.0f}, 32.0f};
-  struct Entry {
-    physics2d::BodyId body = 0;
-    std::uint64_t sig = 0;
-  };
-  std::map<std::uint32_t, Entry> bodies;
-};
 
 std::size_t ShipSim::hull_bodies() const { return hulls_ ? hulls_->bodies.size() : 0; }
 
 void ShipSim::physics_box2d() {
-  if (!hulls_) hulls_ = std::make_shared<Hulls>();
-  physics2d::World& w = hulls_->world;
+  physics2d::World& w = *hulls_->owned;
   constexpr float kRad = 180.0f / kPi;
   // Drop bodies of ships that are gone.
   for (auto it = hulls_->bodies.begin(); it != hulls_->bodies.end();) {

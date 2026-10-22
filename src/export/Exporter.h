@@ -78,6 +78,7 @@ struct ExportResult {
   std::size_t pak_files = 0;
   std::uint64_t pak_bytes = 0;
   std::vector<std::string> plugins_shipped;
+  std::vector<std::string> plugins_used;  // ids the game loads (game.json "plugins")
   ValidationReport report;
   std::string text() const;  // human report (also export_report.txt)
 };

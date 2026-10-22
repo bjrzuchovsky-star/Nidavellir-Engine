@@ -47,6 +47,7 @@ add_executable(ts_admin
   SmokeVault.cpp
   SmokeUpdate.cpp
   SmokeMouseLook.cpp
+  SmokePluginSplit.cpp
   VaultCli.cpp
   TerrainShot.cpp
 )
@@ -75,6 +76,7 @@ target_link_libraries(ts_admin
     ts_render3d
     ts_world3d
     ts_physics3d
+    ts_plugins_3d
     ts_xr
     ts_imgui
     ts_audio

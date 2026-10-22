@@ -1,5 +1,5 @@
 {
   "name": "Empty 2D Platformer",
   "dimension": "2d",
-  "plugins": ""
+  "plugins": "ts.move.platformer"
 }

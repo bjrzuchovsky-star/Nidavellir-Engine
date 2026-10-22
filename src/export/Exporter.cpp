@@ -154,6 +154,9 @@ std::string ExportResult::text() const {
   if (!installer_path.empty()) o << "installer: " << installer_path << '\n';
   if (!iss_path.empty()) o << "installer script: " << iss_path << '\n';
   for (const std::string& m : missing_dlls) o << "MISSING DLL: " << m << '\n';
+  o << "plugins: " << (plugins_used.empty() ? std::string("(none)") : "") ;
+  for (std::size_t i = 0; i < plugins_used.size(); ++i) o << (i ? ", " : "") << plugins_used[i];
+  o << '\n';
   for (const std::string& p : plugins_shipped) o << "plugin dll: " << p << '\n';
   for (const std::string& e : report.errors) o << "ERROR: " << e << '\n';
   for (const std::string& w : report.warnings) o << "warning: " << w << '\n';
@@ -211,6 +214,16 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
   const std::string vr_flag = json_mini::get_string(*pj, "vr", json_mini::get_string(*pj, "xr", ""));
   const bool vr = dimension == "vr" || (dimension == "3d" && vr_flag == "true");
   if (dimension == "vr") dimension = "3d";
+  // Plugins the game rides with: project.json's list, plus (for a claim
+  // from before the 0.2.0 split) the physics / movement plugins its scenes
+  // use. Only these load in the exported game; editor-only ones stay home.
+  std::string plugin_list, runtime_plugins;
+  for (const PluginNeed& p : project_plugins(proj.string(), {})) {
+    plugin_list += (plugin_list.empty() ? "" : ",") + p.id;
+    if (p.editor_only) continue;
+    runtime_plugins += (runtime_plugins.empty() ? "" : ",") + p.id;
+    r.plugins_used.push_back(p.id);
+  }
   const std::string slug = slugify(name);
   const std::string exe_name = (opt.exe_name.empty() ? slug : opt.exe_name) + kExeExt;
   auto pick_int = [&](int given, const char* key, int fallback) {
@@ -320,12 +333,16 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
                  rel.rfind("scripts/", 0) == 0)) {
       continue;  // compiled into native/
     }
-    if (rel == "project.json" && !dev) {
-      // Strip editor-only bookkeeping (created / last_opened / editor_*).
-      std::vector<std::pair<std::string, std::string>> keep;
+    if (rel == "project.json") {
+      // Strip editor-only bookkeeping (created / last_opened / editor_*;
+      // the dev profile keeps it) and pin the plugin list: the effective
+      // one, marked past the 0.2.0 split so the game never re-scans.
+      std::vector<std::pair<std::string, std::string>> keep = {
+          {"plugins", plugin_list}, {"plugin_split", "1"}};
       std::vector<std::pair<std::string, bool>> bools;
       for (const auto& [k, v] : *pj) {
-        if (k == "created" || k == "last_opened" || k.rfind("editor", 0) == 0) continue;
+        if (k == "plugins" || k == "plugin_split") continue;
+        if (!dev && (k == "created" || k == "last_opened" || k.rfind("editor", 0) == 0)) continue;
         if (v == "true" || v == "false") bools.emplace_back(k, v == "true");
         else keep.emplace_back(k, v);
       }
@@ -446,7 +463,7 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
       {"name", name},           {"version", version},  {"dimension", dimension},
       {"start_scene", "scene.json"}, {"icon", icon},   {"pak", "game.tspak"},
       {"profile", profile},     {"engine", "TombStone Engine"},
-      {"vr", vr ? "true" : "false"}};
+      {"vr", vr ? "true" : "false"}, {"plugins", runtime_plugins}};
   if (!write_all(game_dir / "game.json",
                  json_num_object(gs, {{"window_width", ww}, {"window_height", wh}}))) {
     return fail("cannot write game.json");

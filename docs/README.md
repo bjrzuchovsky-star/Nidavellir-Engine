@@ -12,6 +12,7 @@ These pages are written from the source in this repository (`src/`, `apps/`, `sd
 | [The Vault](vault.md) | The asset library shared by every claim: local folder or self-hosted `ts_vault` server, Send to Vault / Pull, GUID-stable pulls, versions and pins, API, CLI, hosting, `--smoke-vault` |
 | [Project types and templates](projects-and-templates.md) | 2D / 3D / VR, `project.json`, claim templates, plugins per project |
 | [The Trading Post](trading-post.md) | Plugin store, sources, the plugin cache, signed indexes, the plugin system |
+| [Physics and rider movement](physics.md) | The 0.2.0 plugins: Jolt (3D), Box2D (2D), Rider 3D, Top-down and Platformer riders; the core interfaces, play without them, templates, migrating old claims, export, `--smoke-plugin-split` |
 | [Scripting](scripting.md) | Lua, visual graphs (Brand Book), C++ scripts with hot reload, C# |
 | [Audio](audio.md) | `ts_audio`, buses, Audio Source, Lua `audio.*`, the Saloon Band mixer |
 | [UI and fonts](ui-and-fonts.md) | `ts_ui`, fonts, widgets, `.ui.json`, Lua `ui.*` |
@@ -32,10 +33,6 @@ These pages are written from the source in this repository (`src/`, `apps/`, `sd
 | [Profiler and debug tools: Assay Office](profiler.md) | Optional `ts.profiler`: CPU scopes, timeline, GPU timers, draws / memory / assets, net stats, F3 overlay, console, captures |
 | [Persistent world: Town Hall](mmo.md) | `ts_server --mmo`: accounts (Argon2i), SQLite riders + Strongbox bridge, zones + interest, anti-cheat movement, chat, resume, admin console, bot load test, editor panel |
 | [Multiplayer (the posse)](multiplayer.md) | `ts_server`, `ts_client`, protocol, prediction, Play with Posse |
-
-## Coming soon
-
-- **Physics (Jolt / Box2D):** in progress, not documented yet. Right now `src/physics/Physics2D.h` is only a stub class (`init`, `shutdown`, `step`), and the repository contains no Jolt or Box2D code. 2D collision currently lives in `src/runtime/World_Collision.cpp` (see the editor guide). 3D collision is a capsule against static box / capsule colliders in `World3D`.
 
 ## Note on the top-level README
 

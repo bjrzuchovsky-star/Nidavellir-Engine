@@ -1,7 +1,8 @@
 // --smoke-templates, part 8: every engine template becomes a claim in a temp
 // folder, opens in its editor (headless: null renderer, no window) and
 // rides Play for a few frames. The Empty templates are checked for what
-// they promise (entities, components, README, starter script, no plugins)
+// they promise (entities, components, README, starter script, only the
+// physics / movement plugins the rider needs)
 // and driven a little (walk, jump, look, teleport, snap turn).
 #include "SmokeTemplates.h"
 
@@ -10,12 +11,14 @@
 #include "editor/projects/ProjectStore.h"
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/templates/TemplateStore.h"
+#include "plugins/split/Split.h"
 #include "render3d/Scene3D.h"
 #include "runtime/Input.h"
 #include "runtime/World.h"
 #include "store/Json.h"
 #include "world3d/World3D.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -399,8 +402,14 @@ int run_template_play_smoke(std::string* note) {
         store::Json pj;
         store::read_json_file((dir / "project.json").string(), &pj, &err);
         const ed::ProjectKind want = dim ? t.alt_kind : t.kind;
+        // 0.2.0: the plugin list is exactly the physics / movement plugins
+        // the scene's rider needs (none without one).
+        std::vector<std::string> need = ts::tombstone::plugins::required_plugins(dir.string());
+        std::vector<std::string> have = p.plugins;
+        std::sort(need.begin(), need.end());
+        std::sort(have.begin(), have.end());
         if (pj.string_at("name") != "Claim " + t.id || p.kind != want || p.vr != (t.vr && !dim) ||
-            !p.plugins_set || !p.plugins.empty() || pj.string_at("plugins") != "") {
+            !p.plugins_set || have != need || !ts::tombstone::plugins::claim_is_split(dir.string())) {
           return fail(t.id + ": project.json " + pj.dump());
         }
         if (!fs::is_regular_file(dir / "README.md") || !fs::is_regular_file(dir / "scene.json")) {

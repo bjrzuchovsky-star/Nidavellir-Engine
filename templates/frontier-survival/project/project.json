@@ -1,5 +1,5 @@
 {
   "name": "Frontier Survival",
   "dimension": "2D",
-  "plugins": "ts.frontier"
+  "plugins": "ts.frontier,ts.move.topdown"
 }

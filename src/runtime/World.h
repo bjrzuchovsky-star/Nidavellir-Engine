@@ -471,6 +471,11 @@ class World final : public ScriptWorld {
   void phys2d_unjoint(std::uint32_t joint);
   float phys2d_joint_value(std::uint32_t joint) const;
 
+  // Movement plugins (RiderController2D.h): move `a` by (dx, dy) with the
+  // rider collision (tiles, solids, bodies; nothing when it has no solid
+  // collider).
+  void move_actor(Actor& a, float dx, float dy) { move_body(a, dx, dy); }
+
  private:
   struct CameraRig {
     std::uint64_t entity = 0;  // camera entity (0 = implicit)
@@ -497,9 +502,11 @@ class World final : public ScriptWorld {
   void separate_dynamics();
   void update_triggers();
   void step_players(const InputFrame& input);
-  // One rider, one tick of input (step_players / predict_rider).
+  // One rider, one tick of input (step_players / predict_rider), through
+  // the movement plugin for its mode (RiderController2D.h).
   void move_rider(Actor& a, const PlayerInput& in);
-  void face_aim(Actor& a, const PlayerInput& in);  // top-down face_mouse riders
+  unsigned rider_warned_ = 0;   // bit 1 top-down, 2 platformer: warned this ride
+  bool phys2d_warned_ = false;  // rigid bodies but no 2D physics plugin
   void step_camera();
   void setup_animation();
   void setup_actor_animation(Actor& a);

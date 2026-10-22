@@ -2,6 +2,7 @@
 
 #include "editor/projects/ProjectStore.h"
 #include "plugins/Builtins.h"
+#include "plugins/split/Split.h"
 
 #include <algorithm>
 #include <iostream>
@@ -59,10 +60,52 @@ void EditorPlugins::open(ProjectInfo* project, std::string host,
   sink_ = std::move(sink);
   build_catalog();
   const plugin::ProjectType type = plugin_type_of(vr_enabled(*project_) ? ProjectKind::VR : project_->kind);
+  // 0.2.0: physics and rider movement became Trading Post plugins. A claim
+  // from before switches on what its scenes use, once (backup + log).
+  if (!project_->path.empty()) {
+    const plugins::MigrationReport mig =
+        plugins::migrate_claim(project_->path, plugin::PluginManager::defaults(*catalog_, type));
+    for (const std::string& line : mig.log) {
+      say(mig.error.empty() ? LogLevel::Info : LogLevel::Warn, line);
+    }
+    if (mig.changed) {
+      // The open claim's list (it may be newer than the file) gains what
+      // the migration switched on.
+      if (!project_->plugins_set) project_->plugins = mig.enabled;
+      for (const std::string& id : mig.added) {
+        if (std::find(project_->plugins.begin(), project_->plugins.end(), id) ==
+            project_->plugins.end()) {
+          project_->plugins.push_back(id);
+        }
+      }
+      project_->plugins_set = true;
+    }
+  }
   enabled_ = project_->plugins_set
                  ? project_->plugins
                  : plugin::PluginManager::defaults(*catalog_, type);
   apply();
+}
+
+std::vector<std::string> EditorPlugins::follow_needs(const std::vector<std::string>& needs) {
+  std::vector<std::string> on;
+  if (!project_) return on;
+  for (const std::string& id : needs) {
+    if (std::find(seen_needs_.begin(), seen_needs_.end(), id) != seen_needs_.end()) continue;
+    if (is_enabled(id) || !catalog_->find(id)) continue;
+    std::string err;
+    if (set_enabled(id, true, &err)) {
+      on.push_back(id);
+      const plugin::CatalogEntry* e = catalog_->find(id);
+      say(LogLevel::Info, "Switched on " + (e ? e->info.name : id) + " (" + id +
+                              "): the scene uses it now. Turn it off in the Trading Post if you "
+                              "don't want it.");
+    } else if (!err.empty()) {
+      say(LogLevel::Warn, "Couldn't switch on " + id + ": " + err);
+    }
+  }
+  seen_needs_ = needs;
+  return on;
 }
 
 void EditorPlugins::close() {
@@ -71,6 +114,7 @@ void EditorPlugins::close() {
   host_object_ = nullptr;
   enabled_.clear();
   loaded_list_.clear();
+  seen_needs_.clear();
   sink_ = nullptr;
 }
 

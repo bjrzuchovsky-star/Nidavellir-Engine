@@ -1,11 +1,15 @@
 #include "editor/templates/TemplateStore.h"
 
 #include "editor/launch/GameLauncher.h"
+#include "editor/plugins/EditorPlugins.h"
 #include "editor/templates/EmptyTemplates.h"
 #include "editor/projects/ProjectStore.h"
 #include "editor/workspace/SceneIO.h"
 #include "editor/workspace/Workspace2D.h"
+#include "plugins/Builtins.h"
 #include "plugins/shipyard/Sample.h"
+#include "plugins/split/Split.h"
+#include "plugin/PluginManager.h"
 #include "plugins/survival/Sample.h"
 #include "render3d/Scene3D.h"
 #include "scene/SampleRider.h"
@@ -19,6 +23,7 @@
 #include <ctime>
 #include <filesystem>
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 #include <system_error>
 
@@ -280,6 +285,29 @@ const ProjectTemplate* TemplateStore::find(const std::string& id) const {
   return nullptr;
 }
 
+namespace {
+// 0.2.0 split: a new claim gets the physics / movement plugins its scenes
+// use (on top of what the template lists) and is marked split, so opening
+// it never runs the pre-0.2.0 migration.
+void settle_plugins(ProjectInfo* out, ProjectKind kind, bool vr) {
+  if (!out || out->path.empty()) return;
+  plugin::Catalog catalog;
+  plugins::register_builtin_plugins(catalog);
+  const std::vector<std::string> defaults = plugin::PluginManager::defaults(
+      catalog, plugin_type_of(vr ? ProjectKind::VR : kind));
+  std::string err;
+  const std::vector<std::string> added = plugins::settle_new_claim(out->path, defaults, &err);
+  if (!err.empty()) std::cout << "[Templates] plugin split: " << err << '\n';
+  if (added.empty()) return;
+  std::string lerr;
+  ProjectInfo fresh;
+  if (ProjectStore::load_project_json(out->path, &fresh, &lerr)) {
+    out->plugins = fresh.plugins;
+    out->plugins_set = fresh.plugins_set;
+  }
+}
+}  // namespace
+
 bool TemplateStore::create_project(ProjectStore& store, const ProjectTemplate& tpl,
                                    const std::string& raw_name, ProjectInfo* out,
                                    std::string* error, int vr_choice, int dimension) {
@@ -297,6 +325,7 @@ bool TemplateStore::create_project(ProjectStore& store, const ProjectTemplate& t
       if (error) *error = store.last_error();
       return false;
     }
+    settle_plugins(out, tpl.kind, vr);
     return true;
   }
   if (store.projects_root().empty()) {
@@ -326,6 +355,11 @@ bool TemplateStore::create_project(ProjectStore& store, const ProjectTemplate& t
     fs::remove_all(dir, ec);
     if (error) *error = "Template \"" + tpl.name + "\": " + err;
     return false;
+  }
+  {
+    ProjectInfo staked;
+    staked.path = dir.string();
+    settle_plugins(&staked, kind, vr);
   }
   if (!store.refresh()) {
     if (error) *error = store.last_error();

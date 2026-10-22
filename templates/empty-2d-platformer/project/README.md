@@ -11,5 +11,5 @@ A / D, the arrows or the left stick walk; W / Up / Space (action) jump while sta
 - Paint platforms with any solid tile; tune Gravity and Jump Speed in the Player Controller.
 - Give the Player a sprite and an animator.
 - Write your rules in scripts/player.lua.
-- No optional plugins are on. Turn them on from the Trading Post (or the Outfitter's Wagon) when you need them.
+- On: ts.move.platformer (physics and movement for the rider, 0.2.0 Trading Post plugins). Turn more on from the Trading Post (or the Outfitter's Wagon) when you need them.
 - Everything in this claim was made by the engine (CC0). Replace it freely.

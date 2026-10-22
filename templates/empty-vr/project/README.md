@@ -13,5 +13,5 @@ Desktop fallback: with no headset (or ts_game --desktop) the rig rides as a regu
 - Add Grabbable to props to pick them up and throw them.
 - Switch locomotion to Teleport + smooth or tune snap turn on the VR Rig.
 - Write your rules in scripts/player.lua.
-- No optional plugins are on. Turn them on from the Trading Post (or the Outfitter's Wagon) when you need them.
+- On: ts.physics.jolt,ts.move.rider3d (physics and movement for the rider, 0.2.0 Trading Post plugins). Turn more on from the Trading Post (or the Outfitter's Wagon) when you need them.
 - Everything in this claim was made by the engine (CC0). Replace it freely.

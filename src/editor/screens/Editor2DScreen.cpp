@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/plugins/PluginNeeds.h"
 
 #include "editor/assets/AssetLibrary.h"
 #include "editor/workspace/SceneIO.h"
@@ -64,6 +65,7 @@ void Editor2DScreen::on_enter() {
   telegraph_seen_total_ = 0;
 
   std::string err;
+  bool seeded = false;
   if (!project_.path.empty() && scene_io::load(workspace_, scene_path_, &err)) {
     std::cout << "[Editor2D] loaded scene.json (" << workspace_.entities().size()
               << " entities) from " << scene_path_ << '\n';
@@ -74,6 +76,7 @@ void Editor2DScreen::on_enter() {
       std::cout << "[Editor2D] seeding default entities\n";
     }
     workspace_.reset_defaults();
+    seeded = true;
     if (!project_.path.empty()) {
       // The seeded Player rides the sample cowboy sheet.
       std::string rider_err;
@@ -115,6 +118,15 @@ void Editor2DScreen::on_enter() {
   refresh_assets();
   refresh_scripts();
   open_plugins();
+  // 0.2.0 split: a freshly seeded scene switches on what its rider needs;
+  // a loaded one is the baseline (Play switches on what gets added later).
+  if (seeded && plugins_.is_open()) {
+    if (!plugins_.follow_needs(plugin_needs(workspace_.entities())).empty()) {
+      apply_plugin_changes_if_idle();
+    }
+  } else {
+    plugins_.set_needs_baseline(plugin_needs(workspace_.entities()));
+  }
   telegraph_.add(runtime::LogLevel::Info, "editor",
                  "Telegraph open for " + project_.name + " (" +
                      std::to_string(scripts_.size()) + " scripts on file)");

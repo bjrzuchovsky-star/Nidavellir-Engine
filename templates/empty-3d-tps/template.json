@@ -5,7 +5,7 @@
   "vr": false,
   "group": "empty",
   "description": "A character controller with an orbit camera, a ground plane and a starter script.",
-  "plugins": [],
+  "plugins": ["ts.physics.jolt", "ts.move.rider3d"],
   "tags": ["empty", "third-person", "player"],
   "order": 5,
   "thumbnail": "thumbnail.png",

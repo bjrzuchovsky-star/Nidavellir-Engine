@@ -1,3 +1,5 @@
+#include "plugins/rider3d/Rider3D.h"
+#include "plugins/split/Split.h"
 #include "core/Engine.h"
 #include "profiler/Profiler.h"
 #include "editor/audio/EditorAudio.h"
@@ -61,6 +63,7 @@
 #include "VaultCli.h"
 #include "SmokeUpdate.h"
 #include "SmokeMouseLook.h"
+#include "SmokePluginSplit.h"
 #include "editor/vault/VaultPanel.h"
 int run_terrain_shot(const std::string& png);
 #include "store/TradingPost.h"
@@ -1277,6 +1280,10 @@ int run_console_smoke() {
   if (run_physics_smoke() != 0) {
     return 1;
   }
+  // Physics / movement as Trading Post plugins, 0.2.0 (SmokePluginSplit.cpp).
+  if (ts::tombstone::run_plugin_split_smoke() != 0) {
+    return 1;
+  }
   // Frontier Survival plugin (see SmokeSurvival.cpp).
   if (run_survival_smoke() != 0) {
     return 1;
@@ -2199,8 +2206,27 @@ int run_imgui_app() {
 
 }  // namespace
 
+// Smoke runs: every physics / movement provider on for the whole run, so
+// the older smokes keep riding with Jolt, Box2D and the riders without
+// switching plugins on claim by claim. --smoke-plugin-split drops this hold
+// to test the plugin-off paths (smoke_provider_hold()).
+ts::tombstone::plugins::ProviderHold& smoke_provider_hold() {
+  static ts::tombstone::plugins::ProviderHold hold;
+  return hold;
+}
+
 int main(int argc, char** argv) {
   bool smoke = false;
+  // The 3D halves of the physics / movement plugins (2D ones come with the
+  // built-in catalog). Offered only; claims switch them on.
+  ts::tombstone::plugins::offer_3d_providers();
+  ts::tombstone::plugins::offer_builtin_providers();
+  for (int i = 1; i < argc; ++i) {
+    if (std::strncmp(argv[i], "--smoke", 7) == 0 || std::strcmp(argv[i], "--templates-shot") == 0) {
+      smoke_provider_hold().hold(ts::tombstone::plugins::split_plugin_ids());
+      break;
+    }
+  }
   // The Trading Post's plugin cache: installed plugins are found by this
   // process and by the ts_game / ts_client it launches.
   if (!std::getenv("TS_PLUGIN_CACHE")) {
@@ -2252,6 +2278,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-vault") == 0) {
       return ts::tombstone::run_vault_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-plugin-split") == 0) {
+      return ts::tombstone::run_plugin_split_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-mouselook") == 0) {
       // Mouse look: synthetic deltas through the 3D rider and 2D face-mouse.

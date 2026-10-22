@@ -50,9 +50,11 @@ if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT)
   include(FetchOpenXR)
   add_subdirectory(src/render3d)
   add_subdirectory(src/xr)
-  # 3D physics core (ts_physics3d): Jolt Physics fetched by hash.
+  # 3D physics interface (ts_physics3d); Jolt Physics (fetched by hash) is
+  # the ts.physics.jolt Trading Post plugin's backend (ts_physics_jolt).
   include(FetchJolt)
   add_subdirectory(src/physics3d)
+  add_subdirectory(src/plugins/physics_jolt)
 endif()
 
 # Game runtime (World, fixed-step PlaySession, Lua gameplay scripts). Pure
@@ -60,7 +62,8 @@ endif()
 # headless server included). Lua 5.4 is fetched by hash.
 if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
   include(FetchLua)
-  # 2D physics core (ts_physics2d): Box2D v3 fetched by hash.
+  # 2D physics interface (ts_physics2d); Box2D v3 (fetched by hash) is the
+  # ts.physics.box2d Trading Post plugin's backend (built in src/plugins).
   enable_language(C)
   include(FetchBox2D)
   add_subdirectory(src/physics2d)
@@ -81,6 +84,8 @@ if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
   # 3D play runtime (needs ts_render3d, so windowed apps only).
   if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT)
     add_subdirectory(src/world3d)
+    # 3D halves of the split plugins (Rider 3D controller, Jolt offer).
+    add_subdirectory(src/plugins/rider3d)
     add_subdirectory(src/ai3d)
     add_subdirectory(src/story3d)
     # In-game debug overlay + console, profiler 3D extension.

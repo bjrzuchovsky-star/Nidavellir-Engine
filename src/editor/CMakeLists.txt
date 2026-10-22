@@ -52,6 +52,7 @@ add_library(ts_editor
   editor3d/Editor3DScreen_Tools.cpp
   editor3d/Editor3DScreen_Terrain.cpp
   plugins/EditorPlugins.cpp
+  plugins/PluginNeeds.cpp
   plugins/EditorBuiltinPlugins.cpp
   plugins/FrontierPanels.cpp
   plugins/AiPanels.cpp

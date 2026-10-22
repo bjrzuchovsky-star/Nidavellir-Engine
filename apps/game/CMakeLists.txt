@@ -35,6 +35,7 @@ target_link_libraries(ts_game
     ts_gfx
     ts_render3d
     ts_world3d
+    ts_plugins_3d
     ts_ai3d
     ts_weather3d
     ts_story3d

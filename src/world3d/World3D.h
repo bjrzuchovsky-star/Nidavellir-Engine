@@ -6,7 +6,11 @@
 //     scene is never touched).
 //   * One rider (the entity with a `player` component): a capsule moved
 //     with WASD / stick relative to the camera yaw, gravity, jump, slides
-//     along static colliders (boxes and capsules, as world AABBs).
+//     along static colliders (boxes and capsules, as world AABBs). Walking,
+//     jumping and looking come from the Rider 3D Trading Post plugin
+//     (ts.move.rider3d, RiderController3D.h); bodies, the character sweep
+//     and grabbing from the physics plugin (ts.physics.jolt). Either off:
+//     the core keeps the rider standing / the AABB collision (no-op physics).
 //   * Follow camera behind the rider (yaw from input, smoothed). Mouse
 //     look (Player look = Mouse, the default): first person turns the body
 //     (yaw) and tilts the eyes (pitch, +-89 deg); third person orbits the
@@ -58,6 +62,7 @@ using scene3d::Entity3D;
 using render3d::Transform;
 
 class World3D;
+class RiderController3D;
 
 // Optional systems a host attaches to a World3D before start() (ts.ai's
 // navmesh agents). on_start runs after the statics are built and before
@@ -472,9 +477,9 @@ class World3D final : public runtime::ScriptWorld {
   float want_yaw_ = 0.0f;   // look targets: input lands here, smoothing eases
   float want_pitch_ = 0.0f; // cam_yaw_ / cam_pitch_ toward them each tick
   float cam_dist_ = 6.0f;   // third person, after zoom
-  void clamp_look(const scene3d::Player3D& cfg);
   void apply_zoom(float steps);
-  void ease_look(const scene3d::Player3D& cfg);
+  // The movement plugin's controller (RiderController3D.h), picked at start.
+  std::shared_ptr<RiderController3D> rider_ctrl_;
   std::size_t contacts_ = 0;
   std::uint64_t trigger_events_ = 0;
   std::uint64_t tick_ = 0;

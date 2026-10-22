@@ -1,6 +1,7 @@
 #include "core/Localization.h"
 #include "profiler/Profiler.h"
 #include "runtime/World.h"
+#include "runtime/RiderController2D.h"
 
 #include "scene/SceneJson.h"
 
@@ -114,6 +115,8 @@ void World::clear() {
   draw_order_.clear();
   cam_ = CameraRig{};
   tick_ = 0;
+  rider_warned_ = 0;
+  phys2d_warned_ = false;
   project_dir_.clear();
   solidity_ = TileSolidity{};
   grids_.clear();
@@ -313,20 +316,6 @@ void World::step_players(const InputFrame& input) {
   }
 }
 
-void World::face_aim(Actor& a, const PlayerInput& in) {
-  if (!a.data.player || !a.data.player->face_mouse ||
-      a.data.player->mode != PlayerControllerData::Mode::TopDown) {
-    a.aiming = false;
-    return;
-  }
-  a.aiming = true;
-  if (!in.aim) return;  // no cursor this tick: keep the last heading
-  const float dx = in.aim_x - (a.data.x + a.data.w * 0.5f);
-  const float dy = in.aim_y - (a.data.y + a.data.h * 0.5f);
-  if (dx * dx + dy * dy < 1.0f) return;  // on top of the rider: hold still
-  a.aim_deg = top_down_aim_degrees(dx, dy);
-}
-
 float top_down_aim_degrees(float dx, float dy) {
   // atan2 on screen axes (y down) is clockwise from +x; art faces up.
   float deg = std::atan2(dy, dx) * 57.29577951308232f + 90.0f;
@@ -356,62 +345,27 @@ bool aim_along_stick(PlayerInput* in, const World& world, int slot, float x, flo
 }
 
 void World::move_rider(Actor& a, const PlayerInput& in) {
-  const float dt = static_cast<float>(kTickSeconds);
-  float mx = std::clamp(in.move_x, -1.0f, 1.0f);
-  float my = std::clamp(in.move_y, -1.0f, 1.0f);
-  // Diagonals are no faster than straight lines.
-  const float len = std::sqrt(mx * mx + my * my);
-  if (len > 1.0f) {
-    mx /= len;
-    my /= len;
-  }
-  a.in_x = mx;
-  a.in_y = my;
-  const float x0 = a.data.x;
-  const float y0 = a.data.y;
-  if (a.data.player->mode == PlayerControllerData::Mode::Platformer) {
-    // Side-on: the stick walks, gravity pulls, up / action jumps off the
-    // ground. Collision is the same axis-at-a-time sweep as top-down.
-    const PlayerControllerData& pc = *a.data.player;
-    const float walk = std::clamp(in.move_x, -1.0f, 1.0f);
-    a.in_x = walk;
-    a.in_y = 0.0f;
-    const bool jump = in.move_y < -0.5f || in.held(kButtonAction);
-    if (jump && a.grounded) {
-      a.fall_vy = -pc.jump_speed;
-      a.grounded = false;
-    }
-    a.fall_vy = std::min(a.fall_vy + pc.gravity * dt, 2400.0f);
-    const float want_dy = a.fall_vy * dt;
-    move_body(a, walk * pc.speed * dt, 0.0f);
-    const float before = a.data.y;
-    move_body(a, 0.0f, want_dy);
-    const float got_dy = a.data.y - before;
-    a.grounded = false;
-    if (want_dy > 0.0f && got_dy < want_dy - 0.01f) {
-      a.grounded = true;  // landed
-      a.fall_vy = 0.0f;
-    } else if (want_dy < 0.0f && got_dy > want_dy + 0.01f) {
-      a.fall_vy = 0.0f;   // bumped a ceiling
-    }
-    a.vx = (a.data.x - x0) / dt;
-    a.vy = (a.data.y - y0) / dt;
-    if (walk > 0.0f) {
-      a.facing = 1;
-    } else if (walk < 0.0f) {
-      a.facing = -1;
-    }
+  // Movement is a Trading Post plugin (RiderController2D.h), picked by the
+  // rider's mode.
+  const bool platformer = a.data.player->mode == PlayerControllerData::Mode::Platformer;
+  const char* id = platformer ? kPlatformerRiderId : kTopDownRiderId;
+  if (const auto ctrl = RiderControllers2D::instance().get(id)) {
+    ctrl->move(*this, a, in, static_cast<float>(kTickSeconds));
     return;
   }
-  move_body(a, mx * a.data.player->speed * dt, my * a.data.player->speed * dt);
-  face_aim(a, in);
-  // Report what actually happened (0 when stopped flush on a wall).
-  a.vx = (a.data.x - x0) / dt;
-  a.vy = (a.data.y - y0) / dt;
-  if (mx > 0.0f) {
-    a.facing = 1;
-  } else if (mx < 0.0f) {
-    a.facing = -1;
+  // No movement plugin for this mode: the rider stays put.
+  a.in_x = 0.0f;
+  a.in_y = 0.0f;
+  a.aiming = false;
+  const unsigned bit = platformer ? 2u : 1u;
+  if ((rider_warned_ & bit) == 0) {
+    rider_warned_ |= bit;
+    post(LogLevel::Warn, "play",
+         a.data.name + std::string(" has a ") + (platformer ? "platformer" : "top-down") +
+             " Player but no movement plugin is on; it stays put. Switch on " +
+             (platformer ? "Platformer Rider (ts.move.platformer)" : "Top-down Rider (ts.move.topdown)") +
+             " in the Trading Post.",
+         a.data.id);
   }
 }
 

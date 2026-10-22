@@ -284,7 +284,21 @@ void World3D::phys_build() {
   ps.gravity = cfg.gravity;
   ps.collision_steps = cfg.collision_steps;
   for (int i = 0; i < p3::kLayerCount; ++i) ps.collide[i] = cfg.collide[i];
-  phys_ = std::make_unique<p3::World>(ps);
+  // The physics plugin's world (ts.physics.jolt); none = no-op physics:
+  // bodies stay put, the rider uses the core AABB sweep, triggers still fire.
+  std::string backend;
+  phys_ = p3::create_world(ps, &backend);
+  if (!phys_) {
+    const bool wants = std::any_of(ents_.begin(), ents_.end(), [](const Entity3D& e) {
+      return e.rigid_body || e.grabbable || e.joint;
+    });
+    if (wants) {
+      post(LogLevel::Warn, "physics",
+           "This scene has rigid bodies, grabbables or joints but no 3D physics plugin is on; "
+           "they stay put. Switch on Jolt Physics (ts.physics.jolt) in the Trading Post.");
+    }
+    return;
+  }
   for (const Entity3D& e : ents_) {
     if (phys_wants_body(e)) phys_add(e);
   }
