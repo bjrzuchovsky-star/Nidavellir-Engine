@@ -11,6 +11,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <string>
 #include <utility>
 #include <vector>
@@ -83,15 +84,20 @@ void Editor3DScreen::draw_add_component(std::uint64_t id, std::string* attach_re
   ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (ImGui::GetContentRegionAvail().x - w) * 0.5f));
   ImGui::BeginDisabled(playing());
   if (theme::PrimaryButton("Add Component", ImVec2(w, 0)) || add_component_open_) {
+    if (add_component_open_) ImGui::SetScrollHereY(1.0f);  // opened from code: bring it into view
     ImGui::OpenPopup("##add_component");
     add_component_open_ = false;
   }
+  const ImVec2 below(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y + 2.0f);
+  const float menu_w = ImGui::GetItemRectSize().x;
   ImGui::EndDisabled();
   if (std::string dropped = accept_script_drop(); !dropped.empty()) *attach_rel = std::move(dropped);
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
     ImGui::SetTooltip(playing() ? "Stop the ride to add components"
                                 : "New Script..., an existing script, or drop a script here");
   }
+  ImGui::SetNextWindowPos(below, ImGuiCond_Appearing);
+  ImGui::SetNextWindowSizeConstraints(ImVec2(menu_w, 0), ImVec2(FLT_MAX, FLT_MAX));
   if (ImGui::BeginPopup("##add_component")) {
     const scene3d::Entity3D* e = scene_.find(id);
     ImGui::TextDisabled("Add to %s", e ? e->name.c_str() : "?");

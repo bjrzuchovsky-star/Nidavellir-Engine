@@ -7,6 +7,7 @@ add_executable(ts_admin
   SmokeScripting.cpp
   SmokeScriptRuntime.cpp
   SmokeScriptEditor.cpp
+  SmokeScriptsMulti.cpp
   SmokeNetwork.cpp
   SmokePlugins.cpp
   SmokeSurvival.cpp

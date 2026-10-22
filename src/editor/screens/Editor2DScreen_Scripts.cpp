@@ -17,6 +17,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -222,17 +223,24 @@ void Editor2DScreen::draw_inspector_add_component(std::uint64_t id) {
   ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (ImGui::GetContentRegionAvail().x - w) * 0.5f));
   ImGui::BeginDisabled(is_playing());
   if (theme::PrimaryButton("Add Component", ImVec2(w, 0)) || add_component_open_) {
+    if (add_component_open_) ImGui::SetScrollHereY(1.0f);  // opened from code: bring it into view
     ImGui::OpenPopup("##add_component");
     add_component_open_ = false;
   }
+  const ImVec2 below(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y + 2.0f);
+  const float menu_w = ImGui::GetItemRectSize().x;
   ImGui::EndDisabled();
   if (!e->tilemap) {
     if (const std::string dropped = accept_script_drop(); !dropped.empty()) attach_script(id, dropped);
   }
+  e = workspace_.find(id);
+  if (!e) return;
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
     ImGui::SetTooltip(is_playing() ? "Stop the ride to add components"
                                    : "Colliders, riders, cameras, scripts... (or drop a script here)");
   }
+  ImGui::SetNextWindowPos(below, ImGuiCond_Appearing);
+  ImGui::SetNextWindowSizeConstraints(ImVec2(menu_w, 0), ImVec2(FLT_MAX, FLT_MAX));
   if (ImGui::BeginPopup("##add_component")) {
     ImGui::TextDisabled("Add to %s", e->name.c_str());
     ImGui::Separator();

@@ -42,6 +42,7 @@
 #include "ExportCli.h"
 #include "SmokeGraph.h"
 #include "SmokeCSharp.h"
+#include "SmokeScriptsMulti.h"
 #include "SmokePhysics.h"
 #include "editor/scripting/BrandBook.h"
 #include "editor/export/FreightOffice.h"
@@ -1366,6 +1367,11 @@ int run_console_smoke() {
   if (run_csharp_smoke() != 0) {
     return 1;
   }
+  // Several scripts per object, New Script, drag-attach, IDE launch plans
+  // (see SmokeScriptsMulti.cpp).
+  if (run_scripts_multi_smoke() != 0) {
+    return 1;
+  }
 
   std::cout << "TombStone Admin smoke complete\n";
   return flow.current_state() == AppState::Quit ? 0 : 1;
@@ -1740,6 +1746,119 @@ int run_gizmo_shot(const std::string& which, const std::string& png) {
     return 1;
   }
   std::cout << "Gizmo screenshot (" << which << "): " << png << " (" << fw << "x" << fh << ")\n";
+  return 0;
+}
+
+// ts_admin --scripts-shot <out.png>: the 2D editor (Dusk theme) on a
+// throwaway claim, a stagecoach carrying four scripts (Lua, visual graph,
+// C++, C#) in the Inspector with the Add Component menu open
+// (docs/scripting.md screenshot). Never touches imgui.ini.
+int run_scripts_shot(const std::string& png) {
+  namespace fs = std::filesystem;
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+  GLFWwindow* window = glfwCreateWindow(1600, 1000, "TombStone Scripts", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(window);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO& io = ImGui::GetIO();
+  io.IniFilename = nullptr;
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  static gfx::GlTextureUploader gl_uploader;
+  gfx::set_texture_uploader(&gl_uploader);
+  Settings defaults;
+  apply_theme(defaults);
+
+  const fs::path dir = fs::temp_directory_path() / "ts_scripts_shot";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  editor::ProjectInfo info;
+  info.id = "scripts_shot";
+  info.name = "Dusty Gulch";
+  info.kind = editor::ProjectKind::TwoD;
+  info.path = dir.string();
+  auto e2 = std::make_unique<editor::Editor2DScreen>(info);
+  e2->on_enter();
+  const std::uint64_t coach = e2->create_entity("Stagecoach");
+  if (Entity2D* en = e2->workspace().find(coach)) {
+    en->x = -60;
+    en->y = 0;
+    en->w = 160;
+    en->h = 80;
+    en->color[0] = 0.62f;
+    en->color[1] = 0.30f;
+    en->color[2] = 0.20f;
+  }
+  e2->new_script(coach, "Coach Gate", editor::ScriptLang::Lua, "gate");
+  e2->new_script(coach, "Coach Sign", editor::ScriptLang::Graph, "sign");
+  e2->new_script(coach, "Coach Ticker", editor::ScriptLang::Cpp, "ticker");
+  e2->new_script(coach, "Coach Pickup", editor::ScriptLang::CSharp, "pickup");
+  if (const Entity2D* en = e2->workspace().find(coach)) {
+    std::vector<ScriptData> stack = script_stack(*en);
+    if (stack.size() > 2) stack[2].enabled = false;  // show a disabled one
+    e2->set_scripts(coach, stack, "Disable Script");
+  }
+  e2->workspace().select(coach);
+  int fw = 0, fh = 0;
+  std::vector<unsigned char> px;
+  for (int frame = 0; frame < 30; ++frame) {
+    glfwPollEvents();
+    glfwGetFramebufferSize(window, &fw, &fh);
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    if (frame == 10) e2->open_add_component_menu();
+    e2->on_update(1.0f / 60.0f);
+    if (frame == 4) e2->frame_selected();
+    ImGui::Render();
+    glViewport(0, 0, fw, fh);
+    const ImVec4 clear = editor::theme::Charcoal();
+    glClearColor(clear.x, clear.y, clear.z, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    if (frame == 29) {
+      px.assign(static_cast<std::size_t>(fw) * fh * 4, 0);
+      glPixelStorei(GL_PACK_ALIGNMENT, 1);
+      glReadBuffer(GL_BACK);
+      glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    }
+    glfwSwapBuffers(window);
+  }
+  e2->on_exit();
+  e2.reset();
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  gfx::set_texture_uploader(nullptr);
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  fs::remove_all(dir, ec);
+  if (px.empty()) return 1;
+  std::vector<unsigned char> flipped(px.size());
+  for (int y = 0; y < fh; ++y) {
+    std::memcpy(&flipped[static_cast<std::size_t>(y) * fw * 4],
+                &px[static_cast<std::size_t>(fh - 1 - y) * fw * 4], static_cast<std::size_t>(fw) * 4);
+  }
+  for (std::size_t i = 3; i < flipped.size(); i += 4) flipped[i] = 255;
+  if (!write_png_rgba(png, fw, fh, flipped)) {
+    std::cerr << "cannot write " << png << '\n';
+    return 1;
+  }
+  std::cout << "Scripts screenshot: " << png << " (" << fw << "x" << fh << ")\n";
   return 0;
 }
 
@@ -2573,6 +2692,12 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-tiles") == 0) {
       return run_tiles_smoke();
+    }
+    if (std::strcmp(argv[i], "--scripts-shot") == 0 && i + 1 < argc) {
+      return run_scripts_shot(argv[i + 1]);
+    }
+    if (std::strcmp(argv[i], "--smoke-scripts-multi") == 0) {
+      return run_scripts_multi_smoke();
     }
     if (std::strcmp(argv[i], "--gizmo-shot") == 0 && i + 2 < argc) {
       return run_gizmo_shot(argv[i + 1], argv[i + 2]);
