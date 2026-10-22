@@ -2,6 +2,18 @@
 
 All notable changes to TombStone Engine. The version number lives in the `VERSION` file at the repo root.
 
+## 0.1.2 — 2026-10-23
+
+A small patch release: the Vault without opening a claim. `TombStone-0.1.2-update.exe` upgrades a 0.1.0 or 0.1.1 install in place and keeps your claims, settings and the Vault.
+
+### The Vault
+- **Vault** on the Project Manager opens the library without a claim: the same browse, search, kind / tag / 2D / 3D / VR filters, thumbnails, details and versions as the in-claim panel, plus Settings and **Test connection**. See [docs/vault.md](docs/vault.md#the-vault-manager-project-manager).
+- **Add files...** sends loose files straight to the Vault (Windows file picker, a pasted path, or files dropped from Explorer on the window), with the usual send dialog (name, author, licence, tags, 2D / 3D / VR). A model brings its sibling files and the textures it names as dependency items.
+- **Edit details** (name, author, licence, tags, 2D / 3D / VR, description), **Delete item** and **Delete vN**, each with a confirm. Deleting something another item still needs is refused with the reason, claims keep the copies they pulled, and a deleted version number is never reused.
+- **Pull into claim...** with a picker listing your claims, through the regular pull path (metadata in `.tombstone/meta`, sorted type folders, `.vault/lock.json`).
+- `ts_vault` API: `PATCH /items/<id>`, `DELETE /items/<id>` and `DELETE /items/<id>/versions/<n>` (write key; **409** while in use). The local library supports the same.
+- `ts_admin --smoke-vault-pm` (also in `--smoke`) and `ts_admin --vault-pm-shot <png>`.
+
 ## 0.1.1 (2026-10-23)
 
 A trail update for 0.1.0: The Vault asset library, empty claim templates, an update notice with an in-place update installer, mouse look, much tighter model bounds and hitboxes, better Blender detection, and asset metadata tucked away in a hidden folder. `TombStone-0.1.1-update.exe` upgrades a 0.1.0 install in place and keeps your claims, settings and the Vault.
