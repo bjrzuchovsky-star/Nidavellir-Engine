@@ -582,6 +582,20 @@ void Editor3DScreen::draw_viewport() {
       ground_point(mx, my, vw, vh, &at);
       drop_asset(rel, at, pick(mx, my, vw, vh));
     }
+    // A script: attach it to the entity under the cursor.
+    if (dragging_script()) {
+      const std::uint64_t hit = pick(mx, my, vw, vh);
+      const scene3d::Entity3D* under = hit ? scene_.find(hit) : nullptr;
+      if (under) {
+        ImGui::SetTooltip("Attach to %s", under->name.c_str());
+        if (std::string rel = accept_script_payload(); !rel.empty()) {
+          select(hit);
+          attach_script(hit, rel);
+        }
+      } else {
+        ImGui::SetTooltip("Drop on an entity to attach the script");
+      }
+    }
     // A Vault tile: pull it into the claim, then place it at the drop point.
     if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kVaultItemPayload)) {
       Vec3 at = scene_.editor_camera.target;
@@ -809,6 +823,11 @@ void Editor3DScreen::draw_hierarchy() {
     if (hier_toggle_hide_) {
       if (const scene3d::Entity3D* e = find(hier_toggle_hide_)) set_hidden(e->id, !e->editor_hidden);
     }
+    if (script_drop_id_) {
+      attach_script(script_drop_id_, script_drop_rel_);
+      script_drop_id_ = 0;
+      script_drop_rel_.clear();
+    }
     if (hier_drop_id_) {
       if (hier_drop_root_) set_parent(hier_drop_id_, 0);
       else hierarchy_drop(hier_drop_id_, hier_drop_target_, hier_drop_where_);
@@ -877,6 +896,13 @@ void Editor3DScreen::draw_hierarchy_row(const scene3d::Entity3D& e, int depth) {
   if (ImGui::BeginDragDropTarget()) {
     if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kDragPayload)) {
       drop_asset(static_cast<const char*>(p->Data), e.transform.position, e.id);
+    }
+    // A script: attach it to this row (after the list is drawn).
+    if (!playing()) {
+      if (std::string rel = accept_script_payload(); !rel.empty()) {
+        script_drop_id_ = e.id;
+        script_drop_rel_ = std::move(rel);
+      }
     }
     // Top quarter: before, bottom quarter: after, middle: make a child.
     const float h = mxr.y - mn.y;
@@ -1000,10 +1026,8 @@ void Editor3DScreen::draw_assets() {
       drop_asset(a.rel, {t.x, 0.0f, t.z});
     }
   }
-  if (!scripts_.empty()) {
-    theme::SectionHeader("Scripts");
-    for (const std::string& s : scripts_) ImGui::TextUnformatted(s.c_str());
-  }
+  ImGui::Spacing();
+  draw_scripts_panel();
 }
 
 void Editor3DScreen::draw_telegraph() {

@@ -1,4 +1,5 @@
 #include "editor/assets/AssetBrowser.h"
+#include "editor/scripting/ScriptComponents.h"
 
 #include "editor/assets/AssetImport.h"
 #include "editor/ui/Theme.h"
@@ -519,12 +520,75 @@ void AssetBrowser::draw_grid() {
     col = (col + 1) % per_row;
     ++shown;
   }
+  if (host_.scripts && (filter_ == 0)) {
+    for (const std::string& rel : host_.scripts()) {
+      if (!q.empty()) {
+        if (lower(rel).find(q) == std::string::npos) continue;
+        if (!folder_.empty() && rel.rfind(folder_ + "/", 0) != 0) continue;
+      } else if (!folder_.empty() && dir_of(rel) != folder_) {
+        continue;
+      }
+      if (col > 0) ImGui::SameLine(0, 8);
+      if (script_tile(rel, size)) selected_ = rel;
+      col = (col + 1) % per_row;
+      ++shown;
+    }
+  }
   if (shown == 0) {
     theme::StatusInfo(db_.entries().empty()
                           ? "No assets yet. Drop .png / .jpg / .gltf / .glb / .wav / .ogg / .mp3 / "
                             ".ttf files into the project's assets/ folder."
                           : "Nothing matches.");
   }
+}
+
+bool AssetBrowser::script_tile(const std::string& rel, float size) {
+  ImGui::PushID(rel.c_str());
+  ImGui::BeginGroup();
+  const ImVec2 p0 = ImGui::GetCursorScreenPos();
+  const bool clicked = ImGui::InvisibleButton("##tile", ImVec2(size, size + 18));
+  const bool hovered = ImGui::IsItemHovered();
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  const bool sel = selected_ == rel;
+  dl->AddRectFilled(p0, ImVec2(p0.x + size, p0.y + size + 18),
+                    ImGui::GetColorU32(sel ? theme::AccentMuted() : (hovered ? theme::HeaderBg() : theme::PanelBg())),
+                    4.0f);
+  const ImVec2 t0(p0.x + 4, p0.y + 4), t1(p0.x + size - 4, p0.y + size - 4);
+  const ScriptLang lang = lang_of(rel);
+  const ImVec4 c = lang_colour(lang);
+  dl->AddRectFilled(t0, t1, ImGui::GetColorU32(ImVec4(c.x, c.y, c.z, 0.22f)), 6.0f);
+  dl->AddRect(t0, t1, ImGui::GetColorU32(ImVec4(c.x, c.y, c.z, 0.8f)), 6.0f, 0, 1.5f);
+  const char* g = lang_tag(lang);
+  const float px = size * 0.26f;
+  const ImVec2 ts = theme::MeasureText(px, g);
+  theme::DrawSizedText(dl, ImVec2((t0.x + t1.x - ts.x) * 0.5f, (t0.y + t1.y - ts.y) * 0.5f), px,
+                       ImGui::GetColorU32(c), g);
+  dl->AddRectFilled(ImVec2(t0.x, t1.y - 3), ImVec2(t1.x, t1.y), ImGui::GetColorU32(c));
+  std::string name = name_of(rel);
+  const float max_w = size - 4;
+  while (name.size() > 3 && ImGui::CalcTextSize(name.c_str()).x > max_w) {
+    name = name.substr(0, name.size() - 4) + "..";
+  }
+  dl->AddText(ImVec2(p0.x + 2, p0.y + size), ImGui::GetColorU32(sel ? theme::Accent() : theme::Text()),
+              name.c_str());
+  ImGui::EndGroup();
+  script_drag_source(rel);
+  if (hovered) {
+    ImGui::SetTooltip("%s\n%s script - drag onto an entity to attach, double-click to open", rel.c_str(),
+                      lang_label(lang));
+    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && host_.open_script) host_.open_script(rel, 0);
+  }
+  if (ImGui::BeginPopupContextItem("##ctx")) {
+    selected_ = rel;
+    if (host_.open_script) {
+      if (ImGui::MenuItem(lang == ScriptLang::Graph ? "Open in Brand Book" : "Open")) host_.open_script(rel, 0);
+      if (ImGui::MenuItem("Open in VS Code")) host_.open_script(rel, 1);
+      if (ImGui::MenuItem("Open in Visual Studio")) host_.open_script(rel, 2);
+    }
+    ImGui::EndPopup();
+  }
+  ImGui::PopID();
+  return clicked;
 }
 
 void AssetBrowser::draw_settings(const AssetDb::Entry& e) {

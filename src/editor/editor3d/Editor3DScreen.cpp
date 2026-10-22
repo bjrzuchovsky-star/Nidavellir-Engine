@@ -854,9 +854,8 @@ void Editor3DScreen::rescan_assets() {
     std::transform(ext.begin(), ext.end(), ext.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     const std::string rel = fs::relative(it->path(), root, ec).generic_string();
-    if (ext == ".lua") {
-      scripts_.push_back(rel);
-      continue;
+    if (ext == ".lua" || ext == ".cpp" || ext == ".cs" || rel.size() > 11 && rel.compare(rel.size() - 11, 11, ".graph.json") == 0) {
+      continue;  // scripts: listed below
     }
     AssetEntry a;
     a.rel = rel;
@@ -867,7 +866,8 @@ void Editor3DScreen::rescan_assets() {
   }
   std::sort(files.begin(), files.end(),
             [](const AssetEntry& a, const AssetEntry& b) { return a.rel < b.rel; });
-  std::sort(scripts_.begin(), scripts_.end());
+  scripts_ = list_script_files(project_.path);
+  script_infos_.clear();
   assets_.insert(assets_.end(), files.begin(), files.end());
 }
 

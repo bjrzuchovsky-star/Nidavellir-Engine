@@ -54,6 +54,7 @@ add_library(ts_editor
   editor3d/Editor3DScreen.cpp
   editor3d/Editor3DScreen_UI.cpp
   editor3d/Editor3DScreen_Panels.cpp
+  editor3d/Editor3DScreen_Scripts.cpp
   editor3d/Editor3DScreen_VR.cpp
   editor3d/Editor3DScreen_Anim.cpp
   editor3d/Editor3DScreen_Tools.cpp
@@ -92,6 +93,7 @@ add_library(ts_editor
   update/UpdateCheck.cpp
   update/UpdateService.cpp
   scripting/BrandBook.cpp
+  scripting/ScriptComponents.cpp
   tools/StringsPanel.cpp
   tools/AutoTilePanel.cpp
   tools/SpriteSlicerPanel.cpp

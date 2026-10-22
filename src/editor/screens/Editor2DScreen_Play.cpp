@@ -927,6 +927,8 @@ void Editor2DScreen::draw_inspector_gameplay(std::uint64_t id) {
   draw_inspector_audio(id);
   // Particles + Light.
   draw_inspector_fx(id);
+  // Add Component (colliders, riders, cameras, scripts...).
+  draw_inspector_add_component(id);
 }
 
 }  // namespace editor

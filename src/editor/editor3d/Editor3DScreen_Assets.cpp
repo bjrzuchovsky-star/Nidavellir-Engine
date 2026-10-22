@@ -32,6 +32,15 @@ void Editor3DScreen::open_asset_browser() {
   host.vault_badge = [this](const std::string& rel) { return vault_panel_.badge(rel); };
   host.vault_origin = [this](const std::string& rel) { return vault_panel_.origin_label(rel); };
   host.on_vault_drop = [this](const std::string& item) { vault_panel_.pull_then(item, {}); };
+  host.scripts = [this] { return scripts_; };
+  host.open_script = [this](const std::string& rel, int which) {
+    std::string msg;
+    const ExternalEditor ed = which == 1 ? ExternalEditor::VSCode
+                              : which == 2 ? ExternalEditor::VisualStudio
+                                           : ExternalEditor::Auto;
+    open_script_external(ed, project_.path, project_.name, rel, &msg);
+    note(msg);
+  };
   asset_browser_.open(project_.path, std::move(host));
 
   VaultHost vh;

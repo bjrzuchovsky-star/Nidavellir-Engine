@@ -471,19 +471,29 @@ void Editor3DScreen::draw_inspector() {
     ImGui::DragFloat("Throw scale", &g.throw_scale, 0.01f, 0.0f, 5.0f, "%.2fx");
     t.after("Throw scale");
   }
-  if (component("Script", e.script.has_value(), [&] { e.script = ScriptData{}; },
-                [&] { e.script.reset(); })) {
-    if (ImGui::BeginCombo("Lua", e.script->path.empty() ? "(none)" : e.script->path.c_str())) {
-      for (const std::string& s : scripts_) {
-        if (ImGui::Selectable(s.c_str(), s == e.script->path)) {
-          e.script->path = s;
-          t.activated = true;
-          t.commit = "Script";
-        }
-      }
-      ImGui::EndCombo();
+  // Scripts: a stack of components, run top to bottom.
+  std::string script_label;
+  std::string attach_rel;
+  {
+    std::vector<ScriptData> stack = script_stack(e);
+    ScriptStackHost host = script_host();
+    host.after_item = [&](const char* l) { t.after(l); };
+    ImGui::Spacing();
+    ImGui::BeginGroup();
+    if (!stack.empty()) {
+      theme::SectionHeader(stack.size() == 1 ? "Script" : "Scripts", "run top to bottom");
     }
-    ImGui::TextDisabled("%zu prop override(s)", e.script->props.size());
+    const StackResult r = draw_script_stack(stack, host);
+    ImGui::EndGroup();
+    if (std::string dropped = accept_script_drop(); !dropped.empty()) attach_rel = std::move(dropped);
+    if (r.change != StackChange::None) {
+      set_script_stack(e, std::move(stack));
+      t.activated = true;
+      if (r.change == StackChange::Commit) {
+        script_label = r.label;
+        t.commit = script_label.c_str();
+      }
+    }
   }
   if (component("Audio Source", e.audio.has_value(), [&] { e.audio = scene3d::audio_3d(); },
                 [&] { e.audio.reset(); })) {
@@ -509,6 +519,7 @@ void Editor3DScreen::draw_inspector() {
       t.activated = true;
     }
   }
+  draw_add_component(e.id, &attach_rel);
   ImGui::PopID();
 
   if (t.activated && !inspector_before_) inspector_before_ = scene_;
@@ -525,6 +536,7 @@ void Editor3DScreen::draw_inspector() {
     if (!(before == scene_)) push_undo(std::string(t.commit) + " " + e.name, before);
   }
   if (unparent && !inspector_before_) set_parent(e.id, 0);
+  if (!attach_rel.empty() && !inspector_before_) attach_script(e.id, attach_rel);
 }
 
 void Editor3DScreen::draw_physics_settings() {

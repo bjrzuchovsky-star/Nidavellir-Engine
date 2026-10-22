@@ -11,6 +11,7 @@
 #include "editor/console/TelegraphLog.h"
 #include "editor/plugins/EditorPlugins.h"
 #include "editor/plugins/PluginsPanel.h"
+#include "editor/scripting/ScriptComponents.h"
 #include "editor/transform/Gizmo2D.h"
 #include "editor/transform/ModalTransform.h"
 #include "editor/screens/IScreen.h"
@@ -66,13 +67,6 @@ struct EntityImage {
   bool animated = false;  // the frame comes from an animation set
 };
 
-// What a script file declares, for the Inspector and the Scripts panel.
-struct ScriptInfo {
-  bool ok = false;
-  std::string error;                // file:line when it does not run
-  std::vector<ScriptProp> defaults;  // `props = {...}`, sorted by name
-  std::uint64_t version = 0;        // ScriptLibrary version it was read at
-};
 
 // 2D editor workspace: Hierarchy list, Viewport2D canvas, Inspector
 // properties, Tile Palette, Supply Wagon (assets), Scripts and Telegraph
@@ -404,6 +398,19 @@ class Editor2DScreen final : public IScreen {
   // step + autosave.
   bool set_script_prop(std::uint64_t id, const std::string& name,
                        std::optional<ScriptValue> value);
+  // The whole script stack (Inspector order = run order): one undo step.
+  bool set_scripts(std::uint64_t id, std::vector<ScriptData> stack,
+                   const std::string& label = "Edit Scripts");
+  // Adds rel at the bottom of the stack (Add Component, drag and drop
+  // onto the viewport / Hierarchy / Inspector). False when playing, the
+  // entity is a tile map, it already runs that file, or the stack is full.
+  bool attach_script(std::uint64_t id, const std::string& rel);
+  // New Script: scripts/<stem><ext> from a template, then attached to id
+  // (0 = just write the file). rel_out gets the new file.
+  bool new_script(std::uint64_t id, const std::string& name, ScriptLang lang,
+                  const std::string& template_id, std::string* rel_out = nullptr);
+  // Opens the Inspector's Add Component menu next frame (docs screenshot).
+  void open_add_component_menu() { add_component_open_ = true; }
   // <project>/scripts/**.lua, project-relative and sorted.
   void refresh_scripts();
   const std::vector<std::string>& script_list() const { return scripts_; }
@@ -452,6 +459,8 @@ class Editor2DScreen final : public IScreen {
   // Script section of the Inspector; Scripts panel; Telegraph panel and its
   // status-bar badge.
   void draw_inspector_script(std::uint64_t id);
+  // "Add Component" at the foot of the Inspector (components + scripts).
+  void draw_inspector_add_component(std::uint64_t id);
   void draw_inspector_audio(std::uint64_t id);
   void draw_inspector_fx(std::uint64_t id);
   void draw_lighting_panel();
@@ -720,6 +729,11 @@ class Editor2DScreen final : public IScreen {
   std::string scripts_selected_;  // highlighted file in the Scripts panel
   char new_script_name_[64]{};
   int new_script_template_ = 0;
+  int new_script_lang_ = 0;
+  AddScriptMenu add_script_menu_;
+  bool add_component_open_ = false;
+  std::uint64_t script_drop_id_ = 0;  // hierarchy row a script was dropped on
+  std::string script_drop_rel_;
   double play_scripts_poll_ = 0.0;  // last hot-reload check while playing
 
   // Telegraph console.

@@ -40,6 +40,7 @@
 #include "editor/transform/ModalTransform.h"
 #include "editor/plugins/EditorPlugins.h"
 #include "editor/plugins/PluginsPanel.h"
+#include "editor/scripting/ScriptComponents.h"
 #include "editor/screens/IScreen.h"
 #include "editor/ui/PlayUi.h"
 #include "render3d/Renderer3D.h"
@@ -289,6 +290,19 @@ class Editor3DScreen final : public IScreen {
   // Surface with snapping on).
   void set_surface_snap(bool on) { surface_snap_ = on; }
 
+  // ---- Scripts (Editor3DScreen_Scripts.cpp) ---------------------------------
+  // The entity's script stack (Unity-style components: several per entity,
+  // run top to bottom). Each edit is one undo step; all refuse while playing.
+  bool set_scripts(std::uint64_t id, std::vector<ScriptData> stack,
+                   const std::string& label = "Edit Scripts");
+  // Append `rel` (refuses duplicates and the 16-script cap).
+  bool attach_script(std::uint64_t id, const std::string& rel);
+  // Write scripts/<name>.<ext> from a template; attach it when id != 0.
+  bool new_script(std::uint64_t id, const std::string& name, ScriptLang lang,
+                  const std::string& template_id, std::string* rel_out = nullptr);
+  const std::vector<std::string>& scripts() const { return scripts_; }
+  void open_add_component_menu() { add_component_open_ = true; }
+
   // ---- Assets ---------------------------------------------------------------
   struct AssetEntry {
     std::string rel;   // "primitive:cube" or "assets/x.gltf"
@@ -473,6 +487,18 @@ class Editor3DScreen final : public IScreen {
   void update_mouse_look(world3d::Input3D* in);
   std::vector<AssetEntry> assets_;
   std::vector<std::string> scripts_;
+  ScriptInfoCache script_infos_;
+  AddScriptMenu add_script_menu_;
+  bool add_component_open_ = false;
+  std::uint64_t script_drop_id_ = 0;
+  std::string script_drop_rel_;
+  char new_script_name_[64]{};
+  int new_script_lang_ = 0;
+  int new_script_template_ = 0;
+  std::string scripts_selected_;
+  ScriptStackHost script_host();
+  void draw_scripts_panel();
+  void draw_add_component(std::uint64_t id, std::string* attach_rel);
   std::vector<std::string> sounds_;  // project sounds (Audio Source picker)
   bool show_mixer_ = false;
   AnimPreview anim_preview_;

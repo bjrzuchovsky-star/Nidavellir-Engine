@@ -97,6 +97,11 @@ void Editor2DScreen::draw_hierarchy() {
   }
 
   // Queued row actions (safe now that iteration is over).
+  if (script_drop_id_ != 0) {
+    attach_script(script_drop_id_, script_drop_rel_);
+    script_drop_id_ = 0;
+    script_drop_rel_.clear();
+  }
   if (hier_toggle_lock_ != 0) {
     if (const Entity2D* e = workspace_.find(hier_toggle_lock_)) {
       set_entity_locked(e->id, !e->locked);
@@ -236,7 +241,14 @@ void Editor2DScreen::draw_hierarchy_row(const Entity2D& e, int depth) {
     ImGui::Text("%s", e.name.c_str());
     ImGui::EndDragDropSource();
   }
-  if (ImGui::BeginDragDropTarget()) {
+  if (dragging_script() && !e.tilemap && ImGui::BeginDragDropTarget()) {
+    // A script from the Scripts panel / Asset Browser: attach it to this row.
+    if (std::string rel = accept_script_payload(); !rel.empty()) {
+      script_drop_id_ = e.id;
+      script_drop_rel_ = std::move(rel);
+    }
+    ImGui::EndDragDropTarget();
+  } else if (ImGui::BeginDragDropTarget()) {
     const float h = mx.y - mn.y;
     const float my = io.MousePos.y - mn.y;
     Workspace2D::HierDrop where = Workspace2D::HierDrop::Inside;

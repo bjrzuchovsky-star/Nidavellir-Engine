@@ -5,6 +5,7 @@
 #include "editor/update/UpdateService.h"
 
 #include "editor/ui/Theme.h"
+#include "editor/scripting/ScriptComponents.h"
 
 #include <imgui.h>
 
@@ -170,6 +171,24 @@ void SettingsScreen::draw_ui() {
     } else {
       theme::StatusInfo("Blender not found automatically; pick blender.exe (Steam: <library>\\steamapps\\common\\Blender).");
     }
+  }
+
+  {
+    // Scripts: which outside editor "Open" uses (Inspector / Scripts panel /
+    // Asset Browser). VS Code / Visual Studio buttons always pick that one.
+    const ExternalEditor cur = external_editor_from_name(draft_.script_editor);
+    ImGui::SetNextItemWidth(-110.0f);
+    if (ImGui::BeginCombo("Open scripts in##script_editor", external_editor_label(cur))) {
+      for (ExternalEditor e : {ExternalEditor::Auto, ExternalEditor::VSCode, ExternalEditor::VisualStudio,
+                               ExternalEditor::Os}) {
+        if (ImGui::Selectable(external_editor_label(e), e == cur)) draft_.script_editor = external_editor_name(e);
+      }
+      ImGui::EndCombo();
+    }
+    const EditorInstall& vc = find_vscode();
+    const EditorInstall& vs = find_visual_studio();
+    ImGui::TextDisabled("VS Code: %s", vc.found ? vc.path.c_str() : "not found");
+    ImGui::TextDisabled("Visual Studio: %s", vs.found ? vs.path.c_str() : "not found");
   }
 
   {

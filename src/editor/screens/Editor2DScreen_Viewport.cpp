@@ -282,6 +282,23 @@ void Editor2DScreen::draw_viewport() {
       tool_ = TileTool::Select;
       create_sprite_at(rel, mouse_world.x, mouse_world.y);
     }
+    // A script: attach it to the entity under the cursor.
+    if (dragging_script()) {
+      const std::optional<std::uint64_t> hit = workspace_.pick(mouse_world.x, mouse_world.y);
+      const Entity2D* under = hit ? workspace_.find(*hit) : nullptr;
+      if (under && !under->tilemap) {
+        ImGui::GetWindowDrawList()->AddRect(view.to_screen(under->x, under->y),
+                                            view.to_screen(under->x + under->w, under->y + under->h),
+                                            theme::U32(theme::Accent()), 2.0f, 0, 2.0f);
+        ImGui::SetTooltip("Attach to %s", under->name.c_str());
+        if (std::string rel = accept_script_payload(); !rel.empty()) {
+          workspace_.select(*hit);
+          attach_script(*hit, rel);
+        }
+      } else {
+        ImGui::SetTooltip("Drop on an entity to attach the script");
+      }
+    }
     // A Vault tile: pull it into the claim, then place it here.
     if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kVaultItemPayload)) {
       tool_ = TileTool::Select;

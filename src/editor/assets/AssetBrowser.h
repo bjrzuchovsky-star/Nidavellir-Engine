@@ -44,6 +44,11 @@ struct AssetBrowserHost {
   std::function<int(const std::string& rel)> vault_badge;  // 0 none, 1 pulled, 2 update, 3 sent
   std::function<std::string(const std::string& rel)> vault_origin;
   std::function<void(const std::string& item)> on_vault_drop;
+  // Scripts (any language) shown as tiles after the assets: drag one onto an
+  // entity to attach it (payload "TS_SCRIPT"); double-click / right-click
+  // opens it (which: 0 default editor, 1 VS Code, 2 Visual Studio).
+  std::function<std::vector<std::string>()> scripts;
+  std::function<void(const std::string& rel, int which)> open_script;
 };
 
 class AssetBrowser {
@@ -81,6 +86,7 @@ class AssetBrowser {
  private:
   void draw_folders();
   void draw_grid();
+  bool script_tile(const std::string& rel, float size);
   void draw_details();
   void draw_settings(const assetdb::AssetDb::Entry& e);
   bool tile(const assetdb::AssetDb::Entry& e, float size);

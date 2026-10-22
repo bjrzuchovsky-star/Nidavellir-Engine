@@ -155,6 +155,8 @@ const DotnetInfo& dotnet_info() {
   return info;
 }
 
+std::string binding_sources_dir() { return binding_sources().string(); }
+
 bool sdk_available(std::string* why) {
   const std::string r = disabled_reason(false);
   if (why) *why = r;

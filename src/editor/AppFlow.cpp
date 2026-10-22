@@ -2,6 +2,7 @@
 #include "gfx/TextureCache.h"
 #include "render3d/import/SourceFormats.h"
 #include "render3d/import/SourceMaterials.h"
+#include "editor/scripting/ScriptComponents.h"
 #include "editor/AppFlow.h"
 
 #include "editor/plugins/EditorPlugins.h"
@@ -40,6 +41,7 @@ void AppFlow::start() {
   std::string load_err;
   settings_ = SettingsStore::load(&load_err);
   render3d::set_blender_setting(settings_.blender_path);
+  set_script_editor_preference(settings_.script_editor);
   render3d::source::set_content_search_folders(render3d::source::split_folder_list(settings_.source_search_folders));
   gfx::set_extra_image_decoder(&render3d::source::decode_vtf_rgba);  // .vtf thumbnails
   if (!load_err.empty()) {
@@ -117,6 +119,7 @@ bool AppFlow::try_apply_settings_from_screen() {
   draft.update_cached_url = settings_.update_cached_url;
   settings_ = std::move(draft);
   render3d::set_blender_setting(settings_.blender_path);
+  set_script_editor_preference(settings_.script_editor);
   render3d::source::set_content_search_folders(render3d::source::split_folder_list(settings_.source_search_folders));
   persist_settings();
   if (!reload_projects()) {
