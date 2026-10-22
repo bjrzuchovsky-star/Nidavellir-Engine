@@ -2,6 +2,7 @@
 #include "runtime/ScriptAbi.h"
 
 #include <algorithm>
+#include <cctype>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -296,13 +297,78 @@ int run_command(const std::string& command, std::string* output) {
   return rc;
 }
 
+namespace {
+
+// Compiler paths and the project path can name one folder differently: on
+// Windows a temp dir may be an 8.3 short name (C:/Users/RUNNER~1/...) while
+// MSVC prints the long one (C:/Users/runneradmin/...), drive letters and
+// folders can differ in case, and either side may hold "..", "." or a
+// symlink. Canonicalize both the same way before comparing.
+std::string canonical_path_text(const std::string& p) {
+  if (p.empty()) return p;
+  fs::path path(p);
+#if defined(_WIN32)
+  {
+    const std::wstring w = path.wstring();
+    const DWORD n = GetLongPathNameW(w.c_str(), nullptr, 0);
+    if (n > 0) {
+      std::wstring buf(n, L'\0');
+      const DWORD got = GetLongPathNameW(w.c_str(), buf.data(), n);
+      if (got > 0 && got < n) {
+        buf.resize(got);
+        path = fs::path(buf);
+      }
+    }
+  }
+#endif
+  std::error_code ec;
+  fs::path c = fs::weakly_canonical(path, ec);
+  if (ec || c.empty()) c = path;
+  std::string out = c.lexically_normal().generic_string();
+  while (out.size() > 1 && out.back() == '/') out.pop_back();
+  return out;
+}
+
+bool same_path_char(char a, char b, bool fold_case) {
+#if defined(_WIN32)
+  if (fold_case) return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
+#else
+  (void)fold_case;
+#endif
+  return a == b;
+}
+
+// `file` relative to `root` ("scripts/door.cpp") when it lies under it.
+bool strip_root(const std::string& file, const std::string& root, bool fold_case, std::string* rel) {
+  if (root.empty() || file.size() <= root.size() + 1 || file[root.size()] != '/') return false;
+  for (std::size_t i = 0; i < root.size(); ++i) {
+    if (!same_path_char(file[i], root[i], fold_case)) return false;
+  }
+  *rel = file.substr(root.size() + 1);
+  return true;
+}
+
+}  // namespace
+
+std::string project_relative_path(const std::string& file, const std::string& project_dir) {
+  std::string rel = fs::path(file).lexically_normal().generic_string();
+  if (project_dir.empty()) return rel;
+  // Exact textual match first; then the canonical forms (long names and
+  // the on-disk case on Windows, compared case-insensitively there).
+  std::string root_text = fs::path(project_dir).lexically_normal().generic_string();
+  while (root_text.size() > 1 && root_text.back() == '/') root_text.pop_back();
+  std::string r;
+  if (strip_root(rel, root_text, false, &r)) return r;
+  if (strip_root(canonical_path_text(file), canonical_path_text(project_dir), true, &r)) return r;
+  return rel;
+}
+
 std::vector<LogEntry> parse_build_output(const std::string& output, const std::string& project_dir) {
   std::vector<LogEntry> out;
   static const std::regex gcc(R"(^(.*?):(\d+):(?:\d+:)?\s*(fatal error|error|warning):\s*(.*)$)");
   static const std::regex msvc(R"(^\s*(.*?)\((\d+)(?:,\d+)?\)\s*:\s*(fatal error|error|warning)\s+\w+\s*:\s*(.*?)(?:\s*\[.*\])?$)");
   std::istringstream in(output);
   std::string line;
-  const std::string root = fs::path(project_dir).lexically_normal().generic_string();
   while (std::getline(in, line)) {
     if (!line.empty() && line.back() == '\r') line.pop_back();
     std::smatch m;
@@ -310,9 +376,7 @@ std::vector<LogEntry> parse_build_output(const std::string& output, const std::s
     LogEntry e;
     e.channel = "script";
     e.level = m[3].str() == "warning" ? LogLevel::Warn : LogLevel::Error;
-    std::string file = fs::path(m[1].str()).lexically_normal().generic_string();
-    if (!root.empty() && file.rfind(root + "/", 0) == 0) file = file.substr(root.size() + 1);
-    e.file = file;
+    e.file = project_relative_path(m[1].str(), project_dir);
     e.line = std::atoi(m[2].str().c_str());
     e.text = m[4].str();
     out.push_back(std::move(e));

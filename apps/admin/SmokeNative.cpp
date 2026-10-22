@@ -10,6 +10,7 @@
 #include "runtime/World.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -18,6 +19,16 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -122,9 +133,74 @@ int check_export() {
 
 }  // namespace
 
+// Compiler output -> Telegraph file:line, whatever spelling the compiler
+// uses for the project folder (CI runners hand out 8.3 short temp paths
+// while MSVC prints long ones). Runs without a toolchain.
+int check_build_output_paths(std::string* note) {
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_native_paths_LongFolderName";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "door.cpp", "// door\n");
+  struct Clean { fs::path p; ~Clean() { std::error_code e; fs::remove_all(p, e); } } clean{proj};
+  const std::string root = proj.string();
+  auto located = [](const std::vector<LogEntry>& logs) {
+    return logs.size() == 1 && logs[0].file == "scripts/door.cpp" && logs[0].line == 19 &&
+           logs[0].level == LogLevel::Error;
+  };
+  struct Case { std::string what, output, project; };
+  std::vector<Case> cases = {
+      {"gcc", (proj / "scripts" / "door.cpp").generic_string() + ":19:5: error: expected ';'", root},
+      {"msvc", (proj / "scripts" / "door.cpp").string() + "(19): error C2143: syntax error: missing ';'", root},
+      {"dot-dot", (proj / "scripts" / ".." / "scripts" / "door.cpp").generic_string() + ":19: error: x", root},
+      {"trailing slash root", (proj / "scripts" / "door.cpp").generic_string() + ":19: error: x",
+       proj.generic_string() + "/"},
+  };
+  int extra = 0;
+#if defined(_WIN32)
+  {
+    std::string upper = (proj / "scripts" / "door.cpp").string();
+    for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    cases.push_back({"upper case", upper + "(19,5): error C2143: x", root});
+    std::string lower = (proj / "scripts" / "door.cpp").string();
+    for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    cases.push_back({"lower case (MSVC /FC)", lower + "(19): error C2143: x", root});
+    const std::wstring wl = proj.wstring();
+    std::wstring ws(MAX_PATH * 4, L'\0');
+    const DWORD n = GetShortPathNameW(wl.c_str(), ws.data(), static_cast<DWORD>(ws.size()));
+    if (n > 0 && n < ws.size()) {
+      ws.resize(n);
+      const fs::path short_proj(ws);
+      if (short_proj != proj) {
+        // Short project folder, long compiler path (the CI case) and back.
+        cases.push_back({"8.3 project dir", (proj / "scripts" / "door.cpp").string() + "(19): error C2143: x",
+                         short_proj.string()});
+        cases.push_back({"8.3 compiler path", (short_proj / "scripts" / "door.cpp").string() + "(19): error C2143: x",
+                         root});
+        ++extra;
+      }
+    }
+  }
+#endif
+  for (const Case& c : cases) {
+    const std::vector<LogEntry> logs = parse_build_output(c.output + "\n", c.project);
+    if (!located(logs)) {
+      std::string got = logs.empty() ? "nothing" : logs[0].file + ":" + std::to_string(logs[0].line);
+      return fail("build output path (" + c.what + ") should map to scripts/door.cpp:19, got " + got +
+                  " from '" + c.output + "' in '" + c.project + "'");
+    }
+  }
+  if (project_relative_path("/elsewhere/door.cpp", root) != "/elsewhere/door.cpp") {
+    return fail("a file outside the project should keep its path");
+  }
+  *note = std::to_string(cases.size()) + " path spellings" + (extra ? " incl. 8.3 short names" : "");
+  return 0;
+}
+
 int run_native_smoke() {
   const bool require = std::getenv("TS_SMOKE_REQUIRE_CPP") != nullptr;
   std::string why;
+  std::string path_note;
+  if (check_build_output_paths(&path_note) != 0) return 1;
   if (!native_scripts::toolchain_available(&why)) {
     std::cout << "[smoke] C++ scripts SKIPPED (" << why << ")\n";
     return require ? 1 : 0;
@@ -208,6 +284,6 @@ int run_native_smoke() {
   std::cout << "[smoke] C++ scripts OK (module built in " << static_cast<int>(build_s)
             << " s, hooks + props + state + plugin bridge, hot reload kept state, compile error at "
                "scripts/door.cpp:line kept the old module, background rebuild swapped in after " << bg_ticks
-            << " live ticks, exported game ran the module from its pak)\n";
+            << " live ticks, exported game ran the module from its pak, compiler paths: " << path_note << ")\n";
   return 0;
 }

@@ -39,6 +39,10 @@ int run_command(const std::string& command, std::string* output);
 // Telegraph entries from compiler output: gcc / clang "file:line:col: error:"
 // and MSVC "file(line): error C1234:" lines (errors and warnings).
 std::vector<LogEntry> parse_build_output(const std::string& output, const std::string& project_dir);
+// `file` made relative to `project_dir` when it lies inside it (generic
+// slashes). Both are canonicalized first: long names for 8.3 short names
+// and a case-insensitive compare on Windows, symlinks / ".." everywhere.
+std::string project_relative_path(const std::string& file, const std::string& project_dir);
 
 }  // namespace runtime
 }  // namespace tombstone
