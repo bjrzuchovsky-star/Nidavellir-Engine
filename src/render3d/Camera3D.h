@@ -16,6 +16,10 @@ struct Camera3D {
   float fov_y_degrees = 60.0f;
   float z_near = 0.1f;
   float z_far = 1000.0f;
+  // Orthographic projection (scene cameras): ortho_size = half the view
+  // height in world units.
+  bool orthographic = false;
+  float ortho_size = 5.0f;
   // VR eyes: explicit view + projection (asymmetric per-eye frustum). When
   // set, view() / projection() return them; position / target still
   // describe the eye (lighting, shadow focus).
@@ -27,8 +31,12 @@ struct Camera3D {
     return explicit_matrices ? view_matrix : Mat4::look_at(position, target, up);
   }
   Mat4 projection(float aspect) const {
-    return explicit_matrices ? projection_matrix
-                             : Mat4::perspective(radians(fov_y_degrees), aspect, z_near, z_far);
+    if (explicit_matrices) return projection_matrix;
+    if (orthographic) {
+      const float h = ortho_size > 1e-4f ? ortho_size : 1e-4f;
+      return Mat4::ortho(-h * aspect, h * aspect, -h, h, z_near, z_far);
+    }
+    return Mat4::perspective(radians(fov_y_degrees), aspect, z_near, z_far);
   }
   Vec3 forward() const { return normalize(target - position); }
 

@@ -159,6 +159,12 @@ std::vector<GraphNodeDef> build_catalog() {
       {{"a", N(0)}, {"b", N(0)}, {"type", T("hinge")}, {"ax", N(0)}, {"ay", N(0)}, {"az", N(0)}}, {"value"},
       "join b to a (0 = the world); joint handle");
   act("Physics", "phys.unjoint", "Remove Joint", {{"joint", N(0)}}, {}, "break a joint");
+  // Cameras (the camera table through the plugin bridge; docs/camera.md).
+  act("Camera", "camera.set_active", "Set Active Camera", {{"camera", N(0)}}, {"value"},
+      "look through this camera (id, entity or name; 0 = self)");
+  act("Camera", "camera.reset", "Reset Camera", {}, {"value"},
+      "back to the highest-priority active camera");
+  act("Camera", "camera.active", "Active Camera", {}, {"value"}, "camera Play looks through (0 = built-in)");
   act("Plugins", "plugin.call", "Plugin Call",
       {{"table", T("")}, {"fn", T("")}, {"a", N(0)}, {"b", N(0)}, {"c", N(0)}}, {"value"},
       "table.fn(a, b, c) on a plugin's Lua table");
@@ -520,7 +526,8 @@ struct GraphScriptHost::Impl {
     auto I = [&](const char* p) { return input(in, n, p, depth); };
     const auto stored = in.outs.find({node_id, pin});
     if (t.rfind("event.", 0) == 0 || t == "flow.for" || t == "var.set" || t == "var.add" || t == "plugin.call" ||
-        t == "entity.spawn" || t.rfind("ai.", 0) == 0 || t.rfind("phys.", 0) == 0) {
+        t == "entity.spawn" || t.rfind("ai.", 0) == 0 || t.rfind("phys.", 0) == 0 ||
+        t.rfind("camera.", 0) == 0) {
       return stored == in.outs.end() ? N(0) : stored->second;
     }
     if (t.rfind("math.", 0) == 0) {
@@ -735,6 +742,26 @@ struct GraphScriptHost::Impl {
         std::string err;
         if (world->script_plugin_call("physics", fn, args, &r, &err)) {
           in.outs[{n.id, "value"}] = r;
+        } else {
+          in.outs[{n.id, "value"}] = B(false);
+          log(LogLevel::Error, err, &in, 0);
+        }
+      } else if (t.rfind("camera.", 0) == 0) {
+        const std::string fn = t.substr(7);
+        std::vector<ScriptValue> args;
+        if (fn == "set_active") {
+          const ScriptValue c = I("camera");
+          if (c.type == ScriptValue::Type::Text) {
+            args.push_back(c);
+          } else {
+            const std::uint64_t e = id_of(c);
+            args.push_back(N(static_cast<double>(e ? e : in.entity)));
+          }
+        }
+        ScriptValue r;
+        std::string err;
+        if (world->script_plugin_call("camera", fn, args, &r, &err)) {
+          in.outs[{n.id, "value"}] = fn == "reset" ? B(true) : r;
         } else {
           in.outs[{n.id, "value"}] = B(false);
           log(LogLevel::Error, err, &in, 0);

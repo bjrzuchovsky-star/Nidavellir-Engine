@@ -4,6 +4,7 @@
 #include "scene/SceneJson.h"
 
 #include <string>
+#include <vector>
 
 namespace ts {
 namespace tombstone {
@@ -27,8 +28,10 @@ scene_json::SceneDoc to_doc(const Workspace2D& workspace);
 void apply_doc(Workspace2D& workspace, scene_json::SceneDoc doc);
 
 // Load entities + view state into workspace. Returns false if missing/invalid.
+// `camera_log` (optional): run the v13 camera migration (docs/camera.md)
+// on a v12- scene; one line per change goes there (empty = none).
 bool load(Workspace2D& workspace, const std::string& scene_path,
-          std::string* error_out = nullptr);
+          std::string* error_out = nullptr, std::vector<std::string>* camera_log = nullptr);
 
 // Write workspace entities + view state. Creates parent dirs as needed.
 bool save(const Workspace2D& workspace, const std::string& scene_path,

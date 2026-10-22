@@ -8,6 +8,7 @@ add_library(ts_editor
   workspace/Workspace2D_History.cpp
   workspace/Workspace2D_Tiles.cpp
   workspace/Workspace2D_Tools.cpp
+  workspace/Workspace2D_Attach.cpp
   workspace/Workspace2D_Xform.cpp
   workspace/SceneIO_Load.cpp
   workspace/SceneIO_Save.cpp
@@ -36,6 +37,7 @@ add_library(ts_editor
   screens/Editor2DScreen_Viewport.cpp
   screens/Editor2DScreen_Tiles.cpp
   screens/Editor2DScreen_Tools.cpp
+  screens/Editor2DScreen_Attach.cpp
   screens/Editor2DScreen_TilePanels.cpp
   screens/Editor2DScreen_Play.cpp
   screens/Editor2DScreen_Collision.cpp
@@ -58,6 +60,8 @@ add_library(ts_editor
   editor3d/Editor3DScreen_VR.cpp
   editor3d/Editor3DScreen_Anim.cpp
   editor3d/Editor3DScreen_Tools.cpp
+  editor3d/Editor3DScreen_Camera.cpp
+  editor3d/Editor3DScreen_Attach.cpp
   editor3d/Editor3DScreen_Terrain.cpp
   plugins/EditorPlugins.cpp
   plugins/PluginNeeds.cpp

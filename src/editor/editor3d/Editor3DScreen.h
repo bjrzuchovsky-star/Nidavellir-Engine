@@ -44,6 +44,7 @@
 #include "editor/screens/IScreen.h"
 #include "editor/ui/PlayUi.h"
 #include "render3d/Renderer3D.h"
+#include "render3d/Attach3D.h"
 #include "render3d/Scene3D.h"
 #include "render3d/SceneView.h"
 #include "terrain/Terrain.h"
@@ -160,6 +161,13 @@ class Editor3DScreen final : public IScreen {
 
   // ---- Viewport (pixels in a vw x vh view) ---------------------------------
   render3d::Camera3D editor_camera() const;
+  // Screen position and size of the view drawn last frame.
+  void viewport_screen_rect(float* x, float* y, float* w, float* h) const {
+    *x = viewport_x_;
+    *y = viewport_y_;
+    *w = viewport_w_;
+    *h = viewport_h_;
+  }
   void orbit(float dyaw_deg, float dpitch_deg);
   void dolly(float factor);
   void pan(float dx_px, float dy_px, float vh);
@@ -303,6 +311,61 @@ class Editor3DScreen final : public IScreen {
   const std::vector<std::string>& scripts() const { return scripts_; }
   void open_add_component_menu() { add_component_open_ = true; }
 
+  // ---- Cameras (Editor3DScreen_Camera.cpp, docs/camera.md) ------------------
+  // Create > Camera: a Fixed camera where the editor view is, looking the
+  // same way. One undo step; selected.
+  std::uint64_t create_camera();
+  // Replace an entity's camera settings (one undo step).
+  bool set_camera(std::uint64_t id, const scene3d::PlayCamera3D& c,
+                  const std::string& label = "Edit Camera");
+  // "Make active camera": on, priority above every other camera.
+  bool make_active_camera(std::uint64_t id);
+  // The camera Play would start with (highest-priority active; 0 = none).
+  std::uint64_t play_camera_id() const;
+  // Ctrl+Alt+Numpad0: move the camera (selected, else the play camera) to
+  // the editor view. One undo step.
+  bool align_camera_to_view(std::uint64_t id = 0);
+  // Numpad0: look through a camera (0 = selected / play camera); again (or
+  // orbiting / panning / zooming) goes back to the editor view.
+  bool look_through_camera(std::uint64_t id = 0);
+  void stop_looking_through() { look_through_ = 0; }
+  std::uint64_t looking_through() const { return look_through_; }
+  // The view a camera entity gives (projection, clip planes, transform).
+  render3d::Camera3D camera_view(const scene3d::Entity3D& e) const;
+  // Render the selected camera's view into its preview texture (GL: the
+  // overlay shows it; null backend: stats only). False = no camera.
+  bool render_camera_preview(int width, int height);
+  std::uint64_t camera_preview_texture() const;
+  // v18 migration report of the last open ("" = nothing migrated).
+  const std::string& camera_migration_backup() const { return camera_backup_; }
+
+  // ---- Attach tools (Editor3DScreen_Attach.cpp, docs/transforms.md) -------
+  // Every call works on the selection roots (minus the target), is one undo
+  // step and refuses while playing.
+  bool attach_selected(std::uint64_t target, scene3d::AttachMode mode);
+  bool detach_selected();  // world transforms kept
+  // Follow constraint on the selection (offsets keep them where they are).
+  bool follow_selected(std::uint64_t target, bool position, bool rotation);
+  bool remove_follow_selected();
+  // Bones of `target`'s skinned model ("" list = none).
+  std::vector<std::string> bone_names(std::uint64_t target);
+  bool attach_selected_to_bone(std::uint64_t target, const std::string& bone,
+                               scene3d::AttachMode mode);
+  // Snap the selection onto `target`'s position (rotation / scale kept).
+  bool snap_selected_to(std::uint64_t target);
+  // Copy target's position / rotation / scale onto the selection.
+  bool copy_transform_to_selected(std::uint64_t from, bool position, bool rotation, bool scale);
+  // Drop each root onto the surface below it and turn its up (+Y) to the
+  // surface normal.
+  bool align_selected_to_surface();
+  // Eyedropper: the next viewport (or hierarchy) click picks the target of
+  // `action` ("attach_keep", "attach_snap", "follow_pos", "follow_rot",
+  // "follow_both", "snap", "copy", "bone_keep", "bone_snap"); Esc cancels.
+  void begin_target_pick(const std::string& action);
+  bool target_picking() const { return !pick_action_.empty(); }
+  bool finish_target_pick(std::uint64_t target);  // runs the action
+  void cancel_target_pick() { pick_action_.clear(); }
+
   // ---- Assets ---------------------------------------------------------------
   struct AssetEntry {
     std::string rel;   // "primitive:cube" or "assets/x.gltf"
@@ -419,6 +482,22 @@ class Editor3DScreen final : public IScreen {
  private:
   void draw_vr_mirror();
   void draw_context_menu(std::uint64_t clicked);
+  // Cameras + attach UI.
+  void migrate_cameras_on_open(const std::string& path);
+  void draw_camera_lines();  // frustums (edit view, after view_->begin)
+  void draw_camera_overlay(float x0, float y0, float vw, float vh);
+  void draw_camera_inspector(const scene3d::Entity3D& e);
+  void draw_attach_menu(std::uint64_t clicked);
+  void draw_object_menu();
+  bool attach_target_list(const char* id, std::uint64_t* out);
+  bool ray_surface(const render3d::Ray& ray, const std::vector<std::uint64_t>& skip, float max_t,
+                   float* t);
+  std::uint64_t look_through_ = 0;
+  std::string camera_backup_;
+  std::string pick_action_;
+  bool copy_pos_ = true, copy_rot_ = true, copy_scale_ = false;
+  std::unique_ptr<render3d::Renderer3D> preview_renderer_;
+  std::unique_ptr<render3d::SceneView> preview_view_;
   void draw_hierarchy_row(const scene3d::Entity3D& e, int depth);
   std::size_t duplicate_roots(bool offset);
   // Move one entity by the delta prev -> its current transform's children.

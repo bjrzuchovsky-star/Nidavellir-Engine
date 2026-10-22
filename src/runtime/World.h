@@ -94,6 +94,10 @@ struct CameraView {
   float x = 0.0f;
   float y = 0.0f;
   float zoom = 1.0f;
+  // Active Camera2D's background and screen rect (v13, docs/camera.md).
+  bool use_clear = false;
+  float clear[4] = {0.10f, 0.08f, 0.07f, 1.0f};
+  float viewport[4] = {0.0f, 0.0f, 1.0f, 1.0f};  // x, y, w, h (0..1, top-left origin)
 };
 
 class World;
@@ -242,6 +246,12 @@ class World final : public ScriptWorld {
   // Entity carrying the active Camera2D (0 = implicit follow camera).
   std::uint64_t camera_entity() const { return cam_.entity; }
   std::uint64_t camera_target() const { return cam_.target; }
+  // Look through Camera2D `id` now (scripts' camera.set_active); 0 = back
+  // to the highest-priority active camera.
+  bool set_active_camera(std::uint64_t id);
+  bool set_camera_priority(std::uint64_t id, int priority);
+  bool set_camera_zoom(std::uint64_t id, float zoom);
+  std::size_t camera_count() const;
   // World rect a camera shows on a width x height pixel view.
   static WorldRect view_rect(const CameraView& cam, float width, float height);
 
@@ -339,6 +349,7 @@ class World final : public ScriptWorld {
   void script_log(LogEntry entry) override;
   void script_open_extensions(lua_State* L, int sandbox) override;
   void open_physics_lua(lua_State* L, int sandbox);  // World_PhysicsLua.cpp
+  void open_camera_lua(lua_State* L, int sandbox);   // World_CameraLua.cpp
   void script_sound(SoundEvent event) override;
   void script_ui(UiCommand command) override;
   void script_fx(FxEvent event) override;
@@ -493,6 +504,9 @@ class World final : public ScriptWorld {
   };
 
   void setup_camera();
+  std::uint64_t pick_camera() const;
+  std::uint64_t forced_cam_ = 0;
+  void apply_follows();
   void setup_collision();
   // Move by (dx, dy) with collision when the actor has a solid collider.
   void move_body(Actor& a, float dx, float dy);

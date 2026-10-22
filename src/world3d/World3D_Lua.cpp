@@ -184,6 +184,7 @@ void World3D::script_open_extensions(lua_State* L, int sandbox) {
     lua_setfield(L, sb, "vr");
     anim_open_lua(L, sb);
     open_physics_lua(L, sb);
+    open_camera_lua(L, sb);
     open_terrain_lua(L, sb);
     for (const auto& x : exts_) x->open_lua(*this, L, sb);
   }

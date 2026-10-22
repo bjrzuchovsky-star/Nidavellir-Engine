@@ -225,9 +225,34 @@ bool apply_components(Entity2D& e, const FlatMap& nested, std::string* why) {
     c.bounds_y = map_float(*cm, "bounds_y", c.bounds_y);
     c.bounds_w = map_float(*cm, "bounds_w", c.bounds_w);
     c.bounds_h = map_float(*cm, "bounds_h", c.bounds_h);
+    c.active = map_bool(*cm, "active", true);
+    c.priority = map_int(*cm, "priority", 0);
+    c.dead_zone_w = std::max(0.0f, map_float(*cm, "dead_zone_w", 0.0f));
+    c.dead_zone_h = std::max(0.0f, map_float(*cm, "dead_zone_h", 0.0f));
+    c.use_clear = map_bool(*cm, "use_clear", false);
+    c.clear_color[0] = map_float(*cm, "clear_r", c.clear_color[0]);
+    c.clear_color[1] = map_float(*cm, "clear_g", c.clear_color[1]);
+    c.clear_color[2] = map_float(*cm, "clear_b", c.clear_color[2]);
+    c.clear_color[3] = map_float(*cm, "clear_a", c.clear_color[3]);
+    c.viewport[0] = std::clamp(map_float(*cm, "viewport_x", 0.0f), 0.0f, 1.0f);
+    c.viewport[1] = std::clamp(map_float(*cm, "viewport_y", 0.0f), 0.0f, 1.0f);
+    c.viewport[2] = std::clamp(map_float(*cm, "viewport_w", 1.0f), 0.01f, 1.0f);
+    c.viewport[3] = std::clamp(map_float(*cm, "viewport_h", 1.0f), 0.01f, 1.0f);
     e.camera = c;
   } else if (nested.count("camera")) {
     return bad("bad camera object");
+  }
+  if (auto fo = parse_nested(nested, "follow")) {
+    FollowData f;
+    f.target = map_u64(*fo, "target", 0);
+    f.position = map_bool(*fo, "position", true);
+    f.rotation = map_bool(*fo, "rotation", false);
+    f.offset_x = map_float(*fo, "offset_x", 0.0f);
+    f.offset_y = map_float(*fo, "offset_y", 0.0f);
+    f.rotation_offset = map_float(*fo, "rotation_offset", 0.0f);
+    e.follow = f;
+  } else if (nested.count("follow")) {
+    return bad("bad follow object");
   }
   if (auto spn = parse_nested(nested, "spawn")) {
     SpawnPointData s;
@@ -501,7 +526,36 @@ void write_entity(std::ostringstream& out, const Entity2D& e) {
         << ", \"bounds_x\": " << format_float(c.bounds_x)
         << ", \"bounds_y\": " << format_float(c.bounds_y)
         << ", \"bounds_w\": " << format_float(c.bounds_w)
-        << ", \"bounds_h\": " << format_float(c.bounds_h) << "}";
+        << ", \"bounds_h\": " << format_float(c.bounds_h);
+    // v13 extras: only what differs from the defaults.
+    const Camera2DData def;
+    if (!c.active) out << ", \"active\": false";
+    if (c.priority != 0) out << ", \"priority\": " << c.priority;
+    if (c.dead_zone_w != 0.0f) out << ", \"dead_zone_w\": " << format_float(c.dead_zone_w);
+    if (c.dead_zone_h != 0.0f) out << ", \"dead_zone_h\": " << format_float(c.dead_zone_h);
+    if (c.use_clear) out << ", \"use_clear\": true";
+    if (c.use_clear || !std::equal(c.clear_color, c.clear_color + 4, def.clear_color)) {
+      out << ", \"clear_r\": " << format_float(c.clear_color[0])
+          << ", \"clear_g\": " << format_float(c.clear_color[1])
+          << ", \"clear_b\": " << format_float(c.clear_color[2])
+          << ", \"clear_a\": " << format_float(c.clear_color[3]);
+    }
+    if (!std::equal(c.viewport, c.viewport + 4, def.viewport)) {
+      out << ", \"viewport_x\": " << format_float(c.viewport[0])
+          << ", \"viewport_y\": " << format_float(c.viewport[1])
+          << ", \"viewport_w\": " << format_float(c.viewport[2])
+          << ", \"viewport_h\": " << format_float(c.viewport[3]);
+    }
+    out << "}";
+  }
+  if (e.follow) {
+    const FollowData& f = *e.follow;
+    out << ",\n      \"follow\": {\"target\": " << static_cast<unsigned long long>(f.target)
+        << ", \"position\": " << (f.position ? "true" : "false")
+        << ", \"rotation\": " << (f.rotation ? "true" : "false")
+        << ", \"offset_x\": " << format_float(f.offset_x)
+        << ", \"offset_y\": " << format_float(f.offset_y)
+        << ", \"rotation_offset\": " << format_float(f.rotation_offset) << "}";
   }
   if (e.spawn) {
     out << ",\n      \"spawn\": {\"slot\": " << e.spawn->slot << "}";

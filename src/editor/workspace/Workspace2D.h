@@ -120,6 +120,19 @@ class Workspace2D {
   // (same parent as target) or inside it (last child). True if changed.
   enum class HierDrop { Before, After, Inside };
   bool hierarchy_drop(std::uint64_t id, std::uint64_t target, HierDrop where);
+  // Attach tools (Workspace2D_Attach.cpp, docs/transforms.md). Each takes
+  // one entity (its subtree rides along) and returns true if it changed.
+  // attach_to: parent to `target`; snap = move the centre onto the
+  // target's first. Detach is set_parent(id, 0) (positions are world).
+  bool attach_to(std::uint64_t id, std::uint64_t target, bool snap);
+  // Follow constraint (runtime): offsets keep it where it is now.
+  bool set_follow(std::uint64_t id, std::uint64_t target, bool position, bool rotation);
+  bool snap_to(std::uint64_t id, std::uint64_t target);  // centres meet
+  bool copy_transform(std::uint64_t from, std::uint64_t id, bool position, bool rotation,
+                      bool scale);
+  // Drop onto the top of the first solid tile or collider below (upright).
+  bool align_to_surface(std::uint64_t id);
+
   // New "Group" around the selection roots (bounding box, transparent,
   // under their common parent) holding them; selected. Returns its id.
   std::uint64_t group_selection(const std::string& name = "Group");

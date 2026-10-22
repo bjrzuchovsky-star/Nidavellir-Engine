@@ -6,6 +6,18 @@ All notable changes to TombStone Engine. The version number lives in the `VERSIO
 
 Work in progress for 0.2.0. Optional features ship as Trading Post plugins rather than in every game, starting with physics and player movement.
 
+### Cameras are scene objects (2D and 3D)
+- **Create > Camera** in both editors. A camera is an ordinary object: select it, move it with the gizmo, parent it, give it scripts. It has a viewport icon and a frustum (3D) or view rectangle (2D), with the Play camera drawn in brass. Icons are hidden in Play.
+- Inspector: active, priority, perspective / orthographic, FOV, near / far, ortho size, clear colour and viewport rect (split screen, picture-in-picture). 3D adds the Fixed / Orbit / First person rig with distance, height and collision. 2D adds zoom, follow target, smoothing, dead zone and bounds.
+- Several cameras per scene: Play looks through the **active camera with the highest priority** (ties go by scene order). **Make active camera** puts one on top in a single undo step. A new camera does not take over from the one already playing.
+- 3D: a **Camera preview** inset (rendered to a texture) when a camera is selected; **Look through camera** (Numpad0) and **Align camera to view** (Ctrl+Alt+Numpad0), also on the new **Object** menu and the context menu.
+- Scripts switch cameras: Lua `camera.set_active / reset / active / set_priority / set_fov / set_zoom / count`, graph nodes **Set Active Camera**, **Reset Camera** and **Active Camera**, C++ `<tombstone/camera.h>` and C# `SetActiveCamera` / `ResetCamera` / `ActiveCamera` / `SetCameraPriority`.
+- 3D Orbit collision: static boxes always, plus a sphere cast along the boom when the physics plugin is on. Without the plugin the sphere cast does nothing.
+- VR claims still look through the headset; scene cameras are ignored while it drives the view.
+- **Old claims** (3D scene v17 and earlier, 2D v12 and earlier) play as before until opened in the editor. On open the scene is backed up to `.tombstone/backup/scene.json.pre-cameras` and a **Main Camera** is added that matches the old follow camera tick for tick. Then the scene is saved (3D v18, 2D v13) and the change is logged to `.tombstone/migrations.log` and the Telegraph. Nothing migrates if the backup cannot be written.
+- `ts_admin --smoke-camera` (also in `--smoke`); `ts_admin --camera-shot camera <out.png>`. Docs: [docs/camera.md](docs/camera.md).
+- Not yet: the 2D editor shows the camera's view rectangle rather than a rendered preview inset.
+
 ### Script components: several scripts per object (2D and 3D)
 - Objects carry any number of scripts (up to 16) in any mix of Lua, visual graph, C++ and C#, like Unity components. Each one is an Inspector section with its own properties, an on/off checkbox, move up / down and remove, all undoable. Properties are saved per object, per script.
 - Order: on one object, events reach scripts in Inspector order; across the world each phase runs stack position by stack position, keeping lua, graph, cpp, cs within a position. Single-script claims behave as before.

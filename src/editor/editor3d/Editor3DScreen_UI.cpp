@@ -263,11 +263,16 @@ void Editor3DScreen::draw_menu_bar() {
     if (ImGui::MenuItem("Point light")) create_light(false, {at.x, 2.5f, at.z});
     if (ImGui::MenuItem("Sun (directional)")) create_light(true, {at.x, 8.0f, at.z});
     if (ImGui::MenuItem("Empty")) create_empty({at.x, 0.0f, at.z});
+    if (ImGui::MenuItem("Camera", nullptr, false, !playing())) create_camera();
     ImGui::Separator();
     if (ImGui::MenuItem("Terrain (hills)", nullptr, false, !playing())) {
       create_terrain(129, 128.0f, true, "meadow");
       show_terrain_ = true;
     }
+    ImGui::EndMenu();
+  }
+  if (ImGui::BeginMenu("Object")) {
+    draw_object_menu();
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("View")) {
@@ -491,6 +496,13 @@ void Editor3DScreen::handle_shortcuts() {
       std::string err;
       if (save_scene(&err)) note("Saved scene.json");
     }
+    if (io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_Keypad0, false)) align_camera_to_view();
+    return;
+  }
+  if (ImGui::IsKeyPressed(ImGuiKey_Keypad0, false)) look_through_camera();
+  if (target_picking() && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+    cancel_target_pick();
+    note("Target pick cancelled");
     return;
   }
   if (ImGui::IsMouseDown(ImGuiMouseButton_Right) || ImGui::IsMouseDown(ImGuiMouseButton_Left)) return;
@@ -550,11 +562,26 @@ void Editor3DScreen::draw_viewport() {
   viewport_x_ = origin.x;
   viewport_y_ = origin.y;
   const float scale = ImGui::GetIO().DisplayFramebufferScale.x > 0 ? ImGui::GetIO().DisplayFramebufferScale.x : 1.0f;
-  render_frame(static_cast<int>(vw * scale), static_cast<int>(vh * scale));
+  // The active camera's viewport rect (x, y from the top left, w, h as
+  // fractions) in Play; the rest stays dark.
+  float rx = 0.0f, ry = 0.0f, rw = vw, rh = vh;
+  if (playing() && !vr_previewing() && !free_camera_in_play_) {
+    const world3d::World3D::CameraView cv = world_.camera_view();
+    rw = std::max(8.0f, cv.viewport[2] * vw);
+    rh = std::max(8.0f, cv.viewport[3] * vh);
+    rx = std::clamp(cv.viewport[0] * vw, 0.0f, vw - rw);
+    ry = std::clamp(cv.viewport[1] * vh, 0.0f, vh - rh);
+  }
+  const bool partial = rw < vw - 0.5f || rh < vh - 0.5f;
+  render_frame(static_cast<int>(rw * scale), static_cast<int>(rh * scale));
   const std::uint64_t tex = viewport_texture();
   if (tex != 0) {
     // GL textures are bottom-up.
-    ImGui::Image(static_cast<ImTextureID>(tex), ImVec2(vw, vh), ImVec2(0, 1), ImVec2(1, 0));
+    if (partial) {
+      ImGui::GetWindowDrawList()->AddRectFilled(origin, ImVec2(origin.x + vw, origin.y + vh), IM_COL32(8, 6, 5, 255));
+      ImGui::SetCursorScreenPos(ImVec2(origin.x + rx, origin.y + ry));
+    }
+    ImGui::Image(static_cast<ImTextureID>(tex), ImVec2(rw, rh), ImVec2(0, 1), ImVec2(1, 0));
   } else {
     ImGui::InvisibleButton("##vp_null", ImVec2(vw, vh));
   }
@@ -711,7 +738,11 @@ void Editor3DScreen::draw_viewport() {
     // A click on a gizmo handle starts a drag (a modal transform with that
     // handle's constraint: Ctrl flips snapping, Shift = precision).
     gizmo_hover_ = viewport_hovered_ ? gizmo_pick(mx, my, vw, vh) : GizmoHandle{};
-    if (viewport_hovered_ && !dup_drag_ && !swallow_lmb_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    if (target_picking() && viewport_hovered_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+      // Eyedropper: this click names the target, it does not select.
+      if (const std::uint64_t id = pick(mx, my, vw, vh)) finish_target_pick(id);
+      else note("Nothing there: click an object (Esc cancels)");
+    } else if (viewport_hovered_ && !dup_drag_ && !swallow_lmb_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       if (!gizmo_begin(mx, my, vw, vh)) {
         const std::uint64_t id = pick(mx, my, vw, vh);
         if (id) select(id, io.KeyCtrl);
@@ -720,6 +751,14 @@ void Editor3DScreen::draw_viewport() {
     }
     draw_gizmo_overlay(origin.x, origin.y, vw, vh);
     draw_transform_header(origin.x, origin.y, vw);
+  }
+  if (!playing()) {
+    draw_camera_overlay(origin.x, origin.y, vw, vh);
+    if (target_picking()) {
+      ImGui::GetWindowDrawList()->AddText(ImVec2(origin.x + 12, origin.y + 40), IM_COL32(242, 200, 90, 255),
+                                          "Eyedropper: click the target object (Esc cancels)");
+      if (viewport_hovered_) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    }
   }
 
   // In-game UI (ui/*.ui.json, Lua ui.*) over the Play view.
@@ -830,7 +869,14 @@ void Editor3DScreen::draw_hierarchy() {
     }
     if (hier_drop_id_) {
       if (hier_drop_root_) set_parent(hier_drop_id_, 0);
-      else hierarchy_drop(hier_drop_id_, hier_drop_target_, hier_drop_where_);
+      else if (hier_drop_where_ == 2 && ImGui::GetIO().KeyAlt) {
+        // Alt+drag onto a row: attach and snap onto it.
+        if (std::find(selection().begin(), selection().end(), hier_drop_id_) == selection().end())
+          select(hier_drop_id_);
+        attach_selected(hier_drop_target_, scene3d::AttachMode::SnapToTarget);
+      } else {
+        hierarchy_drop(hier_drop_id_, hier_drop_target_, hier_drop_where_);
+      }
     }
   }
   if (hier_open_context_) ImGui::OpenPopup("##Hier3DContext");
@@ -862,6 +908,7 @@ void Editor3DScreen::draw_hierarchy_row(const scene3d::Entity3D& e, int depth) {
 
   std::string label = e.name;
   if (e.player) label += "  (rider)";
+  else if (e.camera) label += play_camera_id() == e.id ? "  (camera, active)" : "  (camera)";
   else if (e.light) label += "  (light)";
   else if (e.script) label += "  (script)";
   else if (!kids.empty() && !e.mesh) label += "  (group)";
@@ -877,7 +924,8 @@ void Editor3DScreen::draw_hierarchy_row(const scene3d::Entity3D& e, int depth) {
   const ImVec2 mn = ImGui::GetItemRectMin();
   const ImVec2 mxr = ImGui::GetItemRectMax();
   if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
-    select(e.id, ImGui::GetIO().KeyCtrl);
+    if (target_picking()) finish_target_pick(e.id);
+    else select(e.id, ImGui::GetIO().KeyCtrl);
   }
   if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
     select(e.id);
@@ -957,7 +1005,14 @@ void Editor3DScreen::draw_context_menu(std::uint64_t clicked) {
   ImGui::Separator();
   if (ImGui::MenuItem("Group", "Ctrl+G", false, has)) group_selected();
   if (ImGui::MenuItem("Ungroup", "Ctrl+Shift+G", false, has)) ungroup_selected();
-  if (e && e->parent != 0 && ImGui::MenuItem("Unparent")) set_parent(e->id, 0);
+  ImGui::Separator();
+  draw_attach_menu(clicked);
+  if (e && e->camera) {
+    if (ImGui::MenuItem("Make active camera", nullptr, false, !playing())) make_active_camera(e->id);
+    if (ImGui::MenuItem("Align camera to view", "Ctrl+Alt+Num0", false, !playing())) align_camera_to_view(e->id);
+    if (ImGui::MenuItem("Look through camera", "Num0")) look_through_camera(e->id);
+  }
+  ImGui::Separator();
   if (e) {
     if (ImGui::MenuItem(e->locked ? "Unlock" : "Lock", "Ctrl+L")) set_locked(e->id, !e->locked);
     if (ImGui::MenuItem(e->editor_hidden ? "Show" : "Hide", "H")) set_hidden(e->id, !e->editor_hidden);
@@ -988,6 +1043,8 @@ void Editor3DScreen::draw_context_menu(std::uint64_t clicked) {
     if (ImGui::MenuItem("Grabbable", nullptr, false, !e->grabbable)) { c.grabbable = scene3d::Grabbable3D{}; add = true; }
     if (ImGui::MenuItem("Audio Source", nullptr, false, !e->audio)) { c.audio = scene3d::audio_3d(); add = true; }
     if (ImGui::MenuItem("Particles", nullptr, false, !e->particles)) { c.particles = fx::preset("campfire", fx::Space::ThreeD); add = true; }
+    if (ImGui::MenuItem("Camera", nullptr, false, !e->camera)) { c.camera = scene3d::PlayCamera3D{}; add = true; }
+    if (ImGui::MenuItem("Follow", nullptr, false, !e->follow)) { c.follow = scene3d::Follow3D{}; add = true; }
     if (add) replace_entity(c, "Add component " + c.name);
     ImGui::EndMenu();
   }
@@ -998,6 +1055,7 @@ void Editor3DScreen::draw_context_menu(std::uint64_t clicked) {
       if (ImGui::MenuItem(p)) create_primitive(p, {at.x, 0.0f, at.z});
     if (ImGui::MenuItem("Point light")) create_light(false, {at.x, 2.5f, at.z});
     if (ImGui::MenuItem("Empty")) create_empty({at.x, 0.0f, at.z});
+    if (ImGui::MenuItem("Camera", nullptr, false, !playing())) create_camera();
     ImGui::Separator();
     if (ImGui::MenuItem("Terrain (hills)", nullptr, false, !playing())) {
       create_terrain(129, 128.0f, true, "meadow");

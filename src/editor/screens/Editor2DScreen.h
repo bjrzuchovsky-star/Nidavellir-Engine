@@ -173,6 +173,28 @@ class Editor2DScreen final : public IScreen {
   // Alt+drag: copies of the selection on the spot, then a normal drag
   // moves the copies. One "Duplicate N" step; Esc takes the copies back.
   bool begin_duplicate_drag();
+  // --- Cameras + attach tools (Editor2DScreen_Attach.cpp) -------------------
+  // docs/camera.md, docs/transforms.md. Each edit is one undo step on the
+  // selection roots (minus the target) and refuses while playing.
+  std::uint64_t create_camera_2d();  // at the view centre, follows the rider
+  bool make_active_camera_2d(std::uint64_t id);
+  std::uint64_t play_camera_2d() const;  // highest-priority active (0 = none)
+  bool attach_selected_2d(std::uint64_t target, bool snap);
+  bool detach_selected_2d();
+  bool follow_selected_2d(std::uint64_t target, bool position, bool rotation);
+  bool remove_follow_selected_2d();
+  bool snap_selected_to_2d(std::uint64_t target);
+  bool copy_transform_to_selected_2d(std::uint64_t from, bool position, bool rotation, bool scale);
+  bool align_selected_to_surface_2d();
+  // Eyedropper (same actions as 3D: attach_keep, attach_snap, follow_pos,
+  // follow_rot, follow_both, snap, copy).
+  void begin_target_pick_2d(const std::string& action);
+  bool target_picking_2d() const { return !pick_action2d_.empty(); }
+  bool finish_target_pick_2d(std::uint64_t target);
+  void cancel_target_pick_2d() { pick_action2d_.clear(); }
+  // Path of the v13 camera-migration backup made on open ("" = none).
+  const std::string& camera_migration_backup_2d() const { return camera_backup2d_; }
+
   // --- Modal transforms + gizmo (Editor2DScreen_Transform.cpp) ---------------
   // G / R / S with the mouse over the viewport (Select tool), or a gizmo
   // drag; docs/transforms.md. px / py are canvas pixels (0, 0 = the
@@ -438,6 +460,14 @@ class Editor2DScreen final : public IScreen {
   bool focus_log_entry(const runtime::LogEntry& entry);
 
  private:
+  void draw_attach_menu_2d();
+  void draw_inspector_follow_2d(std::uint64_t id);
+  void draw_object_menu_2d();
+  bool attach_target_list_2d(const char* id, std::uint64_t* out);
+  void migrate_cameras_on_open_2d(const std::vector<std::string>& lines);
+  std::string pick_action2d_;
+  std::string camera_backup2d_;
+  bool copy_pos2d_ = true, copy_rot2d_ = true, copy_scale2d_ = false;
   friend class PossePlugin;  // registers the posse UI as plugin contributions
   void draw_ui();
   void draw_menu_bar();

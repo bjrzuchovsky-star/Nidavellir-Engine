@@ -19,6 +19,8 @@ add_library(ts_render3d
   Skeleton.cpp
   Animator.cpp
   Scene3D.cpp
+  Attach3D.cpp
+  CameraMigrate3D.cpp
   Scene3D_Physics.cpp
   SceneView.cpp
   Renderer3D.cpp

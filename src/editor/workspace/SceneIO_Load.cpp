@@ -1,5 +1,7 @@
 #include "editor/workspace/SceneIO.h"
 
+#include "scene/CameraMigrate.h"
+
 #include <string>
 #include <utility>
 
@@ -29,11 +31,12 @@ void apply_doc(Workspace2D& workspace, scene_json::SceneDoc doc) {
 }
 
 bool load(Workspace2D& workspace, const std::string& scene_path,
-          std::string* error_out) {
+          std::string* error_out, std::vector<std::string>* camera_log) {
   scene_json::SceneDoc doc;
   if (!scene_json::load_file(scene_path, &doc, error_out)) {
     return false;
   }
+  if (camera_log) camera_migrate::migrate_2d(doc.version, &doc.entities, camera_log);
   apply_doc(workspace, std::move(doc));
   return true;
 }

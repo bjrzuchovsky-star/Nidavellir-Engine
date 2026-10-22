@@ -66,9 +66,15 @@ void Editor2DScreen::on_enter() {
 
   std::string err;
   bool seeded = false;
-  if (!project_.path.empty() && scene_io::load(workspace_, scene_path_, &err)) {
+  std::vector<std::string> camera_log;
+  pick_action2d_.clear();
+  camera_backup2d_.clear();
+  if (!project_.path.empty() && scene_io::load(workspace_, scene_path_, &err, &camera_log)) {
     std::cout << "[Editor2D] loaded scene.json (" << workspace_.entities().size()
               << " entities) from " << scene_path_ << '\n';
+    // Pre-0.2.0 scenes: the implicit rider camera becomes a Camera entity
+    // (backup + claim log first; docs/camera.md "Migration").
+    migrate_cameras_on_open_2d(camera_log);
   } else {
     if (!err.empty()) {
       std::cout << "[Editor2D] no scene.json yet (" << err << ") -- seeding defaults\n";

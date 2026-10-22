@@ -81,7 +81,11 @@ void Editor3DScreen::on_enter() {
   } else if (!scene3d::load_file(path, &scene_, &err)) {
     note(err, LogLevel::Error);
     scene_ = scene3d::Scene3D{};
+  } else {
+    migrate_cameras_on_open(path);  // pre-v18: the follow camera becomes an entity
   }
+  look_through_ = 0;
+  pick_action_.clear();
   plugins_.set_needs_baseline(plugin_needs(scene_));
   undo_.clear();
   redo_.clear();
@@ -102,6 +106,9 @@ void Editor3DScreen::on_exit() {
   std::string err;
   save_scene(&err);
   plugins_.close();
+  preview_view_.reset();
+  if (preview_renderer_) preview_renderer_->shutdown();
+  preview_renderer_.reset();
   view_.reset();
   if (renderer_) renderer_->shutdown();
   renderer_.reset();
@@ -111,6 +118,9 @@ void Editor3DScreen::on_exit() {
 void Editor3DScreen::ensure_renderer() {
   const bool want_gl = ImGui::GetCurrentContext() != nullptr && glfwGetCurrentContext() != nullptr;
   if (renderer_ && gl_ == want_gl) return;
+  preview_view_.reset();
+  if (preview_renderer_) preview_renderer_->shutdown();
+  preview_renderer_.reset();
   view_.reset();
   if (renderer_) renderer_->shutdown();
   renderer_.reset();
@@ -551,6 +561,10 @@ GizmoSnap Editor3DScreen::snap_steps() const {
 // ---- Camera + picking -------------------------------------------------------------
 
 render3d::Camera3D Editor3DScreen::editor_camera() const {
+  if (look_through_ != 0) {
+    // Numpad0: the view through a camera entity.
+    if (const Entity3D* e = scene_.find(look_through_); e && e->camera) return camera_view(*e);
+  }
   const scene3d::EditorCamera3D& c = scene_.editor_camera;
   render3d::Camera3D cam;
   const float yaw = render3d::radians(c.yaw), pitch = render3d::radians(c.pitch);
@@ -563,15 +577,18 @@ render3d::Camera3D Editor3DScreen::editor_camera() const {
 }
 
 void Editor3DScreen::orbit(float dyaw, float dpitch) {
+  look_through_ = 0;  // moving the view leaves the camera
   scene_.editor_camera.yaw = std::fmod(scene_.editor_camera.yaw + dyaw, 360.0f);
   scene_.editor_camera.pitch = std::clamp(scene_.editor_camera.pitch + dpitch, -89.0f, 89.0f);
 }
 
 void Editor3DScreen::dolly(float factor) {
+  look_through_ = 0;
   scene_.editor_camera.distance = std::clamp(scene_.editor_camera.distance * factor, 0.5f, 500.0f);
 }
 
 void Editor3DScreen::pan(float dx, float dy, float vh) {
+  look_through_ = 0;
   const render3d::Camera3D cam = editor_camera();
   const Vec3 f = cam.forward();
   const Vec3 right = render3d::normalize(render3d::cross(f, {0, 1, 0}));
@@ -656,7 +673,8 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
       view_->begin(world_.environment(), ents, cam, width, height, opt);
       world3d::vr_overlay_lines(world_, renderer_.get());
     } else {
-      view_->begin(world_.environment(), world_.entities(), cam, width, height, opt);
+      // The active camera entity's clear colour (if any) sets the sky.
+      view_->begin(world_.view_environment(), world_.entities(), cam, width, height, opt);
     }
     std::vector<render3d::Renderer3D::Billboard> bills;
     world_.billboards(&bills);
@@ -689,6 +707,7 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
     } else {
       view_->begin(scene_.environment, scene_.entities, cam, width, height, opt);
     }
+    draw_camera_lines();  // frustums / view cones (cameras are hidden in Play)
   }
   last_stats_ = view_->end();
   collect_problems();

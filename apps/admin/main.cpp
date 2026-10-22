@@ -13,6 +13,7 @@
 #include "editor/assets/ImportSort.h"
 #include "editor/assets/TextureCache.h"
 #include "editor/editor3d/Editor3DScreen.h"
+#include "render3d/Attach3D.h"
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/settings/Settings.h"
 #include "editor/workspace/SceneIO.h"
@@ -36,6 +37,7 @@
 #include "SmokePrefab.h"
 #include "SmokeTools.h"
 #include "SmokeTransform.h"
+#include "SmokeCamera.h"
 #include "SmokeVR.h"
 #include "SmokePlugins.h"
 #include "SmokeAudio.h"
@@ -1299,6 +1301,10 @@ int run_console_smoke() {
   if (run_transform_smoke() != 0) {
     return 1;
   }
+  // Scene cameras (see SmokeCamera.cpp).
+  if (run_camera_smoke() != 0) {
+    return 1;
+  }
   // Asset database, importers, Asset Browser (see SmokeAssets.cpp).
   if (run_assets_smoke() != 0) {
     return 1;
@@ -1746,6 +1752,142 @@ int run_gizmo_shot(const std::string& which, const std::string& png) {
     return 1;
   }
   std::cout << "Gizmo screenshot (" << which << "): " << png << " (" << fw << "x" << fh << ")\n";
+  return 0;
+}
+
+// ts_admin --camera-shot <camera | attach> <out.png>: the 3D editor (Dusk
+// theme) on a throwaway claim. "camera": a scene Camera selected, frustum
+// and preview inset showing. "attach": the viewport context menu on the
+// Crate with Attach to... open. Never touches imgui.ini.
+int run_camera_shot(const std::string& which, const std::string& png) {
+  namespace fs = std::filesystem;
+  const bool attach = which == "attach";
+  if (!attach && which != "camera") {
+    std::cerr << "--camera-shot wants camera or attach\n";
+    return 1;
+  }
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+  GLFWwindow* window = glfwCreateWindow(1600, 940, "TombStone Cameras", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(window);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO& io = ImGui::GetIO();
+  io.IniFilename = nullptr;
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  static gfx::GlTextureUploader gl_uploader;
+  gfx::set_texture_uploader(&gl_uploader);
+  Settings defaults;
+  apply_theme(defaults);
+
+  const fs::path dir = fs::temp_directory_path() / (attach ? "ts_attach_shot" : "ts_camera_shot");
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  editor::ProjectInfo info;
+  info.id = attach ? "attach_shot" : "camera_shot";
+  info.name = attach ? "Hitching Post (3D)" : "Lookout Ridge (3D)";
+  info.kind = editor::ProjectKind::ThreeD;
+  info.path = dir.string();
+  auto ed = std::make_unique<editor::Editor3DScreen>(info);
+  ed->on_enter();
+  std::uint64_t crate = 0;
+  if (const auto* c = ed->scene().find_named("Crate")) crate = c->id;
+  const float menu_dx = std::getenv("TS_SHOT_DX") ? std::stof(std::getenv("TS_SHOT_DX")) : 60.0f;
+  const float menu_dy = std::getenv("TS_SHOT_DY") ? std::stof(std::getenv("TS_SHOT_DY")) : 228.0f;
+  if (!attach) {
+    const std::uint64_t cam = ed->create_camera();
+    if (const auto* e = ed->scene().find(cam); e && crate) {
+      const render3d::Vec3 at = ed->scene().find(crate)->transform.position;
+      render3d::Transform t = e->transform;
+      t.position = at + render3d::Vec3{5.5f, 2.6f, 4.5f};
+      t.rotation = scene3d::look_rotation(at - t.position);
+      ed->set_transform(cam, t, "Place camera");
+    }
+    ed->orbit(-35.0f, 8.0f);
+    ed->dolly(1.6f);
+    ed->select(cam);
+  } else if (crate) {
+    ed->select(crate);
+  }
+  float cx = 0, cy = 0;  // where the context menu opened
+  int fw = 0, fh = 0;
+  std::vector<unsigned char> px;
+  const int frames = 40;
+  for (int frame = 0; frame < frames; ++frame) {
+    glfwPollEvents();
+    glfwGetFramebufferSize(window, &fw, &fh);
+    if (attach && crate) {
+      if (frame == 8) {
+        float vx, vy, vw, vh;
+        ed->viewport_screen_rect(&vx, &vy, &vw, &vh);
+        const render3d::Camera3D cam = ed->editor_camera();
+        const render3d::Vec3 ndc = (cam.projection(vw / vh) * cam.view()).transform_point(ed->scene().find(crate)->transform.position);
+        cx = vx + (ndc.x * 0.5f + 0.5f) * vw;
+        cy = vy + (0.5f - ndc.y * 0.5f) * vh;
+        io.AddFocusEvent(true);
+        io.AddMousePosEvent(cx, cy);
+      }
+      if (frame == 10) io.AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+      if (frame == 11) io.AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+      // Slide down onto Attach to... (a moving mouse opens the submenu).
+      if (frame >= 16 && frame <= 28) {
+        const float k = static_cast<float>(frame - 16) / 12.0f;
+        io.AddMousePosEvent(cx + menu_dx, cy + 12.0f + (menu_dy - 12.0f) * k);
+      }
+    }
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    ed->on_update(1.0f / 60.0f);
+    ImGui::Render();
+    glViewport(0, 0, fw, fh);
+    const ImVec4 clear = editor::theme::Charcoal();
+    glClearColor(clear.x, clear.y, clear.z, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    if (frame == frames - 1) {
+      px.assign(static_cast<std::size_t>(fw) * fh * 4, 0);
+      glPixelStorei(GL_PACK_ALIGNMENT, 1);
+      glReadBuffer(GL_BACK);
+      glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    }
+    glfwSwapBuffers(window);
+  }
+  ed->on_exit();
+  ed.reset();
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  gfx::set_texture_uploader(nullptr);
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  fs::remove_all(dir, ec);
+  if (px.empty()) return 1;
+  std::vector<unsigned char> flipped(px.size());
+  for (int y = 0; y < fh; ++y) {
+    std::memcpy(&flipped[static_cast<std::size_t>(y) * fw * 4],
+                &px[static_cast<std::size_t>(fh - 1 - y) * fw * 4], static_cast<std::size_t>(fw) * 4);
+  }
+  for (std::size_t i = 3; i < flipped.size(); i += 4) flipped[i] = 255;
+  if (!write_png_rgba(png, fw, fh, flipped)) {
+    std::cerr << "cannot write " << png << '\n';
+    return 1;
+  }
+  std::cout << "Camera screenshot (" << which << "): " << png << " (" << fw << "x" << fh << ")\n";
   return 0;
 }
 
@@ -2699,6 +2841,9 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-scripts-multi") == 0) {
       return run_scripts_multi_smoke();
     }
+    if (std::strcmp(argv[i], "--camera-shot") == 0 && i + 2 < argc) {
+      return run_camera_shot(argv[i + 1], argv[i + 2]);
+    }
     if (std::strcmp(argv[i], "--gizmo-shot") == 0 && i + 2 < argc) {
       return run_gizmo_shot(argv[i + 1], argv[i + 2]);
     }
@@ -2769,6 +2914,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-prefab") == 0) {
       // Just the prefab checks (2D + 3D).
       return run_prefab_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-camera") == 0) {
+      // Just the scene camera checks (2D + 3D, migration).
+      return run_camera_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-transform") == 0) {
       // Just the modal transform / gizmo checks (2D + 3D).

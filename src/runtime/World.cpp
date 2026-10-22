@@ -176,17 +176,29 @@ void World::set_view_size(float width, float height) {
 
 // --- Camera -------------------------------------------------------------------
 
+// The camera Play looks through: a forced one (camera.set_active), else
+// the active Camera2D with the highest priority (ties: scene order).
+std::uint64_t World::pick_camera() const {
+  if (forced_cam_ != 0) {
+    const Actor* f = find(forced_cam_);
+    if (f && f->data.camera) return forced_cam_;
+  }
+  const Actor* best = nullptr;
+  for (const Actor& a : actors_) {
+    if (a.dead || !a.data.camera || !a.data.camera->active) continue;
+    if (!best || a.data.camera->priority > best->data.camera->priority) best = &a;
+  }
+  return best ? best->data.id : 0;
+}
+
 void World::setup_camera() {
   cam_ = CameraRig{};
-  for (const Actor& a : actors_) {
-    if (a.data.camera) {
-      cam_.entity = a.data.id;
-      cam_.data = *a.data.camera;
-      cam_.target = a.data.camera->target;
-      cam_.x = a.data.center_x();
-      cam_.y = a.data.center_y();
-      break;
-    }
+  if (const Actor* a = find(pick_camera())) {
+    cam_.entity = a->data.id;
+    cam_.data = *a->data.camera;
+    cam_.target = a->data.camera->target;
+    cam_.x = a->data.center_x();
+    cam_.y = a->data.center_y();
   }
   if (cam_.entity == 0) {
     // No Camera2D in the scene: an implicit, rigid camera on player 0.
@@ -227,6 +239,37 @@ void World::setup_camera() {
   }
 }
 
+bool World::set_active_camera(std::uint64_t id) {
+  if (id != 0) {
+    const Actor* a = find(id);
+    if (!a || !a->data.camera) return false;
+  }
+  forced_cam_ = id;
+  if (pick_camera() != cam_.entity) setup_camera();
+  return true;
+}
+
+bool World::set_camera_priority(std::uint64_t id, int priority) {
+  Actor* a = find(id);
+  if (!a || !a->data.camera) return false;
+  a->data.camera->priority = priority;
+  return true;
+}
+
+bool World::set_camera_zoom(std::uint64_t id, float zoom) {
+  Actor* a = find(id);
+  if (!a || !a->data.camera) return false;
+  a->data.camera->zoom = std::clamp(zoom, 0.05f, 50.0f);
+  if (id == cam_.entity) cam_.data.zoom = a->data.camera->zoom;
+  return true;
+}
+
+std::size_t World::camera_count() const {
+  std::size_t n = 0;
+  for (const Actor& a : actors_) n += (!a.dead && a.data.camera) ? 1u : 0u;
+  return n;
+}
+
 bool World::target_center(float* x, float* y) const {
   if (cam_.target == 0 || cam_.target == cam_.entity) {
     return false;
@@ -258,11 +301,27 @@ void World::clamp_camera(float* x, float* y) const {
 }
 
 void World::step_camera() {
+  // Another camera took over (priority / active / scripts): cut to it.
+  if (pick_camera() != cam_.entity) {
+    setup_camera();
+    return;
+  }
+  if (const Actor* ce = find(cam_.entity); ce && ce->data.camera) {
+    // Live settings (scripts, inspector) except the follow target.
+    const std::uint64_t keep = cam_.target;
+    cam_.data = *ce->data.camera;
+    cam_.target = keep;
+  }
   cam_.prev_x = cam_.x;
   cam_.prev_y = cam_.y;
   float tx = 0.0f;
   float ty = 0.0f;
   if (target_center(&tx, &ty)) {
+    // Dead zone: the target roams a centred box without moving the view.
+    const float hw = cam_.data.dead_zone_w * 0.5f;
+    const float hh = cam_.data.dead_zone_h * 0.5f;
+    if (hw > 0.0f) tx = tx > cam_.x + hw ? tx - hw : tx < cam_.x - hw ? tx + hw : cam_.x;
+    if (hh > 0.0f) ty = ty > cam_.y + hh ? ty - hh : ty < cam_.y - hh ? ty + hh : cam_.y;
     if (cam_.data.smoothing <= 0.0f) {
       cam_.x = tx;
       cam_.y = ty;
@@ -291,6 +350,9 @@ CameraView World::camera(float alpha) const {
   v.x = cam_.prev_x + (cam_.x - cam_.prev_x) * alpha;
   v.y = cam_.prev_y + (cam_.y - cam_.prev_y) * alpha;
   v.zoom = cam_.data.zoom;
+  v.use_clear = cam_.entity != 0 && cam_.data.use_clear;
+  std::copy(cam_.data.clear_color, cam_.data.clear_color + 4, v.clear);
+  if (cam_.entity != 0) std::copy(cam_.data.viewport, cam_.data.viewport + 4, v.viewport);
   return v;
 }
 
@@ -403,6 +465,7 @@ void World::step(const InputFrame& input) {
     step_extensions();
   }
   follow_parents();
+  apply_follows();
   {
     TS_PROFILE_SCOPE("world.animation");
     step_animation();
@@ -450,6 +513,29 @@ void World::follow_parents() {
     if (!p || p == &c) continue;
     c.data.x += p->data.x - p->prev_x;
     c.data.y += p->data.y - p->prev_y;
+  }
+}
+
+// Follow constraints (Entity2D::follow), after parents carried children.
+void World::apply_follows() {
+  for (Actor& a : actors_) {
+    if (a.dead || !a.data.follow || a.data.follow->target == 0) continue;
+    const Actor* t = find(a.data.follow->target);
+    if (!t || t == &a) continue;
+    const FollowData& f = *a.data.follow;
+    if (f.position) {
+      float ox = f.offset_x, oy = f.offset_y;
+      if (f.rotation) {
+        const float r = t->data.rotation * 3.14159265f / 180.0f;
+        const float c = std::cos(r), sn = std::sin(r);
+        const float rx = ox * c - oy * sn;
+        oy = ox * sn + oy * c;
+        ox = rx;
+      }
+      a.data.x = t->data.center_x() + ox - a.data.w * 0.5f;
+      a.data.y = t->data.center_y() + oy - a.data.h * 0.5f;
+    }
+    if (f.rotation) a.data.rotation = t->data.rotation + f.rotation_offset;
   }
 }
 

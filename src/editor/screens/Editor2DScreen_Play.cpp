@@ -813,6 +813,42 @@ void Editor2DScreen::draw_inspector_gameplay(std::uint64_t id) {
         mark_dirty();
       }
       track_inspector_item("Edit Camera Zoom");
+      // Several cameras: Play uses the active one with the highest priority.
+      bool active = t->camera->active;
+      if (ImGui::Checkbox("Active camera", &active)) {
+        edit("Camera Active", "", [active](Entity2D& c) {
+          if (c.camera) c.camera->active = active;
+        });
+      }
+      if (Entity2D* t2 = workspace_.find(id); t2 && t2->camera) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Make active")) make_active_camera_2d(id);
+        if (ImGui::DragInt("Priority", &t2->camera->priority, 0.1f, -1000, 1000)) mark_dirty();
+        track_inspector_item("Edit Camera Priority");
+        float dz[2] = {t2->camera->dead_zone_w, t2->camera->dead_zone_h};
+        if (ImGui::DragFloat2("Dead zone w/h", dz, 0.5f, 0.0f, 4096.0f, "%.0f px")) {
+          t2->camera->dead_zone_w = dz[0];
+          t2->camera->dead_zone_h = dz[1];
+          mark_dirty();
+        }
+        track_inspector_item("Edit Camera Dead Zone");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("The target moves this far before the camera does.");
+        if (ImGui::Checkbox("Clear colour", &t2->camera->use_clear)) mark_dirty();
+        track_inspector_item("Edit Camera Clear");
+        if (t2->camera->use_clear) {
+          ImGui::SameLine();
+          if (ImGui::ColorEdit4("##clear2d", t2->camera->clear_color, ImGuiColorEditFlags_NoInputs)) mark_dirty();
+          track_inspector_item("Edit Camera Clear Colour");
+        }
+        if (ImGui::DragFloat4("Viewport", t2->camera->viewport, 0.005f, 0.0f, 1.0f, "%.2f")) mark_dirty();
+        track_inspector_item("Edit Camera Viewport");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("x, y (from the top left), width, height as fractions of the screen");
+      }
+      t = workspace_.find(id);
+      if (!t || !t->camera) {
+        ImGui::PopID();
+        return;
+      }
       bool bounds = t->camera->use_bounds;
       if (ImGui::Checkbox("Keep inside bounds", &bounds)) {
         edit("Camera Bounds", "", [bounds](Entity2D& c) {

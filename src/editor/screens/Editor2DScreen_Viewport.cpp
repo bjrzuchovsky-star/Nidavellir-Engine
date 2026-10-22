@@ -464,6 +464,19 @@ void Editor2DScreen::draw_viewport() {
     }
   }
 
+  // Eyedropper (Attach to... / Follow / Snap / Copy transform): the click
+  // picks the target instead of selecting.
+  if (target_picking_2d() && !tile_mode && hovered && !is_playing() &&
+      ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    const std::optional<std::uint64_t> hit = workspace_.pick(mouse_world.x, mouse_world.y);
+    if (hit && !workspace_.is_selected(*hit)) {
+      finish_target_pick_2d(*hit);
+    } else {
+      note("Pick another object (Esc cancels)");
+    }
+    swallow = true;
+  }
+
   if (!tile_mode && hovered && !alt && !panning_ && !hot_handle && !swallow &&
       drag_mode_ == DragMode::None &&
       ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
@@ -821,6 +834,55 @@ void Editor2DScreen::draw_viewport() {
       }
       draw->AddText(ImVec2(io.MousePos.x + 14.0f, io.MousePos.y + 10.0f),
                     primary_col, buf);
+    }
+  }
+
+  // --- Cameras: the Play view rectangle (canvas size / zoom, centred on the
+  // camera object), dead zone, follow line and a label. Hidden in Play.
+  if (!is_playing()) {
+    const std::uint64_t play_cam = play_camera_2d();
+    for (const Entity2D& e : workspace_.entities()) {
+      if (!e.camera || workspace_.effectively_hidden(e)) continue;
+      const Camera2DData& c = *e.camera;
+      const bool sel = workspace_.is_selected(e.id);
+      const bool act = e.id == play_cam;
+      const ImU32 col = act ? IM_COL32(226, 178, 92, sel ? 255 : 200)
+                            : sel ? IM_COL32(240, 140, 60, 255) : IM_COL32(160, 160, 160, 150);
+      const float z = std::max(c.zoom, 0.05f);
+      const float hw = canvas_size.x * std::max(c.viewport[2], 0.05f) * 0.5f / z;
+      const float hh = canvas_size.y * std::max(c.viewport[3], 0.05f) * 0.5f / z;
+      const float cx = e.center_x();
+      const float cy = e.center_y();
+      draw->AddRect(view.to_screen(cx - hw, cy - hh), view.to_screen(cx + hw, cy + hh), col, 0.0f, 0,
+                    sel ? 2.0f : 1.0f);
+      if (sel && c.dead_zone_w > 0.0f && c.dead_zone_h > 0.0f) {
+        draw->AddRect(view.to_screen(cx - c.dead_zone_w * 0.5f, cy - c.dead_zone_h * 0.5f),
+                      view.to_screen(cx + c.dead_zone_w * 0.5f, cy + c.dead_zone_h * 0.5f),
+                      IM_COL32(120, 200, 255, 180));
+      }
+      if (sel && c.use_bounds) {
+        draw->AddRect(view.to_screen(c.bounds_x, c.bounds_y),
+                      view.to_screen(c.bounds_x + c.bounds_w, c.bounds_y + c.bounds_h),
+                      IM_COL32(200, 90, 90, 160));
+      }
+      if (const Entity2D* t = c.target ? workspace_.find(c.target) : nullptr) {
+        const ImVec2 a = view.to_screen(cx, cy);
+        const ImVec2 b = view.to_screen(t->center_x(), t->center_y());
+        const int steps = 24;
+        for (int i = 0; i < steps; i += 2) {
+          const float f0 = static_cast<float>(i) / steps;
+          const float f1 = static_cast<float>(i + 1) / steps;
+          draw->AddLine(ImVec2(a.x + (b.x - a.x) * f0, a.y + (b.y - a.y) * f0),
+                        ImVec2(a.x + (b.x - a.x) * f1, a.y + (b.y - a.y) * f1), col, 1.0f);
+        }
+      }
+      const std::string label = e.name + (act ? "  (Play camera)" : "");
+      const ImVec2 tl = view.to_screen(cx - hw, cy - hh);
+      draw->AddText(ImVec2(tl.x + 4.0f, tl.y + 3.0f), col, label.c_str());
+    }
+    if (target_picking_2d()) {
+      draw->AddText(ImVec2(canvas_pos.x + 10.0f, canvas_pos.y + canvas_size.y - 24.0f),
+                    IM_COL32(240, 200, 120, 255), "Eyedropper: click the target (Esc cancels)");
     }
   }
 

@@ -42,8 +42,16 @@ using render3d::Vec3;
 // v17 lets an entity carry several scripts: "scripts" (an array of
 // {path, props, enabled}) when there is more than one or one is disabled;
 // a single enabled script is still written as "script".
-// v7 .. v16 files still load.
-inline constexpr int kScene3DVersion = 17;
+// v18 makes the camera a real scene object: "camera" grows projection,
+// clip planes, ortho size, clear colour, viewport rect, priority / active
+// and a rig (fixed / orbit / first_person) that follows a target with
+// optional boom collision; adds the "follow" constraint (position and / or
+// rotation with offsets) and "parent_bone" + "bone_offset" (ride a bone of
+// the parent's skinned model). Older files keep their old camera
+// behaviour at runtime (Scene3D::legacy_cameras) until the editor migrates
+// them (docs/camera.md).
+// v7 .. v17 files still load.
+inline constexpr int kScene3DVersion = 18;
 
 // ts.ai navmesh agent (v13): walks the baked navmesh with crowd avoidance,
 // optionally driven by a behaviour tree (*.bt.json).
@@ -207,12 +215,52 @@ struct Player3D {
   bool operator==(const Player3D& o) const = default;
 };
 
-// A play camera (scene.json "camera"). With no rider in the scene, Play
-// looks through the first one (its position, looking down its -Z). A
-// child of a first-person rider marks the eye point instead.
+// A play camera (scene.json "camera"); v18 makes it a full scene object.
+// Play looks through the active camera with the highest priority (ties:
+// scene order). Rigs:
+//   Fixed        the entity's own transform (parent it to ride along),
+//                looking down its -Z.
+//   Orbit        third-person boom behind `follow` (0 = the rider): yaw /
+//                pitch from mouse look, `distance` back and `height` up,
+//                scroll zooms; `collision` pulls it in front of walls.
+//   FirstPerson  the eyes of `follow`: its own position when it is a child
+//                of the target, else the rider's eye height.
+// v16 files (and older) only had "fov"; Scene3D::legacy_cameras keeps their
+// old Play behaviour until the editor migrates them.
 struct PlayCamera3D {
+  enum class Projection : std::uint8_t { Perspective, Orthographic };
+  enum class Rig : std::uint8_t { Fixed, Orbit, FirstPerson };
   float fov = 60.0f;  // vertical, degrees
+  Projection projection = Projection::Perspective;
+  float near_clip = 0.1f;   // m
+  float far_clip = 1000.0f; // m
+  float ortho_size = 5.0f;  // half the view height in metres (orthographic)
+  bool use_clear = false;   // solid background instead of the sky
+  float clear_color[4] = {0.10f, 0.08f, 0.07f, 1.0f};
+  float viewport[4] = {0.0f, 0.0f, 1.0f, 1.0f};  // x, y, w, h (0..1 of the view)
+  int priority = 0;
+  bool active = true;
+  Rig rig = Rig::Fixed;
+  std::uint64_t follow = 0;  // Orbit / FirstPerson target (0 = the rider)
+  float distance = 6.0f;     // Orbit boom length (m)
+  float height = 2.5f;       // Orbit height above the target's feet (m)
+  bool collision = true;     // Orbit: keep the boom out of walls
+  float collision_radius = 0.2f;  // m, sphere cast through the physics plugin
   bool operator==(const PlayCamera3D& o) const = default;
+};
+const char* camera_rig_name(PlayCamera3D::Rig r);
+
+// v18 "follow": a lightweight constraint instead of full parenting. Each
+// tick the entity takes the target's position (plus `offset`, in the
+// target's frame when rotation follows too) and / or rotation (times
+// `rotation_offset`).
+struct Follow3D {
+  std::uint64_t target = 0;
+  bool position = true;
+  bool rotation = false;
+  Vec3 offset;               // target space when rotation follows, else world
+  Quat rotation_offset;      // applied after the target's rotation
+  bool operator==(const Follow3D& o) const = default;
 };
 
 // VR player rig ("dimension": "vr"): the headset's floor origin starts at
@@ -360,7 +408,12 @@ struct Entity3D {
   std::optional<Joint3D> joint;              // v14
   std::optional<prefab::Link> prefab;        // v15
   std::optional<terrain::Terrain3D> terrain; // v16
-  std::optional<PlayCamera3D> camera;        // v16 (optional, additive)
+  std::optional<PlayCamera3D> camera;        // v16 (optional, additive); v18 full
+  std::optional<Follow3D> follow;            // v18
+  // v18: ride a bone of the parent's skinned model ("" = the parent's
+  // origin, as before). bone_offset is this entity in that bone's space.
+  std::string parent_bone;
+  Transform bone_offset;
   bool operator==(const Entity3D& o) const = default;
 };
 
@@ -388,6 +441,10 @@ struct Scene3D {
   bool snap = true;
   std::vector<std::uint64_t> selection;
   PhysicsSettings3D physics;  // v14
+  // Read from a file older than v18: Play keeps the old camera rules (the
+  // rider's follow camera, camera entities only without a rider) until the
+  // editor migrates the scene (docs/camera.md). Not written.
+  bool legacy_cameras = false;
   bool operator==(const Scene3D& o) const = default;
 
   Entity3D* find(std::uint64_t id);

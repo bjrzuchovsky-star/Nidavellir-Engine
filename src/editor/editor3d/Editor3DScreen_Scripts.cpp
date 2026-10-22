@@ -103,6 +103,10 @@ void Editor3DScreen::draw_add_component(std::uint64_t id, std::string* attach_re
     ImGui::TextDisabled("Add to %s", e ? e->name.c_str() : "?");
     ImGui::Separator();
     if (std::string picked = add_script_menu_.draw_items(host); !picked.empty()) *attach_rel = std::move(picked);
+    ImGui::Separator();
+    // Built-in components (the inspector adds them after its own edit).
+    if (ImGui::MenuItem("Camera", nullptr, false, e && !e->camera)) *attach_rel = "@camera";
+    if (ImGui::MenuItem("Follow", nullptr, false, e && !e->follow)) *attach_rel = "@follow";
     ImGui::TextDisabled("Other components: the + buttons above");
     ImGui::EndPopup();
   }

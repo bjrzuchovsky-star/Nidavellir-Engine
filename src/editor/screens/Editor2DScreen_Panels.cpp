@@ -116,7 +116,13 @@ void Editor2DScreen::draw_hierarchy() {
     if (hier_drop_root_) {
       reparent(hier_drop_id_, 0);
     } else {
-      hierarchy_drop(hier_drop_id_, hier_drop_target_, hier_drop_where_);
+      if (hier_drop_where_ == Workspace2D::HierDrop::Inside && ImGui::GetIO().KeyAlt) {
+        // Alt+drag onto a row: attach and snap onto it.
+        if (!workspace_.is_selected(hier_drop_id_)) workspace_.select(hier_drop_id_);
+        attach_selected_2d(hier_drop_target_, true);
+      } else {
+        hierarchy_drop(hier_drop_id_, hier_drop_target_, hier_drop_where_);
+      }
     }
   }
   if (hier_open_context_) {
@@ -275,7 +281,9 @@ void Editor2DScreen::draw_hierarchy_row(const Entity2D& e, int depth) {
     ImGui::EndDragDropTarget();
   }
 
-  if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
+  if (target_picking_2d() && ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
+    finish_target_pick_2d(e.id);
+  } else if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
     const bool ctrl = io.KeyCtrl || io.KeySuper;
     if (io.KeyShift && has_range_anchor_ && range_anchor_ < hier_rows_prev_.size() &&
         row < hier_rows_prev_.size()) {
@@ -491,6 +499,9 @@ void Editor2DScreen::draw_inspector() {
     // Player / Camera2D / Spawn Point (same re-fetch rule).
     if (workspace_.find(eid)) {
       draw_inspector_gameplay(eid);
+    }
+    if (workspace_.find(eid)) {
+      draw_inspector_follow_2d(eid);
     }
     // Animator (idle / walk clips from a .anim.json).
     if (workspace_.find(eid)) {

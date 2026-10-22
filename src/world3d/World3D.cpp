@@ -147,33 +147,47 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
   cam_pitch_ = want_pitch_ = 0.0f;
   cam_dist_ = 6.0f;
   if (const Entity3D* p = find(player_); p && p->player) cam_dist_ = p->player->camera_distance;
+  camera_ = render3d::Camera3D{};
   camera_.position = {0, 3, 8};
   camera_.target = {0, 1, 0};
   camera_.fov_y_degrees = 60.0f;
-  follow_camera(true);
-  const Entity3D* play_cam = nullptr;
-  for (const Entity3D& e : ents_) {
-    if (e.camera && (!player_ || e.parent != player_)) {
-      play_cam = &e;
-      break;
-    }
-  }
+  legacy_cams_ = scene.legacy_cameras;
+  forced_cam_ = 0;
+  active_cam_ = 0;
+  view_ = {};
+  boom_hits_ = 0;
+  has_attach_ = std::any_of(ents_.begin(), ents_.end(), [](const Entity3D& e) {
+    return e.follow.has_value() || !e.parent_bone.empty();
+  });
+  const std::uint64_t first_cam = legacy_cams_ ? 0 : pick_camera();
   if (vr_) {
     vr_update_poses();
-  } else if (!player_ && play_cam) {
-    // No rider: look through the scene's camera entity.
-    camera_.position = play_cam->transform.position;
-    camera_.target = play_cam->transform.position +
-                     play_cam->transform.rotation.rotate(Vec3{0.0f, 0.0f, -1.0f});
-    camera_.fov_y_degrees = play_cam->camera->fov;
-  } else if (!player_) {
-    const float yaw = render3d::radians(scene.editor_camera.yaw);
-    const float pitch = render3d::radians(scene.editor_camera.pitch);
-    const float d = scene.editor_camera.distance;
-    camera_.target = scene.editor_camera.target;
-    camera_.position = camera_.target + Vec3{std::sin(yaw) * std::cos(pitch) * d,
-                                             std::sin(pitch) * d,
-                                             std::cos(yaw) * std::cos(pitch) * d};
+  } else if (first_cam != 0) {
+    update_camera(true);
+  } else {
+    follow_camera(true);
+    const Entity3D* play_cam = nullptr;
+    for (const Entity3D& e : ents_) {
+      if (e.camera && (!player_ || e.parent != player_)) {
+        play_cam = &e;
+        break;
+      }
+    }
+    if (!player_ && play_cam) {
+      // No rider: look through the scene's camera entity.
+      camera_.position = play_cam->transform.position;
+      camera_.target = play_cam->transform.position +
+                       play_cam->transform.rotation.rotate(Vec3{0.0f, 0.0f, -1.0f});
+      camera_.fov_y_degrees = play_cam->camera->fov;
+    } else if (!player_) {
+      const float yaw = render3d::radians(scene.editor_camera.yaw);
+      const float pitch = render3d::radians(scene.editor_camera.pitch);
+      const float d = scene.editor_camera.distance;
+      camera_.target = scene.editor_camera.target;
+      camera_.position = camera_.target + Vec3{std::sin(yaw) * std::cos(pitch) * d,
+                                               std::sin(pitch) * d,
+                                               std::cos(yaw) * std::cos(pitch) * d};
+    }
   }
   running_ = true;
   for (const auto& x : exts_) x->on_start(*this);
@@ -564,6 +578,7 @@ void World3D::step(const Input3D& input0) {
   ++tick_;
   in_step_ = false;
   if (has_parents_) follow_parents(before);
+  apply_attachments();
   {
     TS_PROFILE_SCOPE("world3d.fx");
     step_fx();
@@ -576,7 +591,7 @@ void World3D::step(const Input3D& input0) {
     if (host_) prof.counter("mem.lua_kb", static_cast<double>(host_->memory_used()) / 1024.0);
     prof.add("world.ticks", 1);
   }
-  if (!vr_) follow_camera(false);
+  if (!vr_) update_camera(false);
 }
 
 void World3D::apply_zoom(float steps) {

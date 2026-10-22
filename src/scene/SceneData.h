@@ -61,8 +61,34 @@ struct Camera2DData {
   float bounds_y = 0.0f;
   float bounds_w = 1024.0f;
   float bounds_h = 768.0f;
+  // v13: several cameras per scene. Play looks through the active camera
+  // with the highest priority (ties: scene order); scripts switch with
+  // camera.set_active.
+  bool active = true;
+  int priority = 0;
+  // Dead zone (world px, centred): the target roams inside it without
+  // moving the camera. 0 x 0 = always centred.
+  float dead_zone_w = 0.0f;
+  float dead_zone_h = 0.0f;
+  bool use_clear = false;  // fill the background with clear_color
+  float clear_color[4] = {0.10f, 0.08f, 0.07f, 1.0f};
+  float viewport[4] = {0.0f, 0.0f, 1.0f, 1.0f};  // x, y, w, h (0..1 of the window)
 
   bool operator==(const Camera2DData& o) const = default;
+};
+
+// v13 "follow": a lightweight constraint instead of parenting. Each tick
+// the entity's centre takes the target's centre plus the offset (turned
+// with the target when rotation follows too) and / or its rotation plus
+// rotation_offset.
+struct FollowData {
+  std::uint64_t target = 0;
+  bool position = true;
+  bool rotation = false;
+  float offset_x = 0.0f;  // world px (target space when rotation follows)
+  float offset_y = 0.0f;
+  float rotation_offset = 0.0f;  // degrees
+  bool operator==(const FollowData& o) const = default;
 };
 
 // Where player `slot` starts when play begins (scene.json "spawn").
@@ -237,6 +263,7 @@ struct Entity2D {
   // Gameplay components (scene.json v3).
   std::optional<PlayerControllerData> player;
   std::optional<Camera2DData> camera;
+  std::optional<FollowData> follow;  // v13
   std::optional<SpawnPointData> spawn;
   // Collision (scene.json v4).
   std::optional<ColliderData> collider;

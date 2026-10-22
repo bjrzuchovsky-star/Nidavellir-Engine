@@ -304,7 +304,10 @@ void Editor2DScreen::draw_entity_context_menu(std::uint64_t clicked) {
     any_kids |= !workspace_.children_of(id).empty();
   }
   if (ImGui::MenuItem("Ungroup", "Ctrl+Shift+G", false, any_kids)) ungroup_selected();
-  if (e && e->parent != 0 && ImGui::MenuItem("Unparent (to scene root)")) reparent(e->id, 0);
+  ImGui::Separator();
+  draw_attach_menu_2d();
+  if (e && e->camera && ImGui::MenuItem("Make active camera", nullptr, false, !is_playing()))
+    make_active_camera_2d(e->id);
   ImGui::Separator();
   if (e) {
     if (ImGui::MenuItem(e->locked ? "Unlock" : "Lock", "Ctrl+L")) lock_selected(!e->locked);

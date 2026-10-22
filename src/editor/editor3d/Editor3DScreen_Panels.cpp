@@ -68,6 +68,7 @@ void Editor3DScreen::draw_inspector() {
   ImGui::Checkbox("Hidden (editor)", &e.editor_hidden);
   t.after("Hide");
   bool unparent = false;
+  int cam_action = 0;
   if (e.parent != 0) {
     const scene3d::Entity3D* par = find(e.parent);
     ImGui::TextDisabled("Parent: %s", par ? par->name.c_str() : "?");
@@ -419,9 +420,134 @@ void Editor3DScreen::draw_inspector() {
   }
   if (component("Camera", e.camera.has_value(), [&] { e.camera = scene3d::PlayCamera3D{}; },
                 [&] { e.camera.reset(); })) {
-    ImGui::DragFloat("FOV", &e.camera->fov, 0.2f, 10.0f, 150.0f, "%.0f deg");
-    t.after("Camera FOV");
-    ImGui::TextDisabled("Play looks through it when there is no rider.");
+    scene3d::PlayCamera3D& c = *e.camera;
+    using P = scene3d::PlayCamera3D;
+    bool active_now = c.active;
+    if (ImGui::Checkbox("Active camera", &active_now)) {
+      c.active = active_now;
+      t.activated = true;
+      t.commit = "Active camera";
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled(play_camera_id() == e.id ? "(Play starts here)" : "");
+    ImGui::DragInt("Priority", &c.priority, 0.1f, -1000, 1000);
+    t.after("Camera priority");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Play uses the active camera with the highest priority.");
+    int proj = c.projection == P::Projection::Orthographic ? 1 : 0;
+    if (ImGui::Combo("Projection", &proj, "Perspective\0Orthographic\0")) {
+      c.projection = proj ? P::Projection::Orthographic : P::Projection::Perspective;
+      t.activated = true;
+      t.commit = "Camera projection";
+    }
+    if (c.projection == P::Projection::Perspective) {
+      ImGui::DragFloat("FOV", &c.fov, 0.2f, 10.0f, 150.0f, "%.0f deg");
+      t.after("Camera FOV");
+    } else {
+      ImGui::DragFloat("Ortho size", &c.ortho_size, 0.05f, 0.1f, 1000.0f, "%.2f m");
+      t.after("Camera ortho size");
+    }
+    ImGui::DragFloat("Near", &c.near_clip, 0.005f, 0.01f, 100.0f, "%.3f m");
+    t.after("Camera near");
+    ImGui::DragFloat("Far", &c.far_clip, 1.0f, 1.0f, 100000.0f, "%.0f m");
+    t.after("Camera far");
+    ImGui::Checkbox("Clear colour", &c.use_clear);
+    t.after("Camera clear");
+    if (c.use_clear) {
+      ImGui::SameLine();
+      ImGui::ColorEdit4("##clear", c.clear_color, ImGuiColorEditFlags_NoInputs);
+      t.after("Camera clear colour");
+    }
+    ImGui::DragFloat4("Viewport", c.viewport, 0.005f, 0.0f, 1.0f, "%.2f");
+    t.after("Camera viewport");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("x, y (from the top left), width, height as fractions of the screen");
+    int rig = static_cast<int>(c.rig);
+    if (ImGui::Combo("Rig", &rig, "Fixed\0Orbit (follow)\0First person\0")) {
+      c.rig = static_cast<P::Rig>(rig);
+      t.activated = true;
+      t.commit = "Camera rig";
+    }
+    if (c.rig != P::Rig::Fixed) {
+      const scene3d::Entity3D* tgt = c.follow ? find(c.follow) : nullptr;
+      const std::string cur_t = tgt ? tgt->name : "The rider (Player)";
+      if (ImGui::BeginCombo("Follow", cur_t.c_str())) {
+        if (ImGui::Selectable("The rider (Player)", c.follow == 0)) {
+          c.follow = 0;
+          t.activated = true;
+          t.commit = "Camera follow";
+        }
+        for (const scene3d::Entity3D& o : scene_.entities) {
+          if (o.id == e.id) continue;
+          ImGui::PushID(static_cast<int>(o.id));
+          if (ImGui::Selectable(o.name.c_str(), c.follow == o.id)) {
+            c.follow = o.id;
+            t.activated = true;
+            t.commit = "Camera follow";
+          }
+          ImGui::PopID();
+        }
+        ImGui::EndCombo();
+      }
+    }
+    if (c.rig == P::Rig::Orbit) {
+      ImGui::DragFloat("Distance", &c.distance, 0.05f, 0.5f, 100.0f, "%.2f m");
+      t.after("Camera distance");
+      ImGui::DragFloat("Height", &c.height, 0.05f, -10.0f, 50.0f, "%.2f m");
+      t.after("Camera height");
+      ImGui::Checkbox("Collision", &c.collision);
+      t.after("Camera collision");
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Pull in when the boom hits a wall (sphere cast with a physics plugin,\n"
+                          "static colliders otherwise).");
+      if (c.collision) {
+        ImGui::DragFloat("Radius", &c.collision_radius, 0.005f, 0.01f, 2.0f, "%.2f m");
+        t.after("Camera collision radius");
+      }
+    }
+    // Run after the inspector's own edit lands (they replace the entity).
+    if (ImGui::SmallButton("Make active")) cam_action = 1;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Align to view")) cam_action = 2;
+    ImGui::SameLine();
+    if (ImGui::SmallButton(looking_through() == e.id ? "Stop looking" : "Look through")) cam_action = 3;
+  }
+  if (component("Follow", e.follow.has_value(), [&] { e.follow = scene3d::Follow3D{}; },
+                [&] { e.follow.reset(); })) {
+    scene3d::Follow3D& f = *e.follow;
+    const scene3d::Entity3D* tgt = find(f.target);
+    if (ImGui::BeginCombo("Target", tgt ? tgt->name.c_str() : "(none)")) {
+      for (const scene3d::Entity3D& o : scene_.entities) {
+        if (o.id == e.id) continue;
+        ImGui::PushID(static_cast<int>(o.id));
+        if (ImGui::Selectable(o.name.c_str(), f.target == o.id)) {
+          f.target = o.id;
+          t.activated = true;
+          t.commit = "Follow target";
+        }
+        ImGui::PopID();
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::Checkbox("Position", &f.position);
+    t.after("Follow position");
+    ImGui::SameLine();
+    ImGui::Checkbox("Rotation", &f.rotation);
+    t.after("Follow rotation");
+    ImGui::DragFloat3("Offset", &f.offset.x, 0.02f);
+    t.after("Follow offset");
+    Vec3 ro = f.rotation_offset.to_euler_deg();
+    if (ImGui::DragFloat3("Rotation offset", &ro.x, 0.5f)) f.rotation_offset = render3d::Quat::from_euler_deg(ro);
+    t.after("Follow rotation offset");
+    ImGui::TextDisabled("Moves with the target in Play (no parenting).");
+  }
+  if (!e.parent_bone.empty()) {
+    ImGui::Spacing();
+    ImGui::TextDisabled("Attached to bone: %s", e.parent_bone.c_str());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Unlink bone")) {
+      e.parent_bone.clear();
+      t.activated = true;
+      t.commit = "Unlink bone";
+    }
   }
   if (component("Animator", e.animator.has_value(),
                 [&] { e.animator = scene3d::default_locomotion_animator(); },
@@ -536,7 +662,22 @@ void Editor3DScreen::draw_inspector() {
     if (!(before == scene_)) push_undo(std::string(t.commit) + " " + e.name, before);
   }
   if (unparent && !inspector_before_) set_parent(e.id, 0);
-  if (!attach_rel.empty() && !inspector_before_) attach_script(e.id, attach_rel);
+  if (cam_action == 1) make_active_camera(e.id);
+  if (cam_action == 2) align_camera_to_view(e.id);
+  if (cam_action == 3) {
+    if (looking_through() == e.id) stop_looking_through();
+    else look_through_camera(e.id);
+  }
+  if (attach_rel == "@camera" || attach_rel == "@follow") {
+    if (const scene3d::Entity3D* live = find(e.id); live && !inspector_before_) {
+      scene3d::Entity3D c = *live;
+      if (attach_rel == "@camera") c.camera = scene3d::PlayCamera3D{};
+      else c.follow = scene3d::Follow3D{};
+      replace_entity(c, "Add component " + c.name);
+    }
+  } else if (!attach_rel.empty() && !inspector_before_) {
+    attach_script(e.id, attach_rel);
+  }
 }
 
 void Editor3DScreen::draw_physics_settings() {

@@ -15,7 +15,7 @@ bool operator==(const Entity2D& a, const Entity2D& b) {
          a.color[1] == b.color[1] && a.color[2] == b.color[2] &&
          a.color[3] == b.color[3] && a.layer == b.layer &&
          a.tilemap == b.tilemap && a.sprite == b.sprite &&
-         a.player == b.player && a.camera == b.camera && a.spawn == b.spawn &&
+         a.player == b.player && a.camera == b.camera && a.follow == b.follow && a.spawn == b.spawn &&
          a.collider == b.collider && a.animator == b.animator &&
          a.script == b.script && a.extra_scripts == b.extra_scripts &&
          a.rotation == b.rotation &&

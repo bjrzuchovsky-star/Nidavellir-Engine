@@ -229,6 +229,9 @@ void Editor2DScreen::draw_menu_bar() {
     if (ImGui::MenuItem("Create Entity")) {
       create_entity("Entity");
     }
+    if (ImGui::MenuItem("Create Camera")) {
+      create_camera_2d();
+    }
     if (ImGui::MenuItem("Create TileMap")) {
       create_tilemap();
     }
@@ -276,6 +279,11 @@ void Editor2DScreen::draw_menu_bar() {
     if (ImGui::MenuItem("Reset Scene Placeholders")) {
       reset_scene_placeholders();
     }
+    ImGui::EndMenu();
+  }
+
+  if (ImGui::BeginMenu("Object", !is_playing())) {
+    draw_object_menu_2d();
     ImGui::EndMenu();
   }
 
@@ -735,7 +743,10 @@ void Editor2DScreen::handle_hotkeys() {
   if (scene_focus && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_A)) {
     workspace_.select_all();
   }
-  if (scene_focus && ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
+  if (target_picking_2d() && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+    cancel_target_pick_2d();
+    note("Target pick cancelled");
+  } else if (scene_focus && ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
       !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
     workspace_.clear_selection();
   }

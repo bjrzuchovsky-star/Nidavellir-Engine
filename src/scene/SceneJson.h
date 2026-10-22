@@ -22,9 +22,12 @@ namespace scene_json {
 // "rotation" / "parent" / "locked" / "hidden"; 8 = "audio"; 9 =
 // "particles" / "light" / "lighting"; 10 = optional Box2D "body" / "joint"
 // and collider "shape"; 11 = optional "prefab" link; 12 = optional
-// "scripts" stack (several scripts per entity, per-script "enabled"). Older
-// files still load (see upgrade notes in SceneJson.cpp).
-inline constexpr int kSceneVersion = 12;
+// "scripts" stack (several scripts per entity, per-script "enabled"); 13 =
+// camera "active" / "priority" / dead zone / clear colour / viewport and
+// the optional "follow" constraint. Older files still load (see upgrade
+// notes in SceneJson.cpp; the editor adds a Camera to v12- riders, see
+// docs/camera.md).
+inline constexpr int kSceneVersion = 13;
 
 // Whole file: entities plus the editor's view state. The runtime only
 // reads `entities`; the rest round-trips untouched.

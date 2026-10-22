@@ -235,6 +235,7 @@ bool Editor3DScreen::set_parent(std::uint64_t id, std::uint64_t parent) {
   }
   const scene3d::Scene3D before = scene_;
   e->parent = parent;
+  e->parent_bone.clear();  // a new parent ends a bone link
   const Entity3D* p = scene_.find(parent);
   push_undo(p ? "Parent " + e->name + " to " + p->name : "Unparent " + e->name, before);
   return true;
@@ -251,7 +252,10 @@ bool Editor3DScreen::hierarchy_drop(std::uint64_t id, std::uint64_t target, int 
   std::vector<Entity3D> lifted, rest;
   for (const Entity3D& e : scene_.entities) (contains(block, e.id) ? lifted : rest).push_back(e);
   for (Entity3D& e : lifted) {
-    if (e.id == id) e.parent = new_parent;
+    if (e.id == id && e.parent != new_parent) {
+      e.parent = new_parent;
+      e.parent_bone.clear();
+    }
   }
   auto index_of = [&](std::uint64_t want) {
     for (std::size_t i = 0; i < rest.size(); ++i) {
