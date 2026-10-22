@@ -21,7 +21,7 @@
 #endif
 
 #define AppName "TombStone Engine"
-#define AppPublisher "TombStone Engine contributors"
+#define AppPublisher "TombStone Team"
 #define AppUrl "https://github.com/bjrzuchovsky-star/TombStone_Engine"
 
 [Setup]

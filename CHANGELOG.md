@@ -2,9 +2,25 @@
 
 All notable changes to TombStone Engine. The version number lives in the `VERSION` file at the repo root.
 
-## Unreleased
+## 0.1.1 (2026-10-23)
 
-### Editor
+A trail update for 0.1.0: The Vault asset library, empty claim templates, an update notice with an in-place update installer, mouse look, much tighter model bounds and hitboxes, better Blender detection, and asset metadata tucked away in a hidden folder. `TombStone-0.1.1-update.exe` upgrades a 0.1.0 install in place and keeps your claims, settings and the Vault.
+
+### The Vault
+- The Vault, a universal asset library that sits outside your claims: send textures, models, sounds, fonts and prefabs from any claim and pull them into any other. A pulled asset keeps its `.meta` GUID, so references to it hold in every claim, and pulls bring their dependencies (a model's textures, a prefab's models). See [docs/vault.md](docs/vault.md).
+- Two kinds of library behind one interface: a **local library** shared by every claim on the PC (default `Documents\TombStone\Vault`, override with `TS_VAULT_DIR`) and **`ts_vault`**, a small self-hosted HTTP server with a JSON API and hashed API keys (`--add-key`, `--list-keys`, `--revoke-key`). Both store SHA-256 content-addressed blobs with a SQLite index.
+- **View > Vault** panel in the 2D and 3D editors: search, kind / tag / 2D / 3D / VR filters, thumbnail tiles with versions and **UPDATE** / **PINNED** badges, details with versions and dependencies, **Pull**, **Update all**, **Pin**, and settings (API key in a password field, **Test connection**; the key is never logged).
+- **Send to Vault...** from the Asset Browser (right-click or the details pane) with name, author, licence presets, tags, 2D / 3D / VR, description, version note and thumbnail. Changed files make a new version (v2, v3, ...). Vault tiles can be dragged into the Asset Browser or straight into the scene.
+- Pulled assets show a **V** badge and an origin line (**UPD** when a newer version is waiting). Pulls never overwrite another asset's file or a pulled file you changed locally. Exports leave out pulled assets the game doesn't use.
+- `ts_admin --vault push|pull|list|status|update` and `ts_admin --smoke-vault` (also in `--smoke`); `ts_vault --smoke`. `TS_BUILD_VAULT` (on) builds the server.
+
+### Templates
+- New **Empty** template group, shown first in the New Claim dialog: 2D, 2D Top-down, 2D Platformer, 3D, 3D First-person, 3D Third-person, VR and **Truly Blank** (one card with a 2D / 3D switch). Each is a clean, playable starting point with no plugins and, where there's a player, a starter `scripts/player.lua`. The sample claims move to a **Samples** group. Blank 2D / Blank 3D are retired in favour of the Empty group.
+- Every template thumbnail is rendered by the engine (`ts_admin --bake-thumbnails`). All template content is engine-made or CC0.
+- Engine support behind them: a 2D **platformer** controller mode (gravity, grounded jumps, ceiling hits) alongside top-down, playable empty 2D scenes, a 3D **first-person** view with eye height, and a new 3D **Camera** component (field of view) used as the Play camera when there's no player. New inspector fields: Movement, Gravity, Jump Speed, View, Eye height and Camera. The new `scene.json` fields are optional, so older scenes load unchanged.
+- `--smoke-templates` now creates every template in a temp folder, opens it in its editor and runs Play headless (top-down walk, platformer land and jump, first-person eye height and look, third-person orbit, VR snap turn and teleport).
+
+### Updates
 - "New update available" notice on the Project Manager. On open (at most every 6 hours, cached in settings), a background check asks GitHub for the latest release and compares it with the built-in `VERSION`. The notice has **Update** (downloads `TombStone-<ver>-update.exe`, falling back to `-setup.exe`, checks it against `SHA256SUMS.txt`, runs it and closes the editor), **Release notes**, **Later** and **Skip this version**. There's a Settings toggle, **Check for updates on start** (on by default). Errors and offline stay quiet (log only). The check uses the Vault's HTTP client (WinHTTP, Windows). `TS_FAKE_UPDATE=9.9.9` forces the notice for testing. See [docs/updates.md](docs/updates.md).
 - `ts_admin --smoke-update-check` (also in `--smoke`): canned release JSON and a loopback server, no internet.
 
@@ -37,8 +53,9 @@ All notable changes to TombStone Engine. The version number lives in the `VERSIO
 
 ### Release tooling
 - `build_release.ps1` also writes `TombStone-<ver>-update.exe`: same AppId, upgrades in place with a minimal wizard, and keeps claims, settings and the Vault. It's listed in `SHA256SUMS.txt`, and `-TestInstall` runs it over the test install.
+- The installers' publisher is now **TombStone Team**. The AppId is unchanged, so 0.1.1 upgrades a 0.1.0 install in place.
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-22)
 
 The first release: a C++20 engine and editor for 2D, 3D and VR games with multiplayer, scripting in four languages, and a Windows installer for both the engine and exported games.
 

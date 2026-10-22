@@ -11,7 +11,7 @@ This page is about installing the TombStone Engine itself (the editor, the runti
 In a Developer PowerShell for VS 2022, run:
 
 ```powershell
-tools\release\build_release.ps1 -Out D:\Dev\TombStoneReleases\0.1.0 [-BuildDir build] [-SkipBuild] [-SkipSmoke] [-TestInstall]
+tools\release\build_release.ps1 -Out D:\Dev\TombStoneReleases\0.1.1 [-BuildDir build] [-SkipBuild] [-SkipSmoke] [-TestInstall]
 ```
 
 The script does the following, in order:
@@ -53,7 +53,7 @@ The script never tags or publishes anything.
 Silent install and uninstall:
 
 ```
-TombStone-0.1.0-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER [/DIR="C:\Tools\TombStone"] [/MERGETASKS="!desktopicon"]
+TombStone-0.1.1-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER [/DIR="C:\Tools\TombStone"] [/MERGETASKS="!desktopicon"]
 "%LOCALAPPDATA%\Programs\TombStone Engine\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
