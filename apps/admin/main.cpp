@@ -57,6 +57,7 @@
 #include "SmokeAnim3D.h"
 #include "SmokeTemplates.h"
 #include "editor/screens/ProjectManagerScreen.h"
+#include "editor/projects/ProjectStore.h"
 #include "editor/templates/TemplateStore.h"
 #include "SmokeTradingPost.h"
 #include "SmokeTerrain.h"
@@ -1977,6 +1978,110 @@ int run_vault_pm_shot(const char* png) {
   return 0;
 }
 
+// ts_admin --trading-post-shot <out.png>: the Project Manager's Trading
+// Post, Engine category, over a fresh Empty 3D First-person claim (Jolt +
+// Rider 3D on), Jolt selected (docs screenshot of the 0.2.0 plugins).
+int run_trading_post_shot(const char* png) {
+  namespace fs = std::filesystem;
+  const fs::path root = fs::temp_directory_path() / "ts_trading_post_shot";
+  std::error_code ec;
+  fs::remove_all(root, ec);
+  fs::create_directories(root / "claims", ec);
+  editor::TemplateStore templates;
+  templates.refresh_dirs(editor::TemplateStore::engine_template_dirs(),
+                         editor::TemplateStore::user_template_dir((root / "claims").string()));
+  const editor::ProjectTemplate* fps = templates.find("empty-3d-fps");
+  editor::ProjectStore store((root / "claims").string());
+  editor::ProjectInfo claim;
+  std::string err;
+  if (!fps || !editor::TemplateStore::create_project(store, *fps, "High Noon Range", &claim, &err)) {
+    std::cerr << "claim: " << err << '\n';
+    return 1;
+  }
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+  const int W = 1280, H = 760;
+  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Trading Post", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(window);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGui::GetIO().IniFilename = nullptr;  // never touches imgui.ini
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  static gfx::GlTextureUploader gl_uploader;
+  gfx::set_texture_uploader(&gl_uploader);
+  Settings defaults;
+  apply_theme(defaults);
+  int fw = 0, fh = 0;
+  std::vector<unsigned char> px;
+  {
+    auto pm = std::make_unique<editor::ProjectManagerScreen>(std::vector<editor::ProjectInfo>{claim},
+                                                             (root / "claims").string());
+    pm->on_enter();
+    pm->open_trading_post();
+    for (int frame = 0; frame < 30 && !glfwWindowShouldClose(window); ++frame) {
+      glfwPollEvents();
+      editor::TradingPostUi& tp = pm->trading_post();
+      if (frame == 3) {
+        tp.category = "Engine";
+        tp.selected = "ts.physics.jolt";
+      }
+      glfwGetFramebufferSize(window, &fw, &fh);
+      ImGui_ImplOpenGL3_NewFrame();
+      ImGui_ImplGlfw_NewFrame();
+      ImGui::GetIO().AddMousePosEvent(-FLT_MAX, -FLT_MAX);  // no hover tooltips
+      ImGui::NewFrame();
+      pm->on_update(1.0f / 60.0f);
+      ImGui::Render();
+      glViewport(0, 0, fw, fh);
+      const ImVec4 clear = editor::theme::Charcoal();
+      glClearColor(clear.x, clear.y, clear.z, 1.0f);
+      glClear(GL_COLOR_BUFFER_BIT);
+      ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+      const bool last = frame == 29;
+      if (last) {
+        px.assign(static_cast<std::size_t>(fw) * fh * 4, 0);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadBuffer(GL_BACK);
+        glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+      }
+      glfwSwapBuffers(window);
+    }
+    pm->on_exit();
+  }
+  gfx::set_texture_uploader(nullptr);
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  fs::remove_all(root, ec);
+  if (px.empty()) return 1;
+  std::vector<unsigned char> flipped(px.size());
+  for (int y = 0; y < fh; ++y) {
+    std::memcpy(&flipped[static_cast<std::size_t>(y) * fw * 4],
+                &px[static_cast<std::size_t>(fh - 1 - y) * fw * 4], static_cast<std::size_t>(fw) * 4);
+  }
+  for (std::size_t i = 3; i < flipped.size(); i += 4) flipped[i] = 255;
+  if (!write_png_rgba(png, fw, fh, flipped)) {
+    std::cerr << "cannot write " << png << '\n';
+    return 1;
+  }
+  std::cout << "Trading Post screenshot: " << png << " (" << fw << "x" << fh << ")\n";
+  return 0;
+}
+
 // ts_admin --assets-shot <out.png>: the Asset Browser over a demo claim
 // whose imports were sorted into type folders (metadata in .tombstone/meta).
 int run_assets_shot(const char* png) {
@@ -2272,6 +2377,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-vault-pm") == 0) {
       return ts::tombstone::run_vault_pm_smoke();
+    }
+    if (std::strcmp(argv[i], "--trading-post-shot") == 0 && i + 1 < argc) {
+      return run_trading_post_shot(argv[i + 1]);
     }
     if (std::strcmp(argv[i], "--vault-pm-shot") == 0 && i + 1 < argc) {
       return run_vault_pm_shot(argv[i + 1]);

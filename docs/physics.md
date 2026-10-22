@@ -76,3 +76,5 @@ The exporter ships only the plugins the claim uses: the cooked `project.json` in
 - four exports (top-down only, Jolt + Rider 3D, bare 3D, and an unmigrated 2D claim): `game.json` and the cooked `project.json` list only the used plugins, and each exported game rides and reports what it loaded.
 
 The other smokes ride with every provider on, so they test the engine exactly as before.
+
+`ts_admin --trading-post-shot <out.png>` saves a screenshot of the Trading Post's Engine category over a fresh Empty 3D First-person claim (it never writes `imgui.ini`).
