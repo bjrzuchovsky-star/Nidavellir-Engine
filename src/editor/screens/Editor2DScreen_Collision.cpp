@@ -272,6 +272,7 @@ void Editor2DScreen::draw_inspector_collider(std::uint64_t id) {
     return;  // TileMaps block through their solid tiles instead
   }
   ImGui::SeparatorText("Collision");
+  component_header_menu_2d(id, "Collision");
   ImGui::PushID("collider");
   if (!e->collider) {
     ImGui::TextDisabled("No collider: rides through everything.");
@@ -379,6 +380,7 @@ void Editor2DScreen::draw_inspector_body(std::uint64_t id) {
     }
   };
   ImGui::SeparatorText("Rigid Body");
+  component_header_menu_2d(id, "Rigid Body");
   ImGui::PushID("rigidbody");
   if (!e->body) {
     ImGui::TextDisabled("Not simulated: the collider (if any) uses the platformer rules.");
@@ -425,6 +427,7 @@ void Editor2DScreen::draw_inspector_body(std::uint64_t id) {
   ImGui::PopID();
 
   ImGui::SeparatorText("Joint");
+  component_header_menu_2d(id, "Joint");
   ImGui::PushID("joint2d");
   e = workspace_.find(id);
   if (!e) { ImGui::PopID(); return; }

@@ -324,6 +324,7 @@ void Editor2DScreen::draw_inspector_follow_2d(std::uint64_t id) {
   if (!e || !e->follow) return;
   ImGui::PushID("follow2d");
   ImGui::SeparatorText("Follow");
+  component_header_menu_2d(id, "Follow");
   const Entity2D* tgt = workspace_.find(e->follow->target);
   ImGui::Text("Target: %s", tgt ? tgt->name.c_str() : "(missing)");
   bool pos = e->follow->position;

@@ -563,6 +563,7 @@ void Editor2DScreen::draw_inspector_components(Entity2D& e) {
   }
 
   ImGui::SeparatorText("Sprite");
+  component_header_menu_2d(e.id, "Sprite");
   std::string rel;
   if (asset_combo("Image", e.sprite ? e.sprite->path : std::string(), "(none)",
                   &rel)) {

@@ -195,6 +195,7 @@ void Editor2DScreen::mark_dirty_and_autosave() {
   dirty_ = true;
   std::string err;
   if (!save_scene(&err) && !err.empty()) {
+    last_save_error_ = err;
     std::cout << "[Editor2D] autosave failed: " << err << '\n';
     telegraph_.add(runtime::LogLevel::Warn, "editor", "Autosave failed: " + err);
   }
@@ -232,6 +233,7 @@ bool Editor2DScreen::save_scene(std::string* error_out) {
     return false;
   }
   dirty_ = false;
+  last_save_error_.clear();
   std::cout << "[Editor2D] saved scene.json (" << workspace_.entities().size()
             << " entities) -> " << scene_path_ << '\n';
   return true;
@@ -601,6 +603,17 @@ AppState Editor2DScreen::on_update(float /*delta_seconds*/) {
 
 void Editor2DScreen::request_quit() {
   quit_requested_ = true;
+}
+
+void Editor2DScreen::leave_or_ask(bool quit) {
+  auto go = [this, quit] { quit ? request_quit() : request_back_to_projects(); };
+  if (!has_unsaved()) return go();
+  ux::EditorUx::LeaveAsk a;
+  a.action = quit ? "Quit" : "Leave";
+  a.why = last_save_error_.empty() ? (scene_locked_ ? scene_locked_why_ : std::string()) : last_save_error_;
+  a.save = [this](std::string* err) { return save_scene(err); };
+  a.leave = go;
+  ux_.ask_leave(std::move(a));
 }
 
 void Editor2DScreen::request_back_to_projects() {

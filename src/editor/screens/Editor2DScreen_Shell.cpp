@@ -1,6 +1,7 @@
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
+#include "editor/ux/ContextMenus.h"
 #include "editor/export/FreightOffice.h"
 #include "editor/tools/AutoTilePanel.h"
 #include "editor/tools/SpriteSlicerPanel.h"
@@ -219,10 +220,10 @@ void Editor2DScreen::draw_menus() {
     }
     ImGui::Separator();
     if (ux::MenuItem("Back to Projects")) {
-      request_back_to_projects();
+      leave_or_ask(false);
     }
     if (ux::MenuItem("Quit", "Alt+F4")) {
-      request_quit();
+      leave_or_ask(true);
     }
     ux::EndMenu();
   }
@@ -1135,7 +1136,7 @@ void Editor2DScreen::setup_field_guide() {
         return;
       }
       ux::request_open_claim(r.path);
-      request_back_to_projects();
+      leave_or_ask(false);
     } else {
       show_asset_browser_ = true;
       asset_browser_.select(r.path);
@@ -1143,7 +1144,45 @@ void Editor2DScreen::setup_field_guide() {
   });
 }
 
-void Editor2DScreen::draw_context_menus_for_audit() {}
+// --smoke-ux: every right-click menu body under its scope. Items only record
+// themselves in a harvest, so nothing here changes the claim.
+void Editor2DScreen::draw_context_menus_for_audit() {
+  const std::uint64_t saved_id = context_id_;
+  const bool saved_vp = context_in_viewport_;
+  context_id_ = 0;
+  context_in_viewport_ = true;
+  ux::BeginContextScope("ctx.viewport2d");
+  draw_entity_context_menu(0);
+  ux::EndContextScope();
+  context_in_viewport_ = false;
+  ux::BeginContextScope("ctx.hierarchy2d");
+  draw_entity_context_menu(0);
+  ux::EndContextScope();
+  if (!workspace_.entities().empty()) {
+    const std::uint64_t id = workspace_.entities().front().id;
+    context_id_ = id;
+    ux::BeginContextScope("ctx.entity2d");
+    draw_entity_context_menu(id);
+    ux::EndContextScope();
+  }
+  context_id_ = saved_id;
+  context_in_viewport_ = saved_vp;
+  ux::HeaderOps ops;
+  ops.reset = ops.copy = ops.paste = ops.remove = [] {};
+  ops.can_paste = true;
+  ux::BeginContextScope("ctx.inspector2d");
+  ux::ComponentHeaderItems("Collision", ops);
+  ux::EndContextScope();
+  {
+    // A claim with no assets yet still has the menu: audit it on a stand-in.
+    assetdb::AssetDb::Entry sample;
+    sample.rel = "assets/textures/sample.png";
+    const auto& all = asset_browser_.db().entries();
+    ux::BeginContextScope("ctx.assets2d");
+    asset_browser_.draw_asset_context_items(all.empty() ? sample : all.front());
+    ux::EndContextScope();
+  }
+}
 
 }  // namespace editor
 }  // namespace tombstone

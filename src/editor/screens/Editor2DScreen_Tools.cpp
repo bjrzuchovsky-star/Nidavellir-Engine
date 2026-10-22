@@ -7,6 +7,8 @@
 
 #include <imgui.h>
 
+#include "editor/ux/ContextMenus.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -282,12 +284,180 @@ bool Editor2DScreen::hierarchy_row_visible(const Entity2D& e) const {
 
 // --- Context menu ----------------------------------------------------------------
 
+void Editor2DScreen::paste_components_2d(const std::string& only) {
+  if (!comp_clip_ || is_playing()) return;
+  const Workspace2D::Snapshot before = workspace_.snapshot();
+  const Entity2D& src = *comp_clip_;
+  for (std::uint64_t id : workspace_.selection()) {
+    Entity2D* d = workspace_.find(id);
+    if (!d || d->locked || d->id == src.id) continue;
+    auto want = [&](const char* name) { return only.empty() || only == name; };
+    if (want("Sprite")) d->sprite = src.sprite;
+    if (want("Player")) d->player = src.player;
+    if (want("Camera")) d->camera = src.camera;
+    if (want("Follow")) d->follow = src.follow;
+    if (want("Spawn Point")) d->spawn = src.spawn;
+    if (want("Collision")) d->collider = src.collider;
+    if (want("Animator")) d->animator = src.animator;
+    if (want("Audio Source")) d->audio = src.audio;
+    if (want("Particles")) d->particles = src.particles;
+    if (want("Light")) d->light = src.light;
+    if (want("Rigid Body")) d->body = src.body;
+    if (want("Joint")) d->joint = src.joint;
+    if (only.empty()) {
+      d->script = src.script;
+      d->extra_scripts = src.extra_scripts;
+    }
+    normalize_components(*d);
+  }
+  if (workspace_.commit_step(only.empty() ? "Paste components" : "Paste " + only, before)) mark_dirty();
+}
+
+namespace {
+// The component a 2D Inspector section edits: has / reset / remove.
+bool comp_has_2d(const Entity2D& e, const std::string& n) {
+  if (n == "Sprite") return e.sprite.has_value();
+  if (n == "Collision") return e.collider.has_value();
+  if (n == "Rigid Body") return e.body.has_value();
+  if (n == "Joint") return e.joint.has_value();
+  if (n == "Animator") return e.animator.has_value();
+  if (n == "Follow") return e.follow.has_value();
+  if (n == "Particles") return e.particles.has_value();
+  if (n == "Light") return e.light.has_value();
+  if (n == "Audio Source") return e.audio.has_value();
+  return false;
+}
+void comp_set_2d(Entity2D& e, const std::string& n, bool keep) {
+  if (n == "Sprite") { if (keep) e.sprite = SpriteData{}; else e.sprite.reset(); }
+  if (n == "Collision") { if (keep) e.collider = default_collider(e); else e.collider.reset(); }
+  if (n == "Rigid Body") { if (keep) e.body = RigidBody2DData{}; else e.body.reset(); }
+  if (n == "Joint") { if (keep) e.joint = Joint2DData{}; else e.joint.reset(); }
+  if (n == "Animator") { if (keep) e.animator = AnimatorData{}; else e.animator.reset(); }
+  if (n == "Follow") {
+    if (keep) { const std::uint64_t tgt = e.follow ? e.follow->target : 0; e.follow = FollowData{}; e.follow->target = tgt; }
+    else e.follow.reset();
+  }
+  if (n == "Particles") { if (keep) e.particles = fx::preset("campfire", fx::Space::TwoD); else e.particles.reset(); }
+  if (n == "Light") { if (keep) e.light = fx::Light2DData{}; else e.light.reset(); }
+  if (n == "Audio Source") { if (keep) e.audio = AudioSourceData{}; else e.audio.reset(); }
+  normalize_components(e);
+}
+}  // namespace
+
+void Editor2DScreen::component_header_menu_2d(std::uint64_t id, const char* name) {
+  const Entity2D* e = workspace_.find(id);
+  if (!e) return;
+  const bool present = comp_has_2d(*e, name);
+  const bool editable = !is_playing() && !e->locked;
+  const std::string n = name;
+  ux::HeaderOps ops;
+  auto change = [this, id, n](const std::string& label, bool keep) {
+    Workspace2D::Snapshot before = prepare_edit();
+    if (Entity2D* t = workspace_.find(id)) comp_set_2d(*t, n, keep);
+    commit_discrete(std::move(before), label, "");
+  };
+  if (present && editable) {
+    ops.reset = [change, n] { change("Reset " + n, true); };
+    ops.remove = [change, n] { change("Remove " + n, false); };
+  }
+  if (present)
+    ops.copy = [this, id, n] {
+      if (const Entity2D* t = workspace_.find(id)) {
+        comp_clip_ = *t;
+        comp_clip_name_ = n;
+        note("Copied " + n + " values from " + t->name);
+      }
+    };
+  ops.can_paste = editable && comp_clip_ && (comp_clip_name_ == n || comp_clip_name_.empty()) &&
+                  comp_has_2d(*comp_clip_, n) && comp_clip_->id != id;
+  if (comp_clip_) ops.paste_from = n + " on " + comp_clip_->name;
+  ops.paste = [this, n] { paste_components_2d(n); };
+  // The Inspector is mid-draw (it holds references into the entity): apply
+  // after it finishes (draw_inspector runs header_op_).
+  auto later = [this](std::function<void()>& f) {
+    if (!f) return;
+    std::function<void()> g = f;
+    f = [this, g] { header_op_ = g; };
+  };
+  later(ops.reset);
+  later(ops.remove);
+  later(ops.paste);
+  ux::ComponentHeaderMenu(name, ops);
+}
+
+bool Editor2DScreen::component_header_2d(std::uint64_t id, const char* name) {
+  const bool open = ImGui::CollapsingHeader(name, ImGuiTreeNodeFlags_DefaultOpen);
+  component_header_menu_2d(id, name);
+  return open;
+}
+
 void Editor2DScreen::draw_entity_context_menu(std::uint64_t clicked) {
   const Entity2D* e = workspace_.find(clicked);
   const std::size_t n = workspace_.selection_count();
   if (e) {
     ImGui::TextDisabled("%s%s", e->name.c_str(),
                         n > 1 ? ("  (+" + std::to_string(n - 1) + ")").c_str() : "");
+    ImGui::Separator();
+  } else if (context_in_viewport_) {
+    // Empty viewport space: make something right here.
+    const float wx = context_world_x_, wy = context_world_y_;
+    if (ux::BeginMenu("Create here")) {
+      auto make = [&](const char* name, const char* comp) {
+        const std::uint64_t id = create_entity(name);
+        if (!id) return;
+        if (comp) add_component(id, comp);
+        if (Entity2D* m = workspace_.find(id)) {
+          m->x = wx - m->w * 0.5f;
+          m->y = wy - m->h * 0.5f;
+          mark_dirty();
+        }
+      };
+      if (ux::MenuItem("Empty entity", nullptr, false, !is_playing())) make("Entity", nullptr);
+      if (ux::MenuItem("Collider box", nullptr, false, !is_playing())) make("Wall", "Collider");
+      if (ux::MenuItem("Player", nullptr, false, !is_playing())) make("Rider", "Player");
+      if (ux::MenuItem("Camera", nullptr, false, !is_playing())) make("Camera", "Camera");
+      if (ux::MenuItem("Spawn point", nullptr, false, !is_playing())) make("Spawn", "Spawn");
+      ux::EndMenu();
+    }
+    if (ux::MenuItem("Paste here", "Ctrl+V", false, !clipboard_text().empty() && !is_playing())) {
+      paste();
+      // Centre what landed on the click.
+      float minx = 1e30f, miny = 1e30f, maxx = -1e30f, maxy = -1e30f;
+      for (std::uint64_t id : workspace_.selection())
+        if (const Entity2D* p = workspace_.find(id)) {
+          minx = std::min(minx, p->x);
+          miny = std::min(miny, p->y);
+          maxx = std::max(maxx, p->x + p->w);
+          maxy = std::max(maxy, p->y + p->h);
+        }
+      if (minx < maxx) {
+        const float dx = wx - (minx + maxx) * 0.5f, dy = wy - (miny + maxy) * 0.5f;
+        for (std::uint64_t id : workspace_.selection())
+          if (Entity2D* p = workspace_.find(id)) {
+            p->x += dx;
+            p->y += dy;
+          }
+        mark_dirty();
+      }
+    }
+    if (ux::MenuItem("Set 2D cursor here", "Shift+RMB")) set_cursor2d(wx, wy);
+    if (ux::BeginMenu("View options")) {
+      const bool grid = workspace_.show_grid();
+      if (ux::MenuItem("Show grid", "'", grid, !is_playing())) {
+        workspace_.set_show_grid(!grid);
+        mark_dirty();
+      }
+      const bool snap = workspace_.snap_enabled();
+      if (ux::MenuItem("Snap to grid", "Shift+G", snap, !is_playing())) {
+        workspace_.set_snap_enabled(!snap);
+        mark_dirty();
+      }
+      if (ux::MenuItem("Reset camera")) {
+        workspace_.set_pan(0.0f, 0.0f);
+        workspace_.set_zoom(1.0f);
+      }
+      ux::EndMenu();
+    }
     ImGui::Separator();
   }
   const bool has = n > 0;
@@ -315,6 +485,18 @@ void Editor2DScreen::draw_entity_context_menu(std::uint64_t clicked) {
     if (ux::MenuItem(e->hidden ? "Show" : "Hide", "H")) hide_selected(!e->hidden);
   }
   if (ux::MenuItem("Focus", "F", false, has)) frame_selected();
+  if (has && ux::BeginMenu("Reset transform")) {
+    if (ux::MenuItem("Location", "Alt+G")) reset_transform(XformOp::Move);
+    if (ux::MenuItem("Rotation", "Alt+R")) reset_transform(XformOp::Rotate);
+    if (ux::MenuItem("Size", "Alt+S")) reset_transform(XformOp::Scale);
+    ux::EndMenu();
+  }
+  if (ux::MenuItem("Copy components", nullptr, false, e != nullptr)) {
+    comp_clip_ = *e;
+    comp_clip_name_.clear();
+    note("Copied " + e->name + "'s components");
+  }
+  if (ux::MenuItem("Paste components", nullptr, false, has && comp_clip_ && !is_playing())) paste_components_2d({});
   if (n >= 2 && ux::BeginMenu("Align")) {
     if (ux::MenuItem("Left edges")) align_selected(Workspace2D::Align::Left);
     if (ux::MenuItem("Centres (horizontal)")) align_selected(Workspace2D::Align::CenterX);

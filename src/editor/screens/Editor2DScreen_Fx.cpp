@@ -26,7 +26,7 @@ void Editor2DScreen::draw_inspector_fx(std::uint64_t id) {
     if (theme::SecondaryButton("Add Particles", ImVec2(140, 0))) {
       apply("Add Particles", [](Entity2D& t) { t.particles = fx::preset("campfire", fx::Space::TwoD); });
     }
-  } else if (ImGui::CollapsingHeader("Particles", ImGuiTreeNodeFlags_DefaultOpen)) {
+  } else if (component_header_2d(id, "Particles")) {
     ImGui::PushID("particles");
     fx::EmitterDesc copy = *e->particles;
     switch (draw_particle_fields(copy, fx::Space::TwoD)) {
@@ -52,7 +52,7 @@ void Editor2DScreen::draw_inspector_fx(std::uint64_t id) {
     }
     if (ImGui::IsItemHovered())
       ux::SetTooltip("A point / spot light (needs scene Lighting on: View > Lighting).");
-  } else if (ImGui::CollapsingHeader("Light", ImGuiTreeNodeFlags_DefaultOpen)) {
+  } else if (component_header_2d(id, "Light")) {
     ImGui::PushID("light");
     fx::Light2DData copy = *e->light;
     switch (draw_light_fields(copy)) {

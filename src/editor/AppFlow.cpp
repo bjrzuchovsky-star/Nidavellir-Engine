@@ -556,6 +556,20 @@ void AppFlow::request_back_to_projects() {
   }
 }
 
+bool AppFlow::intercept_close() {
+  if (auto* editor = dynamic_cast<Editor2DScreen*>(screen_.get())) {
+    if (!editor->has_unsaved()) return false;
+    editor->leave_or_ask(true);
+    return true;
+  }
+  if (auto* e3 = dynamic_cast<Editor3DScreen*>(screen_.get())) {
+    if (!e3->has_unsaved()) return false;
+    e3->leave_or_ask(true);
+    return true;
+  }
+  return false;
+}
+
 void AppFlow::request_quit() {
   if (auto* editor = dynamic_cast<Editor2DScreen*>(screen_.get())) {
     editor->request_quit();

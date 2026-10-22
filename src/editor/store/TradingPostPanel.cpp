@@ -446,8 +446,20 @@ TradingPostResult draw_trading_post_window(TradingPostUi& ui, const TradingPostT
         ImGui::SameLine();
       }
       if (e && e->installed && !e->installed_dir.empty()) {
-        const bool clicked = theme::DangerButton("Uninstall", ImVec2(110, 0));
-        if (ImGui::IsItemHovered()) ux::SetTooltip("Remove it from the plugin cache. Claims that use it will warn until you reinstall.");
+        if (theme::DangerButton("Uninstall", ImVec2(110, 0))) ImGui::OpenPopup("Uninstall plugin?###ts_uninstall");
+        if (ImGui::IsItemHovered()) ux::SetTooltip("Remove it from the plugin cache (asks first). Claims that use it will warn until you reinstall.");
+        bool clicked = false;
+        if (ImGui::BeginPopupModal("Uninstall plugin?###ts_uninstall", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+          ImGui::Text("Uninstall %s?", e->name.empty() ? e->id.c_str() : e->name.c_str());
+          ImGui::TextDisabled("Claims that use it will warn until you install it again.");
+          if (theme::DangerButton("Uninstall")) {
+            clicked = true;
+            ImGui::CloseCurrentPopup();
+          }
+          ImGui::SameLine();
+          if (theme::SecondaryButton("Keep it") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
+          ImGui::EndPopup();
+        }
         if (clicked) {
           std::string err;
           const std::string id = e->id;

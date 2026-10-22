@@ -6,6 +6,7 @@ add_library(ts_editor
   ux/Tooltip.cpp
   ux/EmptyState.cpp
   ux/FriendlyError.cpp
+  ux/ContextMenus.cpp
   ux/Layouts.cpp
   ux/Walkthrough.cpp
   ux/Actions.cpp

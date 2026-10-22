@@ -153,6 +153,7 @@ void Editor2DScreen::draw_inspector_animator(std::uint64_t id) {
     return;
   }
   ImGui::SeparatorText("Animator");
+  component_header_menu_2d(id, "Animator");
   if (!e->animator) {
     const std::string guess =
         e->sprite ? anim_set_for_image(e->sprite->path) : std::string();

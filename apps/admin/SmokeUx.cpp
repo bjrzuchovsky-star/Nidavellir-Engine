@@ -128,6 +128,67 @@ void dump_actions(const char* what, const std::vector<ux::Action>& v) {
               << (a.enabled ? "" : " (disabled)") << (a.tip.empty() ? " (no tip)" : "") << "\n";
 }
 
+// ---- unsaved changes ------------------------------------------------------------
+
+// An edit whose autosave fails (a read-only scene): Quit asks first, "Try
+// saving again" keeps asking while it still fails, Stay stays, Leave leaves.
+template <class Screen>
+int check_leave_prompt(Ctx& ctx, Screen& s, const char* tag, const std::function<void()>& edit) {
+  const std::string t = tag;
+  ux::EditorUx& u = s.field_guide();
+  if (s.has_unsaved()) return fail(t + ": unsaved before any edit");
+  edit();
+  if (!s.has_unsaved()) return fail(t + ": a failed autosave isn't flagged as unsaved");
+  editor::AppState st{};
+  auto tick = [&] { ctx.frames(2, [&] { st = s.on_update(1.0f / 60.0f); }); };
+  s.leave_or_ask(true);
+  if (!u.leave_pending()) return fail(t + ": Quit with unsaved changes didn't ask");
+  tick();
+  if (st == editor::AppState::Quit) return fail(t + ": quit without waiting for the answer");
+  if (!ImGui::FindWindowByName("Unsaved changes###ts_unsaved")) return fail(t + ": no Unsaved changes prompt drawn");
+  u.resolve_leave(1);
+  if (!u.leave_pending() || u.leave_status().find("Still not saved") == std::string::npos)
+    return fail(t + ": 'Try saving again' on a read-only scene didn't keep asking");
+  u.resolve_leave(0);
+  tick();
+  if (u.leave_pending() || st == editor::AppState::Quit) return fail(t + ": Stay didn't stay");
+  s.leave_or_ask(true);
+  u.resolve_leave(2);
+  tick();
+  if (st != editor::AppState::Quit) return fail(t + ": 'Leave without saving' didn't quit");
+  return 0;
+}
+
+// ---- context menus ------------------------------------------------------------
+
+// Every right-click menu body is harvested under its scope: the expected items
+// are there, each one has a tooltip and none bypasses the registry.
+int check_contexts(Ctx& ctx, ux::EditorUx& u, const char* tag,
+                   const std::vector<std::pair<std::string, std::vector<std::string>>>& want, int* total) {
+  const std::string t = tag;
+  ctx.frames(1, [&] { u.harvest_contexts(); });
+  for (const auto& [scope, labels] : want) {
+    const auto& items = u.actions().harvested(scope);
+    dump_actions(scope.c_str(), items);
+    if (items.empty()) return fail(t + ": context menu " + scope + " registered nothing");
+    const auto& raw = u.actions().unregistered(scope);
+    if (!raw.empty()) return fail(t + ": " + scope + " widget outside the registry: '" + raw.front() + "'");
+    for (const auto& l : labels) {
+      bool found = false;
+      for (const auto& a : items)
+        found |= a.label == l || ("/" + a.path + "/").find("/" + l + "/") != std::string::npos;  // submenus
+      if (!found) return fail(t + ": " + scope + " lacks '" + l + "'");
+    }
+    for (const auto& a : items) {
+      if (!a.tip.empty()) continue;
+      if (dump()) std::cout << "  [ctx-tip-missing] " << scope << " " << a.id << "\n";
+      else return fail(t + ": " + scope + " item without a tooltip: " + a.id);
+    }
+    *total += static_cast<int>(items.size());
+  }
+  return 0;
+}
+
 // ---- registry + palette -----------------------------------------------------
 
 int check_registry(Ctx& ctx, ux::EditorUx& u, const char* tag,
@@ -417,6 +478,8 @@ int check_errors(Ctx& ctx, const fs::path& root, int* cases) {
     if (!ImGui::FindWindowByName(title.c_str())) return fail("2D: the error modal didn't open");
     std::string err;
     if (s.save_scene(&err)) return fail("2D: saved over a scene from a newer TombStone");
+    ux::clear_errors();
+    if (int r = check_leave_prompt(ctx, s, "2D", [&] { s.create_entity("Unsaved"); })) return r;
     s.on_exit();
     if (read_all(sp) != future2d) return fail("2D: the newer scene.json was changed on disk");
     covered.insert(K::SceneVersion);
@@ -443,6 +506,8 @@ int check_errors(Ctx& ctx, const fs::path& root, int* cases) {
     ctx.frames(3, [&] { e.on_update(1.0f / 60.0f); });
     std::string err;
     if (e.save_scene(&err)) return fail("3D: saved over a scene from a newer TombStone");
+    ux::clear_errors();
+    if (int r = check_leave_prompt(ctx, e, "3D", [&] { e.create_empty({0, 0, 0}); })) return r;
     e.on_exit();
     if (read_all(sp) != future3d) return fail("3D: the newer scene.json was changed on disk");
     ux::clear_errors();
@@ -604,7 +669,7 @@ int run_ux_smoke() {
   ux::prefs() = ux::Prefs{};
   ux::prefs().walkthrough_2d_done = ux::prefs().walkthrough_3d_done = true;  // tours tested on their own
   Ctx ctx;
-  int menu2d = 0, menu3d = 0, tips2d = 0, tips3d = 0;
+  int menu2d = 0, menu3d = 0, tips2d = 0, tips3d = 0, ctx2d = 0, ctx3d = 0;
   {
     editor::ProjectInfo info;
     info.id = "_ux_2d";
@@ -618,6 +683,17 @@ int run_ux_smoke() {
                                [&] { return s.hierarchy_shown(); }))
       return r;
     menu2d = static_cast<int>(s.field_guide().actions().harvested("menu").size());
+    if (int r = check_contexts(
+            ctx, s.field_guide(), "2D",
+            {{"ctx.viewport2d", {"Create here", "Empty entity", "Paste here", "Set 2D cursor here", "View options"}},
+             {"ctx.hierarchy2d", {"Paste"}},
+             {"ctx.entity2d", {"Duplicate", "Rename", "Delete", "Focus", "Copy components", "Paste components",
+                               "Location", "Rotation", "Size"}},
+             {"ctx.inspector2d", {"Reset to defaults", "Copy values", "Paste values", "Remove component",
+                                  "Move up", "Move down", "Open docs"}},
+             {"ctx.assets2d", {"Open", "Rename...", "Reimport", "Find references", "Delete..."}}},
+            &ctx2d))
+      return r;
 
     // Tooltips: one entity wearing every component, then each starter entity.
     for (auto& en : s.workspace().entities()) {
@@ -690,6 +766,17 @@ int run_ux_smoke() {
                                "View/Grid", [&] { return e.scene().show_grid; }))
       return r;
     menu3d = static_cast<int>(e.field_guide().actions().harvested("menu").size());
+    if (int r = check_contexts(
+            ctx, e.field_guide(), "3D",
+            {{"ctx.viewport3d", {"Create here", "Cube", "Paste here", "Place 3D cursor here", "View options"}},
+             {"ctx.hierarchy3d", {"Paste"}},
+             {"ctx.entity3d", {"Duplicate", "Delete", "Focus", "Copy components", "Paste components", "Location",
+                               "Rotation", "Scale"}},
+             {"ctx.inspector3d", {"Reset to defaults", "Copy values", "Paste values", "Remove component",
+                                  "Move up", "Move down", "Open docs"}},
+             {"ctx.assets3d", {"Open", "Rename...", "Reimport", "Find references", "Delete..."}}},
+            &ctx3d))
+      return r;
 
     // Tooltips: the crate wearing every component, then each starter entity.
     if (const s3::Entity3D* crate = e.scene().find_named("Crate")) {
@@ -819,6 +906,7 @@ int run_ux_smoke() {
             << " 2D / " << tips3d << " 3D toolbar + Inspector widgets + every menu item + Trading Post rows; "
             << "empty states in 6 2D / 6 3D panels; readable errors for " << error_cases
             << " cases incl. a newer scene.json left untouched; walkthrough " << tour2d << " 2D / " << tour3d
-            << " 3D steps, skip + don't-show-again + finish persisted; layouts save / load / reset round trip)\n";
+            << " 3D steps, skip + don't-show-again + finish persisted; layouts save / load / reset round trip; unsaved-changes prompt on quit (2D + 3D); "
+            << ctx2d << " 2D / " << ctx3d << " 3D context-menu items registered with tips)\n";
   return 0;
 }

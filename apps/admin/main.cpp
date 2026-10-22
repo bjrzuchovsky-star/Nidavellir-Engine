@@ -2661,7 +2661,12 @@ int run_imgui_app() {
   std::string last_title = editor::brand::kWindowTitle;
 
   long admin_frames = 0;
-  while (!glfwWindowShouldClose(window) && flow.is_running()) {
+  while (flow.is_running()) {
+    if (glfwWindowShouldClose(window)) {
+      // Unsaved changes ask first ("Unsaved changes" prompt in the editor).
+      if (!flow.intercept_close()) break;
+      glfwSetWindowShouldClose(window, GLFW_FALSE);
+    }
     profiler::Profiler::get().begin_frame();
     glfwPollEvents();
 

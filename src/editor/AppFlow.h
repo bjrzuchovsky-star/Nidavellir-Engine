@@ -95,6 +95,9 @@ class AppFlow {
   // Editor2D helpers.
   void request_back_to_projects();
   void request_quit();
+  // Window close button / Alt+F4: true = an editor holds unsaved changes and
+  // is asking first (keep the window open; its prompt quits if you agree).
+  bool intercept_close();
   Workspace2D* editor_workspace();
   const Workspace2D* editor_workspace() const;
   bool editor_save_scene(std::string* error_out = nullptr);

@@ -248,7 +248,22 @@ void Editor3DScreen::report_save_failure(const std::string& err) {
 
 void Editor3DScreen::autosave() {
   std::string err;
-  if (!save_scene(&err)) note("Autosave failed: " + err, LogLevel::Error);
+  if (!save_scene(&err)) {
+    unsaved_ = true;
+    last_save_error_ = err;
+    note("Autosave failed: " + err, LogLevel::Error);
+  }
+}
+
+void Editor3DScreen::leave_or_ask(bool quit) {
+  auto go = [this, quit] { quit ? request_quit() : request_back_to_projects(); };
+  if (!has_unsaved()) return go();
+  ux::EditorUx::LeaveAsk a;
+  a.action = quit ? "Quit" : "Leave";
+  a.why = last_save_error_;
+  a.save = [this](std::string* err) { return save_scene(err); };
+  a.leave = go;
+  ux_.ask_leave(std::move(a));
 }
 
 const std::string& Editor3DScreen::undo_label() const {
@@ -293,7 +308,10 @@ bool Editor3DScreen::save_scene(std::string* error) {
   }
   refresh_prefab_overrides();
   if (!scene3d::save_file(scene3d::scene_path(project_.path), scene_, error)) return false;
-  return save_terrains(error);
+  if (!save_terrains(error)) return false;
+  unsaved_ = false;
+  last_save_error_.clear();
+  return true;
 }
 
 bool Editor3DScreen::reload_scene(std::string* error) {

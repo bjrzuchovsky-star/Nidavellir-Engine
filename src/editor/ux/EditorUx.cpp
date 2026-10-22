@@ -133,6 +133,7 @@ void EditorUx::frame() {
   }
   walk_.frame([this](const std::string& panel) { run_now("Panel/" + panel); });
   draw_layout_popups();
+  draw_leave_popup();
   draw_error_modal([this](const std::string& id) { return run_now(id); });
 }
 
@@ -185,6 +186,60 @@ void EditorUx::draw_window_menu() {
     EndMenu();
   }
   EndMenu();
+}
+
+void EditorUx::ask_leave(LeaveAsk a) {
+  leave_ = std::move(a);
+  leave_open_ = true;
+  leave_status_.clear();
+}
+
+void EditorUx::resolve_leave(int choice) {
+  if (!leave_.leave) return;
+  if (choice == 1) {
+    std::string err;
+    if (leave_.save && !leave_.save(&err)) {
+      leave_.why = err.empty() ? leave_.why : err;
+      leave_status_ = "Still not saved: " + leave_.why;
+      return;  // the prompt stays up
+    }
+  }
+  std::function<void()> go = std::move(leave_.leave);
+  leave_ = {};
+  if (choice != 0 && go) go();
+}
+
+void EditorUx::draw_leave_popup() {
+  const char* id = "Unsaved changes###ts_unsaved";
+  if (leave_open_) {
+    ImGui::OpenPopup(id);
+    leave_open_ = false;
+  }
+  if (!ImGui::BeginPopupModal(id, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+  if (!leave_.leave) {
+    ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+    return;
+  }
+  ImGui::TextUnformatted("Your latest changes haven't been saved to disk.");
+  ImGui::PushTextWrapPos(ImGui::GetFontSize() * 34.0f);
+  ImGui::TextDisabled("Why: %s", leave_.why.empty() ? "the last save didn't finish." : leave_.why.c_str());
+  ImGui::TextDisabled("%s now and they're lost. Try saving again, or stay and fix the cause first.",
+                      leave_.action.c_str());
+  if (!leave_status_.empty()) ImGui::TextColored(theme::Warning(), "%s", leave_status_.c_str());
+  ImGui::PopTextWrapPos();
+  ImGui::Spacing();
+  int choice = -1;
+  if (theme::PrimaryButton("Try saving again")) choice = 1;
+  ImGui::SameLine();
+  if (theme::DangerButton("Leave without saving")) choice = 2;
+  ImGui::SameLine();
+  if (theme::SecondaryButton("Stay") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) choice = 0;
+  if (choice >= 0) {
+    resolve_leave(choice);
+    if (!leave_.leave) ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
 }
 
 void EditorUx::draw_layout_popups() {

@@ -58,6 +58,20 @@ class EditorUx {
   void request_save_layout(const std::string& suggested = {});
   // Last layout message ("Saved layout ..."), for the smoke / status line.
   const std::string& layout_status() const { return layout_status_; }
+  // Leaving with changes that didn't reach disk (an autosave failed, or the
+  // scene is read-only): "Try saving again / Leave without saving / Stay".
+  struct LeaveAsk {
+    std::string action;                     // "Quit", "Back to Projects"
+    std::string why;                        // the last save error
+    std::function<bool(std::string*)> save; // retry; true = saved
+    std::function<void()> leave;
+  };
+  void ask_leave(LeaveAsk a);
+  bool leave_pending() const { return leave_.leave != nullptr; }
+  // 0 = Stay, 1 = Try saving again, 2 = Leave without saving (buttons + smoke).
+  void resolve_leave(int choice);
+  const std::string& leave_status() const { return leave_status_; }
+
   // Harvest the menus now (smoke + palette); invoke = id to run.
   void harvest(const std::string& invoke = {});
   void harvest_contexts();
@@ -80,6 +94,10 @@ class EditorUx {
   bool confirm_delete_open_ = false;
   std::string layout_status_;
   void draw_layout_popups();
+  LeaveAsk leave_;
+  bool leave_open_ = false;
+  std::string leave_status_;
+  void draw_leave_popup();
 };
 
 // Hand-offs to AppFlow (read once).
