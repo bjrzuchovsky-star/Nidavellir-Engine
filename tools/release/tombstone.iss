@@ -3,6 +3,12 @@
 ; passes /DAppVersion=<VERSION> /DStageDir=<stage> /DOutDir=<out>.
 ; Per-user by default (no admin); "Install for all users" is offered on the
 ; first page or with /ALLUSERS.
+;
+; /DUpdate=1 builds TombStone-<ver>-update.exe instead: the same AppId and
+; files, so it upgrades an existing install in place (same folder, tasks and
+; privileges mode; Documents\TombStone with claims, settings and the Vault is
+; never touched), with a minimal wizard: no welcome, licence, folder or task
+; pages. The editor's update notifier prefers it (docs/updates.md).
 
 #ifndef AppVersion
   #error AppVersion is required (from the VERSION file)
@@ -33,7 +39,11 @@ DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\ts_admin.exe
 UninstallDisplayName={#AppName} {#AppVersion}
 OutputDir={#OutDir}
+#ifdef Update
+OutputBaseFilename=TombStone-{#AppVersion}-update
+#else
 OutputBaseFilename=TombStone-{#AppVersion}-setup
+#endif
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -42,8 +52,26 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog commandline
-LicenseFile={#StageDir}\LICENSE
 SetupLogging=yes
+#ifdef Update
+; Upgrade in place: reuse the previous install's folder, Start menu group,
+; tasks, language and privileges mode, and skip the pages that would ask.
+UsePreviousAppDir=yes
+UsePreviousGroup=yes
+UsePreviousTasks=yes
+UsePreviousSetupType=yes
+UsePreviousLanguage=yes
+UsePreviousPrivileges=yes
+DisableWelcomePage=yes
+DisableDirPage=auto
+DisableReadyPage=yes
+; The editor closes itself after starting this; Restart Manager handles
+; any other TombStone app still open.
+CloseApplications=yes
+RestartApplications=no
+#else
+LicenseFile={#StageDir}\LICENSE
+#endif
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -76,6 +104,15 @@ Filename: "{app}\ts_admin.exe"; WorkingDir: "{userdocs}\TombStone"; Description:
 Type: files; Name: "{app}\*.log"
 
 [Code]
+#ifdef Update
+// An update reuses the tasks picked at install time (UsePreviousTasks), so
+// the task page is skipped too.
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := (PageID = wpSelectTasks);
+end;
+
+#endif
 // GPU gate: the editor and the game need OpenGL 3.3. ts_game checks itself
 // too (a friendly box at start); this tells the user at install time.
 procedure CurStepChanged(CurStep: TSetupStep);

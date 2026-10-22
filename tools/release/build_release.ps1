@@ -3,10 +3,13 @@
 # 1. Release build (VS 2022 x64), 2. ts_admin --smoke (TS_AUDIO=null),
 # 3. stages the engine (ts_admin, ts_game, ts_server, ts_client, C++ runtime
 #    DLLs, plugins, templates, samples, fonts, docs, script SDK, licences),
-# 4. writes TombStone-<VERSION>-win64.zip and TombStone-<VERSION>-setup.exe
-#    (Inno Setup 6, tools\release\tombstone.iss) plus SHA256SUMS.txt.
+# 4. writes TombStone-<VERSION>-win64.zip, TombStone-<VERSION>-setup.exe (the
+#    full installer) and TombStone-<VERSION>-update.exe (same AppId, upgrades
+#    an install in place with a minimal wizard; the editor's update notifier
+#    prefers it), both from tools\release\tombstone.iss, plus SHA256SUMS.txt.
 # -TestInstall then installs the setup silently per-user into a temp folder,
-# runs the installed ts_admin --version and --smoke, and uninstalls it.
+# runs the installed ts_admin --version and --smoke, runs the update over
+# it, and uninstalls it.
 # The version comes from the VERSION file at the repo root. Nothing is
 # tagged or published.
 param(
@@ -147,13 +150,18 @@ if (Test-Path $setup) { Remove-Item -Force $setup }
 Native { & $iscc /Q "/DAppVersion=$version" "/DStageDir=$stage" "/DOutDir=$Out" (Join-Path $PSScriptRoot "tombstone.iss") }
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $setup)) { throw "ISCC failed ($LASTEXITCODE)" }
 "setup: $setup"
+$update = Join-Path $Out "TombStone-$version-update.exe"
+if (Test-Path $update) { Remove-Item -Force $update }
+Native { & $iscc /Q "/DAppVersion=$version" "/DStageDir=$stage" "/DOutDir=$Out" "/DUpdate=1" (Join-Path $PSScriptRoot "tombstone.iss") }
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $update)) { throw "ISCC (update) failed ($LASTEXITCODE)" }
+"update: $update"
 
-$sums = foreach ($f in $setup, $zip) {
+$sums = foreach ($f in $setup, $update, $zip) {
   "{0}  {1}" -f (Get-FileHash -Algorithm SHA256 $f).Hash.ToLower(), (Split-Path $f -Leaf)
 }
 $sums | Set-Content -Encoding ascii (Join-Path $Out "SHA256SUMS.txt")
 $sums
-foreach ($f in $setup, $zip) { "{0}  {1:N0} bytes" -f (Split-Path $f -Leaf), (Get-Item $f).Length }
+foreach ($f in $setup, $update, $zip) { "{0}  {1:N0} bytes" -f (Split-Path $f -Leaf), (Get-Item $f).Length }
 
 # --- 5. Optional: silent install test ----------------------------------------
 if ($TestInstall) {
@@ -187,6 +195,16 @@ if ($TestInstall) {
   } finally { Pop-Location }
   Get-Content "$t\installed_smoke.log" -Tail 2
   "installed ts_admin --smoke exit $rc"
+  # The update over the install: same folder, still one Apps & features entry.
+  $up = Start-Process $update -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+    "/CURRENTUSER", "/LOG=`"$t\update.log`""
+  if ($up.ExitCode -ne 0) { throw "silent update exit code $($up.ExitCode)" }
+  if (-not (Test-Path "$app\ts_admin.exe")) { throw "after update, missing $app\ts_admin.exe" }
+  $entries = @(Get-ChildItem HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall |
+    Where-Object { $_.PSChildName -like "*6F1D3B0A-7C52-4E1B-9A3D-5B2C8E4F7A10*" })
+  if ($entries.Count -ne 1) { throw "after update, $($entries.Count) Apps & features entries (want 1)" }
+  "update over the install: same folder, one Apps & features entry"
+  Copy-Item "$t\update.log" (Join-Path $Out "update.log") -Force
   Copy-Item "$t\installed_smoke.log" (Join-Path $Out "installed_smoke.log") -Force
   Copy-Item "$t\install.log" (Join-Path $Out "install.log") -Force
   $u = Start-Process "$app\unins000.exe" -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
