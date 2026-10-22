@@ -20,7 +20,7 @@ The 2D editor uses an ImGui docking layout. Panels:
 
 - **Hierarchy**: create, duplicate, rename, delete, multi-select, search, drag to reparent.
 - **Viewport**: the edit canvas, and Play while riding.
-- **Inspector**: transform, tint, layer, and the TileMap, Sprite, Player, Camera2D, Spawn Point, Collision, Animator, Script, Audio Source, Particles and Light sections.
+- **Inspector**: transform, tint, layer, and the TileMap, Sprite, Player, Camera2D, Spawn Point, Collision, Animator, Script (one section per script, see [scripting](scripting.md#script-components-several-per-object)), Audio Source, Particles and Light sections, and **Add Component**.
 - **Tile Palette**, **Stable** (animation), **Supply Wagon** (assets), **Scripts** and **Telegraph** (console).
 - **Network** (posse), **Saloon Band** (mixer), **UI Preview** and **Lighting**.
 

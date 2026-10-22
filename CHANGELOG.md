@@ -6,6 +6,18 @@ All notable changes to TombStone Engine. The version number lives in the `VERSIO
 
 Work in progress for 0.2.0. Optional features ship as Trading Post plugins rather than in every game, starting with physics and player movement.
 
+### Script components: several scripts per object (2D and 3D)
+- Objects carry any number of scripts (up to 16) in any mix of Lua, visual graph, C++ and C#, like Unity components. Each one is an Inspector section with its own properties, an on/off checkbox, move up / down and remove, all undoable. Properties are saved per object, per script.
+- Order: on one object, events reach scripts in Inspector order; across the world each phase runs stack position by stack position, keeping lua, graph, cpp, cs within a position. Single-script claims behave as before.
+- **Add Component** at the bottom of the Inspector: **New Script...** (name, language, template) writes the file under `scripts/` and attaches it; **Script** picks an existing one with search. The 2D menu also adds Collider, Player, Camera and Spawn Point.
+- Templates for every language: Blank, Gate, Pickup, Sign and Ticker. C++ ones compile against `script_sdk.h`, C# ones against the SDK.
+- Drag a script from the Asset Browser or Scripts panel onto an object in the viewport, a Hierarchy row or the Inspector to attach it. The Asset Browser now shows scripts.
+- **Open in VS Code / Visual Studio** on each script, with detection and a **Settings > Tools > Open scripts in** default. TombStone writes the VS Code workspace and settings, `compile_commands.json` for C++ and a `.csproj` referencing the C# SDK. A missing editor gives a status message rather than an error.
+- Script errors name the object and the script: `"Wagon" (scripts/boom.lua): ...`.
+- Scene format: 2D v12 and 3D v17 add a `"scripts"` array with `"enabled"`. Older scenes with one `"script"` still load.
+- `ts_admin --smoke-scripts-multi` (also in `--smoke`); `ts_admin --scripts-shot <out.png>`. Docs: [docs/scripting.md](docs/scripting.md#script-components-several-per-object).
+- Not yet: the 3D Add Component menu lists scripts only (other 3D components stay on the + buttons).
+
 ### Blender-style transforms and gizmos (2D and 3D)
 - **G / R / S** move, rotate and scale with the mouse over the viewport in both editors. **X / Y / Z** lock an axis; press it twice for the local axis. **Shift+X / Y / Z** lock a plane. Type exact values (with `-` and Backspace, Tab for the next component); the viewport header shows them. **Ctrl** flips snap and **Shift** gives precision. **Enter** or LMB confirms, as one undo step. **Esc** or RMB cancels and puts everything back. **Alt+G / R / S** clear location, rotation or scale. Multi-select and children work, and locked entities stay put.
 - New gizmos in red / green / blue that keep their size on screen and light up under the mouse:

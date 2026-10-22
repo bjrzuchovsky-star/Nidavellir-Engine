@@ -11,7 +11,60 @@ A script component names a file under `scripts/`, and the file extension picks t
 | `.cpp` | C++20 | `NativeScriptHost` (one module per project) | Through `save()` / `load()` |
 | `.cs` | C# (.NET 8) | `CSharpScriptHost` (hostfxr + AssemblyLoadContext) | Through `Save()` / `Load()` |
 
-All four languages share the same hooks and world API. Each phase runs them in a fixed order (lua, graph, cpp, cs), so a project that mixes languages stays deterministic.
+All four languages share the same hooks and world API.
+
+## Script components (several per object)
+
+An object can carry any number of scripts (up to 16), in any mix of languages, much like Unity components. Each script is its own section in the Inspector of the 2D and 3D editors:
+
+- **Checkbox:** turns the script on or off. A switched-off script stays on the object with its settings but does not run at all (no `on_start`, no events).
+- **Arrow buttons / `...` menu:** move the script up or down, open it, or remove it. Every change is one undo step (**Attach Script**, **Move Script**, **Remove Script**, ...).
+- **Properties:** each script shows its own `props` (Lua `props`, graph variables, C++ / C# fields the SDK reports). They are saved per object, per script, so two objects can run the same file with different settings.
+- **Open / VS Code / Visual Studio:** opens the file (see [Editing in VS Code or Visual Studio](#editing-in-vs-code-or-visual-studio)).
+
+### Order
+
+Scripts run in a fixed, predictable order:
+
+1. **On one object,** events (`on_start`, `on_interact`, triggers, collisions, VR hooks such as `on_grab` / `on_release`, ...) reach its scripts top to bottom, in Inspector order, whatever their languages.
+2. **Across the world,** a phase (`on_start`, `on_update`, `on_fixed_update`, ...) runs every object's first script, then every object's second script, and so on. Within one stack position the languages keep their old order: lua, graph, cpp, cs. So a project with one script per object behaves exactly as before.
+
+Put the script that sets things up at the top. A script that fails (a Lua error, a C# exception) is logged and switched off for the ride; the rest of the object's scripts keep going. Errors name the object and the script, for example `"Wagon" (scripts/boom.lua): attempt to call a nil value`.
+
+### Adding scripts
+
+- **Add Component** (bottom of the Inspector) > **New Script...** asks for a name, a language (Lua, Visual graph, C++ or C#) and a template, writes `scripts/<name>.<ext>` and attaches it. Names are turned into safe file names (`Coach Gate` becomes `coach_gate.lua`); an existing file is never overwritten.
+- **Add Component** > **Script** lists the claim's existing scripts with a search box. The 2D menu also adds Collider, Player, Camera and Spawn Point; in 3D the other components stay on the **+** buttons above.
+- **Drag a script** from the Asset Browser or the Scripts panel onto an object in the viewport (it lights up and says *Attach to ...*), onto a Hierarchy row, or onto the Inspector. Dropping a script the object already runs does nothing and says so.
+
+### Templates
+
+Every language has the same five templates, so you can start in one and port to another:
+
+| Template | What it does |
+|---|---|
+| Blank | Every hook stubbed out, ready to fill in |
+| Gate | Opens on the action button; can shut itself |
+| Pickup | Pocketed by the first rider through its trigger |
+| Sign | Shows a HUD line on the action button |
+| Ticker | Repeats on a timer (a tumbleweed hop) |
+
+C++ templates compile against `tombstone/script_sdk.h` and C# templates against the TombStone.Scripting SDK; graph templates are small graphs that open in the Brand Book. Without the .NET 8 SDK, New Script still writes C# files; they run once the SDK is installed.
+
+### Scene format
+
+2D scenes (version 12) and 3D scenes (version 17) store the stack as `"scripts": [ { "path": ..., "enabled": true, "props": { ... } }, ... ]`. An object with just one running script is still written with the old `"script"` key, and older scenes with a single `"script"` load as a one-script stack.
+
+### Editing in VS Code or Visual Studio
+
+**Open** uses **Settings > Tools > Open scripts in**: *Automatic* (VS Code if found, then Visual Studio for C++ / C#, otherwise the system's default app), *VS Code*, *Visual Studio* or *The OS default app*. Visual graphs always open in the Brand Book under *Automatic*. The VS Code and Visual Studio buttons on each script force one or the other.
+
+- **VS Code** is found on `PATH` (`code`), in the registry, or under `%LOCALAPPDATA%\Programs\Microsoft VS Code`; set `TS_VSCODE` to override. It opens the claim's `<claim>.code-workspace` and jumps to the file (`-g`).
+- **Visual Studio** is found with `vswhere` (or `TS_DEVENV`). C# scripts open the generated project; others open the claim folder with the file (`/Edit`).
+- Before launching, TombStone writes what the IDE needs: `.vscode/settings.json`, `extensions.json` and `c_cpp_properties.json` (written once, yours to tune), the `.code-workspace`, a `compile_commands.json` and `CppProperties.json` for the C++ scripts (pointing at the script SDK headers), and for C# `.tombstone/ide/<Claim>.Scripts.csproj` referencing a copy of the SDK binding. The engine never builds from these files.
+- If the editor is not installed, the status bar says so and points at Settings; nothing else changes.
+
+`ts_admin --smoke-scripts-multi` (also in `--smoke`) checks all of this. `ts_admin --scripts-shot <out.png>` renders the Inspector with several scripts and the Add Component menu.
 
 ## Lua
 
