@@ -10,6 +10,7 @@ These pages are written from the source in this repository (`src/`, `apps/`, `sd
 | [Assets](assets.md) | Asset browser, importers, `.meta` GUIDs, move-safe references, hot reload, `--smoke-assets` |
 | [Model import](model-import.md) | glTF, Source `.mdl` (GMod), OBJ, FBX, DAE, PLY, STL, X and more through Assimp, `.blend` via Blender; import settings, VMT / VTF, limits, `--smoke-models` / `--smoke-mdl` |
 | [The Vault](vault.md) | The asset library shared by every claim: local folder or self-hosted `ts_vault` server, Send to Vault / Pull, GUID-stable pulls, versions and pins, API, CLI, hosting, `--smoke-vault` |
+| [Live Team Claims](team-claims.md) | Real-time team editing (0.2.0): Host from my editor or `ts_vault --team`, op sync, presence, cursors, soft locks, late join, version guard, `--smoke-team`; stage 2 / 3 design for 1.0.0 |
 | [Project types and templates](projects-and-templates.md) | 2D / 3D / VR, `project.json`, claim templates, plugins per project |
 | [The Trading Post](trading-post.md) | Plugin store, sources, the plugin cache, signed indexes, the plugin system |
 | [Scripting](scripting.md) | Lua, visual graphs (Brand Book), C++ scripts with hot reload, C# |
