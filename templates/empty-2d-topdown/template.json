@@ -1,0 +1,14 @@
+{
+  "id": "empty-2d-topdown",
+  "name": "Empty 2D Top-down",
+  "dimension": "2d",
+  "vr": false,
+  "group": "empty",
+  "description": "A player with top-down movement and a starter script, a follow camera and an empty tilemap.",
+  "plugins": [],
+  "tags": ["empty", "top-down", "player"],
+  "order": 1,
+  "thumbnail": "thumbnail.png",
+  "project": "project",
+  "generator": "empty-2d-topdown"
+}

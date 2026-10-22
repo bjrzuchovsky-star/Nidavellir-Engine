@@ -1,6 +1,7 @@
 #include "editor/templates/TemplateStore.h"
 
 #include "editor/launch/GameLauncher.h"
+#include "editor/templates/EmptyTemplates.h"
 #include "editor/projects/ProjectStore.h"
 #include "editor/workspace/SceneIO.h"
 #include "editor/workspace/Workspace2D.h"
@@ -198,6 +199,18 @@ bool TemplateStore::load_template(const std::string& dir, bool user, ProjectTemp
   if (!proj.empty() && fs::is_regular_file(d / proj / "project.json", ec)) {
     t.project_dir = (d / proj).string();
   }
+  t.group = user ? "mine" : j.string_at("group", "samples");
+  if (t.group != "empty" && t.group != "mine") t.group = "samples";
+  if (j.has("alt_dimension")) {
+    t.alt_kind = project_kind_from_dimension(j.string_at("alt_dimension"));
+    if (t.alt_kind == ProjectKind::VR) t.alt_kind = ProjectKind::ThreeD;
+    t.alt_generator = j.string_at("alt_generator");
+    const std::string alt = j.string_at("alt_project");
+    if (!alt.empty() && fs::is_regular_file(d / alt / "project.json", ec)) {
+      t.alt_project_dir = (d / alt).string();
+    }
+    t.has_alt = t.alt_kind != t.kind && (!t.alt_project_dir.empty() || !t.alt_generator.empty());
+  }
   if (t.name.empty()) {
     if (error) *error = dir + ": template has no name";
     return false;
@@ -252,12 +265,17 @@ const ProjectTemplate* TemplateStore::find(const std::string& id) const {
 
 bool TemplateStore::create_project(ProjectStore& store, const ProjectTemplate& tpl,
                                    const std::string& raw_name, ProjectInfo* out,
-                                   std::string* error, int vr_choice) {
+                                   std::string* error, int vr_choice, int dimension) {
   const std::string name = trim(raw_name);
-  const bool vr = tpl.kind != ProjectKind::TwoD && (vr_choice < 0 ? tpl.vr : vr_choice != 0);
+  // The 2D / 3D switch: build the template's alt dimension instead.
+  const ProjectKind want = dimension < 0 ? tpl.kind
+                           : dimension == 0 ? ProjectKind::TwoD : ProjectKind::ThreeD;
+  const bool use_alt = tpl.has_alt && want == tpl.alt_kind && want != tpl.kind;
+  const ProjectKind kind = use_alt ? tpl.alt_kind : tpl.kind;
+  const bool vr = kind != ProjectKind::TwoD && (vr_choice < 0 ? tpl.vr : vr_choice != 0);
   if (!ProjectStore::validate_project_name(name, error)) return false;
   const std::vector<std::string>* plugins = tpl.plugins_set ? &tpl.plugins : nullptr;
-  if (tpl.blank()) {
+  if (tpl.blank() && !use_alt) {
     if (!store.create_project(name, vr ? ProjectKind::VR : tpl.kind, plugins, out)) {
       if (error) *error = store.last_error();
       return false;
@@ -279,12 +297,13 @@ bool TemplateStore::create_project(ProjectStore& store, const ProjectTemplate& t
   }
   bool ok = false;
   std::string err;
-  if (!tpl.project_dir.empty()) {
-    ok = copy_tree(tpl.project_dir, dir, &err);
+  const std::string& from = use_alt ? tpl.alt_project_dir : tpl.project_dir;
+  if (!from.empty()) {
+    ok = copy_tree(from, dir, &err);
   } else {
-    ok = run_generator(tpl.generator, dir.string(), name, &err);
+    ok = run_generator(use_alt ? tpl.alt_generator : tpl.generator, dir.string(), name, &err);
   }
-  if (ok) ok = stamp_project_json(dir, name, tpl.kind, vr, plugins, &err);
+  if (ok) ok = stamp_project_json(dir, name, kind, vr, plugins, &err);
   if (ok) fs::create_directories(dir / "assets", ec);
   if (!ok) {
     fs::remove_all(dir, ec);
@@ -370,8 +389,10 @@ bool TemplateStore::save_as_template(const ProjectInfo& project, const std::stri
 }
 
 std::vector<std::string> TemplateStore::generator_ids() {
-  return {"sample-2d-platformer", "ghost-town-3d", "haunted-saloon-vr", survival::kSampleId,
-          shipyard::kSampleId};
+  std::vector<std::string> ids = {"sample-2d-platformer", "ghost-town-3d", "haunted-saloon-vr",
+                                   survival::kSampleId, shipyard::kSampleId};
+  for (const std::string& id : empty_templates::ids()) ids.push_back(id);
+  return ids;
 }
 
 bool TemplateStore::run_generator(const std::string& id, const std::string& dir,
@@ -404,6 +425,7 @@ bool TemplateStore::run_generator(const std::string& id, const std::string& dir,
   if (id == "haunted-saloon-vr") return scene3d::write_haunted_saloon_sample(dir, name, error);
   if (id == survival::kSampleId) return survival::write_frontier_sample(dir, name, error);
   if (id == shipyard::kSampleId) return shipyard::write_sky_pirates_sample(dir, name, error);
+  if (empty_templates::handles(id)) return empty_templates::write(id, dir, name, error);
   if (error) *error = "unknown template generator '" + id + "'";
   return false;
 }
@@ -420,22 +442,33 @@ int TemplateStore::bake(const std::string& templates_root, std::vector<std::stri
       continue;
     }
     if (t.generator.empty()) continue;
-    const fs::path out = e.path() / "project";
-    fs::remove_all(out, ec);
-    if (!run_generator(t.generator, out.string(), t.name, &err)) {
-      if (errors) errors->push_back(t.id + ": " + err);
-      continue;
+    store::Json tj;
+    store::read_json_file((e.path() / "template.json").string(), &tj, &err);
+    std::vector<std::pair<std::string, std::string>> jobs = {
+        {tj.string_at("project", "project"), t.generator}};
+    if (!t.alt_generator.empty() && !tj.string_at("alt_project").empty()) {
+      jobs.emplace_back(tj.string_at("alt_project"), t.alt_generator);
     }
-    // Baked copies carry no timestamps; create_project stamps its own.
-    store::Json j;
-    if (store::read_json_file((out / "project.json").string(), &j, &err)) {
-      store::Json clean = store::Json::object();
-      for (const auto& m : j.members()) {
-        if (m.first != "created" && m.first != "last_opened") clean.set(m.first, m.second);
+    bool all = true;
+    for (const auto& [folder, generator] : jobs) {
+      const fs::path out = e.path() / folder;
+      fs::remove_all(out, ec);
+      if (!run_generator(generator, out.string(), t.name, &err)) {
+        if (errors) errors->push_back(t.id + ": " + err);
+        all = false;
+        break;
       }
-      store::write_text_file((out / "project.json").string(), clean.dump(), &err);
+      // Baked copies carry no timestamps; create_project stamps its own.
+      store::Json j;
+      if (store::read_json_file((out / "project.json").string(), &j, &err)) {
+        store::Json clean = store::Json::object();
+        for (const auto& m : j.members()) {
+          if (m.first != "created" && m.first != "last_opened") clean.set(m.first, m.second);
+        }
+        store::write_text_file((out / "project.json").string(), clean.dump(), &err);
+      }
     }
-    ++baked;
+    if (all) ++baked;
   }
   return baked;
 }

@@ -2,6 +2,7 @@
 
 #include "editor/projects/ProjectStore.h"
 #include "editor/templates/TemplateStore.h"
+#include "editor/templates/TemplateThumbs.h"
 #include "store/Json.h"
 
 #include <algorithm>
@@ -27,6 +28,16 @@ store::Json read_json(const fs::path& p) {
   return j;
 }
 
+bool png_size(const std::string& path, int* w, int* h) {
+  std::ifstream in(path, std::ios::binary);
+  unsigned char b[24] = {};
+  if (!in.read(reinterpret_cast<char*>(b), sizeof(b))) return false;
+  if (b[0] != 0x89 || b[1] != 'P' || b[2] != 'N' || b[3] != 'G') return false;
+  *w = (b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19];
+  *h = (b[20] << 24) | (b[21] << 16) | (b[22] << 8) | b[23];
+  return true;
+}
+
 }  // namespace
 
 int run_bake_templates(const char* dir) {
@@ -34,6 +45,14 @@ int run_bake_templates(const char* dir) {
   const int n = editor::TemplateStore::bake(dir, &errors);
   for (const std::string& e : errors) std::cerr << "[bake] " << e << '\n';
   std::cout << "[bake] " << n << " template project(s) written under " << dir << '\n';
+  return errors.empty() && n > 0 ? 0 : 1;
+}
+
+int run_bake_thumbnails(const char* dir) {
+  std::vector<std::string> errors;
+  const int n = editor::template_thumbs::bake(dir, &errors);
+  for (const std::string& e : errors) std::cerr << "[thumbs] " << e << '\n';
+  std::cout << "[thumbs] " << n << " thumbnail(s) rendered under " << dir << '\n';
   return errors.empty() && n > 0 ? 0 : 1;
 }
 
@@ -49,23 +68,48 @@ int run_templates_smoke() {
                   editor::TemplateStore::user_template_dir(root.string()));
   for (const std::string& e : ts.errors()) std::cerr << "[smoke] template error: " << e << '\n';
   if (!ts.errors().empty()) return fail("engine templates should all load");
-  const char* want[] = {"blank-2d", "blank-3d", "dusty-town", "frontier-survival",
-                        "sky-pirates", "ghost-town-3d", "haunted-saloon-vr"};
+  const char* want[] = {"empty-2d", "empty-2d-topdown", "empty-2d-platformer", "empty-3d",
+                        "empty-3d-fps", "empty-3d-tps", "empty-vr", "truly-blank",
+                        "dusty-town", "frontier-survival", "sky-pirates", "ghost-town-3d",
+                        "haunted-saloon-vr"};
   for (const char* id : want) {
     if (!ts.find(id)) return fail(std::string("missing engine template ") + id);
   }
+  bool seen_sample = false;
+  int empties = 0;
   for (const auto& t : ts.templates()) {
     if (t.kind == editor::ProjectKind::VR) return fail("no template is a VR dimension: " + t.id);
     if (t.description.empty()) return fail("template without a description: " + t.id);
     if (!t.blank() && t.project_dir.empty()) return fail("sample template not baked: " + t.id);
+    if (t.thumbnail.empty()) return fail("template without a thumbnail: " + t.id);
+    int tw = 0, th = 0;
+    if (!png_size(t.thumbnail, &tw, &th) || tw < 64 || th < 32) {
+      return fail("thumbnail does not decode: " + t.thumbnail);
+    }
+    if (t.empty_group()) {
+      ++empties;
+      // Clean starting points: no optional plugins, listed before the samples.
+      if (seen_sample) return fail("the Empty group comes first: " + t.id);
+      if (!t.plugins_set || !t.plugins.empty()) return fail("empty templates enable no plugins: " + t.id);
+    } else if (!t.user) {
+      seen_sample = true;
+      if (t.group != "samples") return fail("engine samples are in the Samples group: " + t.id);
+    }
   }
+  if (empties != 8) return fail("eight Empty templates, got " + std::to_string(empties));
   const auto* saloon = ts.find("haunted-saloon-vr");
   if (saloon->kind != editor::ProjectKind::ThreeD || !saloon->vr) {
     return fail("haunted-saloon-vr is 3D with VR on");
   }
-  if (ts.find("blank-2d")->plugins != std::vector<std::string>{"ts.posse"} ||
+  if (ts.find("dusty-town")->plugins != std::vector<std::string>{"ts.posse"} ||
       ts.find("frontier-survival")->plugins != std::vector<std::string>{"ts.frontier"}) {
     return fail("template plugin lists");
+  }
+  const auto* blank = ts.find("truly-blank");
+  if (!blank->has_alt || blank->kind != editor::ProjectKind::TwoD ||
+      blank->alt_kind != editor::ProjectKind::ThreeD || blank->alt_project_dir.empty() ||
+      !ts.find("empty-vr")->vr || ts.find("empty-3d")->vr) {
+    return fail("Truly Blank picks 2D or 3D; Empty VR is the VR one");
   }
 
   // 2. A fresh root stays empty: samples are templates, not seeds.
@@ -114,7 +158,7 @@ int run_templates_smoke() {
 
   // 4. The VR switch in the create flow (3D only).
   editor::ProjectInfo vr3d, flat_saloon, flat2d;
-  if (!editor::TemplateStore::create_project(store, *ts.find("blank-3d"), "Goggles On", &vr3d, &err, 1) ||
+  if (!editor::TemplateStore::create_project(store, *ts.find("empty-3d"), "Goggles On", &vr3d, &err, 1) ||
       !vr3d.vr || vr3d.kind != editor::ProjectKind::ThreeD || !editor::vr_enabled(vr3d)) {
     return fail("blank 3D with VR on: " + err);
   }
@@ -193,7 +237,14 @@ int run_templates_smoke() {
   }
 
   fs::remove_all(root, ec);
+
+  // 8. Every engine template: a claim in a temp folder, opened in its
+  // editor, ridden headless for a few frames (SmokeTemplatesPlay.cpp).
+  std::string play_note;
+  if (run_template_play_smoke(&play_note) != 0) return 1;
+
   std::cout << "[smoke] templates OK (" << made
-            << " engine templates created, VR switch, no seeding, Save as Template, generator fallback)\n";
+            << " engine templates created, VR switch, no seeding, Save as Template, generator fallback; "
+            << play_note << ")\n";
   return 0;
 }

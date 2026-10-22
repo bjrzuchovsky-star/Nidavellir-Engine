@@ -48,6 +48,8 @@
 #include "SmokeStory.h"
 #include "SmokeAnim3D.h"
 #include "SmokeTemplates.h"
+#include "editor/screens/ProjectManagerScreen.h"
+#include "editor/templates/TemplateStore.h"
 #include "SmokeTradingPost.h"
 #include "SmokeTerrain.h"
 #include "VaultCli.h"
@@ -73,6 +75,7 @@ int run_terrain_shot(const std::string& png);
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -1556,6 +1559,97 @@ int run_tiles_shot(std::string project, const std::string& png) {
   return 0;
 }
 
+// ts_admin --templates-shot <out.png>: the Project Manager's New Claim
+// dialog (Break Ground, Dusk theme) over an empty territory, Empty group
+// first, Samples second, with the engine-made thumbnails (docs screenshot).
+int run_templates_shot(const std::string& png) {
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+  const int W = 1280, H = 1000;
+  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone New Claim", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(window);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGui::GetIO().IniFilename = nullptr;  // never touches imgui.ini
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  static gfx::GlTextureUploader gl_uploader;
+  gfx::set_texture_uploader(&gl_uploader);
+  Settings defaults;
+  apply_theme(defaults);
+  const std::filesystem::path root = std::filesystem::temp_directory_path() / "ts_templates_shot";
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  std::filesystem::create_directories(root, ec);
+  editor::TemplateStore templates;
+  templates.refresh_dirs(editor::TemplateStore::engine_template_dirs(),
+                         editor::TemplateStore::user_template_dir(root.string()));
+  auto pm = std::make_unique<editor::ProjectManagerScreen>(std::vector<editor::ProjectInfo>{},
+                                                           root.string());
+  pm->set_templates(&templates);
+  pm->on_enter();
+  pm->open_template_picker("empty-2d-platformer");
+  int fw = 0, fh = 0;
+  std::vector<unsigned char> px;
+  const int kFrames = 12;
+  for (int frame = 0; frame < kFrames && !glfwWindowShouldClose(window); ++frame) {
+    glfwPollEvents();
+    glfwGetFramebufferSize(window, &fw, &fh);
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::GetIO().AddMousePosEvent(-FLT_MAX, -FLT_MAX);  // no hover tooltips
+    ImGui::NewFrame();
+    pm->on_update(1.0f / 60.0f);
+    ImGui::Render();
+    glViewport(0, 0, fw, fh);
+    const ImVec4 clear = editor::theme::Charcoal();
+    glClearColor(clear.x, clear.y, clear.z, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    if (frame == kFrames - 1) {
+      px.assign(static_cast<std::size_t>(fw) * fh * 4, 0);
+      glPixelStorei(GL_PACK_ALIGNMENT, 1);
+      glReadBuffer(GL_BACK);
+      glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    }
+    glfwSwapBuffers(window);
+  }
+  pm->on_exit();
+  pm.reset();  // thumbnail textures go while the context lives
+  gfx::set_texture_uploader(nullptr);
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  std::filesystem::remove_all(root, ec);
+  if (px.empty()) return 1;
+  std::vector<unsigned char> flipped(px.size());
+  for (int y = 0; y < fh; ++y) {
+    std::memcpy(&flipped[static_cast<std::size_t>(y) * fw * 4],
+                &px[static_cast<std::size_t>(fh - 1 - y) * fw * 4], static_cast<std::size_t>(fw) * 4);
+  }
+  for (std::size_t i = 3; i < flipped.size(); i += 4) flipped[i] = 255;
+  if (!write_png_rgba(png, fw, fh, flipped)) {
+    std::cerr << "cannot write " << png << '\n';
+    return 1;
+  }
+  std::cout << "New Claim screenshot: " << png << " (" << fw << "x" << fh << ", "
+            << templates.templates().size() << " templates)\n";
+  return 0;
+}
+
 // ts_admin --freight-shot <project dir | sample:<id>> <out.png>: the Freight
 // Office (Dusk theme) alone in a window, saved as a PNG (docs screenshots).
 int run_freight_shot(std::string project, const std::string& png) {
@@ -1891,6 +1985,12 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--bake-templates") == 0 && i + 1 < argc) {
       return run_bake_templates(argv[i + 1]);
+    }
+    if (std::strcmp(argv[i], "--bake-thumbnails") == 0 && i + 1 < argc) {
+      return run_bake_thumbnails(argv[i + 1]);
+    }
+    if (std::strcmp(argv[i], "--templates-shot") == 0 && i + 1 < argc) {
+      return run_templates_shot(argv[i + 1]);
     }
     if (std::strcmp(argv[i], "--smoke-store") == 0) {
       return run_trading_post_smoke();

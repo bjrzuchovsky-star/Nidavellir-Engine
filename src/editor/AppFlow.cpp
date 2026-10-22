@@ -181,8 +181,9 @@ void AppFlow::handle_pending_screen_actions() {
       const std::string name = pm->pending_new_project_name();
       const std::string id = pm->pending_template_id();
       const int vr = pm->pending_template_vr();
+      const int dimension = pm->pending_template_dimension();
       pm->clear_template_create_request();
-      create_from_template(name, id, vr);
+      create_from_template(name, id, vr, dimension);
     }
     if (pm->save_template_requested()) {
       const auto idx = pm->highlighted_index();
@@ -307,7 +308,7 @@ void pm_report(IScreen* screen, const std::vector<ProjectInfo>* projects, const 
 }  // namespace
 
 bool AppFlow::create_from_template(const std::string& name, const std::string& template_id,
-                                   int vr) {
+                                   int vr, int dimension) {
   last_error_.clear();
   const ProjectTemplate* tpl = templates_.find(template_id);
   if (!tpl) {
@@ -317,7 +318,7 @@ bool AppFlow::create_from_template(const std::string& name, const std::string& t
   }
   ProjectInfo created;
   std::string err;
-  if (!TemplateStore::create_project(project_store_, *tpl, name, &created, &err, vr)) {
+  if (!TemplateStore::create_project(project_store_, *tpl, name, &created, &err, vr, dimension)) {
     last_error_ = err;
     status_message_.clear();
     std::cout << "[AppFlow] create from template " << template_id << " failed: " << err << '\n';

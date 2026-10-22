@@ -1,0 +1,14 @@
+{
+  "version": 11,
+  "pan_x": 0,
+  "pan_y": 0,
+  "zoom": 1,
+  "show_grid": true,
+  "grid_size": 32,
+  "snap": true,
+  "selected_id": null,
+  "selection": [],
+  "tile_solidity": [],
+  "entities": [
+  ]
+}

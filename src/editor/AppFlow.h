@@ -54,7 +54,9 @@ class AppFlow {
   bool delete_project(std::size_t index);
   // Templates (Break Ground picker): create from a template id; vr = -1
   // template default, 0 off, 1 on (3D only).
-  bool create_from_template(const std::string& name, const std::string& template_id, int vr = -1);
+  // dimension: 0 = 2D, 1 = 3D, -1 = the template's own (Truly Blank picks).
+  bool create_from_template(const std::string& name, const std::string& template_id, int vr = -1,
+                            int dimension = -1);
   bool save_project_as_template(std::size_t index, const std::string& name,
                                 const std::string& description);
   // Claim Settings: VR switch on a 3D project.

@@ -1,0 +1,94 @@
+{
+  "version": 16,
+  "dimension": "3d",
+  "environment": {
+    "sky_top": [0.28, 0.45, 0.72],
+    "sky_horizon": [0.82, 0.8, 0.74],
+    "ground": [0.3, 0.27, 0.22],
+    "ambient": 0.4,
+    "sun_direction": [-0.45, -0.8, -0.35],
+    "sun_color": [1, 0.88, 0.7],
+    "sun_intensity": 2.6,
+    "shadows": true,
+    "shadow_distance": 40,
+    "wind_dir": [1, 0],
+    "wind_strength": 0,
+    "wind_gust": 0
+  },
+  "entities": [
+    {
+      "id": 1,
+      "name": "Player",
+      "position": [0, 1, 3],
+      "rotation": [0, 0, 0, 1],
+      "scale": [1, 1, 1],
+      "mesh": {
+        "source": "primitive:capsule"
+      },
+      "material": {
+        "albedo": [0.86, 0.55, 0.28, 1],
+        "metallic": 0,
+        "roughness": 0.6
+      },
+      "collider": {
+        "shape": "capsule",
+        "size": [0.4, 2, 0.4],
+        "offset": [0, 0, 0]
+      },
+      "player": {
+        "speed": 4.5,
+        "jump_speed": 5.5,
+        "camera_distance": 5,
+        "camera_height": 2
+      },
+      "script": {
+        "path": "scripts/player.lua"
+      }
+    },
+    {
+      "id": 2,
+      "name": "Sun",
+      "position": [0, 10, 0],
+      "rotation": [-0.44601488, 0.22957529, 0.11950933, 0.85678667],
+      "scale": [1, 1, 1],
+      "light": {
+        "type": "directional",
+        "color": [1, 0.92, 0.8],
+        "intensity": 2.6,
+        "range": 8
+      }
+    },
+    {
+      "id": 3,
+      "name": "Ground",
+      "position": [0, -0.25, 0],
+      "rotation": [0, 0, 0, 1],
+      "scale": [40, 0.5, 40],
+      "mesh": {
+        "source": "primitive:cube"
+      },
+      "material": {
+        "albedo": [0.52, 0.47, 0.4, 1],
+        "metallic": 0,
+        "roughness": 0.95
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      }
+    }
+  ],
+  "editor": {
+    "camera_target": [0, 0.5, 0],
+    "camera_yaw": 35,
+    "camera_pitch": 28,
+    "camera_distance": 14,
+    "show_grid": true,
+    "snap": true,
+    "snap_translate": 0.5,
+    "snap_rotate": 15,
+    "snap_scale": 0.25,
+    "selection": [1]
+  }
+}

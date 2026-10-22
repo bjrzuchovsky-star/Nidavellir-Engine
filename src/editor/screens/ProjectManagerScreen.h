@@ -81,10 +81,15 @@ class ProjectManagerScreen final : public IScreen {
   void open_template_picker(std::string preselect_id = {});
   bool template_picker_open() const { return picker_open_; }
   // vr: -1 = template default, 0 off, 1 on (3D only).
-  void request_new_from_template(std::string name, std::string template_id, int vr = -1);
+  // dimension: -1 = the template's own, 0 = 2D, 1 = 3D (Truly Blank).
+  void request_new_from_template(std::string name, std::string template_id, int vr = -1,
+                                 int dimension = -1);
   bool template_create_requested() const { return template_create_requested_; }
   const std::string& pending_template_id() const { return pending_template_id_; }
   int pending_template_vr() const { return pending_template_vr_; }
+  int pending_template_dimension() const { return pending_template_dim_; }
+  // Picker state for tools / screenshots (--templates-shot).
+  void pick_template(const std::string& id);
   void clear_template_create_request();
   // Save the highlighted project as a user template.
   void request_save_as_template(std::string name, std::string description);
@@ -111,6 +116,8 @@ class ProjectManagerScreen final : public IScreen {
   void draw_save_template_popup();
   void draw_claim_settings_popup();
   void draw_template_thumb(const ProjectTemplate& t, const ImVec2& p0, const ImVec2& p1);
+  void draw_template_group(const char* title, const char* caption, const std::string& group);
+  std::string default_claim_name(const ProjectTemplate& t) const;
 
   std::vector<ProjectInfo> projects_;
   std::string projects_root_;
@@ -143,6 +150,8 @@ class ProjectManagerScreen final : public IScreen {
   bool template_create_requested_ = false;
   std::string pending_template_id_;
   int pending_template_vr_ = -1;
+  int pending_template_dim_ = -1;
+  int picker_dim_ = -1;  // Truly Blank's 2D / 3D switch: 0 / 1, -1 = template's
   bool save_popup_pending_ = false;
   char save_name_buf_[128]{};
   char save_desc_buf_[256]{};

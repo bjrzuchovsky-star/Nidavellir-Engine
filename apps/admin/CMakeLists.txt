@@ -32,6 +32,7 @@ add_executable(ts_admin
   SmokeGraph.cpp
   SmokeNative.cpp
   SmokeTemplates.cpp
+  SmokeTemplatesPlay.cpp
   SmokeTradingPost.cpp
   SmokeCSharp.cpp
   SmokePhysics.cpp

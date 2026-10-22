@@ -1,0 +1,14 @@
+{
+  "id": "empty-2d",
+  "name": "Empty 2D",
+  "dimension": "2d",
+  "vr": false,
+  "group": "empty",
+  "description": "A camera, one empty tilemap layer and the 2D lighting off. Nothing else.",
+  "plugins": [],
+  "tags": ["empty", "blank"],
+  "order": 0,
+  "thumbnail": "thumbnail.png",
+  "project": "project",
+  "generator": "empty-2d"
+}

@@ -1,0 +1,14 @@
+{
+  "id": "empty-3d",
+  "name": "Empty 3D",
+  "dimension": "3d",
+  "vr": false,
+  "group": "empty",
+  "description": "A camera, a sun, a sky and a ground plane. No props.",
+  "plugins": [],
+  "tags": ["empty", "blank"],
+  "order": 3,
+  "thumbnail": "thumbnail.png",
+  "project": "project",
+  "generator": "empty-3d"
+}

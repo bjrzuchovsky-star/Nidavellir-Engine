@@ -1,0 +1,17 @@
+{
+  "id": "truly-blank",
+  "name": "Truly Blank",
+  "dimension": "2d",
+  "vr": false,
+  "group": "empty",
+  "description": "No entities at all: an empty scene, an empty assets folder and a README. Pick 2D or 3D.",
+  "plugins": [],
+  "tags": ["empty", "blank"],
+  "order": 7,
+  "thumbnail": "thumbnail.png",
+  "project": "project",
+  "generator": "truly-blank-2d",
+  "alt_dimension": "3d",
+  "alt_project": "project-3d",
+  "alt_generator": "truly-blank-3d"
+}

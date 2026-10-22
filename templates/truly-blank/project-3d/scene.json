@@ -1,0 +1,31 @@
+{
+  "version": 16,
+  "dimension": "3d",
+  "environment": {
+    "sky_top": [0.16, 0.22, 0.36],
+    "sky_horizon": [0.93, 0.62, 0.38],
+    "ground": [0.24, 0.19, 0.15],
+    "ambient": 0.35,
+    "sun_direction": [-0.45, -0.8, -0.35],
+    "sun_color": [1, 0.88, 0.7],
+    "sun_intensity": 2.6,
+    "shadows": true,
+    "shadow_distance": 40,
+    "wind_dir": [1, 0],
+    "wind_strength": 0,
+    "wind_gust": 0
+  },
+  "entities": [],
+  "editor": {
+    "camera_target": [0, 0.5, 0],
+    "camera_yaw": 35,
+    "camera_pitch": 28,
+    "camera_distance": 14,
+    "show_grid": true,
+    "snap": true,
+    "snap_translate": 0.5,
+    "snap_rotate": 15,
+    "snap_scale": 0.25,
+    "selection": []
+  }
+}

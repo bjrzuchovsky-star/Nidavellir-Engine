@@ -9,7 +9,9 @@
 //     template.json     {"id", "name", "dimension": "2d|3d", "vr": bool,
 //                        "description", "plugins": [..], "thumbnail",
 //                        "tags": [..], "order", "project": "project",
-//                        "generator": "ghost-town-3d"}
+//                        "generator": "ghost-town-3d", "group": "empty|samples",
+//                        "alt_dimension": "3d", "alt_project": "project-3d",
+//                        "alt_generator": "truly-blank-3d"}
 //     thumbnail.png     optional card picture
 //     project/          optional; copied as the new project's folder
 //
@@ -49,7 +51,17 @@ struct ProjectTemplate {
   std::string generator;     // built-in sample writer id, "" for none
   int order = 1000;
   bool user = false;         // saved with "Save as Template"
+  // Picker group: "empty" (clean starting points), "samples" (the default
+  // for engine templates) or "mine" (user templates, always).
+  std::string group = "samples";
+  // Optional second dimension (Truly Blank: 2D or 3D). The create flow's
+  // 2D / 3D switch picks it; the alt folder / generator build that one.
+  bool has_alt = false;
+  ProjectKind alt_kind = ProjectKind::ThreeD;
+  std::string alt_project_dir;  // "" = run alt_generator
+  std::string alt_generator;
   bool blank() const { return project_dir.empty() && generator.empty(); }
+  bool empty_group() const { return group == "empty"; }
 };
 
 class TemplateStore {
@@ -78,9 +90,11 @@ class TemplateStore {
   // the new name, dimension, fresh created time, no last_opened and the
   // template's plugins. Refreshes the store. Fails if the folder exists.
   // vr: the create flow's VR switch (3D only); -1 = the template's default.
+  // dimension: the 2D / 3D switch for templates with an alt dimension
+  // (0 = 2D, 1 = 3D, -1 = the template's own).
   static bool create_project(ProjectStore& store, const ProjectTemplate& tpl,
                              const std::string& name, ProjectInfo* out, std::string* error,
-                             int vr = -1);
+                             int vr = -1, int dimension = -1);
 
   // Copies a project into <user dir>/<slug(name)>/project and writes
   // template.json (dimension + plugins from the project, the description
@@ -90,14 +104,16 @@ class TemplateStore {
                                const std::string& name, const std::string& description,
                                ProjectTemplate* out, std::string* error);
 
-  // Built-in sample writers: "sample-2d-platformer", "ghost-town-3d",
-  // "haunted-saloon-vr", "frontier-survival", "sky-pirates".
+  // Built-in writers: the samples ("sample-2d-platformer", "ghost-town-3d",
+  // "haunted-saloon-vr", "frontier-survival", "sky-pirates") and the empty
+  // templates (editor/templates/EmptyTemplates.h).
   static std::vector<std::string> generator_ids();
   static bool run_generator(const std::string& id, const std::string& dir,
                             const std::string& name, std::string* error);
 
-  // ts_admin --bake-templates: (re)writes project/ for every engine template
-  // with a generator under `templates_root`. Returns how many were baked.
+  // ts_admin --bake-templates: (re)writes project/ (and the alt project) for
+  // every engine template with a generator under `templates_root`. Returns
+  // how many were baked. Thumbnails: see TemplateThumbs.h.
   static int bake(const std::string& templates_root, std::vector<std::string>* errors);
 
  private:

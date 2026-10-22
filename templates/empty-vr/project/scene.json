@@ -1,0 +1,86 @@
+{
+  "version": 16,
+  "dimension": "3d",
+  "environment": {
+    "sky_top": [0.28, 0.45, 0.72],
+    "sky_horizon": [0.82, 0.8, 0.74],
+    "ground": [0.3, 0.27, 0.22],
+    "ambient": 0.4,
+    "sun_direction": [-0.45, -0.8, -0.35],
+    "sun_color": [1, 0.88, 0.7],
+    "sun_intensity": 2.6,
+    "shadows": true,
+    "shadow_distance": 40,
+    "wind_dir": [1, 0],
+    "wind_strength": 0,
+    "wind_gust": 0
+  },
+  "entities": [
+    {
+      "id": 1,
+      "name": "VR Rig",
+      "position": [0, 0, 2],
+      "rotation": [0, 0, 0, 1],
+      "scale": [1, 1, 1],
+      "vr_rig": {
+        "locomotion": "teleport",
+        "move_speed": 2,
+        "snap_turn_deg": 45,
+        "smooth_turn_speed": 120,
+        "teleport_range": 9,
+        "vignette": true,
+        "seated": false,
+        "seated_offset": 0.45,
+        "hand_model": "assets/hand.gltf"
+      },
+      "script": {
+        "path": "scripts/player.lua"
+      }
+    },
+    {
+      "id": 2,
+      "name": "Sun",
+      "position": [0, 10, 0],
+      "rotation": [-0.44601488, 0.22957529, 0.11950933, 0.85678667],
+      "scale": [1, 1, 1],
+      "light": {
+        "type": "directional",
+        "color": [1, 0.92, 0.8],
+        "intensity": 2.6,
+        "range": 8
+      }
+    },
+    {
+      "id": 3,
+      "name": "Ground",
+      "position": [0, -0.25, 0],
+      "rotation": [0, 0, 0, 1],
+      "scale": [40, 0.5, 40],
+      "mesh": {
+        "source": "primitive:cube"
+      },
+      "material": {
+        "albedo": [0.52, 0.47, 0.4, 1],
+        "metallic": 0,
+        "roughness": 0.95
+      },
+      "collider": {
+        "shape": "box",
+        "size": [1, 1, 1],
+        "offset": [0, 0, 0]
+      }
+    }
+  ],
+  "editor": {
+    "camera_target": [0, 1, 2],
+    "camera_yaw": 35,
+    "camera_pitch": 28,
+    "camera_distance": 7,
+    "show_grid": true,
+    "snap": true,
+    "snap_translate": 0.5,
+    "snap_rotate": 15,
+    "snap_scale": 0.25,
+    "selection": [1]
+  }
+}

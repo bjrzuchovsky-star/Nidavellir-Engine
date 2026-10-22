@@ -1,0 +1,14 @@
+{
+  "id": "empty-vr",
+  "name": "Empty VR",
+  "dimension": "3d",
+  "vr": true,
+  "group": "empty",
+  "description": "VR on: an XR rig with hands, teleport and snap turn, a ground plane. Rides flat on the desktop too.",
+  "plugins": [],
+  "tags": ["empty", "vr", "player"],
+  "order": 6,
+  "thumbnail": "thumbnail.png",
+  "project": "project",
+  "generator": "empty-vr"
+}

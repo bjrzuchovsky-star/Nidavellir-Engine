@@ -31,9 +31,12 @@ std::string lower(std::string s) {
 }
 
 bool template_matches(const ProjectTemplate& t, int filter, const char* search) {
+  // Templates with an alt dimension (Truly Blank) show under 2D and 3D.
+  const bool any_2d = t.kind == ProjectKind::TwoD || (t.has_alt && t.alt_kind == ProjectKind::TwoD);
+  const bool any_3d = t.kind != ProjectKind::TwoD || (t.has_alt && t.alt_kind != ProjectKind::TwoD);
   switch (filter) {
-    case 1: if (t.kind != ProjectKind::TwoD) return false; break;
-    case 2: if (t.kind == ProjectKind::TwoD) return false; break;
+    case 1: if (!any_2d) return false; break;
+    case 2: if (!any_3d) return false; break;
     case 3: if (!t.vr) return false; break;
     case 4: if (!t.user) return false; break;
     default: break;
@@ -67,6 +70,25 @@ std::string plugin_short(const std::string& id) {
 
 }  // namespace
 
+std::string ProjectManagerScreen::default_claim_name(const ProjectTemplate& t) const {
+  if (t.blank() || t.empty_group()) {
+    const bool two_d = t.has_alt && picker_dim_ >= 0 ? picker_dim_ == 0 : t.kind == ProjectKind::TwoD;
+    if (two_d) return "New 2D Claim";
+    return t.vr ? "New VR Claim" : "New 3D Claim";
+  }
+  return "My " + t.name;
+}
+
+void ProjectManagerScreen::pick_template(const std::string& id) {
+  const ProjectTemplate* t = templates_ ? templates_->find(id) : nullptr;
+  if (!t) return;
+  picked_template_id_ = id;
+  picker_vr_ = t->vr;
+  picker_dim_ = -1;
+  std::memset(picker_name_buf_, 0, sizeof(picker_name_buf_));
+  std::snprintf(picker_name_buf_, sizeof(picker_name_buf_), "%s", default_claim_name(*t).c_str());
+}
+
 void ProjectManagerScreen::open_template_picker(std::string preselect_id) {
   picker_open_ = true;
   picker_popup_pending_ = true;
@@ -74,23 +96,25 @@ void ProjectManagerScreen::open_template_picker(std::string preselect_id) {
   std::memset(picker_search_, 0, sizeof(picker_search_));
   if (!preselect_id.empty()) {
     picked_template_id_ = std::move(preselect_id);
-  } else if (picked_template_id_.empty() && templates_ && !templates_->templates().empty()) {
-    picked_template_id_ = templates_->templates().front().id;
+  } else if ((picked_template_id_.empty() || !templates_ || !templates_->find(picked_template_id_)) &&
+             templates_ && !templates_->templates().empty()) {
+    picked_template_id_ = templates_->templates().front().id;  // Empty 2D
   }
   const ProjectTemplate* t = templates_ ? templates_->find(picked_template_id_) : nullptr;
-  picker_vr_ = t && t->vr;
-  std::memset(picker_name_buf_, 0, sizeof(picker_name_buf_));
-  std::snprintf(picker_name_buf_, sizeof(picker_name_buf_), "%s",
-                t ? (t->blank() ? (t->kind == ProjectKind::TwoD ? "New 2D Claim" : "New 3D Claim")
-                                : ("My " + t->name).c_str())
-                  : "New Claim");
+  if (t) {
+    pick_template(t->id);
+  } else {
+    std::memset(picker_name_buf_, 0, sizeof(picker_name_buf_));
+    std::snprintf(picker_name_buf_, sizeof(picker_name_buf_), "%s", "New Claim");
+  }
 }
 
 void ProjectManagerScreen::request_new_from_template(std::string name, std::string template_id,
-                                                     int vr) {
+                                                     int vr, int dimension) {
   pending_new_project_name_ = std::move(name);
   pending_template_id_ = std::move(template_id);
   pending_template_vr_ = vr;
+  pending_template_dim_ = dimension;
   template_create_requested_ = true;
   std::cout << "[ProjectManager] New claim from template \"" << pending_template_id_
             << "\": \"" << pending_new_project_name_ << "\"\n";
@@ -100,6 +124,7 @@ void ProjectManagerScreen::clear_template_create_request() {
   template_create_requested_ = false;
   pending_template_id_.clear();
   pending_template_vr_ = -1;
+  pending_template_dim_ = -1;
 }
 
 void ProjectManagerScreen::request_save_as_template(std::string name, std::string description) {
@@ -206,18 +231,13 @@ void ProjectManagerScreen::draw_template_card(const ProjectTemplate& t, float w,
   ImGui::PushID(t.id.c_str());
   const ImVec2 p0 = ImGui::GetCursorScreenPos();
   if (ImGui::InvisibleButton("tpl", ImVec2(w, h))) {
-    const bool changed = picked_template_id_ != t.id;
-    picked_template_id_ = t.id;
-    if (changed) {
-      picker_vr_ = t.vr;
-      std::snprintf(picker_name_buf_, sizeof(picker_name_buf_), "%s",
-                    t.blank() ? (t.kind == ProjectKind::TwoD ? "New 2D Claim" : "New 3D Claim")
-                              : ("My " + t.name).c_str());
-    }
+    if (picked_template_id_ != t.id) pick_template(t.id);
   }
   const bool hovered = ImGui::IsItemHovered();
   if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-    request_new_from_template(picker_name_buf_, t.id, t.kind == ProjectKind::TwoD ? 0 : picker_vr_);
+    const bool two_d = t.has_alt && picker_dim_ >= 0 ? picker_dim_ == 0 : t.kind == ProjectKind::TwoD;
+    request_new_from_template(picker_name_buf_, t.id, two_d ? 0 : picker_vr_,
+                              t.has_alt ? picker_dim_ : -1);
     picker_open_ = false;
   }
   ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -242,8 +262,9 @@ void ProjectManagerScreen::draw_template_card(const ProjectTemplate& t, float w,
     bx = b0.x - 4.0f;
   };
   if (t.vr) badge("VR", theme::Success());
-  badge(t.kind == ProjectKind::TwoD ? "2D" : "3D", theme::Accent());
+  badge(t.has_alt ? "2D / 3D" : t.kind == ProjectKind::TwoD ? "2D" : "3D", theme::Accent());
   if (t.user) badge("Mine", theme::Sand());
+  if (t.empty_group()) badge("Empty", theme::Sand());
 
   // Name, description (two lines), plugin chips.
   float y = p0.y + th + 6.0f;
@@ -274,6 +295,41 @@ void ProjectManagerScreen::draw_template_card(const ProjectTemplate& t, float w,
   ImGui::PopID();
 }
 
+void ProjectManagerScreen::draw_template_group(const char* title, const char* caption,
+                                               const std::string& group) {
+  ImGui::Spacing();
+  ImGui::PushStyleColor(ImGuiCol_Text, theme::Accent());
+  ImGui::TextUnformatted(title);
+  ImGui::PopStyleColor();
+  ImGui::SameLine();
+  ImGui::TextDisabled("%s", caption);
+  {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    dl->AddLine(ImVec2(p.x, p.y), ImVec2(p.x + ImGui::GetContentRegionAvail().x, p.y),
+                theme::U32(theme::AccentMuted()), 1.0f);
+    ImGui::Dummy(ImVec2(0, 4));
+  }
+  const float avail = ImGui::GetContentRegionAvail().x;
+  const float gap = 12.0f;
+  const int cols = std::max(1, static_cast<int>((avail + gap) / (220.0f + gap)));
+  const float cw = (avail - gap * (cols - 1)) / cols;
+  const float chh = cw * 0.52f + 92.0f;
+  int col = 0;
+  ImGui::PushID(group.c_str());
+  for (const ProjectTemplate& t : templates_->templates()) {
+    if (t.group != group || !template_matches(t, picker_filter_, picker_search_)) continue;
+    if (col > 0) ImGui::SameLine(0.0f, gap);
+    draw_template_card(t, cw, chh);
+    if (++col == cols) {
+      col = 0;
+      ImGui::Dummy(ImVec2(0, gap - ImGui::GetStyle().ItemSpacing.y));
+    }
+  }
+  if (col != 0) ImGui::Dummy(ImVec2(0, gap - ImGui::GetStyle().ItemSpacing.y));
+  ImGui::PopID();
+}
+
 void ProjectManagerScreen::draw_template_picker() {
   if (picker_popup_pending_) {
     ImGui::OpenPopup(kPickerTitle);
@@ -284,7 +340,7 @@ void ProjectManagerScreen::draw_template_picker() {
                                  vp->WorkPos.y + vp->WorkSize.y * 0.5f),
                           ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
   ImGui::SetNextWindowSize(ImVec2(std::min(980.0f, vp->WorkSize.x - 40.0f),
-                                  std::min(660.0f, vp->WorkSize.y - 40.0f)),
+                                  std::min(900.0f, vp->WorkSize.y - 40.0f)),
                            ImGuiCond_Appearing);
   bool keep = picker_open_;
   if (!ImGui::BeginPopupModal(kPickerTitle, &keep)) {
@@ -320,21 +376,21 @@ void ProjectManagerScreen::draw_template_picker() {
     theme::StatusWarn("No templates found. The engine looks in <ts_admin folder>/templates, "
                       "the source templates/ folder and $TS_TEMPLATES_PATH.");
   } else {
-    const float avail = ImGui::GetContentRegionAvail().x;
-    const float gap = 12.0f;
-    const int cols = std::max(1, static_cast<int>((avail + gap) / (220.0f + gap)));
-    const float cw = (avail - gap * (cols - 1)) / cols;
-    const float chh = cw * 0.52f + 92.0f;
-    int col = 0;
     int shown = 0;
-    for (const ProjectTemplate& t : templates_->templates()) {
-      if (!template_matches(t, picker_filter_, picker_search_)) continue;
-      if (col > 0) ImGui::SameLine(0.0f, gap);
-      draw_template_card(t, cw, chh);
-      ++shown;
-      if (++col == cols) {
-        col = 0;
-        ImGui::Dummy(ImVec2(0, gap - ImGui::GetStyle().ItemSpacing.y));
+    for (const char* group : {"empty", "samples", "mine"}) {
+      int n = 0;
+      for (const ProjectTemplate& t : templates_->templates()) {
+        n += t.group == group && template_matches(t, picker_filter_, picker_search_) ? 1 : 0;
+      }
+      if (n == 0) continue;
+      shown += n;
+      const std::string g = group;
+      if (g == "empty") {
+        draw_template_group("Empty", "clean starting points: no samples, no plugins", g);
+      } else if (g == "samples") {
+        draw_template_group("Samples", "playable sample claims to learn from", g);
+      } else {
+        draw_template_group("Mine", "saved with Save as Template", g);
       }
     }
     if (shown == 0) ImGui::TextDisabled("Nothing on the shelf matches.");
@@ -343,10 +399,27 @@ void ProjectManagerScreen::draw_template_picker() {
   ImGui::EndChild();
 
   theme::Divider();
+  const bool picked_2d = picked && (picked->has_alt && picker_dim_ >= 0
+                                        ? picker_dim_ == 0
+                                        : picked->kind == ProjectKind::TwoD);
   if (picked) {
     ImGui::TextUnformatted(picked->name.c_str());
     ImGui::SameLine();
-    theme::DimensionBadge(picked->kind == ProjectKind::TwoD ? "2D" : "3D");
+    theme::DimensionBadge(picked_2d ? "2D" : "3D");
+    if (picked->has_alt) {
+      // Truly Blank: pick the dimension.
+      ImGui::SameLine();
+      bool two = picked_2d, three = !picked_2d;
+      if (theme::ToggleButton("2D##tpldim", &two) && two) {
+        picker_dim_ = picked->kind == ProjectKind::TwoD ? -1 : 0;
+        std::snprintf(picker_name_buf_, sizeof(picker_name_buf_), "%s", default_claim_name(*picked).c_str());
+      }
+      ImGui::SameLine();
+      if (theme::ToggleButton("3D##tpldim", &three) && three) {
+        picker_dim_ = picked->kind == ProjectKind::TwoD ? 1 : -1;
+        std::snprintf(picker_name_buf_, sizeof(picker_name_buf_), "%s", default_claim_name(*picked).c_str());
+      }
+    }
     std::string plugs;
     for (const std::string& p : picked->plugins) plugs += (plugs.empty() ? "" : ", ") + p;
     ImGui::SameLine();
@@ -358,7 +431,7 @@ void ProjectManagerScreen::draw_template_picker() {
   ImGui::SetNextItemWidth(300.0f);
   ImGui::InputTextWithHint("##tplname", "Name your claim", picker_name_buf_, sizeof(picker_name_buf_));
   ImGui::SameLine();
-  const bool three_d = picked && picked->kind != ProjectKind::TwoD;
+  const bool three_d = picked && !picked_2d;
   ImGui::BeginDisabled(!three_d);
   bool vr = three_d && picker_vr_;
   if (ImGui::Checkbox("VR (headset rig, grab, teleport)", &vr)) picker_vr_ = vr;
@@ -373,7 +446,8 @@ void ProjectManagerScreen::draw_template_picker() {
     if (!ProjectStore::validate_project_name(picker_name_buf_, &err)) {
       error_message_ = err;
     } else {
-      request_new_from_template(picker_name_buf_, picked->id, three_d ? (picker_vr_ ? 1 : 0) : 0);
+      request_new_from_template(picker_name_buf_, picked->id, three_d ? (picker_vr_ ? 1 : 0) : 0,
+                                picked->has_alt ? picker_dim_ : -1);
       picker_open_ = false;
       ImGui::CloseCurrentPopup();
     }

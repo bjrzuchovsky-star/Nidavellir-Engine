@@ -1,0 +1,14 @@
+{
+  "id": "empty-3d-fps",
+  "name": "Empty 3D First-person",
+  "dimension": "3d",
+  "vr": false,
+  "group": "empty",
+  "description": "An FPS character controller with its eye camera, a ground plane and a starter script.",
+  "plugins": [],
+  "tags": ["empty", "fps", "first-person", "player"],
+  "order": 4,
+  "thumbnail": "thumbnail.png",
+  "project": "project",
+  "generator": "empty-3d-fps"
+}

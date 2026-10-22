@@ -72,6 +72,8 @@ add_library(ts_editor
   audio/AudioWidgets.cpp
   export/FreightOffice.cpp
   templates/TemplateStore.cpp
+  templates/EmptyTemplates.cpp
+  templates/TemplateThumbs.cpp
   screens/ProjectManager_Templates.cpp
   store/TradingPostPanel.cpp
   vault/VaultProject.cpp

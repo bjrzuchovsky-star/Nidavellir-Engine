@@ -1,0 +1,14 @@
+{
+  "id": "empty-3d-tps",
+  "name": "Empty 3D Third-person",
+  "dimension": "3d",
+  "vr": false,
+  "group": "empty",
+  "description": "A character controller with an orbit camera, a ground plane and a starter script.",
+  "plugins": [],
+  "tags": ["empty", "third-person", "player"],
+  "order": 5,
+  "thumbnail": "thumbnail.png",
+  "project": "project",
+  "generator": "empty-3d-tps"
+}
