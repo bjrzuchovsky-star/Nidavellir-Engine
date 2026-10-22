@@ -79,6 +79,7 @@ add_library(ts_editor
   store/TradingPostPanel.cpp
   vault/VaultProject.cpp
   vault/VaultPanel.cpp
+  vault/FilePick.cpp
   update/UpdateCheck.cpp
   update/UpdateService.cpp
   scripting/BrandBook.cpp
@@ -131,4 +132,6 @@ target_compile_definitions(ts_editor PRIVATE TS_ENGINE_VERSION="${PROJECT_VERSIO
 if(WIN32)
   # ShellExecuteW (open a script in the OS default editor).
   target_link_libraries(ts_editor PRIVATE shell32)
+  # GetOpenFileNameW (Vault manager > Add files...).
+  target_link_libraries(ts_editor PRIVATE comdlg32)
 endif()

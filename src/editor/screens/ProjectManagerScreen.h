@@ -4,8 +4,10 @@
 #include "editor/screens/IScreen.h"
 #include "editor/store/TradingPostPanel.h"
 #include "editor/update/UpdateBanner.h"
+#include "editor/vault/VaultPanel.h"
 #include "gfx/TextureCache.h"
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -101,6 +103,12 @@ class ProjectManagerScreen final : public IScreen {
   // Trading Post (plugin store), outfitting the highlighted claim.
   void open_trading_post() { trading_post_.open = true; }
   TradingPostUi& trading_post() { return trading_post_; }
+  // The Vault manager: the library without opening a claim (browse, edit,
+  // delete, Add files..., Pull into claim...). Drawn in place of the claims.
+  void open_vault();
+  void close_vault() { vault_open_ = false; }
+  bool vault_open() const { return vault_open_; }
+  VaultPanel* vault_panel() { return vault_.get(); }
 
   // Claim settings: VR switch on the highlighted 3D project.
   void request_set_vr(bool on);
@@ -120,6 +128,7 @@ class ProjectManagerScreen final : public IScreen {
 
  private:
   void draw_update_banner();
+  void draw_vault_screen();
   void draw_ui();
   void draw_project_card(std::size_t index);
   void draw_kind_picker();
@@ -176,6 +185,8 @@ class ProjectManagerScreen final : public IScreen {
   bool pending_vr_ = false;
   UpdateBanner update_banner_;
   UpdateAction update_action_ = UpdateAction::None;
+  std::unique_ptr<VaultPanel> vault_;
+  bool vault_open_ = false;
 };
 
 }  // namespace editor

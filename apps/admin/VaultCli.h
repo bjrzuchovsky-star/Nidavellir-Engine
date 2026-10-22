@@ -7,6 +7,9 @@ namespace tombstone {
 
 int run_vault_cli(int argc, char** argv);
 int run_vault_smoke();
+// ts_admin --smoke-vault-pm (also in --smoke): the Project Manager's Vault
+// manager: add loose files, edit, delete items / versions, pull into a claim.
+int run_vault_pm_smoke();
 // (ts_admin --vault-shot <png> renders the panel over vault_demo(); main.cpp.)
 
 }  // namespace tombstone

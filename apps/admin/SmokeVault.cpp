@@ -481,6 +481,178 @@ int check_remote(const fs::path& root) {
   return rc;
 }
 
+
+// ---- Vault manager (Project Manager) ------------------------------------------------
+
+// A folder of loose files that is not a claim: a model naming a texture one
+// folder up, a sound, a text file the Vault can't hold.
+fs::path loose_files(const fs::path& root) {
+  const fs::path l = root / "Downloads";
+  std::error_code ec;
+  fs::remove_all(l, ec);
+  texture(l / "textures/crate.png", 64, 64, 176, 120, 64, 0);
+  model(l / "models/crate.gltf", "../textures/crate.png");
+  wav(l / "bell.wav");
+  spit(l / "readme.txt", "not an asset");
+  return l;
+}
+
+// The manager's operations against one backend (local or a server with a write key).
+int check_manager(const fs::path& root, tv::Backend& lib, tv::Backend* read_only, const std::string& label) {
+  std::string err;
+  const fs::path l = loose_files(root / ("loose_" + label));
+  vp::PushOptions po;
+  po.author = "Brenden";
+  po.licence = "CC0-1.0";
+  po.tags = {"props"};
+  po.dims = {"3d"};
+  vp::AddFilesResult ar;
+  const std::vector<std::string> sources = {(l / "models/crate.gltf").string(), (l / "bell.wav").string(),
+                                            (l / "readme.txt").string()};
+  if (!vp::add_files(sources, lib, po, (root / ("scratch_" + label)).string(), &ar, &err)) {
+    return fail(label + " add files: " + err);
+  }
+  if (ar.items.size() != 2 || ar.pushed.size() != 3 || ar.skipped.size() != 1) {
+    return fail(label + " add files: 2 assets + the texture dependency, readme skipped (" + tv::join(ar.pushed) + ")");
+  }
+  std::error_code ec;
+  if (fs::exists(root / ("scratch_" + label), ec) && !fs::is_empty(root / ("scratch_" + label), ec)) {
+    return fail(label + " add files leaves its scratch claim behind");
+  }
+  std::vector<tv::Item> items;
+  if (!lib.list({}, &items, &err) || items.size() != 3) return fail(label + " list after add: 3 items");
+  tv::Item crate, bell;
+  for (const std::string& id : ar.items) {
+    tv::Item it;
+    if (!lib.get(id, &it, &err)) return fail(label + " get: " + err);
+    if (it.kind == "model") crate = it;
+    if (it.kind == "audio") bell = it;
+  }
+  if (crate.id.empty() || bell.id.empty()) return fail(label + " added a model and a sound");
+  bool has_bin = false, has_meta = false;
+  for (const tv::FileRec& f : crate.versions.at(0).files) {
+    has_bin |= f.path.size() > 4 && f.path.substr(f.path.size() - 4) == ".bin";
+    has_meta |= f.role == "meta" && f.guid == crate.id;
+  }
+  if (!has_bin || !has_meta || crate.versions[0].deps.size() != 1 || crate.author != "Brenden") {
+    return fail(label + " model item: .bin, .meta, texture dependency, author");
+  }
+  const std::string tex_id = crate.versions[0].deps[0].item;
+  // Edit details.
+  tv::Item meta = bell;
+  meta.versions.clear();
+  meta.name = "Church bell";
+  meta.tags = {"sfx", "town"};
+  meta.dims = {"2D", "3d", "vr"};
+  meta.description = "Rings at noon.";
+  meta.licence = "CC-BY-4.0";
+  tv::Item after;
+  if (read_only && read_only->update_item(meta, &after, &err)) return fail(label + " a read-only key edited an item");
+  if (!lib.update_item(meta, &after, &err)) return fail(label + " edit: " + err);
+  if (after.name != "Church bell" || after.tags.size() != 2 || after.dims.size() != 3 || after.licence != "CC-BY-4.0" ||
+      after.description != "Rings at noon." || after.kind != "audio" || after.versions.size() != 1 ||
+      after.versions[0].files.empty()) {
+    return fail(label + " edit result (name, tags, dims, licence, description; kind + versions kept)");
+  }
+  tv::Query q;
+  q.tag = "town";
+  if (!lib.list(q, &items, &err) || items.size() != 1 || items[0].id != bell.id) return fail(label + " search by the new tag");
+  meta.name = "  ";
+  if (lib.update_item(meta, &after, &err)) return fail(label + " an empty name was accepted");
+  // Delete refused while the model needs the texture; read-only keys can't delete.
+  if (lib.remove_item(tex_id, &err)) return fail(label + " deleted a texture the crate still needs");
+  if (err.find("needed by") == std::string::npos) return fail(label + " in-use error: " + err);
+  if (read_only && read_only->remove_item(bell.id, &err)) return fail(label + " a read-only key deleted an item");
+  // Versions: pull the bell into a claim, change it, send v2; delete v2; next is v3.
+  const fs::path c = fresh(root / ("pm_claim_" + label));
+  vp::PullResult pr;
+  if (!vp::pull_item(c.string(), nullptr, lib, bell.id, {}, &pr, &err)) return fail(label + " pull bell: " + err);
+  auto bump = [&](int n) {
+    std::string d = slurp(c / pr.main);
+    d.back() = static_cast<char>(d.back() + n);
+    spit(c / pr.main, d);
+  };
+  vp::PushResult push;
+  bump(1);
+  if (!vp::push_asset(c.string(), nullptr, pr.main, lib, {}, &push, &err) || push.version != 2 || push.item != bell.id) {
+    return fail(label + " v2 of the bell: " + err);
+  }
+  if (lib.remove_version(bell.id, 7, &err)) return fail(label + " deleted a version that does not exist");
+  if (!lib.remove_version(bell.id, 2, &err)) return fail(label + " delete v2: " + err);
+  if (!lib.get(bell.id, &after, &err) || after.latest != 1 || after.versions.size() != 1) return fail(label + " latest back to v1");
+  bump(2);
+  if (!vp::push_asset(c.string(), nullptr, pr.main, lib, {}, &push, &err) || push.version != 3) {
+    return fail(label + " a deleted version number is not reused (got v" + std::to_string(push.version) + ")");
+  }
+  if (!lib.remove_version(bell.id, 1, &err)) return fail(label + " delete v1: " + err);
+  if (lib.remove_version(bell.id, 3, &err)) return fail(label + " deleted the only version");
+  if (!lib.get(bell.id, &after, &err) || after.latest != 3 || after.versions.size() != 1 || after.versions[0].version != 3) {
+    return fail(label + " bell after the version deletes (latest v" + std::to_string(after.latest) + ", " +
+                std::to_string(after.versions.size()) + " version(s))");
+  }
+  // Pull into a sorted claim through the manager's panel (worker + main-thread finish).
+  const fs::path d = root / ("pm_sorted_" + label);
+  fs::remove_all(d, ec);
+  fs::create_directories(d / "assets", ec);
+  spit(d / "project.json", R"({"name": "Sorted", "kind": "3d"})");
+  if (!vp::pull_item(d.string(), nullptr, lib, crate.id, {}, &pr, &err)) return fail(label + " pull crate: " + err);
+  if (pr.main.rfind("assets/Models/", 0) != 0) return fail(label + " sorted pull lands in assets/Models/ (" + pr.main + ")");
+  if (guid_of(d, pr.main) != crate.id) return fail(label + " pulled model keeps its GUID (.tombstone/meta)");
+  if (!fs::exists(d / ".vault/lock.json")) return fail(label + " pull records .vault/lock.json");
+  for (const auto& e : fs::recursive_directory_iterator(d / "assets")) {
+    if (e.path().extension() == ".meta") return fail(label + " a .meta landed next to the asset: " + e.path().string());
+  }
+  // Delete the model, then its texture is free to go.
+  if (!lib.remove_item(crate.id, &err)) return fail(label + " delete the crate: " + err);
+  if (!lib.remove_item(tex_id, &err)) return fail(label + " delete the texture after the crate: " + err);
+  if (lib.get(crate.id, &after, &err)) return fail(label + " the crate is still listed");
+  if (!lib.list({}, &items, &err) || items.size() != 1) return fail(label + " one item (the bell) left");
+  if (!fs::exists(d / pr.main)) return fail(label + " deleting from the Vault touched a claim's pulled copy");
+  std::cout << "[smoke] vault-pm " << label << ": loose model (+ .bin, texture dep) and sound added without a claim, "
+            << "readme skipped, details edited, in-use delete refused, v2 deleted (next is v3), sorted pull keeps the GUID, "
+            << "items deleted, claim copies untouched\n";
+  return 0;
+}
+
+int check_manager_panel(const fs::path& root) {
+  // The panel in manager mode (no claim): list, then Pull into claim... on a worker.
+  const fs::path lib_dir = root / "panel_vault";
+  tv::LocalBackend lib(lib_dir.string());
+  const fs::path l = loose_files(root / "panel_loose");
+  vp::AddFilesResult ar;
+  std::string err;
+  if (!vp::add_files({(l / "bell.wav").string()}, lib, {}, (root / "panel_scratch").string(), &ar, &err)) {
+    return fail("panel add: " + err);
+  }
+  const fs::path claim = fresh(root / "panel_claim");
+  ed::VaultPanel panel;
+  ed::VaultHost host;
+  host.manager = true;
+  host.claims = [&] { return std::vector<ed::VaultHost::Claim>{{"Panel claim", claim.string(), "3D"}}; };
+  panel.open("", host);
+  panel.use_library("local", lib_dir.string(), "", "");
+  if (!panel.manager()) return fail("panel manager mode");
+  panel.refresh();
+  for (int i = 0; i < 400 && panel.busy(); ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    panel.update();
+  }
+  if (panel.items().size() != 1) return fail("panel lists the library without a claim: " + panel.last_error());
+  panel.pull_into(claim.string(), ar.items.at(0));
+  for (int i = 0; i < 400 && panel.busy(); ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    panel.update();
+  }
+  if (!panel.last_error().empty() || panel.last_status().find("Panel claim") == std::string::npos) {
+    return fail("panel pull into claim: " + panel.last_error() + panel.last_status());
+  }
+  tv::ProjectLock lock;
+  if (!lock.load(claim.string(), &err) || !fs::exists(claim / ".vault/lock.json")) return fail("panel pull lock: " + err);
+  std::cout << "[smoke] vault-pm panel: manager mode lists without a claim, Pull into claim... -> "
+            << panel.last_status() << '\n';
+  return 0;
+}
+
 }  // namespace
 
 bool vault_demo(const std::string& root_s, std::string* project, std::string* library, std::string* model_item,
@@ -544,6 +716,37 @@ int run_vault_smoke() {
   if (rc == 0) rc = check_remote(root);
   fs::remove_all(root, ec);
   if (rc == 0) std::cout << "[smoke] vault OK\n";
+  return rc;
+}
+
+int run_vault_pm_smoke() {
+  const fs::path root = fs::temp_directory_path() / ("ts_vault_pm_smoke_" + tv::random_hex(4));
+  std::error_code ec;
+  fs::remove_all(root, ec);
+  fs::create_directories(root, ec);
+  int rc = 0;
+  {
+    tv::LocalBackend lib((root / "local_vault").string());
+    rc = check_manager(root, lib, nullptr, "local");
+  }
+  if (rc == 0) rc = check_manager_panel(root);
+  if (rc == 0) {
+    tv::VaultStore store;
+    std::string err;
+    if (!store.open((root / "server").string(), &err)) return fail("server store: " + err);
+    const std::string key = store.add_key("brenden", true, &err);
+    const std::string ro_key = store.add_key("viewer", false, &err);
+    tv::VaultServer server(store);
+    tv::ServerOptions so;
+    so.port = 0;
+    if (!server.start(so, &err)) return fail("start ts_vault: " + err);
+    const std::string url = "http://127.0.0.1:" + std::to_string(server.port());
+    tv::RemoteBackend lib(url, key), ro(url, ro_key);
+    rc = check_manager(root, lib, &ro, "remote");
+    server.stop();
+  }
+  fs::remove_all(root, ec);
+  if (rc == 0) std::cout << "[smoke] vault-pm OK\n";
   return rc;
 }
 

@@ -421,6 +421,56 @@ bool push_asset(const std::string& project_dir, assetdb::AssetDb* db_in, const s
   return true;
 }
 
+bool add_files(const std::vector<std::string>& sources, Backend& backend, const PushOptions& opt,
+               const std::string& scratch_root, AddFilesResult* out, std::string* error) {
+  *out = AddFilesResult{};
+  if (sources.empty()) return fail(error, "no files to add");
+  std::error_code ec;
+  const fs::path stage = fs::u8path(scratch_root) / ("add_" + vault::random_hex(6));
+  fs::remove_all(stage, ec);
+  fs::create_directories(stage / "assets", ec);
+  {
+    std::ofstream pj(stage / "project.json", std::ios::binary);
+    pj << R"({"name": "vault-add", "kind": "3d"})";
+  }
+  struct Cleanup {
+    fs::path p;
+    ~Cleanup() {
+      std::error_code e;
+      fs::remove_all(p, e);
+    }
+  } cleanup{stage};
+  importsort::Settings is;
+  is.sort_imports = true;
+  is.keep_model_packs = true;
+  importsort::save_settings(stage.string(), is);
+  importsort::Result ir;
+  importsort::import_files(stage.string(), sources, "", is, &ir);
+  std::vector<std::string> mains;
+  for (const std::string& m : ir.mains) {
+    if (vault_kind(m).empty()) out->skipped.push_back(m);
+    else mains.push_back(m);
+  }
+  if (mains.empty()) {
+    std::string why = "nothing the Vault can hold (textures, models, sounds, fonts, prefabs)";
+    if (!ir.errors.empty()) why += ": " + vault::join(ir.errors, "; ");
+    return fail(error, why);
+  }
+  for (const std::string& rel : mains) {
+    PushOptions o = opt;
+    if (mains.size() > 1) o.name.clear();
+    PushResult pr;
+    std::string err;
+    if (!push_asset(stage.string(), nullptr, rel, backend, o, &pr, &err)) {
+      return fail(error, fs::u8path(rel).filename().string() + ": " + err);
+    }
+    out->items.push_back(pr.item);
+    for (const std::string& p : pr.pushed) out->pushed.push_back(p);
+    out->bytes += pr.bytes;
+  }
+  return true;
+}
+
 namespace {
 
 struct PullCtx {

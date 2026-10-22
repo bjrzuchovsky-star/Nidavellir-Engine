@@ -39,6 +39,18 @@ An item is one asset with everything it needs. Its id is the main asset's GUID.
 
 Network and disk work runs off the main thread. While a job is running, the Asset Browser holds its rescan, so the GUIDs that a pull writes are read only once.
 
+## The Vault manager (Project Manager)
+
+Press **Vault** on the Project Manager to use the library without opening a claim. It is the same panel (search, kind / tag / 2D / 3D / VR filters, thumbnails, details and versions), plus:
+
+- **Add files...** sends loose files from anywhere on the PC straight to the Vault. On Windows it opens the usual file picker (pick several at once); you can also paste a path in the dialog, or drop files from Explorer onto the window while the Vault screen is up. The dialog is the Send to Vault one (name, author, licence, tags, 2D / 3D / VR, description, version note, thumbnail). Behind the scenes the files are staged in a scratch claim (`TombStoneConfig/vault_add`, removed afterwards) exactly like an import, so a model brings its sibling files (`.bin`, `.mtl`...) and the textures it names, which go up as dependency items. Files the Vault can't hold (text, a model's `.bin` on its own) are skipped and listed. Each add makes new items with fresh GUIDs.
+- **Edit details** changes an item's name, author, licence, tags, 2D / 3D / VR and description. Its kind, versions and files stay as they are. Sending a new version from a claim later refreshes these details from the send dialog, as before.
+- **Delete item** removes an item and every version. Pick a version in the list first to see **Delete vN**, which removes just that one (the last version can only go with its item). Both ask first. An item or version that another item still depends on (a model's texture, a prefab's model) can't be deleted until that item is gone, and the message says which. Claims that already pulled it keep their copies. A deleted version's number is never handed out again, so a claim that holds v3 never mistakes a new upload for its own. Blobs stay in the library folder, because they're content-addressed and may be shared.
+- **Pull into claim...** picks one of your claims from a list and pulls the selected version through the same pull path as the in-claim panel, so `.meta` files land in `<claim>/.tombstone/meta`, new items go into the claim's sorted type folders, and `.vault/lock.json` records it.
+- **Settings** (local folder or server URL + API key, **Test connection**) is in the toolbar, the same as in the editors.
+
+On a `ts_vault` server, edits and deletes need a key made without `--read-only`.
+
 ## How a pull keeps references stable
 
 A pull copies the files and the `.meta` with the **same GUID**. The `.meta` goes into the claim's metadata folder (`.tombstone/meta/<path>.meta`, see [assets.md](assets.md)). In the library it's still named by its sidecar path (`assets/models/crate.gltf.meta`), so items sent from claims that kept sidecar `.meta` files pull the same way and are converted on arrival. When the claim sorts imports (the default), a **new** item goes to a type folder: a model and the texture items it depends on go to `assets/Models/<Name>/` with their relative layout kept, so its texture paths still work, and a texture, sound or font goes to `assets/Textures/`, `assets/Audio/` or `assets/Fonts/`. Prefabs, which name their parts by path, keep the paths from the claim they were sent from. So does everything when sorting is off (`assets/models/crate.gltf`). If the GUID already lives elsewhere in this claim (you moved the file), or the claim's lock file already lists the item, the pull writes to that location instead. The `.meta`'s `path` field is rewritten to the destination, so the next Asset Browser scan sees a known asset, not a move or a copy.
@@ -97,6 +109,9 @@ Every route except `health` needs `Authorization: Bearer <key>` (or `X-API-Key: 
 | `GET /items?q=&kind=&tag=&dim=` | list items (versions without file lists) |
 | `GET /items/<id>` | one item with every version, its files and dependencies |
 | `POST /items/<id>/versions` | publish `{item, version}`; every blob must already be there |
+| `PATCH /items/<id>` | edit `{name, author, licence, description, tags, dims}`; returns the item |
+| `DELETE /items/<id>` | delete the item and every version; **409** while another item depends on it |
+| `DELETE /items/<id>/versions/<n>` | delete one version; **409** while depended on, **422** for the only version |
 | `POST /blobs/missing` | `{sha256: [...]}` → the ones the server doesn't have |
 | `GET /blobs/<sha256>` | download; supports `Range: bytes=N-` for resuming |
 | `POST /uploads` | `{sha256, size}` → `{id, offset}`; reuses an open upload of the same blob |
@@ -187,5 +202,7 @@ Use `--host 127.0.0.1` (and no firewall rule) to keep it on this PC only. For ac
   - v2 and the **update** badge in the panel, then update and pin;
   - an upload cut after three chunks resumes without sending anything twice;
   - a wrong chunk offset gets 409 and a bad hash gets 422.
+
+`ts_admin --smoke-vault-pm` (also part of `--smoke`) checks the Vault manager against a local library and an in-process `ts_vault`: loose files (a glTF model naming a texture one folder up, a sound, a text file) are added without a claim (model + `.bin` + `.meta`, the texture as a dependency, the text file skipped, no scratch claim left behind); details are edited and found by the new tag, an empty name is refused, and a read-only key can't edit or delete; deleting the texture the model needs is refused; v2 of the sound is deleted and the next upload becomes v3, and the only version can't be deleted; a pull into a sorted claim lands in `assets/Models/` with the GUID kept in `.tombstone/meta` and a lock file; deleting items leaves claims' copies alone. It also drives the panel in manager mode (no claim) through **Pull into claim...**. `ts_admin --vault-pm-shot out.png` renders the Project Manager's Vault screen over a demo library.
 
 `ts_vault --smoke` starts the server on a free port and checks `health`, key auth and a blob round trip. `ts_admin --vault-shot out.png` renders the panel over a demo library.

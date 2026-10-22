@@ -76,6 +76,21 @@ struct PushResult {
 bool push_asset(const std::string& project_dir, assetdb::AssetDb* db, const std::string& rel,
                 vault::Backend& backend, const PushOptions& opt, PushResult* out, std::string* error);
 
+// Files from outside any claim (the Vault manager's Add files... and OS
+// drops in the Project Manager): staged in a scratch claim under
+// scratch_root exactly like an import (a model brings its sibling files and
+// the textures it names), then every shareable one is pushed (a model's
+// textures as dependency items) and the scratch claim is removed. Each add
+// makes new items (fresh GUIDs). opt.name applies when one asset is added.
+struct AddFilesResult {
+  std::vector<std::string> items;    // ids of the added assets (not deps), in order
+  std::vector<std::string> pushed;   // "name vN" for every item, deps first
+  std::vector<std::string> skipped;  // source files the Vault can't hold
+  std::uint64_t bytes = 0;
+};
+bool add_files(const std::vector<std::string>& sources, vault::Backend& backend, const PushOptions& opt,
+               const std::string& scratch_root, AddFilesResult* out, std::string* error);
+
 struct PullOptions {
   int version = 0;     // 0 = latest
   bool force = false;  // overwrite files changed in this project since the last pull
