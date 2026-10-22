@@ -102,6 +102,18 @@ if(TS_BUILD_ADMIN OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
   add_subdirectory(src/mmo)
 endif()
 
+# The Vault (ts_vault_lib + the ts_vault server): the asset library every
+# claim shares. Needs SQLite (fetched above for the networked apps).
+if(TS_BUILD_ADMIN OR TS_BUILD_VAULT)
+  if(NOT TARGET ts_sqlite)
+    include(FetchSQLite)
+  endif()
+  add_subdirectory(src/vault)
+endif()
+if(TS_BUILD_VAULT)
+  add_subdirectory(apps/vault)
+endif()
+
 # Editor / Admin UI module (screens + AppFlow). Admin-only.
 if(TS_BUILD_ADMIN)
   # Ship It: export pipeline (ts_export) used by the Freight Office + CLI.
