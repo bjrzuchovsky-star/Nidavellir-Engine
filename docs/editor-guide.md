@@ -34,8 +34,10 @@ Every edit is an undo step (Ctrl+Z / Ctrl+Y). History is snapshot based, capped 
 | Multi / box select | Ctrl / Shift + click, or drag on empty canvas |
 | Duplicate / Delete | Ctrl+D / Del |
 | Nudge | Arrows (Shift = ×10, or 4 cells with snap) |
-| Snap / grid / cell size | Shift+G / G / `[` `]` |
+| Snap / grid / cell size | Shift+G (or Shift+Tab) / `'` / `[` `]` |
 | Resize / rotate | 8 handles / the round knob (Shift = keep aspect or 15° steps) |
+| Move / rotate / scale (Blender style) | G / R / S with the mouse over the viewport, then X / Y, typed values, Enter or Esc; see [transforms](transforms.md) |
+| Gizmo | Q Tweak (box handles), W Move, T Scale, Y Transform, or 0-4 (2 = Rotate); `,` Local / Global, `.` pivot |
 | Duplicate-drag | Alt+drag |
 | Copy / cut / paste | Ctrl+C / X / V (scene.json text on the clipboard; ids are remapped) |
 | Group / ungroup | Ctrl+G / Ctrl+Shift+G |
@@ -62,7 +64,7 @@ Collision code is in `src/runtime/World_Collision.cpp`. It uses axis-aligned box
 Source: `src/editor/editor3d/`.
 
 - **Camera:** orbit with RMB or Alt+LMB, pan with MMB, wheel to zoom, fly with RMB + WASD / Q / E, F to frame.
-- **Gizmos** (`Gizmo3D`): W / E / R for translate / rotate / scale. Shift+G toggles snap (defaults: 0.5 m, 15°, 0.25). Hold Ctrl to stick to a surface. End drops the selection to the ground.
+- **Gizmos** (`Gizmo3D`, Blender style): Q Tweak, W Move, E Rotate, T Scale, Y Transform (or 0-4). G / R / S move, rotate and scale with the mouse, X / Y / Z lock an axis, numbers type exact values. Shift+G toggles snap (defaults: 0.5 m, 15°, 0.25); Ctrl while dragging flips it. The toolbar Snap target **Surface** sticks moves to the surface under the mouse. End drops the selection to the ground. See [transforms](transforms.md).
 - **Panels:** Hierarchy, Inspector, Assets, Environment, Telegraph, Plugins, Animation Preview.
 - **Dropping assets:** drop a model (glTF, `.mdl`, OBJ, FBX... see [model import](model-import.md)) in the viewport to place it with a fitted collider. Drop an image on an entity to make it the albedo texture.
 

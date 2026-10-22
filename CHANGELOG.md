@@ -6,6 +6,25 @@ All notable changes to TombStone Engine. The version number lives in the `VERSIO
 
 Work in progress for 0.2.0. Optional features ship as Trading Post plugins rather than in every game, starting with physics and player movement.
 
+### Blender-style transforms and gizmos (2D and 3D)
+- **G / R / S** move, rotate and scale with the mouse over the viewport in both editors. **X / Y / Z** lock an axis; press it twice for the local axis. **Shift+X / Y / Z** lock a plane. Type exact values (with `-` and Backspace, Tab for the next component); the viewport header shows them. **Ctrl** flips snap and **Shift** gives precision. **Enter** or LMB confirms, as one undo step. **Esc** or RMB cancels and puts everything back. **Alt+G / R / S** clear location, rotation or scale. Multi-select and children work, and locked entities stay put.
+- New gizmos in red / green / blue that keep their size on screen and light up under the mouse:
+  - **Move:** a free-move centre circle, axis arrows and plane squares.
+  - **Rotate:** axis rings, a view ring and a 3D trackball.
+  - **Scale:** a uniform outer circle, cube-tipped handles and plane squares.
+  - **Transform:** all three together.
+- Choose the gizmo from the buttons along the top of the viewport, the toolbar, or the keys **Q / W / E / T / Y** (or 0-4). E is the 3D Rotate gizmo; 2D keeps E for Erase, so its Rotate gizmo is on 2. Choose **Local / Global** from the toolbar checkbox or press `,`.
+- Pivot modes **Median Point / Individual Origins / Active Element / Cursor / Bounding Box Centre** are in a dropdown and on the `.` menu. **Shift+right-click** places the 3D or 2D cursor; **Shift+C** resets it.
+- **Shortcut changes:**
+  - The grid toggle moved from G to `'` in both editors.
+  - 3D: the Scale gizmo moved from R to T. Surface snapping moved from holding Ctrl to the toolbar snap target **Surface**.
+  - 2D: R rotates over the viewport when the Select tool has a selection, and is the Rect tool otherwise. Shift+right-click no longer opens the context menu. The 2D editor starts in **Tweak** mode with the old box handles.
+  - Shift+Tab also toggles snap.
+  - No key fires while you type in a text field.
+  - See [docs/transforms.md](docs/transforms.md) for the full list.
+- `ts_admin --smoke-transform` (also in `--smoke`) covers modal transforms, typed values, locks, snap, pivots, gizmo picking and drags, and undo in both editors. `ts_admin --gizmo-shot 3d|2d <out.png>` renders the gizmos.
+- Not yet: mirroring with a negative scale (clamped), and resetting a 2D sprite to its frame size with Alt+S (it resets to 64 × 64).
+
 ### Source engine formats (.mdl/.vtf/.vmt/.gma)
 - `.gma` addon import: **Asset Browser > Import... > Import Source addon (.gma)...** (or dropping a `.gma` on the editor window) opens a picker (addon name / author, files grouped as Models / Materials / Sounds / Other with checkboxes, CRC32 checked per file) and extracts the chosen files into `assets/Models/<Addon>/`, keeping Source paths. A selected `.mdl` brings its `.vvd` / `.vtx` / `.phy`; existing files are never overwritten; unsafe paths are refused. LZMA-compressed Workshop downloads (`.bin`) are decompressed by a new clean-room LZMA decoder. CLI: `ts_admin --import-gma <file> --claim <dir> [--dest] [--only] [--list]`.
 - Source materials are found far more often: each `$cdmaterials` folder is tried against the asset's search path, the folders above the model, the claim (including every addon extracted into it) and the new **Settings > Tools > Source content search folders** (with `garrysmod/`, `addons/*` and `download/` below them; Steam game folders are suggested, read-only). Missing ones keep the checker, and the model's `.meta` lists which `.vmt` files were tried where. **Relink...** in the Asset Browser fixes one by hand (`material_overrides`).

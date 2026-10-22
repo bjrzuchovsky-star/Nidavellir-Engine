@@ -6,6 +6,7 @@ These pages are written from the source in this repository (`src/`, `apps/`, `sd
 |---|---|
 | [Getting started (Windows, VS2022, CMake)](getting-started.md) | Requirements, configure and build, the executables, first run, smoke tests |
 | [Editor guide](editor-guide.md) | Admin flow, the 2D and 3D editors, tools, TileMaps, the Stable, Play mode, the Telegraph |
+| [Transforms and gizmos](transforms.md) | Blender-style G / R / S, axis locks, typed values, snap, pivots, the 2D / 3D cursor, gizmos, every shortcut and what changed in 0.2.0, `--smoke-transform` |
 | [Prefabs](prefabs.md) | `.prefab.json` assets in the 2D and 3D editors: instances, overrides, apply / revert, undo, `--smoke-prefab` |
 | [Assets](assets.md) | Asset browser, importers, `.meta` GUIDs in `.tombstone/meta`, sorted imports, move-safe references, hot reload, `--smoke-assets`, `--smoke-meta` |
 | [Model import](model-import.md) | glTF, Source `.mdl` (GMod), OBJ, FBX, DAE, PLY, STL, X and more through Assimp, `.blend` via Blender; import settings, VMT / VTF, limits, `--smoke-models` / `--smoke-mdl` |

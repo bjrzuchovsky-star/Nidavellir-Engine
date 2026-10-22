@@ -77,7 +77,7 @@ Every system is built with performance as the primary goal:
 **Editor.** 3D claims open the 3D editor:
 - Viewport: orbit (RMB or Alt+LMB), pan (MMB), zoom (wheel), fly (hold RMB + WASD / Q E), F frames the selection.
 - Selection: click to pick, Ctrl+click to add or remove.
-- Gizmos: W / E / R switch between translate, rotate and scale. Snap is on the toolbar (Shift+G); steps are 0.5 m, 15° and 0.25 by default.
+- Gizmos (Blender style): Q Tweak, W Move, E Rotate, T Scale, Y Transform. G / R / S move, rotate and scale with the mouse (X / Y / Z lock an axis, type a value, Enter / Esc). Snap is on the toolbar (Shift+G; Ctrl flips it while dragging); steps are 0.5 m, 15° and 0.25 by default. See [docs/transforms.md](docs/transforms.md).
 - Panels: Hierarchy, Inspector for every component, Assets (primitives, `.gltf` / `.glb`, images), Environment (sky, sun, shadows, ambient), Telegraph and Plugins.
 - Assets: drag a model into the viewport to place it on the ground with a collider fitted to it. Drop an image on an entity to make it the albedo texture.
 - Every edit is one undo step (Ctrl+Z / Ctrl+Y) and autosaves `scene.json`.
@@ -692,7 +692,8 @@ Editor2D runs in an ImGui **Docking** layout (Hierarchy over Supply Wagon and Sc
 | Box select | LMB drag on empty canvas (Ctrl/Shift adds) |
 | Duplicate / Delete | Ctrl+D / Del (also toolbar, Hierarchy, Edit menu) |
 | Nudge | Arrows (1 px, or 1 cell with snap); Shift+Arrows (10 px, or 4 cells) |
-| Snap / grid | Shift+G snap, G grid, `[` `]` halve/double cell size, or toolbar cell field |
+| Snap / grid | Shift+G (or Shift+Tab) snap, `'` grid, `[` `]` halve/double cell size, or toolbar cell field |
+| Move / rotate / scale | G / R / S over the viewport (Blender style, [docs/transforms.md](docs/transforms.md)) |
 | Select all / clear / rename | Ctrl+A / Esc / F2 |
 
 When snap is on, drag moves, nudges, duplicates, and Inspector X/Y/W/H edits all land on the grid. In a group drag the primary snaps and the others keep their spacing. The Inspector edits the primary selection (amber outline) and shows the selection count. Every tool autosaves `scene.json`. `--smoke` covers snap, nudge, multi-select, box select, duplicate, and delete, plus autosave and persistence.
@@ -705,10 +706,10 @@ Mouse-first editing in both editors. Every tool is one undo step, autosaves `sce
 
 | Action | 2D | 3D |
 |---|---|---|
-| Resize | Drag the 8 handles on the primary selection (Shift keeps the aspect; snap rounds to the grid) | Scale gizmo (R) |
-| Rotate | Drag the round knob above the box (Shift or snap: 15° steps) | Rotate gizmo (E) |
+| Resize | Drag the 8 handles on the primary selection (Shift keeps the aspect; snap rounds to the grid), the Scale gizmo (T) or S | Scale gizmo (T) or S |
+| Rotate | Drag the round knob above the box (Shift or snap: 15° steps), the Rotate gizmo (2) or R | Rotate gizmo (E) or R |
 | Duplicate while dragging | Alt+drag an entity: the copies move and the originals stay (Esc takes the copies back) | Alt+drag a gizmo handle |
-| Snapping | Grid plus other entities' edges and centres, with red guide lines (View > Snap to Objects) | Grid steps; hold Ctrl while moving to stick to the surface under the mouse; End = drop to ground (lands on the entity below or y = 0) |
+| Snapping | Grid plus other entities' edges and centres, with red guide lines (View > Snap to Objects) | Grid steps (Ctrl while dragging flips snap); Snap target **Surface** on the toolbar sticks moves to the surface under the mouse; End = drop to ground (lands on the entity below or y = 0) |
 | Context menu | Right-click in the viewport or Hierarchy: rename, duplicate, delete, copy/cut/paste, group/ungroup, unparent, lock, hide, focus, align/distribute, add component, and (always last) New Entity / New Child Entity | Same, plus Create |
 | Frame selection | F (Bucket fill moved to U) | F |
 | Copy / cut / paste | Ctrl+C / Ctrl+X / Ctrl+V. The clip is scene.json text on the system clipboard, so it pastes into another scene or project (ids remapped, parent links inside the clip kept) | Same |
