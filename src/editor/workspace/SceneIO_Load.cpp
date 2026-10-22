@@ -36,6 +36,15 @@ bool load(Workspace2D& workspace, const std::string& scene_path,
   if (!scene_json::load_file(scene_path, &doc, error_out)) {
     return false;
   }
+  // A scene saved by a newer TombStone: refuse rather than drop what this
+  // build can't read (the editor then won't save over it).
+  if (doc.version > scene_json::kSceneVersion) {
+    if (error_out) {
+      *error_out = "scene.json v" + std::to_string(doc.version) + " is newer than this build reads (v" +
+                   std::to_string(scene_json::kSceneVersion) + "): " + scene_path;
+    }
+    return false;
+  }
   if (camera_log) camera_migrate::migrate_2d(doc.version, &doc.entities, camera_log);
   apply_doc(workspace, std::move(doc));
   return true;

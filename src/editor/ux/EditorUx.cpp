@@ -1,4 +1,5 @@
 #include "editor/ux/EditorUx.h"
+#include "editor/ux/FriendlyError.h"
 
 #include "editor/ux/UxPrefs.h"
 #include "editor/ux/UxStrings.h"
@@ -125,6 +126,7 @@ void EditorUx::frame() {
     ImGui::SetWindowFocus(focus_window_.c_str());
     if (--focus_tries_ <= 0) focus_window_.clear();
   }
+  draw_error_modal([this](const std::string& id) { return run_now(id); });
 }
 
 }  // namespace ts::tombstone::editor::ux

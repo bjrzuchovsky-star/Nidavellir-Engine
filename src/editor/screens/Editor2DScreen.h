@@ -590,6 +590,12 @@ class Editor2DScreen final : public IScreen {
   Workspace2D workspace_;
   std::string scene_path_;
   bool dirty_ = false;
+  // scene.json on disk is from a newer TombStone: shown an error and never
+  // saved over (cleared on the next on_enter).
+  bool scene_locked_ = false;
+  std::string scene_locked_why_;
+  // Telegraph line + readable error modal for a failed save.
+  void report_save_failure(const std::string& err);
   bool quit_requested_ = false;
   bool back_requested_ = false;
 

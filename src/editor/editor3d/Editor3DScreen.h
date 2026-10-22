@@ -160,6 +160,8 @@ class Editor3DScreen final : public IScreen {
   std::size_t undo_depth() const { return undo_.size(); }
 
   bool save_scene(std::string* error = nullptr);
+  // Telegraph line + readable error modal for a failed save / load.
+  void report_save_failure(const std::string& err);
   bool reload_scene(std::string* error = nullptr);
 
   // ---- Viewport (pixels in a vw x vh view) ---------------------------------
@@ -634,6 +636,9 @@ class Editor3DScreen final : public IScreen {
   int hier_drop_where_ = 1;
   bool hier_drop_root_ = false;
   std::uint64_t hier_toggle_lock_ = 0, hier_toggle_hide_ = 0;
+  // scene.json on disk is from a newer TombStone: never saved over.
+  bool scene_locked_ = false;
+  std::string scene_locked_why_;
   // Last member: unhitched first.
   EditorPlugins plugins_;
   std::map<std::string, bool> plugin_panel_open_;  // plugin panels without their own flag

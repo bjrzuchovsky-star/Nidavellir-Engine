@@ -1,4 +1,5 @@
 #include "editor/assets/AssetBrowser.h"
+#include "editor/ux/FriendlyError.h"
 #include "editor/ux/EmptyState.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
@@ -106,6 +107,15 @@ importsort::Result AssetBrowser::import_files(const std::vector<std::string>& al
     for (const std::string& n : r.notes) host_.note("Import: " + n);
     for (const std::string& e : r.errors) host_.note("Import failed: " + e);
   }
+  if (!r.errors.empty()) {
+    std::string all;
+    for (const std::string& e : r.errors) all += e + "\n";
+    ux::FriendlyError f = ux::explain(r.errors.front(), ux::ErrorKind::ImportFailed,
+                                      "Importing " + std::to_string(sources.size()) + " file(s); " +
+                                          std::to_string(r.errors.size()) + " failed:\n" + all);
+    if (r.errors.size() > 1) f.what += " (" + std::to_string(r.errors.size() - 1) + " more in Details.)";
+    ux::show_error(std::move(f));
+  }
   if (!r.mains.empty()) {
     selected_ = r.mains.front();
     const auto slash = selected_.find_last_of('/');
@@ -198,6 +208,7 @@ bool AssetBrowser::move(const std::string& from, const std::string& to, std::str
     if (host_.after_refs_changed) host_.after_refs_changed();
   } else {
     if (host_.note) host_.note("Move failed: " + err);
+    ux::show_error(ux::explain(err, ux::ErrorKind::SaveFailed, "Moving " + from + " -> " + to));
     if (error) *error = err;
   }
   return ok;

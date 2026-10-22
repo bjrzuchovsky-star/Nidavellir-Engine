@@ -1,5 +1,6 @@
 #include "editor/tools/SpriteSlicerPanel.h"
 #include "editor/ux/EmptyState.h"
+#include "editor/ux/FriendlyError.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
 #include "editor/tools/StringsPanel.h"
@@ -216,11 +217,14 @@ void Editor3DScreen::draw_menus() {
     if (ux::MenuItem("Save scene", "Ctrl+S")) {
       std::string err;
       if (save_scene(&err)) note("Saved scene.json");
-      else note("Save failed: " + err, runtime::LogLevel::Error);
+      else report_save_failure(err);
     }
     if (ux::MenuItem("Reload from disk", nullptr, false, !playing())) {
       std::string err;
-      if (!reload_scene(&err)) note("Reload failed: " + err, runtime::LogLevel::Error);
+      if (!reload_scene(&err)) {
+        note("Reload failed: " + err, runtime::LogLevel::Error);
+        ux::show_error(ux::explain(err, ux::ErrorKind::MissingFile, "Reloading scene.json"));
+      }
     }
     if (ux::MenuItem("Rescan assets")) rescan_assets();
     if (ux::MenuItem("Export... (Freight Office)", nullptr, false, !playing()))
@@ -511,6 +515,7 @@ void Editor3DScreen::handle_shortcuts() {
     if (ImGui::IsKeyPressed(ImGuiKey_S, false)) {
       std::string err;
       if (save_scene(&err)) note("Saved scene.json");
+      else report_save_failure(err);
     }
     if (io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_Keypad0, false)) align_camera_to_view();
     return;
@@ -1119,13 +1124,20 @@ void Editor3DScreen::draw_assets() {
 
 void Editor3DScreen::draw_telegraph() {
   if (log_.empty()) ux::EmptyState("telegraph", {{"Play (F5)", [this] { if (!playing()) play_start(); }, nullptr, !playing()}});
+  int row = 0;
   for (const runtime::LogEntry& e : log_) {
     const ImVec4 col = e.level == runtime::LogLevel::Error  ? theme::Danger()
                        : e.level == runtime::LogLevel::Warn ? theme::Warning()
                                                             : theme::TextMuted();
+    const std::string text = runtime::format_log(e);
+    const bool problem = e.level != runtime::LogLevel::Info;
+    const ux::ErrorKind hint = ux::telegraph_hint(e.channel);
+    ImGui::PushID(row++);
     ImGui::PushStyleColor(ImGuiCol_Text, col);
-    ImGui::TextWrapped("%s", runtime::format_log(e).c_str());
+    ImGui::TextWrapped("%s", ux::telegraph_label(text, problem, hint).c_str());
     ImGui::PopStyleColor();
+    ux::TelegraphLineHelp(text, problem, hint, "Telegraph, 3D editor, channel '" + e.channel + "'");
+    ImGui::PopID();
   }
   if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f) ImGui::SetScrollHereY(1.0f);
   if (plugins_.loaded("ts.profiler")) {

@@ -6,6 +6,7 @@
 // hitch a plugin to a claim. Opened from the Project Manager (for the
 // highlighted claim) and from the Outfitter's Wagon (for the open claim).
 
+#include "editor/ux/FriendlyError.h"
 #include "editor/ProjectInfo.h"
 #include "store/TradingPost.h"
 
@@ -57,6 +58,8 @@ void trading_post_refresh(TradingPostUi& ui, const std::string& project_dir);
 // Hover text for a Trading Post row: what it is, where it works, where it
 // comes from, what state it's in and what to do next.
 std::string trading_post_entry_tip(const store::StoreEntry& e, bool hitched);
+// The panel's error card (network, signature and install failures).
+ux::FriendlyError friendly_trading_post_error(const std::string& raw);
 
 // Project Manager path (no editor open): switch `id` on / off in
 // project.json. On adds its required deps (from the Trading Post's

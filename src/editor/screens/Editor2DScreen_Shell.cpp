@@ -186,10 +186,10 @@ void Editor2DScreen::draw_menus() {
   if (ux::BeginMenu("File")) {
     if (ux::MenuItem("Save Scene", "Ctrl+S", false, !is_playing())) {
       std::string err;
-      if (!save_scene(&err) && !err.empty()) {
-        std::cout << "[Editor2D] save failed: " << err << '\n';
-      } else {
+      if (save_scene(&err)) {
         note("Scene saved");
+      } else if (!err.empty()) {
+        report_save_failure(err);
       }
     }
     if (ux::MenuItem("Launch Game (ts_game)", nullptr, false,
@@ -527,6 +527,8 @@ void Editor2DScreen::draw_toolbar() {
     std::string err;
     if (save_scene(&err)) {
       note("Scene saved");
+    } else if (!err.empty()) {
+      report_save_failure(err);
     }
   }
   ImGui::SameLine(0.0f, 18.0f);

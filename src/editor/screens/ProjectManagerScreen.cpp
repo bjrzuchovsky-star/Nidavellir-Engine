@@ -1,4 +1,5 @@
 #include "editor/screens/ProjectManagerScreen.h"
+#include "editor/ux/FriendlyError.h"
 #include "editor/ux/Tooltip.h"
 
 #include "editor/assets/ImportSort.h"
@@ -184,7 +185,19 @@ void ProjectManagerScreen::draw_update_banner() {
     if (theme::SecondaryButton("Skip this version", ImVec2(150, 0))) update_action_ = UpdateAction::Skip;
   }
   if (!b.error.empty()) {
-    theme::StatusError(b.error.c_str());
+    ux::FriendlyError f = ux::explain(b.error, ux::ErrorKind::UpdateCheck, "Updating from v" + b.current + " to v" + b.version);
+    if (f.kind == ux::ErrorKind::UpdateCheck) {
+      f.title = "The update didn't download";
+      f.what = "Nothing was installed; you're still riding v" + b.current + ". " + f.what;
+      f.fix_action.clear();
+    }
+    ImGui::AlignTextToFramePadding();
+    theme::StatusError((f.title + ". " + f.fix).c_str());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Why?")) ux::show_error(f);
+    if (ImGui::IsItemHovered()) ux::SetTooltip("%s", f.why.c_str());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Copy details")) ImGui::SetClipboardText(f.copy_text().c_str());
   }
   ImGui::EndChild();
   ImGui::PopStyleVar(2);
@@ -224,12 +237,14 @@ void ProjectManagerScreen::draw_ui() {
   theme::BeginRoot("##ProjectManagerRoot");
   if (vault_open_ && vault_) {
     draw_vault_screen();
+    ux::draw_error_modal();
     theme::EndRoot();
     return;
   }
 
   theme::TitleStrip("Project Manager", "Your claims on the frontier");
   draw_update_banner();
+  ux::draw_error_modal();
 
   char caption[64];
   std::snprintf(caption, sizeof(caption), "%zu on file", projects_.size());

@@ -1,4 +1,5 @@
 #include "editor/editor3d/Editor3DScreen.h"
+#include "editor/ux/FriendlyError.h"
 #include "editor/plugins/PluginNeeds.h"
 #include "terrain/TerrainView.h"
 #include "plugins/profiler/ProfilerPlugin.h"
@@ -68,6 +69,8 @@ void Editor3DScreen::on_enter() {
                   log_.push_back(std::move(e));
                 });
   std::string err;
+  scene_locked_ = false;
+  scene_locked_why_.clear();
   const std::string path = scene3d::scene_path(project_.path);
   if (!fs::exists(path)) {
     scene_ = vr_project() ? scene3d::make_vr_starter_scene() : scene3d::make_starter_scene();
@@ -83,6 +86,11 @@ void Editor3DScreen::on_enter() {
   } else if (!scene3d::load_file(path, &scene_, &err)) {
     note(err, LogLevel::Error);
     scene_ = scene3d::Scene3D{};
+    if (ux::classify(err) == ux::ErrorKind::SceneVersion) {
+      scene_locked_ = true;  // keep the newer file exactly as it is
+      scene_locked_why_ = err;
+    }
+    ux::show_error(ux::explain(err, ux::ErrorKind::MissingFile, "Opening claim " + project_.name));
   } else {
     migrate_cameras_on_open(path);  // pre-v18: the follow camera becomes an entity
   }
@@ -231,6 +239,12 @@ void Editor3DScreen::push_undo(const std::string& label, const scene3d::Scene3D&
   autosave();
 }
 
+void Editor3DScreen::report_save_failure(const std::string& err) {
+  note("Save failed: " + err, LogLevel::Error);
+  ux::show_error(ux::explain(err, scene_locked_ ? ux::ErrorKind::SceneVersion : ux::ErrorKind::SaveFailed,
+                             "Saving " + scene3d::scene_path(project_.path)));
+}
+
 void Editor3DScreen::autosave() {
   std::string err;
   if (!save_scene(&err)) note("Autosave failed: " + err, LogLevel::Error);
@@ -272,6 +286,10 @@ bool Editor3DScreen::redo() {
 }
 
 bool Editor3DScreen::save_scene(std::string* error) {
+  if (scene_locked_) {
+    if (error) *error = "Not saved: " + scene_locked_why_ + ". The file on disk is left as it is.";
+    return false;
+  }
   refresh_prefab_overrides();
   if (!scene3d::save_file(scene3d::scene_path(project_.path), scene_, error)) return false;
   return save_terrains(error);

@@ -12,6 +12,9 @@
 #include "editor/ux/CommandPalette.h"
 #include "editor/ux/EditorUx.h"
 #include "editor/ux/EmptyState.h"
+#include "editor/ux/FriendlyError.h"
+#include "editor/vault/VaultPanel.h"
+#include "editor/workspace/SceneIO.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/UxPrefs.h"
 #include "editor/ux/UxStrings.h"
@@ -298,6 +301,155 @@ int check_empty(Ctx& ctx, ux::EditorUx& u, const char* tag, const std::function<
 
 }  // namespace
 
+// Readable errors: every case the editor can hit gets a title and plain
+// what / why / what-to-do text, keeps the raw message for Copy details, and
+// the modal, Telegraph tag, Vault and Trading Post cards all use it. The
+// messages are the ones the engine really produces.
+std::string read_all(const fs::path& p) {
+  std::ifstream in(p, std::ios::binary);
+  std::stringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+int check_friendly(const ux::FriendlyError& f, const std::string& raw, const std::string& label) {
+  if (f.title.empty() || f.what.size() < 20 || f.why.size() < 20 || f.fix.size() < 20)
+    return fail(label + ": thin explanation (" + f.title + ")");
+  if (f.details.find(raw) == std::string::npos) return fail(label + ": details lose the raw message");
+  const std::string c = f.copy_text();
+  if (c.find(f.title) == std::string::npos || c.find("Details:") == std::string::npos ||
+      c.find(raw) == std::string::npos || c.find("What to do:") == std::string::npos)
+    return fail(label + ": Copy details text is incomplete");
+  return 0;
+}
+
+int check_errors(Ctx& ctx, const fs::path& root, int* cases) {
+  struct Case {
+    const char* raw;
+    ux::ErrorKind hint;
+    ux::ErrorKind want;
+  };
+  using K = ux::ErrorKind;
+  const Case cases_[] = {
+      {"No such file: levels/intro.json", K::Unknown, K::MissingFile},
+      {"Script not found -- Gate (scripts/gate.lua)", K::Unknown, K::MissingFile},
+      {"cannot open or decode assets/textures/rock.png", K::Unknown, K::MissingTexture},
+      {"could not load assets/models/wagon.glb: buffer 0 not found", K::Unknown, K::MissingModel},
+      {"Import failed: assets/broken.png: not a PNG or JPEG the importer knows", K::ImportFailed, K::ImportFailed},
+      {"scripts/gate.lua:12: 'end' expected (to close 'function' at line 3) near <eof>", K::ScriptRuntime,
+       K::ScriptCompile},
+      {"scripts/gate.lua:20: attempt to index a nil value (field 'door') -- Gate is stopped; the rest of the world "
+       "rides on",
+       K::ScriptRuntime, K::ScriptRuntime},
+      {"'ts.weather' is switched on for this project but isn't in the wagon (missing plugin library?); riding on "
+       "without it",
+       K::Unknown, K::PluginMissing},
+      {"Rider 3D needs ts.jolt 0.2.0+, which isn't installed", K::Unknown, K::PluginMissing},
+      {"ts_game runtime not found (build ts_game first)", K::Unknown, K::ExportFailed},
+      {"ISCC not found (install Inno Setup 6: tools/installer/install_inno.ps1, or set TS_ISCC)", K::Unknown,
+       K::ExportFailed},
+      {"could not connect to vault.example:7777 (connection refused)", K::VaultConnection, K::VaultConnection},
+      {"crate.blend: Blender was not found. Set Settings > Tools > Blender executable (or the TS_BLENDER "
+       "environment variable, or this asset's Blender path) to your blender.exe, install Blender (blender.org, "
+       "Steam, Microsoft Store), or export the file to glTF / FBX. Looked in: PATH",
+       K::ImportFailed, K::BlenderNotFound},
+      {"could not reach the release: timed out", K::UpdateCheck, K::UpdateCheck},
+      {"download failed: HTTP 503", K::UpdateCheck, K::UpdateCheck},
+      {"Could not write scene.json.tmp: Permission denied", K::SaveFailed, K::SaveFailed},
+      {"scene.json is a 2D scene (no \"dimension\": \"3d\"); open it in a 2D claim", K::MissingFile, K::SceneVersion},
+  };
+  std::set<K> covered;
+  for (const Case& c : cases_) {
+    const ux::FriendlyError f = ux::explain(c.raw, c.hint);
+    if (f.kind != c.want)
+      return fail(std::string("'") + c.raw + "' read as " + ux::to_string(f.kind) + ", wanted " + ux::to_string(c.want));
+    if (int r = check_friendly(f, c.raw, ux::to_string(c.want))) return r;
+    covered.insert(f.kind);
+    if (dump()) std::cout << "[error] " << ux::to_string(f.kind) << ": " << f.title << "\n";
+  }
+  // Telegraph tags problem lines, leaves info lines alone.
+  const std::string tl = ux::telegraph_label(cases_[6].raw, true, ux::telegraph_hint("script"));
+  if (tl.find("script stopped") == std::string::npos) return fail("Telegraph line has no plain-words tag: " + tl);
+  if (ux::telegraph_label("trigger: Rider rode into Gate", false, K::Unknown) != "trigger: Rider rode into Gate")
+    return fail("Telegraph tagged an info line");
+  // Panel cards.
+  if (editor::friendly_vault_error("could not connect to vault.example:7777", true).kind != K::VaultConnection ||
+      editor::friendly_vault_error("x", true).fix_label != "Vault settings")
+    return fail("Vault error card isn't the friendly one");
+  if (editor::friendly_trading_post_error("Example Spurs: download failed: could not resolve example.invalid").title !=
+      "Couldn't reach the Trading Post")
+    return fail("Trading Post error card isn't the friendly one");
+
+  // Scene version, for real: a scene.json from the future opens with the
+  // readable error and is never saved over, in both editors.
+  const std::string future2d = "{\n  \"version\": 999,\n  \"entities\": []\n}\n";
+  {
+    const fs::path dir = root / "future2d";
+    fs::create_directories(dir);
+    const fs::path sp = editor::scene_io::scene_path_for_project(dir.string());
+    std::ofstream(sp, std::ios::binary) << future2d;
+    ux::clear_errors();
+    editor::ProjectInfo info;
+    info.id = "_ux_future2d";
+    info.name = "Future 2D";
+    info.path = dir.string();
+    editor::Editor2DScreen s(info);
+    s.on_enter();
+    const ux::FriendlyError* f = ux::current_error();
+    if (!f || f->kind != K::SceneVersion) return fail("2D: newer scene.json opened without the scene-version error");
+    if (int r = check_friendly(*f, "is newer than this build reads", "2D scene version")) return r;
+    // The modal is drawn, with its buttons.
+    ux::set_audit(true);
+    ux::clear_audit();
+    const std::string title = f->title + "###ts_friendly_error";
+    ctx.frames(3, [&] { s.on_update(1.0f / 60.0f); });
+    ImGuiWindow* w = ImGui::FindWindowByName(title.c_str());
+    if (!w || !w->Active) {
+      ctx.frames(1, [&] {
+        s.on_update(1.0f / 60.0f);
+        w = ImGui::FindWindowByName(title.c_str());
+      });
+    }
+    ux::set_audit(false);
+    if (!ImGui::FindWindowByName(title.c_str())) return fail("2D: the error modal didn't open");
+    std::string err;
+    if (s.save_scene(&err)) return fail("2D: saved over a scene from a newer TombStone");
+    s.on_exit();
+    if (read_all(sp) != future2d) return fail("2D: the newer scene.json was changed on disk");
+    covered.insert(K::SceneVersion);
+    ux::clear_errors();
+  }
+  {
+    const fs::path dir = root / "future3d";
+    fs::create_directories(dir);
+    const std::string future3d = "{\n  \"dimension\": \"3d\",\n  \"version\": 999,\n  \"entities\": []\n}\n";
+    const fs::path sp = s3::scene_path(dir.string());
+    fs::create_directories(fs::path(sp).parent_path());
+    std::ofstream(sp, std::ios::binary) << future3d;
+    editor::ProjectInfo info;
+    info.id = "_ux_future3d";
+    info.name = "Future 3D";
+    info.kind = editor::ProjectKind::ThreeD;
+    info.path = dir.string();
+    editor::Editor3DScreen e(info);
+    e.on_enter();
+    const ux::FriendlyError* f = ux::current_error();
+    if (!f || f->kind != K::SceneVersion)
+      return fail("3D: newer scene.json opened without the scene-version error" +
+                  (f ? std::string(" (got ") + ux::to_string(f->kind) + ": " + f->details + ")" : std::string()));
+    ctx.frames(3, [&] { e.on_update(1.0f / 60.0f); });
+    std::string err;
+    if (e.save_scene(&err)) return fail("3D: saved over a scene from a newer TombStone");
+    e.on_exit();
+    if (read_all(sp) != future3d) return fail("3D: the newer scene.json was changed on disk");
+    ux::clear_errors();
+  }
+  for (K k : ux::all_error_kinds())
+    if (!covered.count(k)) return fail(std::string("no smoke case for ") + ux::to_string(k));
+  *cases = static_cast<int>(sizeof(cases_) / sizeof(cases_[0])) + 2;
+  return 0;
+}
+
 int run_ux_smoke() {
   SettingsBackup keep;
   const fs::path root = fs::absolute("./TombStoneProjects/_ux_smoke");
@@ -453,6 +605,8 @@ int run_ux_smoke() {
       return r;
     e.on_exit();
   }
+  int error_cases = 0;
+  if (int r = check_errors(ctx, root, &error_cases)) return r;
   fs::remove_all(root, ec);
   // Trading Post rows explain themselves: what, where it works, what next.
   {
@@ -475,6 +629,7 @@ int run_ux_smoke() {
   std::cout << "[smoke] ux OK (registry: " << menu2d << " 2D / " << menu3d
             << " 3D menu actions, palette fuzzy find + run + Ctrl+Shift+P; tooltips on " << tips2d
             << " 2D / " << tips3d << " 3D toolbar + Inspector widgets + every menu item + Trading Post rows; "
-            << "empty states in 6 2D / 6 3D panels)\n";
+            << "empty states in 6 2D / 6 3D panels; readable errors for " << error_cases
+            << " cases incl. a newer scene.json left untouched)\n";
   return 0;
 }

@@ -1,4 +1,5 @@
 #include "editor/vault/VaultPanel.h"
+#include "editor/ux/FriendlyError.h"
 #include "editor/ux/EmptyState.h"
 #include "editor/ux/Tooltip.h"
 
@@ -291,12 +292,21 @@ void VaultPanel::replan_upload() {
 
 // ---- drawing ---------------------------------------------------------------------
 
+ux::FriendlyError friendly_vault_error(const std::string& raw, bool remote) {
+  ux::FriendlyError f = ux::explain(raw, remote ? ux::ErrorKind::VaultConnection : ux::ErrorKind::Unknown,
+                                    remote ? "Vault server" : "Vault (local folder)");
+  if (f.kind != ux::ErrorKind::VaultConnection) f.fix += " You can pick another Vault folder in Vault settings.";
+  f.fix_label = "Vault settings";
+  f.fix_action.clear();  // the panel opens its own settings popup
+  return f;
+}
+
 void VaultPanel::draw() {
   if (!loaded_ && !job_.valid() && error_.empty()) refresh();
   thumb_tex_.poll_changes(ImGui::GetTime(), 2.0);
   draw_toolbar();
   if (!error_.empty()) {
-    theme::StatusError(error_.c_str());
+    if (ux::ErrorBox("vault_error", friendly_vault_error(error_, backend_ == "remote"))) open_settings_ = true;
   } else if (!status_line_.empty()) {
     if (job_.valid()) ImGui::TextColored(theme::Accent(), "%s", status_line_.c_str());
     else ImGui::TextColored(theme::TextMuted(), "%s", status_line_.c_str());
