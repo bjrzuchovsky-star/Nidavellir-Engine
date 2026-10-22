@@ -56,6 +56,8 @@ void Editor3DScreen::note(const std::string& text, LogLevel level) {
 
 void Editor3DScreen::on_enter() {
   back_requested_ = quit_requested_ = false;
+  settings_requested_ = false;
+  setup_field_guide();
   log_.clear();
   plugins_.open(&project_, "editor3d", this,
                 [this](runtime::LogLevel level, const std::string& text) {
@@ -189,7 +191,12 @@ AppState Editor3DScreen::on_update(float delta_seconds) {
   while (!toasts_.empty() && toasts_.front().second <= 0) toasts_.pop_front();
   if (ImGui::GetCurrentContext() != nullptr) draw_ui();
   if (quit_requested_) return AppState::Quit;
-  return back_requested_ ? AppState::ProjectManager : AppState::Editor3D;
+  if (back_requested_) return AppState::ProjectManager;
+  if (settings_requested_) {
+    settings_requested_ = false;
+    return AppState::Settings;  // AppFlow comes back to this claim afterwards
+  }
+  return AppState::Editor3D;
 }
 
 // ---- Selection -------------------------------------------------------------

@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/ui/Theme.h"
 
@@ -41,7 +42,7 @@ void Editor2DScreen::draw_hierarchy() {
     duplicate_selected();
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip("Duplicate selection (Ctrl+D)");
+    ux::SetTooltip("Duplicate selection (Ctrl+D)");
   }
   ImGui::SameLine();
   if (theme::SecondaryButton("Rename", ImVec2(bw, 0))) {
@@ -54,7 +55,7 @@ void Editor2DScreen::draw_hierarchy() {
     delete_selected();
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip("Delete selection (Del)");
+    ux::SetTooltip("Delete selection (Del)");
   }
   ImGui::EndDisabled();
 
@@ -197,13 +198,13 @@ void Editor2DScreen::draw_hierarchy_row(const Entity2D& e, int depth) {
   ImGui::PushStyleColor(ImGuiCol_Text, e.hidden ? theme::TextMuted() : theme::Sand());
   if (ImGui::SmallButton(e.hidden ? "-##eye" : "o##eye")) hier_toggle_hide_ = e.id;
   ImGui::PopStyleColor();
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(e.hidden ? "Show (H)" : "Hide (H)");
+  if (ImGui::IsItemHovered()) ux::SetTooltip(e.hidden ? "Show (H)" : "Hide (H)");
   ImGui::SameLine(0.0f, 2.0f);
   ImGui::PushStyleColor(ImGuiCol_Text, e.locked ? theme::Warning() : theme::TextMuted());
   if (ImGui::SmallButton(e.locked ? "L##lock" : ".##lock")) hier_toggle_lock_ = e.id;
   ImGui::PopStyleColor(2);
   ImGui::PopStyleVar();
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(e.locked ? "Unlock (Ctrl+Shift+L)" : "Lock (Ctrl+L)");
+  if (ImGui::IsItemHovered()) ux::SetTooltip(e.locked ? "Unlock (Ctrl+Shift+L)" : "Lock (Ctrl+L)");
   ImGui::PopID();
   ImGui::SameLine(0.0f, 4.0f);
 
@@ -439,7 +440,7 @@ void Editor2DScreen::draw_inspector() {
       ImGui::InputFloat2("W / H", wh, "%.0f");
       ImGui::EndDisabled();
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("Follows Cols x Tile px and Rows x Tile px.");
+        ux::SetTooltip("Follows Cols x Tile px and Rows x Tile px.");
       }
     } else {
       transform_field("W", &e->w, 2, 1.0f, 4096.0f, true);

@@ -1,4 +1,5 @@
 #include "editor/vault/VaultPanel.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/settings/Settings.h"
 #include "editor/vault/FilePick.h"
@@ -352,7 +353,7 @@ void VaultPanel::draw_toolbar() {
         add_files({});
       }
     }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Send loose files straight to the Vault (or drop them on this window)");
+    if (ImGui::IsItemHovered()) ux::SetTooltip("Send loose files straight to the Vault (or drop them on this window)");
   } else if (theme::PrimaryButton("Send to Vault...")) {
     send_to_vault(host_.selected_asset ? host_.selected_asset() : "");
   }
@@ -450,7 +451,7 @@ bool VaultPanel::tile(const vault::Item& it, float size) {
     ImGui::EndDragDropSource();
   }
   if (hovered) {
-    ImGui::SetTooltip("%s (%s)\n%s%s%s\nv%d  %s", it.name.c_str(), it.kind.c_str(),
+    ux::SetTooltip("%s (%s)\n%s%s%s\nv%d  %s", it.name.c_str(), it.kind.c_str(),
                       it.author.empty() ? "" : ("by " + it.author + "  ").c_str(),
                       it.licence.c_str(), it.tags.empty() ? "" : ("\n#" + vault::join(it.tags, " #")).c_str(),
                       it.latest, it.id.c_str());
@@ -569,7 +570,7 @@ void VaultPanel::draw_details() {
         error_ = err;
       }
     }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Pinned items keep their version when you Update all");
+    if (ImGui::IsItemHovered()) ux::SetTooltip("Pinned items keep their version when you Update all");
   }
   ImGui::EndDisabled();
   ImGui::TextDisabled("Or drag the tile into the Asset Browser / scene.");
@@ -963,7 +964,7 @@ void VaultPanel::draw_manager_actions(const vault::Item& it) {
     for (int i = 0; i < static_cast<int>(claims.size()); ++i) {
       const std::string label = claims[i].name + "  (" + claims[i].kind + ")##" + claims[i].path;
       if (ImGui::Selectable(label.c_str(), i == claim_pick_)) claim_pick_ = i;
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", claims[i].path.c_str());
+      if (ImGui::IsItemHovered()) ux::SetTooltip("%s", claims[i].path.c_str());
     }
     ImGui::EndCombo();
   }

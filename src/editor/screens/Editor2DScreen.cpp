@@ -40,6 +40,8 @@ void Editor2DScreen::on_enter() {
   play_focus_viewport_ = false;
   quit_requested_ = false;
   back_requested_ = false;
+  settings_requested_ = false;
+  setup_field_guide();
   renaming_ = false;
   panning_ = false;
   drag_mode_ = DragMode::None;
@@ -565,6 +567,10 @@ AppState Editor2DScreen::on_update(float /*delta_seconds*/) {
   }
   if (back_requested_) {
     return AppState::ProjectManager;
+  }
+  if (settings_requested_) {
+    settings_requested_ = false;
+    return AppState::Settings;  // AppFlow comes back to this claim afterwards
   }
   return AppState::Editor2D;
 }

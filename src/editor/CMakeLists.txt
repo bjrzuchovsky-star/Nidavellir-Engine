@@ -1,6 +1,12 @@
 add_library(ts_editor
   AppFlow.cpp
   AppFlow_Delete.cpp
+  ux/UxPrefs.cpp
+  ux/UxStrings.cpp
+  ux/Tooltip.cpp
+  ux/Actions.cpp
+  ux/CommandPalette.cpp
+  ux/EditorUx.cpp
   settings/Settings.cpp
   projects/ProjectStore.cpp
   projects/ProjectStore_Delete.cpp

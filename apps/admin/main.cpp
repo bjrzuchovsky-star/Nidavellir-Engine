@@ -70,6 +70,7 @@
 #include "SmokeUpdate.h"
 #include "SmokeMouseLook.h"
 #include "SmokePluginSplit.h"
+#include "SmokeUx.h"
 #include "editor/vault/VaultPanel.h"
 int run_terrain_shot(const std::string& png);
 #include "store/TradingPost.h"
@@ -1379,6 +1380,11 @@ int run_console_smoke() {
   // Several scripts per object, New Script, drag-attach, IDE launch plans
   // (see SmokeScriptsMulti.cpp).
   if (run_scripts_multi_smoke() != 0) {
+    return 1;
+  }
+  // Field Guide: palette, tooltips, walkthrough, layouts, errors, context
+  // menus (see SmokeUx.cpp).
+  if (run_ux_smoke() != 0) {
     return 1;
   }
 
@@ -2966,6 +2972,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-survival") == 0) {
       // Just the Frontier Survival checks.
       return run_survival_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-ux") == 0) {
+      // Just the Field Guide checks.
+      return run_ux_smoke();
     }
     if (std::strcmp(argv[i], "--smoke") == 0) {
       smoke = true;

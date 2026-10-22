@@ -1,4 +1,5 @@
 #include "editor/plugins/PluginsPanel.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/store/TradingPostPanel.h"
 #include "editor/ui/Theme.h"
@@ -159,7 +160,7 @@ PluginsPanelResult draw_plugins_panel(EditorPlugins& plugins,
     }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-      ImGui::SetTooltip(!fits ? "Doesn't work in %s projects"
+      ux::SetTooltip(!fits ? "Doesn't work in %s projects"
                               : (enabled ? "Unhitch (saved to project.json)"
                                          : "Hitch up (saved to project.json)"),
                         plugin::to_string(type));
@@ -210,7 +211,7 @@ PluginsPanelResult draw_plugins_panel(EditorPlugins& plugins,
     ImGui::TextDisabled("%s  |  %s  |  %s", info.id.c_str(), src.c_str(),
                         types_label(info.project_types).c_str());
     if (e.dynamic && ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("%s", e.source.c_str());
+      ux::SetTooltip("%s", e.source.c_str());
     }
     if (loaded) {
       const std::string adds = contributions(mgr, info.id);
@@ -251,7 +252,7 @@ PluginsPanelResult draw_plugins_panel(EditorPlugins& plugins,
     for (const std::string& d : plugins::plugin_search_dirs(mgr.context().project_dir)) {
       dirs += "\n  " + d;
     }
-    ImGui::SetTooltip("Reload plugin libraries (.dll / .so) from:%s",
+    ux::SetTooltip("Reload plugin libraries (.dll / .so) from:%s",
                       dirs.empty() ? "\n  (none)" : dirs.c_str());
   }
   return result;

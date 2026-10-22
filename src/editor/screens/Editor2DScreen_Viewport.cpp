@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/assets/AssetLibrary.h"
 #include "editor/ui/QuadDraw.h"
@@ -290,13 +291,13 @@ void Editor2DScreen::draw_viewport() {
         ImGui::GetWindowDrawList()->AddRect(view.to_screen(under->x, under->y),
                                             view.to_screen(under->x + under->w, under->y + under->h),
                                             theme::U32(theme::Accent()), 2.0f, 0, 2.0f);
-        ImGui::SetTooltip("Attach to %s", under->name.c_str());
+        ux::SetTooltip("Attach to %s", under->name.c_str());
         if (std::string rel = accept_script_payload(); !rel.empty()) {
           workspace_.select(*hit);
           attach_script(*hit, rel);
         }
       } else {
-        ImGui::SetTooltip("Drop on an entity to attach the script");
+        ux::SetTooltip("Drop on an entity to attach the script");
       }
     }
     // A Vault tile: pull it into the claim, then place it here.
@@ -920,7 +921,7 @@ void Editor2DScreen::draw_viewport() {
   if (hover_id) {
     if (const Entity2D* he = workspace_.find(*hover_id)) {
       if (he->sprite && sprite_state(*he) == SpriteState::Missing) {
-        ImGui::SetTooltip("Sprite image missing: %s",
+        ux::SetTooltip("Sprite image missing: %s",
                           he->sprite->path.empty() ? "(no path)"
                                                    : he->sprite->path.c_str());
       }

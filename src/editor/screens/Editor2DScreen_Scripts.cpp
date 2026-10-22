@@ -6,6 +6,8 @@
 // Component and hot reload while playing.
 
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/Tooltip.h"
+#include "editor/ux/Actions.h"
 
 #include "editor/launch/OpenWithOs.h"
 #include "editor/scripting/BrandBook.h"
@@ -236,7 +238,7 @@ void Editor2DScreen::draw_inspector_add_component(std::uint64_t id) {
   e = workspace_.find(id);
   if (!e) return;
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip(is_playing() ? "Stop the ride to add components"
+    ux::SetTooltip(is_playing() ? "Stop the ride to add components"
                                    : "Colliders, riders, cameras, scripts... (or drop a script here)");
   }
   ImGui::SetNextWindowPos(below, ImGuiCond_Appearing);
@@ -250,10 +252,10 @@ void Editor2DScreen::draw_inspector_add_component(std::uint64_t id) {
       ImGui::Separator();
     }
     e = workspace_.find(id);
-    if (ImGui::MenuItem("Collider", nullptr, false, e && !e->collider)) add_component(id, "Collider");
-    if (ImGui::MenuItem("Player", nullptr, false, e && !e->player)) add_component(id, "Player");
-    if (ImGui::MenuItem("Camera", nullptr, false, e && !e->camera)) add_component(id, "Camera");
-    if (ImGui::MenuItem("Spawn Point", nullptr, false, e && !e->spawn)) add_component(id, "Spawn");
+    if (ux::MenuItem("Collider", nullptr, false, e && !e->collider)) add_component(id, "Collider");
+    if (ux::MenuItem("Player", nullptr, false, e && !e->player)) add_component(id, "Player");
+    if (ux::MenuItem("Camera", nullptr, false, e && !e->camera)) add_component(id, "Camera");
+    if (ux::MenuItem("Spawn Point", nullptr, false, e && !e->spawn)) add_component(id, "Spawn");
     ImGui::EndPopup();
   }
   if (const std::string created = add_script_menu_.draw_modal(host); !created.empty()) {

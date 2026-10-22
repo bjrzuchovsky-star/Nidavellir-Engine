@@ -1,4 +1,5 @@
 #include "editor/export/FreightOffice.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/launch/GameLauncher.h"
 #include "editor/launch/OpenWithOs.h"
@@ -54,7 +55,7 @@ void FreightOffice::draw_distribution() {
   ImGui::Checkbox("Windows setup installer", &installer_);
   ImGui::BeginDisabled(!installer_);
   ImGui::InputText("License / EULA (txt or rtf)", license_, sizeof(license_));
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Project-relative file; shown as the installer's license page");
+  if (ImGui::IsItemHovered()) ux::SetTooltip("Project-relative file; shown as the installer's license page");
   const char* modes[] = {"Ask the player (per-user default)", "Per-user (no admin)", "All users (admin)"};
   ImGui::Combo("Install for", &install_mode_, modes, 3);
   ImGui::Checkbox("Start menu shortcut", &start_menu_);

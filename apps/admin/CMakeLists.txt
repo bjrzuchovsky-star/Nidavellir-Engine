@@ -49,6 +49,7 @@ add_executable(ts_admin
   SmokeLocTiles.cpp
   SmokeTerrain.cpp
   SmokeVault.cpp
+  SmokeUx.cpp
   SmokeUpdate.cpp
   SmokeMouseLook.cpp
   SmokePluginSplit.cpp

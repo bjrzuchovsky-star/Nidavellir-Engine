@@ -3,6 +3,7 @@
 // Stable panel itself is drawn in Editor2DScreen_Stable.cpp.
 
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/assets/AssetLibrary.h"
 #include "editor/ui/Theme.h"
@@ -186,7 +187,7 @@ void Editor2DScreen::draw_inspector_animator(std::uint64_t id) {
     ImGui::EndCombo();
   }
   if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip("Sheets with a .anim.json beside them. Make one in the "
+    ux::SetTooltip("Sheets with a .anim.json beside them. Make one in the "
                       "Stable.");
   }
   const AnimLibrary::Entry* entry = an.set.empty() ? nullptr : anim_entry(an.set);
@@ -206,7 +207,7 @@ void Editor2DScreen::draw_inspector_animator(std::uint64_t id) {
       set_animator(id, next, "Animator Clip");
     }
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("The clip the ride starts on. Riders then pick "
+      ux::SetTooltip("The clip the ride starts on. Riders then pick "
                         "idle_/walk_ + _down/_up/_left/_right by heading.");
     }
     if (clip_combo("Default clip", set, an.default_clip, "(set default)",
@@ -216,7 +217,7 @@ void Editor2DScreen::draw_inspector_animator(std::uint64_t id) {
       set_animator(id, next, "Animator Default Clip");
     }
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("Fallback when no idle_/walk_ clip fits; also what "
+      ux::SetTooltip("Fallback when no idle_/walk_ clip fits; also what "
                         "the viewport previews.");
     }
     ImGui::TextDisabled("%zu clips | %d x %d frames | %s", set.clips.size(),
@@ -243,7 +244,7 @@ void Editor2DScreen::draw_inspector_animator(std::uint64_t id) {
       set_animator(id, next, playing ? "Animator Play" : "Animator Hold");
     }
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("Off holds the current frame.");
+      ux::SetTooltip("Off holds the current frame.");
     }
     ImGui::SameLine();
     if (theme::SecondaryButton("Open in Stable", ImVec2(120, 0)) &&

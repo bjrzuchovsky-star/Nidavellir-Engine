@@ -1,4 +1,5 @@
 #include "editor/screens/LoginScreen.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/ui/Brand.h"
 #include "editor/ui/Theme.h"
@@ -80,7 +81,7 @@ void LoginScreen::draw_ui() {
     submit_dev_login();
   }
   if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip("Skip the gate for local work (signs in as the saved user).");
+    ux::SetTooltip("Skip the gate for local work (signs in as the saved user).");
   }
   ImGui::SameLine();
   if (theme::SecondaryButton("Settings", ImVec2(half_w, 30.0f))) {

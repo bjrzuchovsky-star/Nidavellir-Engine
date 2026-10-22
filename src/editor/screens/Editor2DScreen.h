@@ -17,6 +17,7 @@
 #include "editor/screens/IScreen.h"
 #include "editor/ui/FolderBrowser.h"
 #include "editor/ui/PlayUi.h"
+#include "editor/ux/EditorUx.h"
 #include "editor/workspace/Workspace2D.h"
 #include "mp/LocalPosse.h"
 #include "net/SimTransport.h"
@@ -84,6 +85,10 @@ class Editor2DScreen final : public IScreen {
 
   void request_quit();
   void request_back_to_projects();
+  // Field Guide: action registry + command palette (Ctrl+Shift+P), panel /
+  // Settings / recent entries; --smoke-ux drives it.
+  ux::EditorUx& field_guide() { return ux_; }
+  bool hierarchy_shown() const { return show_hierarchy_; }
 
   const ProjectInfo& project() const { return project_; }
   Workspace2D& workspace() { return workspace_; }
@@ -471,6 +476,11 @@ class Editor2DScreen final : public IScreen {
   friend class PossePlugin;  // registers the posse UI as plugin contributions
   void draw_ui();
   void draw_menu_bar();
+  void draw_menus();  // menu bar contents (also harvested for the palette)
+  void setup_field_guide();
+  void draw_context_menus_for_audit();
+  ux::EditorUx ux_{false};
+  bool settings_requested_ = false;
   void draw_toolbar();
   void draw_status_bar();
   void draw_hierarchy();

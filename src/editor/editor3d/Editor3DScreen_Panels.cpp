@@ -1,6 +1,7 @@
 // Inspector + Environment panels. Widgets edit a copy that is applied live;
 // one undo step is pushed when a widget is released after an edit.
 #include "render3d/ColliderFit.h"
+#include "editor/ux/Tooltip.h"
 #include "editor/fx/FxInspector.h"
 #include "editor/editor3d/Editor3DScreen.h"
 
@@ -397,7 +398,7 @@ void Editor3DScreen::draw_inspector() {
       t.commit = "Player look";
     }
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip(p.view == scene3d::Player3D::View::FirstPerson
+      ux::SetTooltip(p.view == scene3d::Player3D::View::FirstPerson
                             ? "Mouse: turn the body and tilt the eyes with the mouse.\n"
                               "Keys: Q / Z turn, Page Up / Down look, right-drag."
                             : "Mouse: orbit the camera with the mouse, scroll to zoom.\n"
@@ -432,7 +433,7 @@ void Editor3DScreen::draw_inspector() {
     ImGui::TextDisabled(play_camera_id() == e.id ? "(Play starts here)" : "");
     ImGui::DragInt("Priority", &c.priority, 0.1f, -1000, 1000);
     t.after("Camera priority");
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Play uses the active camera with the highest priority.");
+    if (ImGui::IsItemHovered()) ux::SetTooltip("Play uses the active camera with the highest priority.");
     int proj = c.projection == P::Projection::Orthographic ? 1 : 0;
     if (ImGui::Combo("Projection", &proj, "Perspective\0Orthographic\0")) {
       c.projection = proj ? P::Projection::Orthographic : P::Projection::Perspective;
@@ -459,7 +460,7 @@ void Editor3DScreen::draw_inspector() {
     }
     ImGui::DragFloat4("Viewport", c.viewport, 0.005f, 0.0f, 1.0f, "%.2f");
     t.after("Camera viewport");
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("x, y (from the top left), width, height as fractions of the screen");
+    if (ImGui::IsItemHovered()) ux::SetTooltip("x, y (from the top left), width, height as fractions of the screen");
     int rig = static_cast<int>(c.rig);
     if (ImGui::Combo("Rig", &rig, "Fixed\0Orbit (follow)\0First person\0")) {
       c.rig = static_cast<P::Rig>(rig);
@@ -496,7 +497,7 @@ void Editor3DScreen::draw_inspector() {
       ImGui::Checkbox("Collision", &c.collision);
       t.after("Camera collision");
       if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Pull in when the boom hits a wall (sphere cast with a physics plugin,\n"
+        ux::SetTooltip("Pull in when the boom hits a wall (sphere cast with a physics plugin,\n"
                           "static colliders otherwise).");
       if (c.collision) {
         ImGui::DragFloat("Radius", &c.collision_radius, 0.005f, 0.01f, 2.0f, "%.2f m");
@@ -585,7 +586,7 @@ void Editor3DScreen::draw_inspector() {
     t.after("Seated lift");
     edit_text("Hand model", &r.hand_model);
     t.after("Hand model");
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Skinned glTF (right hand; mirrored for the left). Empty = controllers");
+    if (ImGui::IsItemHovered()) ux::SetTooltip("Skinned glTF (right hand; mirrored for the left). Empty = controllers");
   }
   if (component("Grabbable", e.grabbable.has_value(), [&] { e.grabbable = scene3d::Grabbable3D{}; },
                 [&] { e.grabbable.reset(); })) {
@@ -705,7 +706,7 @@ void Editor3DScreen::draw_physics_settings() {
     for (int j = 0; j < 8; ++j) {
       ImGui::TableNextColumn();
       ImGui::Text("%d", j);
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", ps.layer_names[j].c_str());
+      if (ImGui::IsItemHovered()) ux::SetTooltip("%s", ps.layer_names[j].c_str());
     }
     for (int i = 0; i < 8; ++i) {
       ImGui::TableNextRow();

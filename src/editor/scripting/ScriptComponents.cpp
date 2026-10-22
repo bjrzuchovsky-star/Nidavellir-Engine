@@ -1,4 +1,6 @@
 #include "editor/scripting/ScriptComponents.h"
+#include "editor/ux/Tooltip.h"
+#include "editor/ux/Actions.h"
 
 #include "core/AppPaths.h"
 #include "editor/launch/OpenWithOs.h"
@@ -1032,14 +1034,14 @@ void open_menu_items(const ScriptStackHost& host, const std::string& rel) {
     open_script_external(e, host.project_dir, host.project_name, rel, &msg);
     if (host.note) host.note(msg);
   };
-  if (ImGui::MenuItem(lang_of(rel) == ScriptLang::Graph ? "Open in the Brand Book" : "Open")) run(ExternalEditor::Auto);
+  if (ux::MenuItem(lang_of(rel) == ScriptLang::Graph ? "Open in the Brand Book" : "Open")) run(ExternalEditor::Auto);
   const EditorInstall& vc = find_vscode();
-  if (ImGui::MenuItem("Open in VS Code", nullptr, false, true)) run(ExternalEditor::VSCode);
-  if (!vc.found && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", vc.detail.c_str());
+  if (ux::MenuItem("Open in VS Code", nullptr, false, true)) run(ExternalEditor::VSCode);
+  if (!vc.found && ImGui::IsItemHovered()) ux::SetTooltip("%s", vc.detail.c_str());
   const EditorInstall& vs = find_visual_studio();
-  if (ImGui::MenuItem("Open in Visual Studio", nullptr, false, true)) run(ExternalEditor::VisualStudio);
-  if (!vs.found && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", vs.detail.c_str());
-  if (lang_of(rel) != ScriptLang::Graph && ImGui::MenuItem("Open with the OS")) run(ExternalEditor::Os);
+  if (ux::MenuItem("Open in Visual Studio", nullptr, false, true)) run(ExternalEditor::VisualStudio);
+  if (!vs.found && ImGui::IsItemHovered()) ux::SetTooltip("%s", vs.detail.c_str());
+  if (lang_of(rel) != ScriptLang::Graph && ux::MenuItem("Open with the OS")) run(ExternalEditor::Os);
 }
 
 }  // namespace
@@ -1063,7 +1065,7 @@ StackResult draw_script_stack(std::vector<ScriptData>& stack, const ScriptStackH
       commit(on ? "Enable Script" : "Disable Script");
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-      ImGui::SetTooltip(on ? "Runs when the ride starts (untick to switch it off)" : "Switched off: does not run");
+      ux::SetTooltip(on ? "Runs when the ride starts (untick to switch it off)" : "Switched off: does not run");
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
@@ -1079,13 +1081,13 @@ StackResult draw_script_stack(std::vector<ScriptData>& stack, const ScriptStackH
       open_menu_items(host, s.path);
       ImGui::Separator();
       ImGui::BeginDisabled(host.read_only);
-      if (ImGui::MenuItem("Move up", nullptr, false, i > 0)) move_from = i, move_to = i - 1;
-      if (ImGui::MenuItem("Move down", nullptr, false, i + 1 < n)) move_from = i, move_to = i + 1;
-      if (ImGui::MenuItem("Reset props", nullptr, false, !s.props.empty())) {
+      if (ux::MenuItem("Move up", nullptr, false, i > 0)) move_from = i, move_to = i - 1;
+      if (ux::MenuItem("Move down", nullptr, false, i + 1 < n)) move_from = i, move_to = i + 1;
+      if (ux::MenuItem("Reset props", nullptr, false, !s.props.empty())) {
         s.props.clear();
         commit("Reset Script Props");
       }
-      if (ImGui::MenuItem("Remove script")) remove = i;
+      if (ux::MenuItem("Remove script")) remove = i;
       ImGui::EndDisabled();
       ImGui::EndPopup();
     }
@@ -1108,12 +1110,12 @@ StackResult draw_script_stack(std::vector<ScriptData>& stack, const ScriptStackH
     ImGui::BeginDisabled(host.read_only || i == 0);
     if (ImGui::ArrowButton("##up", ImGuiDir_Up)) move_from = i, move_to = i - 1;
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Run earlier (move up)");
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ux::SetTooltip("Run earlier (move up)");
     ImGui::SameLine(0, 2);
     ImGui::BeginDisabled(host.read_only || i + 1 >= n);
     if (ImGui::ArrowButton("##down", ImGuiDir_Down)) move_from = i, move_to = i + 1;
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Run later (move down)");
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ux::SetTooltip("Run later (move down)");
     ImGui::SameLine(0, 2);
     if (ImGui::Button("...", ImVec2(bw, 0))) ImGui::OpenPopup("##script_more");
     if (ImGui::BeginPopup("##script_more")) {
@@ -1124,7 +1126,7 @@ StackResult draw_script_stack(std::vector<ScriptData>& stack, const ScriptStackH
     ImGui::BeginDisabled(host.read_only);
     if (ImGui::Button("x", ImVec2(bw, 0))) remove = i;
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Remove this script");
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ux::SetTooltip("Remove this script");
 
     if (open && remove != i) {
       ImGui::Indent(8.0f);
@@ -1146,14 +1148,14 @@ StackResult draw_script_stack(std::vector<ScriptData>& stack, const ScriptStackH
         open_script_external(ExternalEditor::Auto, host.project_dir, host.project_name, s.path, &msg);
         if (host.note) host.note(msg);
       }
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip("Open %s (Settings > Tools picks the editor)", s.path.c_str());
+      if (ImGui::IsItemHovered()) ux::SetTooltip("Open %s (Settings > Tools picks the editor)", s.path.c_str());
       ImGui::SameLine();
       if (theme::SecondaryButton("VS Code", ImVec2(76, 0))) {
         std::string msg;
         open_script_external(ExternalEditor::VSCode, host.project_dir, host.project_name, s.path, &msg);
         if (host.note) host.note(msg);
       }
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip("Open in VS Code: %s", find_vscode().found ? find_vscode().path.c_str() : find_vscode().detail.c_str());
+      if (ImGui::IsItemHovered()) ux::SetTooltip("Open in VS Code: %s", find_vscode().found ? find_vscode().path.c_str() : find_vscode().detail.c_str());
       ImGui::SameLine();
       if (theme::SecondaryButton("Visual Studio", ImVec2(110, 0))) {
         std::string msg;
@@ -1161,7 +1163,7 @@ StackResult draw_script_stack(std::vector<ScriptData>& stack, const ScriptStackH
         if (host.note) host.note(msg);
       }
       if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Open in Visual Studio: %s",
+        ux::SetTooltip("Open in Visual Studio: %s",
                           find_visual_studio().found ? find_visual_studio().path.c_str() : find_visual_studio().detail.c_str());
       }
 
@@ -1217,7 +1219,7 @@ StackResult draw_script_stack(std::vector<ScriptData>& stack, const ScriptStackH
             s.erase(d.name);
             commit("Reset Prop: " + d.name);
           }
-          if (ImGui::IsItemHovered()) ImGui::SetTooltip("Back to the file's %s", describe(d.value).c_str());
+          if (ImGui::IsItemHovered()) ux::SetTooltip("Back to the file's %s", describe(d.value).c_str());
         }
         ImGui::PopID();
       }
@@ -1260,11 +1262,11 @@ StackResult draw_script_stack(std::vector<ScriptData>& stack, const ScriptStackH
 
 std::string AddScriptMenu::draw_items(const ScriptStackHost& host) {
   std::string picked;
-  if (ImGui::MenuItem("New Script...", nullptr, false, !host.read_only)) {
+  if (ux::MenuItem("New Script...", nullptr, false, !host.read_only)) {
     want_modal = true;
     error.clear();
   }
-  if (ImGui::BeginMenu("Script", !host.read_only)) {
+  if (ux::BeginMenu("Script", !host.read_only)) {
     if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
     ImGui::SetNextItemWidth(220.0f);
     ImGui::InputTextWithHint("##script_search", "search scripts", search, sizeof(search));
@@ -1279,14 +1281,14 @@ std::string AddScriptMenu::draw_items(const ScriptStackHost& host) {
         if (!q.empty() && low.find(q) == std::string::npos) continue;
         char label[300];
         std::snprintf(label, sizeof(label), "%-6s %s", lang_tag(lang_of(rel)), rel.c_str());
-        if (ImGui::MenuItem(label)) picked = rel;
+        if (ux::MenuItem(label)) picked = rel;
         ++shown;
       }
     }
     if (shown == 0) {
       ImGui::TextDisabled(host.scripts && !host.scripts->empty() ? "Nothing matches." : "No scripts yet: New Script...");
     }
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
   return picked;
 }
@@ -1312,7 +1314,7 @@ std::string AddScriptMenu::draw_modal(const ScriptStackHost& host) {
     if (ImGui::BeginCombo("Template", tmpl[static_cast<std::size_t>(templ)].label)) {
       for (int i = 0; i < static_cast<int>(tmpl.size()); ++i) {
         if (ImGui::Selectable(tmpl[static_cast<std::size_t>(i)].label, i == templ)) templ = i;
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tmpl[static_cast<std::size_t>(i)].blurb);
+        if (ImGui::IsItemHovered()) ux::SetTooltip("%s", tmpl[static_cast<std::size_t>(i)].blurb);
       }
       ImGui::EndCombo();
     }
@@ -1377,7 +1379,7 @@ void draw_scripts_panel_body(ScriptsPanelState& st, const ScriptsPanelHost& host
   if (ImGui::BeginCombo("##template", tmpl[static_cast<std::size_t>(*st.templ)].label)) {
     for (int i = 0; i < static_cast<int>(tmpl.size()); ++i) {
       if (ImGui::Selectable(tmpl[static_cast<std::size_t>(i)].label, i == *st.templ)) *st.templ = i;
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tmpl[static_cast<std::size_t>(i)].blurb);
+      if (ImGui::IsItemHovered()) ux::SetTooltip("%s", tmpl[static_cast<std::size_t>(i)].blurb);
     }
     ImGui::EndCombo();
   }
@@ -1459,13 +1461,13 @@ void draw_scripts_panel_body(ScriptsPanelState& st, const ScriptsPanelHost& host
   if (theme::SecondaryButton("VS Code##open", ImVec2(80, 0))) open_with(ExternalEditor::VSCode);
   if (ImGui::IsItemHovered()) {
     const EditorInstall& vc = find_vscode();
-    ImGui::SetTooltip("Open the claim folder on this file in VS Code\n%s", vc.found ? vc.path.c_str() : vc.detail.c_str());
+    ux::SetTooltip("Open the claim folder on this file in VS Code\n%s", vc.found ? vc.path.c_str() : vc.detail.c_str());
   }
   ImGui::SameLine();
   if (theme::SecondaryButton("Visual Studio##open", ImVec2(110, 0))) open_with(ExternalEditor::VisualStudio);
   if (ImGui::IsItemHovered()) {
     const EditorInstall& vs = find_visual_studio();
-    ImGui::SetTooltip("Open the claim (C#: its scripts project) on this file in Visual Studio\n%s",
+    ux::SetTooltip("Open the claim (C#: its scripts project) on this file in Visual Studio\n%s",
                       vs.found ? vs.path.c_str() : vs.detail.c_str());
   }
   const bool can_attach = !host.playing && !host.target_name.empty() && host.attach &&

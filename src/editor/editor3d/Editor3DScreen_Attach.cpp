@@ -5,6 +5,7 @@
 // is one undo step and refuses while playing. Targets come from a picker
 // list, the viewport eyedropper or a Hierarchy drag (Alt = snap).
 #include "editor/editor3d/Editor3DScreen.h"
+#include "editor/ux/Actions.h"
 
 #include "render3d/Gltf.h"
 
@@ -307,7 +308,7 @@ bool Editor3DScreen::attach_target_list(const char* id, std::uint64_t* out) {
     if (contains(sel, e.id)) continue;
     ++shown;
     ImGui::PushID(static_cast<int>(e.id));
-    if (ImGui::MenuItem(e.name.c_str())) {
+    if (ux::MenuItem(e.name.c_str())) {
       *out = e.id;
       picked = true;
     }
@@ -324,23 +325,23 @@ void Editor3DScreen::draw_attach_menu(std::uint64_t clicked) {
   const bool has = !selection().empty() && !playing();
   using M = scene3d::AttachMode;
   std::uint64_t t = 0;
-  if (ImGui::BeginMenu("Attach to...", has)) {
-    if (ImGui::BeginMenu("Keep current position")) {
-      if (ImGui::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick("attach_keep");
+  if (ux::BeginMenu("Attach to...", has)) {
+    if (ux::BeginMenu("Keep current position")) {
+      if (ux::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick("attach_keep");
       ImGui::Separator();
       if (attach_target_list("keep", &t)) attach_selected(t, M::KeepWorld);
-      ImGui::EndMenu();
+      ux::EndMenu();
     }
-    if (ImGui::BeginMenu("Snap to target")) {
-      if (ImGui::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick("attach_snap");
+    if (ux::BeginMenu("Snap to target")) {
+      if (ux::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick("attach_snap");
       ImGui::Separator();
       if (attach_target_list("snap", &t)) attach_selected(t, M::SnapToTarget);
-      ImGui::EndMenu();
+      ux::EndMenu();
     }
     ImGui::TextDisabled("Hierarchy: drag onto a row = keep, Alt+drag = snap");
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
-  if (ImGui::BeginMenu("Attach to bone...", has)) {
+  if (ux::BeginMenu("Attach to bone...", has)) {
     int skinned = 0;
     for (const Entity3D& e : scene_.entities) {
       if (contains(selection(), e.id) || !e.mesh) continue;
@@ -348,21 +349,23 @@ void Editor3DScreen::draw_attach_menu(std::uint64_t clicked) {
       if (!m || m->skeleton.joints.empty()) continue;
       ++skinned;
       ImGui::PushID(static_cast<int>(e.id));
-      if (ImGui::BeginMenu(e.name.c_str())) {
+      if (ux::BeginMenu(e.name.c_str())) {
         static bool snap = false;
+        ux::BeginMenuOptions();
         ImGui::Checkbox("Snap to bone", &snap);
+        ux::EndMenuOptions();
         ImGui::Separator();
         for (const render3d::Joint& j : m->skeleton.joints) {
-          if (ImGui::MenuItem(j.name.c_str())) {
+          if (ux::MenuItem(j.name.c_str())) {
             attach_selected_to_bone(e.id, j.name, snap ? M::SnapToTarget : M::KeepWorld);
           }
         }
-        ImGui::EndMenu();
+        ux::EndMenu();
       }
       ImGui::PopID();
     }
     if (skinned == 0) ImGui::TextDisabled("(no skinned models in the scene)");
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
   bool any_parent = false, any_follow = false;
   for (std::uint64_t id : selection()) {
@@ -371,52 +374,54 @@ void Editor3DScreen::draw_attach_menu(std::uint64_t clicked) {
       any_follow |= e->follow.has_value();
     }
   }
-  if (ImGui::MenuItem("Detach", nullptr, false, has && any_parent)) detach_selected();
-  if (ImGui::BeginMenu("Follow...", has)) {
+  if (ux::MenuItem("Detach", nullptr, false, has && any_parent)) detach_selected();
+  if (ux::BeginMenu("Follow...", has)) {
     struct K { const char* label; const char* action; bool p, r; };
     for (const K k : {K{"Position and rotation", "follow_both", true, true},
                       K{"Position only", "follow_pos", true, false},
                       K{"Rotation only", "follow_rot", false, true}}) {
-      if (ImGui::BeginMenu(k.label)) {
-        if (ImGui::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick(k.action);
+      if (ux::BeginMenu(k.label)) {
+        if (ux::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick(k.action);
         ImGui::Separator();
         if (attach_target_list(k.action, &t)) follow_selected(t, k.p, k.r);
-        ImGui::EndMenu();
+        ux::EndMenu();
       }
     }
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
-  if (any_follow && ImGui::MenuItem("Remove Follow", nullptr, false, has)) remove_follow_selected();
+  if (any_follow && ux::MenuItem("Remove Follow", nullptr, false, has)) remove_follow_selected();
   ImGui::Separator();
-  if (ImGui::BeginMenu("Snap to object", has)) {
-    if (ImGui::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick("snap");
+  if (ux::BeginMenu("Snap to object", has)) {
+    if (ux::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick("snap");
     ImGui::Separator();
     if (attach_target_list("snapto", &t)) snap_selected_to(t);
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
-  if (ImGui::BeginMenu("Copy transform from", has)) {
+  if (ux::BeginMenu("Copy transform from", has)) {
+    ux::BeginMenuOptions();
     ImGui::Checkbox("Position", &copy_pos_);
     ImGui::SameLine();
     ImGui::Checkbox("Rotation", &copy_rot_);
     ImGui::SameLine();
     ImGui::Checkbox("Scale", &copy_scale_);
-    if (ImGui::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick("copy");
+    ux::EndMenuOptions();
+    if (ux::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick("copy");
     ImGui::Separator();
     if (attach_target_list("copy", &t)) copy_transform_to_selected(t, copy_pos_, copy_rot_, copy_scale_);
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
-  if (ImGui::MenuItem("Align to surface", nullptr, false, has)) align_selected_to_surface();
+  if (ux::MenuItem("Align to surface", nullptr, false, has)) align_selected_to_surface();
 }
 
 void Editor3DScreen::draw_object_menu() {
   const bool has = !selection().empty() && !playing();
-  if (ImGui::MenuItem("Create camera", nullptr, false, !playing())) create_camera();
+  if (ux::MenuItem("Create camera", nullptr, false, !playing())) create_camera();
   const Entity3D* sel = scene_.find(primary());
   const bool cam = sel && sel->camera;
-  if (ImGui::MenuItem("Make active camera", nullptr, false, cam && !playing())) make_active_camera(sel->id);
-  if (ImGui::MenuItem("Align camera to view", "Ctrl+Alt+Num0", false, !playing() && (cam || play_camera_id())))
+  if (ux::MenuItem("Make active camera", nullptr, false, cam && !playing())) make_active_camera(sel->id);
+  if (ux::MenuItem("Align camera to view", "Ctrl+Alt+Num0", false, !playing() && (cam || play_camera_id())))
     align_camera_to_view();
-  if (ImGui::MenuItem(looking_through() ? "Stop looking through camera" : "Look through camera", "Num0", false,
+  if (ux::MenuItem(looking_through() ? "Stop looking through camera" : "Look through camera", "Num0", false,
                       cam || play_camera_id() || looking_through())) {
     if (looking_through()) stop_looking_through();
     else look_through_camera();
@@ -424,7 +429,7 @@ void Editor3DScreen::draw_object_menu() {
   ImGui::Separator();
   draw_attach_menu(primary());
   ImGui::Separator();
-  if (sel && ImGui::MenuItem(sel->locked ? "Unlock" : "Lock", "Ctrl+L", false, has)) set_locked(sel->id, !sel->locked);
+  if (sel && ux::MenuItem(sel->locked ? "Unlock" : "Lock", "Ctrl+L", false, has)) set_locked(sel->id, !sel->locked);
 }
 
 }  // namespace editor

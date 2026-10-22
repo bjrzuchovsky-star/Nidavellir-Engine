@@ -1,4 +1,6 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/Tooltip.h"
+#include "editor/ux/Actions.h"
 #include "editor/plugins/PluginNeeds.h"
 #include "plugins/profiler/ProfilerPlugin.h"
 #include "profiler/Profiler.h"
@@ -337,7 +339,7 @@ void Editor2DScreen::draw_play_controls() {
       start_play();
     }
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("Ride the scene in the Viewport (F5 / Ctrl+P). Stop "
+      ux::SetTooltip("Ride the scene in the Viewport (F5 / Ctrl+P). Stop "
                         "puts everything back.");
     }
   } else {
@@ -345,7 +347,7 @@ void Editor2DScreen::draw_play_controls() {
       stop_play();
     }
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("Stop and restore the edit scene (F5 / Ctrl+P)");
+      ux::SetTooltip("Stop and restore the edit scene (F5 / Ctrl+P)");
     }
   }
   ImGui::SameLine();
@@ -355,7 +357,7 @@ void Editor2DScreen::draw_play_controls() {
     toggle_pause_play();
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip("Hold up / ride on (F6)");
+    ux::SetTooltip("Hold up / ride on (F6)");
   }
   ImGui::EndDisabled();
   ImGui::SameLine();
@@ -364,7 +366,7 @@ void Editor2DScreen::draw_play_controls() {
     step_play();
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip("Advance exactly one tick while paused (F10)");
+    ux::SetTooltip("Advance exactly one tick while paused (F10)");
   }
   ImGui::EndDisabled();
   ImGui::SameLine();
@@ -373,7 +375,7 @@ void Editor2DScreen::draw_play_controls() {
     launch_game();
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip("Save, then run this project in ts_game (own window)");
+    ux::SetTooltip("Save, then run this project in ts_game (own window)");
   }
   ImGui::EndDisabled();
   // Plugin toolbar contributions (the posse toggle when it's hitched).
@@ -381,54 +383,54 @@ void Editor2DScreen::draw_play_controls() {
 }
 
 void Editor2DScreen::draw_play_menu() {
-  if (!ImGui::BeginMenu("Play")) {
+  if (!ux::BeginMenu("Play")) {
     return;
   }
-  if (ImGui::MenuItem(is_playing() ? "Stop###PlayToggle" : "Play###PlayToggle",
+  if (ux::MenuItem(is_playing() ? "Stop###PlayToggle" : "Play###PlayToggle",
                       "F5 / Ctrl+P")) {
     toggle_play();
   }
-  if (ImGui::MenuItem("Pause", "F6", is_paused(), is_playing())) {
+  if (ux::MenuItem("Pause", "F6", is_paused(), is_playing())) {
     toggle_pause_play();
   }
-  if (ImGui::MenuItem("Step One Tick", "F10", false, is_paused())) {
+  if (ux::MenuItem("Step One Tick", "F10", false, is_paused())) {
     step_play();
   }
   bool free_cam = play_free_cam_;
-  if (ImGui::MenuItem("Free Camera", "C", &free_cam, is_playing())) {
+  if (ux::MenuItem("Free Camera", "C", &free_cam, is_playing())) {
     set_play_free_camera(free_cam);
   }
   bool overlay = show_collision_;
-  if (ImGui::MenuItem("Collision Overlay", "K", &overlay)) {
+  if (ux::MenuItem("Collision Overlay", "K", &overlay)) {
     set_show_collision(overlay);
   }
   ImGui::Separator();
-  if (ImGui::MenuItem("Launch Game (ts_game)", nullptr, false, !is_playing())) {
+  if (ux::MenuItem("Launch Game (ts_game)", nullptr, false, !is_playing())) {
     launch_game();
   }
   draw_plugin_menu_items("Play");
-  ImGui::EndMenu();
+  ux::EndMenu();
 }
 
 // Posse UI, contributed by the ts.posse plugin (EditorBuiltinPlugins.cpp).
 void Editor2DScreen::draw_posse_menu_items() {
   ImGui::Separator();
-  if (ImGui::MenuItem(posse_running() ? "Break Camp (stop posse)###Posse" : "Play with Posse###Posse",
+  if (ux::MenuItem(posse_running() ? "Break Camp (stop posse)###Posse" : "Play with Posse###Posse",
                       nullptr, false, !is_playing())) {
     toggle_posse();
   }
-  if (ImGui::BeginMenu("Posse Size", !posse_running())) {
+  if (ux::BeginMenu("Posse Size", !posse_running())) {
     for (int n = 1; n <= mp::kMaxPosse; ++n) {
       char label[32];
       std::snprintf(label, sizeof(label), "%d rider%s", n, n == 1 ? "" : "s");
-      if (ImGui::MenuItem(label, nullptr, posse_riders_ == n)) set_posse_riders(n);
+      if (ux::MenuItem(label, nullptr, posse_riders_ == n)) set_posse_riders(n);
     }
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
-  if (ImGui::MenuItem("Open Client Window (ts_client)", nullptr, false, posse_running())) {
+  if (ux::MenuItem("Open Client Window (ts_client)", nullptr, false, posse_running())) {
     open_posse_client_window();
   }
-  ImGui::MenuItem("Network Panel", nullptr, &show_network_);
+  ux::MenuItem("Network Panel", nullptr, &show_network_);
 }
 
 void Editor2DScreen::draw_posse_toolbar_button() {
@@ -439,7 +441,7 @@ void Editor2DScreen::draw_posse_toolbar_button() {
     toggle_posse();
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip(posse_running()
+    ux::SetTooltip(posse_running()
                           ? "Break camp: stop the local server and its riders"
                           : "Play with posse: a local server + %d rider(s) in this editor, "
                             "lag sim and Network panel",
@@ -742,7 +744,7 @@ void Editor2DScreen::draw_inspector_gameplay(std::uint64_t id) {
         });
       }
       if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Turn the sprite toward the mouse cursor (or the right stick) while "
+        ux::SetTooltip("Turn the sprite toward the mouse cursor (or the right stick) while "
                           "riding. Draw the art facing up; the collider does not turn.");
       }
     }
@@ -806,7 +808,7 @@ void Editor2DScreen::draw_inspector_gameplay(std::uint64_t id) {
       }
       track_inspector_item("Edit Camera Smoothing");
       if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Catch-up time. 0 = locked on the target.");
+        ux::SetTooltip("Catch-up time. 0 = locked on the target.");
       }
       if (ImGui::DragFloat("Zoom", &t->camera->zoom, 0.01f, 0.05f, 16.0f,
                            "%.2fx", ImGuiSliderFlags_AlwaysClamp)) {
@@ -832,7 +834,7 @@ void Editor2DScreen::draw_inspector_gameplay(std::uint64_t id) {
           mark_dirty();
         }
         track_inspector_item("Edit Camera Dead Zone");
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("The target moves this far before the camera does.");
+        if (ImGui::IsItemHovered()) ux::SetTooltip("The target moves this far before the camera does.");
         if (ImGui::Checkbox("Clear colour", &t2->camera->use_clear)) mark_dirty();
         track_inspector_item("Edit Camera Clear");
         if (t2->camera->use_clear) {
@@ -842,7 +844,7 @@ void Editor2DScreen::draw_inspector_gameplay(std::uint64_t id) {
         }
         if (ImGui::DragFloat4("Viewport", t2->camera->viewport, 0.005f, 0.0f, 1.0f, "%.2f")) mark_dirty();
         track_inspector_item("Edit Camera Viewport");
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("x, y (from the top left), width, height as fractions of the screen");
+        if (ImGui::IsItemHovered()) ux::SetTooltip("x, y (from the top left), width, height as fractions of the screen");
       }
       t = workspace_.find(id);
       if (!t || !t->camera) {

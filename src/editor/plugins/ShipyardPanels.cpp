@@ -1,3 +1,4 @@
+#include "editor/ux/Tooltip.h"
 #include "editor/plugins/ShipyardPanels.h"
 
 #include "editor/ui/Theme.h"
@@ -264,7 +265,7 @@ void draw_works(ShipyardPlugin& p) {
     ImGui::PushID(i);
     const ImVec2 at = ImGui::GetCursorScreenPos();
     if (ImGui::Selectable("##pick", w.selected == i, 0, ImVec2(0, 22))) w.selected = i;
-    if (ImGui::IsItemHovered()) {
+    if (ImGui::IsItemHovered() && ux::TooltipsOn()) {
       ImGui::BeginTooltip();
       ImGui::Text("%s (%s)", d.name.c_str(), part_kind_name(d.kind));
       ImGui::TextColored(theme::TextMuted(), "%dx%d cells, %.1f t, %d hp", d.w, d.h, static_cast<double>(d.mass), d.hp);

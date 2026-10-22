@@ -1,5 +1,6 @@
 // Animation preview panel + Animator inspector.
 #include "editor/editor3d/Editor3DScreen.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/ui/Theme.h"
 #include "render3d/Animator.h"
@@ -82,7 +83,7 @@ void draw_animator_fields(scene3d::Animator3D& a, const render3d::Model* model,
   after("Animator model");
   ImGui::SameLine();
   ImGui::TextDisabled("(?)");
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Empty = the entity's mesh");
+  if (ImGui::IsItemHovered()) ux::SetTooltip("Empty = the entity's mesh");
   ImGui::DragFloat("Playback speed", &a.speed, 0.01f, 0.0f, 5.0f, "%.2fx");
   after("Animator speed");
   discrete(ImGui::Checkbox("Driven by rider", &a.drive_from_player), "Driven by rider");
@@ -165,7 +166,7 @@ void draw_animator_fields(scene3d::Animator3D& a, const render3d::Model* model,
         }
       }
       after("Layer mask");
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip("Each bone takes its subtree; empty = whole body");
+      if (ImGui::IsItemHovered()) ux::SetTooltip("Each bone takes its subtree; empty = whole body");
       std::vector<std::string> snames;
       for (const scene3d::AnimState3D& st : l.states) snames.push_back(st.name);
       discrete(name_combo("Entry", &l.entry, snames), "Entry state");

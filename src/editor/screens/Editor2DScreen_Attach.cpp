@@ -4,6 +4,7 @@
 // "make active", and the v13 camera migration on open. Every edit is one
 // undo step over the selection roots.
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/Actions.h"
 
 #include "editor/workspace/SceneIO.h"
 #include "scene/CameraMigrate.h"
@@ -241,7 +242,7 @@ bool Editor2DScreen::attach_target_list_2d(const char* id, std::uint64_t* out) {
     if (workspace_.is_selected(e.id)) continue;
     ++shown;
     ImGui::PushID(static_cast<int>(e.id));
-    if (ImGui::MenuItem(e.name.c_str())) {
+    if (ux::MenuItem(e.name.c_str())) {
       *out = e.id;
       picked = true;
     }
@@ -256,21 +257,21 @@ bool Editor2DScreen::attach_target_list_2d(const char* id, std::uint64_t* out) {
 void Editor2DScreen::draw_attach_menu_2d() {
   const bool has = workspace_.selection_count() > 0 && !is_playing();
   std::uint64_t t = 0;
-  if (ImGui::BeginMenu("Attach to...", has)) {
-    if (ImGui::BeginMenu("Keep current position")) {
-      if (ImGui::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick_2d("attach_keep");
+  if (ux::BeginMenu("Attach to...", has)) {
+    if (ux::BeginMenu("Keep current position")) {
+      if (ux::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick_2d("attach_keep");
       ImGui::Separator();
       if (attach_target_list_2d("keep", &t)) attach_selected_2d(t, false);
-      ImGui::EndMenu();
+      ux::EndMenu();
     }
-    if (ImGui::BeginMenu("Snap to target")) {
-      if (ImGui::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick_2d("attach_snap");
+    if (ux::BeginMenu("Snap to target")) {
+      if (ux::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick_2d("attach_snap");
       ImGui::Separator();
       if (attach_target_list_2d("snap", &t)) attach_selected_2d(t, true);
-      ImGui::EndMenu();
+      ux::EndMenu();
     }
     ImGui::TextDisabled("Hierarchy: drag onto a row = keep, Alt+drag = snap");
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
   bool any_parent = false, any_follow = false;
   for (std::uint64_t id : workspace_.selection()) {
@@ -279,41 +280,43 @@ void Editor2DScreen::draw_attach_menu_2d() {
       any_follow |= e->follow.has_value();
     }
   }
-  if (ImGui::MenuItem("Detach", nullptr, false, has && any_parent)) detach_selected_2d();
-  if (ImGui::BeginMenu("Follow...", has)) {
+  if (ux::MenuItem("Detach", nullptr, false, has && any_parent)) detach_selected_2d();
+  if (ux::BeginMenu("Follow...", has)) {
     struct K { const char* label; const char* action; bool p, r; };
     for (const K k : {K{"Position and rotation", "follow_both", true, true},
                       K{"Position only", "follow_pos", true, false},
                       K{"Rotation only", "follow_rot", false, true}}) {
-      if (ImGui::BeginMenu(k.label)) {
-        if (ImGui::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick_2d(k.action);
+      if (ux::BeginMenu(k.label)) {
+        if (ux::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick_2d(k.action);
         ImGui::Separator();
         if (attach_target_list_2d(k.action, &t)) follow_selected_2d(t, k.p, k.r);
-        ImGui::EndMenu();
+        ux::EndMenu();
       }
     }
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
-  if (any_follow && ImGui::MenuItem("Remove Follow", nullptr, false, has)) remove_follow_selected_2d();
+  if (any_follow && ux::MenuItem("Remove Follow", nullptr, false, has)) remove_follow_selected_2d();
   ImGui::Separator();
-  if (ImGui::BeginMenu("Snap to object", has)) {
-    if (ImGui::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick_2d("snap");
+  if (ux::BeginMenu("Snap to object", has)) {
+    if (ux::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick_2d("snap");
     ImGui::Separator();
     if (attach_target_list_2d("snapto", &t)) snap_selected_to_2d(t);
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
-  if (ImGui::BeginMenu("Copy transform from", has)) {
+  if (ux::BeginMenu("Copy transform from", has)) {
+    ux::BeginMenuOptions();
     ImGui::Checkbox("Position", &copy_pos2d_);
     ImGui::SameLine();
     ImGui::Checkbox("Rotation", &copy_rot2d_);
     ImGui::SameLine();
     ImGui::Checkbox("Scale", &copy_scale2d_);
-    if (ImGui::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick_2d("copy");
+    ux::EndMenuOptions();
+    if (ux::MenuItem("Pick in viewport (eyedropper)")) begin_target_pick_2d("copy");
     ImGui::Separator();
     if (attach_target_list_2d("copy", &t)) copy_transform_to_selected_2d(t, copy_pos2d_, copy_rot2d_, copy_scale2d_);
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
-  if (ImGui::MenuItem("Align to surface", nullptr, false, has)) align_selected_to_surface_2d();
+  if (ux::MenuItem("Align to surface", nullptr, false, has)) align_selected_to_surface_2d();
 }
 
 void Editor2DScreen::draw_inspector_follow_2d(std::uint64_t id) {
@@ -352,14 +355,14 @@ void Editor2DScreen::draw_inspector_follow_2d(std::uint64_t id) {
 }
 
 void Editor2DScreen::draw_object_menu_2d() {
-  if (ImGui::MenuItem("Create camera", nullptr, false, !is_playing())) create_camera_2d();
+  if (ux::MenuItem("Create camera", nullptr, false, !is_playing())) create_camera_2d();
   const Entity2D* sel = workspace_.selected();
   const bool cam = sel && sel->camera;
-  if (ImGui::MenuItem("Make active camera", nullptr, false, cam && !is_playing())) make_active_camera_2d(sel->id);
+  if (ux::MenuItem("Make active camera", nullptr, false, cam && !is_playing())) make_active_camera_2d(sel->id);
   ImGui::Separator();
   draw_attach_menu_2d();
   ImGui::Separator();
-  if (sel && ImGui::MenuItem(sel->locked ? "Unlock" : "Lock", "Ctrl+L", false, !is_playing()))
+  if (sel && ux::MenuItem(sel->locked ? "Unlock" : "Lock", "Ctrl+L", false, !is_playing()))
     lock_selected(!sel->locked);
 }
 

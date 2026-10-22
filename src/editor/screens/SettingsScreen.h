@@ -44,7 +44,14 @@ class SettingsScreen final : public IScreen {
   void set_validation_error(std::string message);
   const std::string& validation_error() const { return validation_error_; }
 
+ public:
+  // Section the palette asked for and that has been scrolled to (smoke).
+  const std::string& focused_section() const { return focused_section_; }
+
  private:
+  void section_header(const char* name, const char* sub);
+  std::string focus_section_;
+  std::string focused_section_;
   void draw_ui();
   void sync_buffers_from_draft();
   void sync_draft_from_buffers();

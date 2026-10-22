@@ -2,6 +2,7 @@
 // section and the Tile Palette's solid toggle. Every edit is one undo step
 // and autosaves scene.json (v4 "collider" / "tile_solidity").
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/ui/Theme.h"
 #include "runtime/Collision.h"
@@ -500,7 +501,7 @@ void Editor2DScreen::draw_tile_solid_controls(const Entity2D* target) {
   }
   ImGui::EndDisabled();
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip(
+    ux::SetTooltip(
         "Solid tiles stop riders. Right-click any swatch to toggle it.\n"
         "Kept per tileset in scene.json (tile_solidity); K shows the walls.");
   }

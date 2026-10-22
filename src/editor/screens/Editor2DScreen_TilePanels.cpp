@@ -1,6 +1,8 @@
 // Tile Palette + Supply Wagon panels, toolbar tool strip and the Inspector's
 // TileMap / Sprite sections.
 #include "editor/tools/AutoTilePanel.h"
+#include "editor/ux/Tooltip.h"
+#include "editor/ux/Actions.h"
 #include "editor/screens/Editor2DScreen.h"
 
 #include "editor/assets/AssetLibrary.h"
@@ -139,7 +141,7 @@ void Editor2DScreen::draw_tool_buttons(float button_width, int per_row) {
       set_tool(t.tool);
     }
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("%s (%s): %s", t.label, t.key, t.help);
+      ux::SetTooltip("%s (%s): %s", t.label, t.key, t.help);
     }
   }
   // Current brush tile.
@@ -154,7 +156,7 @@ void Editor2DScreen::draw_tool_buttons(float button_width, int per_row) {
                    ImVec2(p.x + h - 2, p.y + h - 2));
   dl->AddRect(p, ImVec2(p.x + h, p.y + h), theme::U32(theme::Accent()));
   if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip("Brush tile #%d, size %d (Tile Palette)", brush_tile_,
+    ux::SetTooltip("Brush tile #%d, size %d (Tile Palette)", brush_tile_,
                       brush_size_);
   }
 }
@@ -218,7 +220,7 @@ void Editor2DScreen::draw_tile_palette() {
     }
     ImGui::SameLine();
     if (ImGui::Button("...##autotiles")) at.open(project_.path, project_.name);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Autotiles panel: new terrains, slots, preview");
+    if (ImGui::IsItemHovered()) ux::SetTooltip("Autotiles panel: new terrains, slots, preview");
   }
 
   if (!target) {
@@ -314,11 +316,11 @@ void Editor2DScreen::draw_tile_palette() {
             const int per_row = std::max(
                 1, texture(target->tilemap->tileset).width /
                        target->tilemap->tile_size);
-            ImGui::SetTooltip("#%d  (col %d, row %d)%s\nRight-click: toggle solid",
+            ux::SetTooltip("#%d  (col %d, row %d)%s\nRight-click: toggle solid",
                               id, (id - 1) % per_row, (id - 1) / per_row,
                               solid ? "  | solid" : "");
           } else {
-            ImGui::SetTooltip("#%d  %s%s\nRight-click: toggle solid", id,
+            ux::SetTooltip("#%d  %s%s\nRight-click: toggle solid", id,
                               builtin_tile(id).name, solid ? "  | solid" : "");
           }
         }
@@ -450,15 +452,15 @@ void Editor2DScreen::draw_supply_wagon() {
     }
     if (ImGui::BeginPopupContextItem()) {
       wagon_selected_ = rel;
-      if (ImGui::MenuItem("Stake sprite at view centre")) {
+      if (ux::MenuItem("Stake sprite at view centre")) {
         stake_rel = rel;
       }
       const bool can_assign = sel && !sel->tilemap;
-      if (ImGui::MenuItem("Assign to selected", nullptr, false, can_assign)) {
+      if (ux::MenuItem("Assign to selected", nullptr, false, can_assign)) {
         assign_rel = rel;
       }
       const bool can_tileset = sel && sel->tilemap;
-      if (ImGui::MenuItem("Use as tileset", nullptr, false, can_tileset)) {
+      if (ux::MenuItem("Use as tileset", nullptr, false, can_tileset)) {
         tileset_rel = rel;
       }
       ImGui::EndPopup();
@@ -520,14 +522,14 @@ void Editor2DScreen::draw_inspector_components(Entity2D& e) {
       resize_tilemap(id, cols, workspace_.find(id)->tilemap->rows);
     }
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("Width in cells. Enter or +/- applies; existing tiles "
+      ux::SetTooltip("Width in cells. Enter or +/- applies; existing tiles "
                         "are kept.");
     }
     if (ImGui::InputInt("Rows", &rows, 1, 8, enter)) {
       resize_tilemap(id, workspace_.find(id)->tilemap->cols, rows);
     }
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("Height in cells. Enter or +/- applies; existing "
+      ux::SetTooltip("Height in cells. Enter or +/- applies; existing "
                         "tiles are kept.");
     }
     if (ImGui::InputInt("Tile px", &tile_size, 1, 8, enter)) {
@@ -567,7 +569,7 @@ void Editor2DScreen::draw_inspector_components(Entity2D& e) {
     assign_sprite(id, rel);
   }
   if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip("Pick from the Supply Wagon, or drag an image here.");
+    ux::SetTooltip("Pick from the Supply Wagon, or drag an image here.");
   }
   Entity2D* cur = workspace_.find(id);
   if (!cur || !cur->sprite) {
@@ -614,7 +616,7 @@ void Editor2DScreen::draw_inspector_components(Entity2D& e) {
     }
     track_inspector_item("Edit Source Rect");
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("Pixels in the image. w/h 0 = to the image edge.");
+      ux::SetTooltip("Pixels in the image. w/h 0 = to the image edge.");
     }
   }
   if (cur && cur->sprite && st == SpriteState::Ready) {

@@ -53,6 +53,8 @@ if(TS_BUILD_ADMIN)
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+    # Item hooks for the editor's Field Guide tooltips + --smoke-ux menu audit.
+    ${PROJECT_SOURCE_DIR}/src/editor/ux/ImGuiItemHook.cpp
   )
 
   add_library(ts::imgui ALIAS ts_imgui)
@@ -61,6 +63,8 @@ if(TS_BUILD_ADMIN)
     PUBLIC
       ${imgui_SOURCE_DIR}
       ${imgui_SOURCE_DIR}/backends
+    PRIVATE
+      ${PROJECT_SOURCE_DIR}/src
   )
 
   target_link_libraries(ts_imgui
@@ -73,6 +77,8 @@ if(TS_BUILD_ADMIN)
   target_compile_definitions(ts_imgui
     PUBLIC
       TS_HAS_IMGUI=1
+      # Item hooks only (no test engine is linked): see src/editor/ux/ImGuiItemHook.h.
+      IMGUI_ENABLE_TEST_ENGINE
   )
 endif()  # TS_BUILD_ADMIN
 

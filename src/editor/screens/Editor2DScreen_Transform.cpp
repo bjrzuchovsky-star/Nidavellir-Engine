@@ -4,6 +4,8 @@
 // handle's constraint, one undo step per confirm, Esc / RMB restores.
 
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/Tooltip.h"
+#include "editor/ux/Actions.h"
 #include "editor/transform/ModalKeys.h"
 #include "editor/ui/Theme.h"
 
@@ -509,7 +511,7 @@ void Editor2DScreen::draw_transform_header() {
     if (on) ImGui::PushStyleColor(ImGuiCol_Button, theme::Accent());
     if (ImGui::SmallButton(m.l)) gizmo_.mode = m.m;
     if (on) ImGui::PopStyleColor();
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", m.tip);
+    if (ImGui::IsItemHovered()) ux::SetTooltip("%s", m.tip);
     ImGui::SameLine(0, 3);
   }
   ImGui::SameLine(0, 10);
@@ -518,7 +520,7 @@ void Editor2DScreen::draw_transform_header() {
   if (ImGui::Combo("##orient2d", &sp, "Global\0Local\0")) {
     orientation_ = sp ? XformSpace::Local : XformSpace::Global;
   }
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Transform orientation (,)");
+  if (ImGui::IsItemHovered()) ux::SetTooltip("Transform orientation (,)");
   ImGui::SameLine(0, 6);
   ImGui::SetNextItemWidth(150);
   if (open_pivot_menu_) {
@@ -532,12 +534,12 @@ void Editor2DScreen::draw_transform_header() {
     }
     ImGui::EndCombo();
   }
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Pivot point (.)");
+  if (ImGui::IsItemHovered()) ux::SetTooltip("Pivot point (.)");
   if (ImGui::BeginPopup("##PivotMenu2D")) {
     ImGui::TextDisabled("Pivot Point");
     for (int i = 0; i < kPivotModeCount; ++i) {
       const PivotMode p = static_cast<PivotMode>(i);
-      if (ImGui::MenuItem(pivot_label(p), nullptr, p == pivot_mode_)) pivot_mode_ = p;
+      if (ux::MenuItem(pivot_label(p), nullptr, p == pivot_mode_)) pivot_mode_ = p;
     }
     ImGui::EndPopup();
   }

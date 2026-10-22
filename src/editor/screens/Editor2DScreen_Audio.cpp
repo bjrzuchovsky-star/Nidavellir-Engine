@@ -2,6 +2,8 @@
 // Supply Wagon's sounds shelf (listen / drag / assign).
 
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/Tooltip.h"
+#include "editor/ux/Actions.h"
 
 #include "editor/assets/AssetLibrary.h"
 #include "editor/audio/EditorAudio.h"
@@ -37,7 +39,7 @@ void Editor2DScreen::draw_inspector_audio(std::uint64_t id) {
       set_audio_source(id, a, "Add Audio Source");
     }
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("A sound that rides with this entity (autoplay, loop, "
+      ux::SetTooltip("A sound that rides with this entity (autoplay, loop, "
                         "panned by position).");
     }
     return;
@@ -96,15 +98,15 @@ void Editor2DScreen::draw_wagon_sounds() {
         can_assign) {
       assign = rel;
     }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", rel.c_str());
+    if (ImGui::IsItemHovered()) ux::SetTooltip("%s", rel.c_str());
     if (ImGui::BeginDragDropSource()) {
       ImGui::SetDragDropPayload("TS_SOUND", rel.c_str(), rel.size() + 1);
       ImGui::Text("Sound: %s", assets::file_name(rel).c_str());
       ImGui::EndDragDropSource();
     }
     if (ImGui::BeginPopupContextItem()) {
-      if (ImGui::MenuItem("Listen")) ea.preview(project_.path, rel);
-      if (ImGui::MenuItem("Assign to selected", nullptr, false, can_assign)) {
+      if (ux::MenuItem("Listen")) ea.preview(project_.path, rel);
+      if (ux::MenuItem("Assign to selected", nullptr, false, can_assign)) {
         assign = rel;
       }
       ImGui::EndPopup();

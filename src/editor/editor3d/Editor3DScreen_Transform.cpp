@@ -5,6 +5,7 @@
 // docs/transforms.md has the user-facing list.
 
 #include "editor/editor3d/Editor3DScreen.h"
+#include "editor/ux/Tooltip.h"
 #include "editor/transform/ModalKeys.h"
 #include "editor/ui/Theme.h"
 
@@ -689,7 +690,7 @@ void Editor3DScreen::draw_transform_header(float x0, float y0, float vw) {
     if (on) ImGui::PushStyleColor(ImGuiCol_Button, theme::Accent());
     if (ImGui::SmallButton(m.l)) gizmo_.mode = m.m;
     if (on) ImGui::PopStyleColor();
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", m.tip);
+    if (ImGui::IsItemHovered()) ux::SetTooltip("%s", m.tip);
     ImGui::SameLine(0, 3);
   }
   ImGui::SameLine(0, 12);
@@ -698,7 +699,7 @@ void Editor3DScreen::draw_transform_header(float x0, float y0, float vw) {
   if (ImGui::Combo("##orient3d", &sp, "Global\0Local\0")) {
     orientation_ = sp ? XformSpace::Local : XformSpace::Global;
   }
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Transform orientation (,)");
+  if (ImGui::IsItemHovered()) ux::SetTooltip("Transform orientation (,)");
   ImGui::SameLine(0, 6);
   ImGui::SetNextItemWidth(150);
   if (ImGui::BeginCombo("##pivot3d", pivot_label(pivot_mode_))) {
@@ -708,7 +709,7 @@ void Editor3DScreen::draw_transform_header(float x0, float y0, float vw) {
     }
     ImGui::EndCombo();
   }
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Pivot point (.)");
+  if (ImGui::IsItemHovered()) ux::SetTooltip("Pivot point (.)");
   ImGui::PopStyleColor(2);
   ImGui::PopStyleVar();
   if (modal_active()) {

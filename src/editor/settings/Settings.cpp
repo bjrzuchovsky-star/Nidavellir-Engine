@@ -88,6 +88,11 @@ Settings SettingsStore::load(std::string* error_out) {
   s.script_editor = json_mini::get_string(*parsed, "script_editor", s.script_editor);
   s.source_search_folders =
       json_mini::get_string(*parsed, "source_search_folders", s.source_search_folders);
+  s.tooltips_enabled = json_mini::get_bool(*parsed, "tooltips_enabled", s.tooltips_enabled);
+  s.tooltip_delay = json_mini::get_string(*parsed, "tooltip_delay", s.tooltip_delay);
+  s.walkthrough_2d_done = json_mini::get_bool(*parsed, "walkthrough_2d_done", s.walkthrough_2d_done);
+  s.walkthrough_3d_done = json_mini::get_bool(*parsed, "walkthrough_3d_done", s.walkthrough_3d_done);
+  s.recent_items = json_mini::get_string(*parsed, "recent_items", s.recent_items);
 
   if (s.projects_root.empty()) {
     s.projects_root = default_projects_root();
@@ -141,10 +146,15 @@ bool SettingsStore::save(const Settings& settings, std::string* error_out) {
           {"blender_path", normalized.blender_path},
           {"script_editor", normalized.script_editor},
           {"source_search_folders", normalized.source_search_folders},
+          {"tooltip_delay", normalized.tooltip_delay},
+          {"recent_items", normalized.recent_items},
       },
       {
           {"auto_login_dev", normalized.auto_login_dev},
           {"check_updates_on_start", normalized.check_updates_on_start},
+          {"tooltips_enabled", normalized.tooltips_enabled},
+          {"walkthrough_2d_done", normalized.walkthrough_2d_done},
+          {"walkthrough_3d_done", normalized.walkthrough_3d_done},
       });
   out << body;
   if (!out) {

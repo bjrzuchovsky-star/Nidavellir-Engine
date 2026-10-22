@@ -1,4 +1,6 @@
 #include "editor/scripting/BrandBook.h"
+#include "editor/ux/Tooltip.h"
+#include "editor/ux/Actions.h"
 
 #include "editor/ui/Theme.h"
 #include "runtime/CSharpScript.h"
@@ -402,7 +404,7 @@ void BrandBook::draw_languages() {
     ImGui::TextColored(theme::Warning(), "%s", s.cs.c_str());
     ImGui::PopTextWrapPos();
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("C# scripts are disabled: %s", runtime::csharp_scripts::kInstallHint);
+      ux::SetTooltip("C# scripts are disabled: %s", runtime::csharp_scripts::kInstallHint);
     }
   }
   const bool building = cpp_build_.valid();
@@ -720,18 +722,18 @@ void BrandBook::draw_palette_popup() {
     for (const GraphNodeDef& d : runtime::graph_node_catalog()) any = any || (d.category == c && match(d));
     if (!any) continue;
     ImGui::PushStyleColor(ImGuiCol_Text, family_color(c));
-    const bool open = filter.empty() ? ImGui::BeginMenu(c.c_str()) : true;
+    const bool open = filter.empty() ? ux::BeginMenu(c.c_str()) : true;
     ImGui::PopStyleColor();
     if (!open) continue;
     for (const GraphNodeDef& d : runtime::graph_node_catalog()) {
       if (d.category != c || !match(d)) continue;
-      if (ImGui::MenuItem(d.title.c_str(), filter.empty() ? nullptr : c.c_str())) {
+      if (ux::MenuItem(d.title.c_str(), filter.empty() ? nullptr : c.c_str())) {
         selected_ = add_node(d.type, palette_x_, palette_y_);
         ImGui::CloseCurrentPopup();
       }
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\n%s", d.type.c_str(), d.blurb.c_str());
+      if (ImGui::IsItemHovered()) ux::SetTooltip("%s\n%s", d.type.c_str(), d.blurb.c_str());
     }
-    if (filter.empty()) ImGui::EndMenu();
+    if (filter.empty()) ux::EndMenu();
   }
   ImGui::EndPopup();
 }

@@ -1,4 +1,5 @@
 #include "editor/plugins/AiPanels.h"
+#include "editor/ux/Tooltip.h"
 
 #include "ai/BehaviorTree.h"
 #include "ai3d/AiWorld3D.h"
@@ -120,7 +121,7 @@ void node_rows(BtPanelState& s, int i, int depth, const ai::BtInstance* live) {
   ImGui::PushStyleColor(ImGuiCol_Text, info ? kind_colour(info->kind) : theme::Warning());
   if (ImGui::Selectable(buf, sel, 0, ImVec2(ImGui::GetContentRegionAvail().x - 90.0f, 0))) s.selected = i;
   ImGui::PopStyleColor();
-  if (info && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", info->help);
+  if (info && ImGui::IsItemHovered()) ux::SetTooltip("%s", info->help);
   if (live && i < static_cast<int>(live->tree().nodes.size())) {
     ImGui::SameLine(ImGui::GetContentRegionMax().x - 80.0f);
     const ai::BtStatus st = live->node_status(i);
@@ -318,7 +319,7 @@ void draw_bt_panel(plugins::AiPlugin& p, BtPanelState& s) {
         ImGui::PushStyleColor(ImGuiCol_Text, kind_colour(types[static_cast<std::size_t>(k)].kind));
         if (ImGui::Selectable(types[static_cast<std::size_t>(k)].type, k == s.palette)) s.palette = k;
         ImGui::PopStyleColor();
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", types[static_cast<std::size_t>(k)].help);
+        if (ImGui::IsItemHovered()) ux::SetTooltip("%s", types[static_cast<std::size_t>(k)].help);
       }
       ImGui::EndCombo();
     }

@@ -4,6 +4,8 @@
 // Assets panel (drag onto an entity; open in VS Code / Visual Studio) and
 // the attach / write API the smokes drive.
 #include "editor/editor3d/Editor3DScreen.h"
+#include "editor/ux/Tooltip.h"
+#include "editor/ux/Actions.h"
 
 #include "editor/ui/Theme.h"
 #include "runtime/Script.h"
@@ -93,7 +95,7 @@ void Editor3DScreen::draw_add_component(std::uint64_t id, std::string* attach_re
   ImGui::EndDisabled();
   if (std::string dropped = accept_script_drop(); !dropped.empty()) *attach_rel = std::move(dropped);
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip(playing() ? "Stop the ride to add components"
+    ux::SetTooltip(playing() ? "Stop the ride to add components"
                                 : "New Script..., an existing script, or drop a script here");
   }
   ImGui::SetNextWindowPos(below, ImGuiCond_Appearing);
@@ -105,8 +107,8 @@ void Editor3DScreen::draw_add_component(std::uint64_t id, std::string* attach_re
     if (std::string picked = add_script_menu_.draw_items(host); !picked.empty()) *attach_rel = std::move(picked);
     ImGui::Separator();
     // Built-in components (the inspector adds them after its own edit).
-    if (ImGui::MenuItem("Camera", nullptr, false, e && !e->camera)) *attach_rel = "@camera";
-    if (ImGui::MenuItem("Follow", nullptr, false, e && !e->follow)) *attach_rel = "@follow";
+    if (ux::MenuItem("Camera", nullptr, false, e && !e->camera)) *attach_rel = "@camera";
+    if (ux::MenuItem("Follow", nullptr, false, e && !e->follow)) *attach_rel = "@follow";
     ImGui::TextDisabled("Other components: the + buttons above");
     ImGui::EndPopup();
   }

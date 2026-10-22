@@ -1,4 +1,6 @@
 #include "editor/tools/SpriteSlicerPanel.h"
+#include "editor/ux/Tooltip.h"
+#include "editor/ux/Actions.h"
 #include "editor/tools/StringsPanel.h"
 #include "editor/plugins/PluginPanelHost.h"
 #include "editor/plugins/ProfilerPanels.h"
@@ -193,114 +195,126 @@ void Editor3DScreen::draw_ui() {
   BrandBook::get().draw();
   StringsPanel::get().draw();
   SpriteSlicerPanel::get().draw();
+  ux_.frame();
 }
 
 void Editor3DScreen::draw_menu_bar() {
   if (!ImGui::BeginMainMenuBar()) return;
-  if (ImGui::BeginMenu("Claim")) {
-    if (ImGui::MenuItem("Save scene", "Ctrl+S")) {
+  draw_menus();
+  ImGui::SameLine(ImGui::GetWindowWidth() - 360.0f);
+  ImGui::TextDisabled("%s  [3D]%s", project_.name.c_str(), playing() ? "  [RIDING]" : "");
+  ImGui::EndMainMenuBar();
+}
+
+void Editor3DScreen::draw_menus() {
+  if (ux::BeginMenu("Claim")) {
+    if (ux::MenuItem("Save scene", "Ctrl+S")) {
       std::string err;
       if (save_scene(&err)) note("Saved scene.json");
       else note("Save failed: " + err, runtime::LogLevel::Error);
     }
-    if (ImGui::MenuItem("Reload from disk", nullptr, false, !playing())) {
+    if (ux::MenuItem("Reload from disk", nullptr, false, !playing())) {
       std::string err;
       if (!reload_scene(&err)) note("Reload failed: " + err, runtime::LogLevel::Error);
     }
-    if (ImGui::MenuItem("Rescan assets")) rescan_assets();
-    if (ImGui::MenuItem("Export... (Freight Office)", nullptr, false, !playing()))
+    if (ux::MenuItem("Rescan assets")) rescan_assets();
+    if (ux::MenuItem("Export... (Freight Office)", nullptr, false, !playing()))
       FreightOffice::get().open(project_.path, project_.name);
-    if (ImGui::MenuItem("Brand Book... (visual scripts)")) BrandBook::get().open(project_.path, project_.name);
-    if (ImGui::MenuItem("Strings... (localisation)")) StringsPanel::get().open(project_.path, project_.name);
-    if (ImGui::MenuItem("Sprite Slicer...")) SpriteSlicerPanel::get().open(project_.path);
+    if (ux::MenuItem("Brand Book... (visual scripts)")) BrandBook::get().open(project_.path, project_.name);
+    if (ux::MenuItem("Strings... (localisation)")) StringsPanel::get().open(project_.path, project_.name);
+    if (ux::MenuItem("Sprite Slicer...")) SpriteSlicerPanel::get().open(project_.path);
     ImGui::Separator();
-    if (ImGui::MenuItem("Back to Claims")) request_back_to_projects();
-    if (ImGui::MenuItem("Quit")) request_quit();
-    ImGui::EndMenu();
+    if (ux::MenuItem("Back to Claims")) request_back_to_projects();
+    if (ux::MenuItem("Quit")) request_quit();
+    ux::EndMenu();
   }
-  if (ImGui::BeginMenu("Edit")) {
-    if (ImGui::MenuItem(("Undo " + undo_label()).c_str(), "Ctrl+Z", false, can_undo() && !playing()))
+  if (ux::BeginMenu("Edit")) {
+    if (ux::MenuItem(("Undo " + undo_label() + "###Undo").c_str(), "Ctrl+Z", false, can_undo() && !playing()))
       undo();
-    if (ImGui::MenuItem(("Redo " + redo_label()).c_str(), "Ctrl+Y", false, can_redo() && !playing()))
+    if (ux::MenuItem(("Redo " + redo_label() + "###Redo").c_str(), "Ctrl+Y", false, can_redo() && !playing()))
       redo();
     ImGui::Separator();
-    if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, !selection().empty())) duplicate_selected();
-    if (ImGui::MenuItem("Delete", "Del", false, !selection().empty())) delete_selected();
+    if (ux::MenuItem("Duplicate", "Ctrl+D", false, !selection().empty())) duplicate_selected();
+    if (ux::MenuItem("Delete", "Del", false, !selection().empty())) delete_selected();
     ImGui::Separator();
     const bool has = !selection().empty() && !playing();
-    if (ImGui::MenuItem("Copy", "Ctrl+C", false, has)) copy_selected();
-    if (ImGui::MenuItem("Cut", "Ctrl+X", false, has)) cut_selected();
-    if (ImGui::MenuItem("Paste", "Ctrl+V", false, !playing() && !clipboard_text().empty())) paste();
+    if (ux::MenuItem("Copy", "Ctrl+C", false, has)) copy_selected();
+    if (ux::MenuItem("Cut", "Ctrl+X", false, has)) cut_selected();
+    if (ux::MenuItem("Paste", "Ctrl+V", false, !playing() && !clipboard_text().empty())) paste();
     ImGui::Separator();
-    if (ImGui::MenuItem("Group", "Ctrl+G", false, has)) group_selected();
-    if (ImGui::MenuItem("Ungroup", "Ctrl+Shift+G", false, has)) ungroup_selected();
-    if (ImGui::MenuItem("Lock", "Ctrl+L", false, has)) lock_selected(true);
-    if (ImGui::MenuItem("Unlock", "Ctrl+Shift+L", false, has)) lock_selected(false);
-    if (ImGui::MenuItem("Hide", "H", false, has)) hide_selected(true);
-    if (ImGui::MenuItem("Show", "Shift+H", false, has)) hide_selected(false);
-    if (ImGui::MenuItem("Drop to ground", "End", false, has)) drop_to_ground();
-    if (ImGui::BeginMenu("Align / Distribute", has && selection().size() >= 2)) {
+    if (ux::MenuItem("Group", "Ctrl+G", false, has)) group_selected();
+    if (ux::MenuItem("Ungroup", "Ctrl+Shift+G", false, has)) ungroup_selected();
+    if (ux::MenuItem("Lock", "Ctrl+L", false, has)) lock_selected(true);
+    if (ux::MenuItem("Unlock", "Ctrl+Shift+L", false, has)) lock_selected(false);
+    if (ux::MenuItem("Hide", "H", false, has)) hide_selected(true);
+    if (ux::MenuItem("Show", "Shift+H", false, has)) hide_selected(false);
+    if (ux::MenuItem("Drop to ground", "End", false, has)) drop_to_ground();
+    if (ux::BeginMenu("Align / Distribute", has && selection().size() >= 2)) {
       static const char* kAx[3] = {"X", "Y", "Z"};
       for (int a = 0; a < 3; ++a) {
-        if (ImGui::MenuItem((std::string("Min ") + kAx[a]).c_str())) align_selected(a, -1);
-        if (ImGui::MenuItem((std::string("Centre ") + kAx[a]).c_str())) align_selected(a, 0);
-        if (ImGui::MenuItem((std::string("Max ") + kAx[a]).c_str())) align_selected(a, 1);
-        if (ImGui::MenuItem((std::string("Distribute ") + kAx[a]).c_str(), nullptr, false,
+        if (ux::MenuItem((std::string("Min ") + kAx[a]).c_str())) align_selected(a, -1);
+        if (ux::MenuItem((std::string("Centre ") + kAx[a]).c_str())) align_selected(a, 0);
+        if (ux::MenuItem((std::string("Max ") + kAx[a]).c_str())) align_selected(a, 1);
+        if (ux::MenuItem((std::string("Distribute ") + kAx[a]).c_str(), nullptr, false,
                             selection().size() >= 3)) {
           distribute_selected(a);
         }
         if (a < 2) ImGui::Separator();
       }
-      ImGui::EndMenu();
+      ux::EndMenu();
     }
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
-  if (ImGui::BeginMenu("Create")) {
+  if (ux::BeginMenu("Create")) {
     const Vec3 at = scene_.editor_camera.target;
-    for (const char* p : {"cube", "plane", "sphere", "capsule"})
-      if (ImGui::MenuItem(p)) create_primitive(p, {at.x, 0.0f, at.z});
+    static const char* kPrims[4][2] = {
+        {"Cube", "cube"}, {"Plane", "plane"}, {"Sphere", "sphere"}, {"Capsule", "capsule"}};
+    for (const auto& p : kPrims)
+      if (ux::MenuItem(p[0])) create_primitive(p[1], {at.x, 0.0f, at.z});
     ImGui::Separator();
-    if (ImGui::MenuItem("Point light")) create_light(false, {at.x, 2.5f, at.z});
-    if (ImGui::MenuItem("Sun (directional)")) create_light(true, {at.x, 8.0f, at.z});
-    if (ImGui::MenuItem("Empty")) create_empty({at.x, 0.0f, at.z});
-    if (ImGui::MenuItem("Camera", nullptr, false, !playing())) create_camera();
+    if (ux::MenuItem("Point light")) create_light(false, {at.x, 2.5f, at.z});
+    if (ux::MenuItem("Sun (directional)")) create_light(true, {at.x, 8.0f, at.z});
+    if (ux::MenuItem("Empty")) create_empty({at.x, 0.0f, at.z});
+    if (ux::MenuItem("Camera", nullptr, false, !playing())) create_camera();
     ImGui::Separator();
-    if (ImGui::MenuItem("Terrain (hills)", nullptr, false, !playing())) {
+    if (ux::MenuItem("Terrain (hills)", nullptr, false, !playing())) {
       create_terrain(129, 128.0f, true, "meadow");
       show_terrain_ = true;
     }
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
-  if (ImGui::BeginMenu("Object")) {
+  if (ux::BeginMenu("Object")) {
     draw_object_menu();
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
-  if (ImGui::BeginMenu("View")) {
-    ImGui::MenuItem("Grid", "'", &scene_.show_grid);
-    ImGui::MenuItem("Colliders + joints", nullptr, &show_colliders_);
-    ImGui::MenuItem("Hitboxes (model $hbox)", nullptr, &show_hitboxes_);
-    ImGui::MenuItem("Physics Settings", nullptr, &show_physics_);
-    ImGui::MenuItem("Terrain + Foliage", nullptr, &show_terrain_);
-    if (ImGui::MenuItem("Physics debug draw (Play)", nullptr, scene_.physics.debug_draw, !playing())) {
+  if (ux::BeginMenu("View")) {
+    ux::MenuItem("Grid", "'", &scene_.show_grid);
+    ux::MenuItem("Colliders + joints", nullptr, &show_colliders_);
+    ux::MenuItem("Hitboxes (model $hbox)", nullptr, &show_hitboxes_);
+    ux::MenuItem("Physics Settings", nullptr, &show_physics_);
+    ux::MenuItem("Terrain + Foliage", nullptr, &show_terrain_);
+    if (ux::MenuItem("Physics debug draw (Play)", nullptr, scene_.physics.debug_draw, !playing())) {
       const scene3d::Scene3D before = scene_;
       scene_.physics.debug_draw = !scene_.physics.debug_draw;
       push_undo("Physics debug draw", before);
     }
-    ImGui::MenuItem("Saloon Band (Mixer)", nullptr, &show_mixer_);
-    ImGui::MenuItem("UI Preview", nullptr, &show_ui_preview_);
-    ImGui::MenuItem("Animation Preview", nullptr, &anim_preview_.open);
-    ImGui::MenuItem("Prefabs", nullptr, &show_prefabs_);
-    ImGui::MenuItem("Asset Browser", nullptr, &show_asset_browser_);
-    ImGui::MenuItem("Vault", nullptr, &show_vault_);
+    ux::MenuItem("Saloon Band (Mixer)", nullptr, &show_mixer_);
+    ux::MenuItem("UI Preview", nullptr, &show_ui_preview_);
+    ux::MenuItem("Animation Preview", nullptr, &anim_preview_.open);
+    ux::MenuItem("Prefabs", nullptr, &show_prefabs_);
+    ux::MenuItem("Asset Browser", nullptr, &show_asset_browser_);
+    ux::MenuItem("Vault", nullptr, &show_vault_);
     if (plugins_.is_open() && !plugins_.manager().editor_panels().empty()) {
       ImGui::Separator();
       draw_plugin_panel_menu_items(plugins_, plugin_panel_open_);
       ImGui::Separator();
     }
-    if (ImGui::MenuItem("Frame selection", "F")) frame_selection();
-    ImGui::EndMenu();
+    if (ux::MenuItem("Frame selection", "F")) frame_selection();
+    ux::EndMenu();
   }
-  if (ImGui::BeginMenu("Help")) {
+  if (ux::BeginMenu("Help")) {
+    if (ux::MenuItem("Command Palette...", "Ctrl+Shift+P")) ux_.palette().open();
+    ImGui::Separator();
     theme::KeyHint("RMB / Alt+LMB", "Orbit");
     theme::KeyHint("MMB", "Pan");
     theme::KeyHint("Wheel", "Zoom");
@@ -320,11 +334,8 @@ void Editor3DScreen::draw_menu_bar() {
     theme::KeyHint("WASD Space E", "Ride: move, jump, interact");
     theme::KeyHint("C", "Free camera while playing");
     theme::KeyHint("Hold F / G", "Carry a physics body / throw it");
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
-  ImGui::SameLine(ImGui::GetWindowWidth() - 360.0f);
-  ImGui::TextDisabled("%s  [3D]%s", project_.name.c_str(), playing() ? "  [RIDING]" : "");
-  ImGui::EndMainMenuBar();
 }
 
 void Editor3DScreen::draw_toolbar() {
@@ -367,7 +378,7 @@ void Editor3DScreen::draw_toolbar() {
     if (ImGui::Checkbox("Local (,)", &local)) {
       orientation_ = local ? XformSpace::Local : XformSpace::Global;
     }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Gizmo and axis keys use the active entity's axes");
+    if (ImGui::IsItemHovered()) ux::SetTooltip("Gizmo and axis keys use the active entity's axes");
     ImGui::SameLine();
   }
   bool snap = scene_.snap;
@@ -376,7 +387,7 @@ void Editor3DScreen::draw_toolbar() {
   ImGui::SetNextItemWidth(84);
   int target = snap_surface_ ? 1 : 0;
   if (ImGui::Combo("##snaptarget", &target, "Increment\0Surface\0")) snap_surface_ = target == 1;
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Snap moves to the grid step or onto surfaces under the mouse");
+  if (ImGui::IsItemHovered()) ux::SetTooltip("Snap moves to the grid step or onto surfaces under the mouse");
   ImGui::SameLine();
   ImGui::SetNextItemWidth(60);
   ImGui::DragFloat("##st", &scene_.snap_translate, 0.05f, 0.05f, 10.0f, "%.2fm");
@@ -614,13 +625,13 @@ void Editor3DScreen::draw_viewport() {
       const std::uint64_t hit = pick(mx, my, vw, vh);
       const scene3d::Entity3D* under = hit ? scene_.find(hit) : nullptr;
       if (under) {
-        ImGui::SetTooltip("Attach to %s", under->name.c_str());
+        ux::SetTooltip("Attach to %s", under->name.c_str());
         if (std::string rel = accept_script_payload(); !rel.empty()) {
           select(hit);
           attach_script(hit, rel);
         }
       } else {
-        ImGui::SetTooltip("Drop on an entity to attach the script");
+        ux::SetTooltip("Drop on an entity to attach the script");
       }
     }
     // A Vault tile: pull it into the claim, then place it at the drop point.
@@ -666,7 +677,7 @@ void Editor3DScreen::draw_viewport() {
     ImGui::TextDisabled("Pivot point");
     for (int i = 0; i < kPivotModeCount; ++i) {
       const PivotMode p = static_cast<PivotMode>(i);
-      if (ImGui::MenuItem(pivot_label(p), nullptr, p == pivot_mode_)) pivot_mode_ = p;
+      if (ux::MenuItem(pivot_label(p), nullptr, p == pivot_mode_)) pivot_mode_ = p;
     }
     ImGui::EndPopup();
   }
@@ -896,13 +907,13 @@ void Editor3DScreen::draw_hierarchy_row(const scene3d::Entity3D& e, int depth) {
   ImGui::PushStyleColor(ImGuiCol_Text, e.editor_hidden ? theme::TextMuted() : theme::Sand());
   if (ImGui::SmallButton(e.editor_hidden ? "-##eye" : "o##eye")) hier_toggle_hide_ = e.id;
   ImGui::PopStyleColor();
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(e.editor_hidden ? "Show (Shift+H)" : "Hide in the editor (H)");
+  if (ImGui::IsItemHovered()) ux::SetTooltip(e.editor_hidden ? "Show (Shift+H)" : "Hide in the editor (H)");
   ImGui::SameLine(0.0f, 2.0f);
   ImGui::PushStyleColor(ImGuiCol_Text, e.locked ? theme::Warning() : theme::TextMuted());
   if (ImGui::SmallButton(e.locked ? "L##lock" : ".##lock")) hier_toggle_lock_ = e.id;
   ImGui::PopStyleColor(2);
   ImGui::PopStyleVar();
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(e.locked ? "Unlock (Ctrl+Shift+L)" : "Lock (Ctrl+L)");
+  if (ImGui::IsItemHovered()) ux::SetTooltip(e.locked ? "Unlock (Ctrl+Shift+L)" : "Lock (Ctrl+L)");
   ImGui::PopID();
   ImGui::SameLine(0.0f, 4.0f);
 
@@ -987,81 +998,83 @@ void Editor3DScreen::draw_context_menu(std::uint64_t clicked) {
     ImGui::TextDisabled("%s", e->name.c_str());
     ImGui::Separator();
   }
-  if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, has)) duplicate_selected();
-  if (ImGui::MenuItem("Delete", "Del", false, has)) delete_selected();
-  if (e && ImGui::BeginMenu("Rename")) {
+  if (ux::MenuItem("Duplicate", "Ctrl+D", false, has)) duplicate_selected();
+  if (ux::MenuItem("Delete", "Del", false, has)) delete_selected();
+  if (e && ux::BeginMenu("Rename")) {
     if (ImGui::IsWindowAppearing()) std::snprintf(rename_buf_, sizeof(rename_buf_), "%s", e->name.c_str());
     if (ImGui::InputText("##ctxrename", rename_buf_, sizeof(rename_buf_),
                          ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
       rename(e->id, rename_buf_);
       ImGui::CloseCurrentPopup();
     }
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
   ImGui::Separator();
-  if (ImGui::MenuItem("Copy", "Ctrl+C", false, has)) copy_selected();
-  if (ImGui::MenuItem("Cut", "Ctrl+X", false, has)) cut_selected();
-  if (ImGui::MenuItem("Paste", "Ctrl+V", false, !clipboard_text().empty())) paste();
+  if (ux::MenuItem("Copy", "Ctrl+C", false, has)) copy_selected();
+  if (ux::MenuItem("Cut", "Ctrl+X", false, has)) cut_selected();
+  if (ux::MenuItem("Paste", "Ctrl+V", false, !clipboard_text().empty())) paste();
   ImGui::Separator();
-  if (ImGui::MenuItem("Group", "Ctrl+G", false, has)) group_selected();
-  if (ImGui::MenuItem("Ungroup", "Ctrl+Shift+G", false, has)) ungroup_selected();
+  if (ux::MenuItem("Group", "Ctrl+G", false, has)) group_selected();
+  if (ux::MenuItem("Ungroup", "Ctrl+Shift+G", false, has)) ungroup_selected();
   ImGui::Separator();
   draw_attach_menu(clicked);
   if (e && e->camera) {
-    if (ImGui::MenuItem("Make active camera", nullptr, false, !playing())) make_active_camera(e->id);
-    if (ImGui::MenuItem("Align camera to view", "Ctrl+Alt+Num0", false, !playing())) align_camera_to_view(e->id);
-    if (ImGui::MenuItem("Look through camera", "Num0")) look_through_camera(e->id);
+    if (ux::MenuItem("Make active camera", nullptr, false, !playing())) make_active_camera(e->id);
+    if (ux::MenuItem("Align camera to view", "Ctrl+Alt+Num0", false, !playing())) align_camera_to_view(e->id);
+    if (ux::MenuItem("Look through camera", "Num0")) look_through_camera(e->id);
   }
   ImGui::Separator();
   if (e) {
-    if (ImGui::MenuItem(e->locked ? "Unlock" : "Lock", "Ctrl+L")) set_locked(e->id, !e->locked);
-    if (ImGui::MenuItem(e->editor_hidden ? "Show" : "Hide", "H")) set_hidden(e->id, !e->editor_hidden);
+    if (ux::MenuItem(e->locked ? "Unlock" : "Lock", "Ctrl+L")) set_locked(e->id, !e->locked);
+    if (ux::MenuItem(e->editor_hidden ? "Show" : "Hide", "H")) set_hidden(e->id, !e->editor_hidden);
   }
-  if (ImGui::MenuItem("Focus", "F", false, has)) frame_selection();
-  if (ImGui::MenuItem("Drop to ground", "End", false, has)) drop_to_ground();
-  if (selection().size() >= 2 && ImGui::BeginMenu("Align")) {
+  if (ux::MenuItem("Focus", "F", false, has)) frame_selection();
+  if (ux::MenuItem("Drop to ground", "End", false, has)) drop_to_ground();
+  if (selection().size() >= 2 && ux::BeginMenu("Align")) {
     static const char* kAx[3] = {"X", "Y", "Z"};
     for (int a = 0; a < 3; ++a) {
-      if (ImGui::MenuItem((std::string("Min ") + kAx[a]).c_str())) align_selected(a, -1);
-      if (ImGui::MenuItem((std::string("Centre ") + kAx[a]).c_str())) align_selected(a, 0);
-      if (ImGui::MenuItem((std::string("Max ") + kAx[a]).c_str())) align_selected(a, 1);
-      if (ImGui::MenuItem((std::string("Distribute ") + kAx[a]).c_str(), nullptr, false,
+      if (ux::MenuItem((std::string("Min ") + kAx[a]).c_str())) align_selected(a, -1);
+      if (ux::MenuItem((std::string("Centre ") + kAx[a]).c_str())) align_selected(a, 0);
+      if (ux::MenuItem((std::string("Max ") + kAx[a]).c_str())) align_selected(a, 1);
+      if (ux::MenuItem((std::string("Distribute ") + kAx[a]).c_str(), nullptr, false,
                           selection().size() >= 3)) {
         distribute_selected(a);
       }
       if (a < 2) ImGui::Separator();
     }
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
-  if (e && ImGui::BeginMenu("Add component")) {
+  if (e && ux::BeginMenu("Add component")) {
     scene3d::Entity3D c = *e;
     bool add = false;
-    if (ImGui::MenuItem("Mesh", nullptr, false, !e->mesh)) { c.mesh = scene3d::MeshRef{}; add = true; }
-    if (ImGui::MenuItem("Material", nullptr, false, !e->material)) { c.material = scene3d::Material3D{}; add = true; }
-    if (ImGui::MenuItem("Light", nullptr, false, !e->light)) { c.light = scene3d::Light3D{}; add = true; }
-    if (ImGui::MenuItem("Collider", nullptr, false, !e->collider)) { c.collider = scene3d::Collider3D{}; add = true; }
-    if (ImGui::MenuItem("Grabbable", nullptr, false, !e->grabbable)) { c.grabbable = scene3d::Grabbable3D{}; add = true; }
-    if (ImGui::MenuItem("Audio Source", nullptr, false, !e->audio)) { c.audio = scene3d::audio_3d(); add = true; }
-    if (ImGui::MenuItem("Particles", nullptr, false, !e->particles)) { c.particles = fx::preset("campfire", fx::Space::ThreeD); add = true; }
-    if (ImGui::MenuItem("Camera", nullptr, false, !e->camera)) { c.camera = scene3d::PlayCamera3D{}; add = true; }
-    if (ImGui::MenuItem("Follow", nullptr, false, !e->follow)) { c.follow = scene3d::Follow3D{}; add = true; }
+    if (ux::MenuItem("Mesh", nullptr, false, !e->mesh)) { c.mesh = scene3d::MeshRef{}; add = true; }
+    if (ux::MenuItem("Material", nullptr, false, !e->material)) { c.material = scene3d::Material3D{}; add = true; }
+    if (ux::MenuItem("Light", nullptr, false, !e->light)) { c.light = scene3d::Light3D{}; add = true; }
+    if (ux::MenuItem("Collider", nullptr, false, !e->collider)) { c.collider = scene3d::Collider3D{}; add = true; }
+    if (ux::MenuItem("Grabbable", nullptr, false, !e->grabbable)) { c.grabbable = scene3d::Grabbable3D{}; add = true; }
+    if (ux::MenuItem("Audio Source", nullptr, false, !e->audio)) { c.audio = scene3d::audio_3d(); add = true; }
+    if (ux::MenuItem("Particles", nullptr, false, !e->particles)) { c.particles = fx::preset("campfire", fx::Space::ThreeD); add = true; }
+    if (ux::MenuItem("Camera", nullptr, false, !e->camera)) { c.camera = scene3d::PlayCamera3D{}; add = true; }
+    if (ux::MenuItem("Follow", nullptr, false, !e->follow)) { c.follow = scene3d::Follow3D{}; add = true; }
     if (add) replace_entity(c, "Add component " + c.name);
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
   ImGui::Separator();
-  if (ImGui::BeginMenu("Create")) {
+  if (ux::BeginMenu("Create")) {
     const Vec3 at = scene_.editor_camera.target;
-    for (const char* p : {"cube", "plane", "sphere", "capsule"})
-      if (ImGui::MenuItem(p)) create_primitive(p, {at.x, 0.0f, at.z});
-    if (ImGui::MenuItem("Point light")) create_light(false, {at.x, 2.5f, at.z});
-    if (ImGui::MenuItem("Empty")) create_empty({at.x, 0.0f, at.z});
-    if (ImGui::MenuItem("Camera", nullptr, false, !playing())) create_camera();
+    static const char* kPrims[4][2] = {
+        {"Cube", "cube"}, {"Plane", "plane"}, {"Sphere", "sphere"}, {"Capsule", "capsule"}};
+    for (const auto& p : kPrims)
+      if (ux::MenuItem(p[0])) create_primitive(p[1], {at.x, 0.0f, at.z});
+    if (ux::MenuItem("Point light")) create_light(false, {at.x, 2.5f, at.z});
+    if (ux::MenuItem("Empty")) create_empty({at.x, 0.0f, at.z});
+    if (ux::MenuItem("Camera", nullptr, false, !playing())) create_camera();
     ImGui::Separator();
-    if (ImGui::MenuItem("Terrain (hills)", nullptr, false, !playing())) {
+    if (ux::MenuItem("Terrain (hills)", nullptr, false, !playing())) {
       create_terrain(129, 128.0f, true, "meadow");
       show_terrain_ = true;
     }
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
 }
 
@@ -1106,6 +1119,51 @@ void Editor3DScreen::draw_telegraph() {
     }
   }
 }
+
+void Editor3DScreen::setup_field_guide() {
+  ux_.set_menu_drawer([this] { draw_menus(); });
+  ux_.set_context_drawer([this] { draw_context_menus_for_audit(); });
+  struct Panel {
+    const char* label;
+    const char* window;
+    bool* shown;
+  };
+  const Panel panels[] = {
+      {"Hierarchy", kHierarchy, nullptr},
+      {"Viewport", kViewport, nullptr},
+      {"Inspector", kInspector, nullptr},
+      {"Assets", kAssets, nullptr},
+      {"Asset Browser", "Asset Browser###AssetBrowser3D", &show_asset_browser_},
+      {"Vault", "Vault###Vault3D", &show_vault_},
+      {"Prefabs", kPrefabs, &show_prefabs_},
+      {"Environment", kEnvironment, nullptr},
+      {"Telegraph (Console)", kTelegraph, nullptr},
+      {"Plugins", kPlugins, nullptr},
+      {"Saloon Band (Mixer)", "Saloon Band (Mixer)", &show_mixer_},
+      {"Physics Settings", "Physics Settings", &show_physics_},
+      {"Terrain + Foliage", "Terrain + Foliage", &show_terrain_},
+  };
+  for (const Panel& p : panels) ux_.add_panel(p.label, p.window, p.shown);
+  ux_.add_settings_entries([this](const std::string& section) {
+    ux::request_settings_section(section);
+    settings_requested_ = true;
+  });
+  ux_.refresh_recent([this](const ux::RecentItem& r) {
+    if (r.kind == "claim") {
+      if (r.path == project_.path) {
+        note("Already riding this claim");
+        return;
+      }
+      ux::request_open_claim(r.path);
+      request_back_to_projects();
+    } else {
+      show_asset_browser_ = true;
+      asset_browser_.select(r.path);
+    }
+  });
+}
+
+void Editor3DScreen::draw_context_menus_for_audit() {}
 
 }  // namespace editor
 }  // namespace tombstone

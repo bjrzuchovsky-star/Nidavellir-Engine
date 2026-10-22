@@ -1,4 +1,5 @@
 #include "editor/assets/GmaImport.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/ui/Theme.h"
 #include "scene/JsonTree.h"
@@ -204,7 +205,7 @@ bool draw_source_materials(assetdb::AssetDb& db, const assetdb::AssetDb::Entry& 
         if (ImGui::SmallButton("Clear")) set_override(name, "");
       }
       if (!m.str("material").empty()) ImGui::TextDisabled("  %s", m.str("material").c_str());
-      if (bad && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", m.str("searched").c_str());
+      if (bad && ImGui::IsItemHovered()) ux::SetTooltip("%s", m.str("searched").c_str());
       if (bad && !m.str("searched").empty()) ImGui::TextWrapped("  %s", m.str("searched").c_str());
       ImGui::PopID();
     }

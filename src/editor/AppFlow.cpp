@@ -11,6 +11,8 @@
 #include "editor/screens/LoadingScreen.h"
 #include "editor/screens/LoginScreen.h"
 #include "editor/screens/ProjectManagerScreen.h"
+#include "editor/ux/EditorUx.h"
+#include "editor/ux/UxPrefs.h"
 #include "editor/screens/SettingsScreen.h"
 #include "editor/update/UpdateService.h"
 
@@ -40,6 +42,7 @@ void AppFlow::start() {
 
   std::string load_err;
   settings_ = SettingsStore::load(&load_err);
+  ux::import_from(settings_);  // tooltips, walkthroughs, recent items
   render3d::set_blender_setting(settings_.blender_path);
   set_script_editor_preference(settings_.script_editor);
   render3d::source::set_content_search_folders(render3d::source::split_folder_list(settings_.source_search_folders));
@@ -86,6 +89,7 @@ bool AppFlow::reload_projects() {
 }
 
 void AppFlow::persist_settings() {
+  ux::export_to(&settings_);  // Field Guide prefs may have changed in an editor
   std::string err;
   if (!SettingsStore::save(settings_, &err)) {
     last_error_ = err;
@@ -118,6 +122,7 @@ bool AppFlow::try_apply_settings_from_screen() {
   draft.update_cached_version = settings_.update_cached_version;
   draft.update_cached_url = settings_.update_cached_url;
   settings_ = std::move(draft);
+  ux::import_from(settings_);
   render3d::set_blender_setting(settings_.blender_path);
   set_script_editor_preference(settings_.script_editor);
   render3d::source::set_content_search_folders(render3d::source::split_folder_list(settings_.source_search_folders));
@@ -168,6 +173,7 @@ void AppFlow::tick(float delta_seconds) {
             active_project_ = std::make_unique<ProjectInfo>(*selected);
             project_store_.touch_last_opened(selected->path);
             settings_.last_project_path = selected->path;
+            ux::add_recent("claim", selected->path, selected->name);
             persist_settings();
           }
         }
@@ -183,6 +189,10 @@ void AppFlow::tick(float delta_seconds) {
         }
       }
     } else if ((state_ == AppState::Editor2D || state_ == AppState::Editor3D) &&
+               next == AppState::Settings) {
+      // Palette / menu jump to Settings: come back to the same claim.
+      settings_return_state_ = state_;
+    } else if ((state_ == AppState::Editor2D || state_ == AppState::Editor3D) &&
                next == AppState::ProjectManager) {
       active_project_.reset();
       status_message_.clear();
@@ -191,6 +201,26 @@ void AppFlow::tick(float delta_seconds) {
 
     transition_to(next);
   }
+  open_requested_claim();
+}
+
+void AppFlow::open_requested_claim() {
+  // "Recent > claim" in an editor's palette: the editor goes back to the
+  // Project Manager first (saving on exit), then we ride straight on.
+  if (state_ != AppState::ProjectManager) return;
+  const std::string path = ux::take_open_claim();
+  if (path.empty()) return;
+  for (const ProjectInfo& p : project_store_.projects()) {
+    if (p.path != path) continue;
+    active_project_ = std::make_unique<ProjectInfo>(p);
+    project_store_.touch_last_opened(p.path);
+    settings_.last_project_path = p.path;
+    ux::add_recent("claim", p.path, p.name);
+    persist_settings();
+    transition_to(p.kind == ProjectKind::ThreeD ? AppState::Editor3D : AppState::Editor2D);
+    return;
+  }
+  status_message_ = "That claim isn't in the projects folder any more: " + path;
 }
 
 void AppFlow::handle_pending_screen_actions() {
@@ -823,6 +853,7 @@ std::unique_ptr<IScreen> AppFlow::make_screen(AppState state) {
       return pm;
     }
     case AppState::Settings:
+      ux::export_to(&settings_);
       return std::make_unique<SettingsScreen>(settings_, settings_return_state_);
     case AppState::Editor2D: {
       ProjectInfo project = active_project_

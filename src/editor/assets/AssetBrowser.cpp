@@ -1,4 +1,6 @@
 #include "editor/assets/AssetBrowser.h"
+#include "editor/ux/Tooltip.h"
+#include "editor/ux/Actions.h"
 #include "editor/scripting/ScriptComponents.h"
 
 #include "editor/assets/AssetImport.h"
@@ -118,17 +120,17 @@ void AssetBrowser::take_os_drop(const std::string& folder) {
 
 void AssetBrowser::draw_import_popup() {
   if (ImGui::BeginPopup("##importmenu")) {
-    if (ImGui::MenuItem("Import file...")) {
+    if (ux::MenuItem("Import file...")) {
       import_pick_folder_ = false;
       import_picker_.open_file({}, {}, "Pick a file to import");
     }
-    if (ImGui::MenuItem("Import folder (model pack)...")) {
+    if (ux::MenuItem("Import folder (model pack)...")) {
       import_pick_folder_ = true;
       import_picker_.open({});
     }
-    if (ImGui::MenuItem("Import Source addon (.gma)...")) gma_dialog_.open_picker(db_.project_dir());
+    if (ux::MenuItem("Import Source addon (.gma)...")) gma_dialog_.open_picker(db_.project_dir());
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("Source engine formats (.mdl/.vtf/.vmt/.gma): pick the models / materials / sounds\n"
+      ux::SetTooltip("Source engine formats (.mdl/.vtf/.vmt/.gma): pick the models / materials / sounds\n"
                         "to extract into assets/Models/<Addon>/. Dropping a .gma here does the same.");
     }
     ImGui::Separator();
@@ -277,13 +279,13 @@ void AssetBrowser::draw() {
     importsort::Settings st = import_settings_;
     bool changed = ImGui::Checkbox("Sort imports into type folders", &st.sort_imports);
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("assets/Models/<Name>/, Textures/, Materials/, Audio/, Fonts/, Scenes/, Animations/, Other/,\n"
+      ux::SetTooltip("assets/Models/<Name>/, Textures/, Materials/, Audio/, Fonts/, Scenes/, Animations/, Other/,\n"
                         "prefabs/ and scripts/. Dropping on a folder puts files there instead.");
     }
     ImGui::BeginDisabled(!st.sort_imports);
     changed |= ImGui::Checkbox("Keep source folder structure for model packs", &st.keep_model_packs);
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("On: a model's textures stay with it in assets/Models/<Name>/.\n"
+      ux::SetTooltip("On: a model's textures stay with it in assets/Models/<Name>/.\n"
                         "Off: they go to assets/Textures/<Name>/ (glTF / OBJ paths rewritten).");
     }
     ImGui::EndDisabled();
@@ -308,7 +310,7 @@ void AssetBrowser::draw() {
     ImGui::PushStyleColor(ImGuiCol_Text, theme::Warning());
     if (ImGui::SmallButton((std::to_string(orphans_.size()) + " orphaned .meta").c_str())) orphans_popup_ = true;
     ImGui::PopStyleColor();
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Metadata whose file is gone (deleted or moved outside the editor and not found)");
+    if (ImGui::IsItemHovered()) ux::SetTooltip("Metadata whose file is gone (deleted or moved outside the editor and not found)");
   }
 
   const float details_h = selected_.empty() ? 0.0f : 150.0f;
@@ -470,18 +472,18 @@ bool AssetBrowser::tile(const AssetDb::Entry& e, float size) {
     ImGui::EndDragDropSource();
   }
   if (hovered) {
-    ImGui::SetTooltip("%s\n%s  %s\nGUID %s", e.rel.c_str(), assetdb::kind_name(e.meta.kind),
+    ux::SetTooltip("%s\n%s  %s\nGUID %s", e.rel.c_str(), assetdb::kind_name(e.meta.kind),
                       assetdb::info_summary(e.meta.info, e.meta.kind).c_str(), e.meta.guid.c_str());
   }
   if (ImGui::BeginPopupContextItem("##ctx")) {
     selected_ = e.rel;
-    if (ImGui::MenuItem("Find references")) {
+    if (ux::MenuItem("Find references")) {
       refs_for_ = e.rel;
       refs_shown_ = db_.find_references(e.rel);
     }
-    if (ImGui::MenuItem("Reimport")) reimport(e.rel);
-    if (host_.send_to_vault && ImGui::MenuItem("Send to Vault...")) host_.send_to_vault(e.rel);
-    if (ImGui::MenuItem("Delete")) {
+    if (ux::MenuItem("Reimport")) reimport(e.rel);
+    if (host_.send_to_vault && ux::MenuItem("Send to Vault...")) host_.send_to_vault(e.rel);
+    if (ux::MenuItem("Delete")) {
       std::vector<assetdb::Ref> refs;
       if (!remove(e.rel, false, &refs)) {
         delete_pending_ = e.rel;
@@ -574,16 +576,16 @@ bool AssetBrowser::script_tile(const std::string& rel, float size) {
   ImGui::EndGroup();
   script_drag_source(rel);
   if (hovered) {
-    ImGui::SetTooltip("%s\n%s script - drag onto an entity to attach, double-click to open", rel.c_str(),
+    ux::SetTooltip("%s\n%s script - drag onto an entity to attach, double-click to open", rel.c_str(),
                       lang_label(lang));
     if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && host_.open_script) host_.open_script(rel, 0);
   }
   if (ImGui::BeginPopupContextItem("##ctx")) {
     selected_ = rel;
     if (host_.open_script) {
-      if (ImGui::MenuItem(lang == ScriptLang::Graph ? "Open in Brand Book" : "Open")) host_.open_script(rel, 0);
-      if (ImGui::MenuItem("Open in VS Code")) host_.open_script(rel, 1);
-      if (ImGui::MenuItem("Open in Visual Studio")) host_.open_script(rel, 2);
+      if (ux::MenuItem(lang == ScriptLang::Graph ? "Open in Brand Book" : "Open")) host_.open_script(rel, 0);
+      if (ux::MenuItem("Open in VS Code")) host_.open_script(rel, 1);
+      if (ux::MenuItem("Open in Visual Studio")) host_.open_script(rel, 2);
     }
     ImGui::EndPopup();
   }
@@ -633,7 +635,7 @@ void AssetBrowser::draw_settings(const AssetDb::Entry& e) {
       ImGui::TextColored(theme::Warning(), "%s", render3d::kModelRightsNote);
       ImGui::PopTextWrapPos();
       number("unit_scale", "Unit scale", 0.0001f, 100, "%.4f");
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip("File units to metres (Source: 0.0254, centimetres: 0.01)");
+      if (ImGui::IsItemHovered()) ux::SetTooltip("File units to metres (Source: 0.0254, centimetres: 0.01)");
       int up = s.str("up_axis") == "y" ? 1 : s.str("up_axis") == "z" ? 2 : 0;
       const char* ups[] = {"Auto (file)", "Y up", "Z up (convert)"};
       ImGui::SetNextItemWidth(140);

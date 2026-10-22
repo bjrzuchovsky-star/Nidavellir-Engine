@@ -53,6 +53,7 @@
 #include "world3d/World3D.h"
 #include "xr/VrPresenter.h"
 #include "xr/XrSession.h"
+#include "editor/ux/EditorUx.h"
 
 #include <cstdint>
 #include <deque>
@@ -77,6 +78,8 @@ class Editor3DScreen final : public IScreen {
   AppState on_update(float delta_seconds) override;
 
   void request_back_to_projects() { back_requested_ = true; }
+  // Field Guide: action registry + command palette (Ctrl+Shift+P).
+  ux::EditorUx& field_guide() { return ux_; }
   void request_quit() { quit_requested_ = true; }
   const ProjectInfo& project() const { return project_; }
   EditorPlugins& plugins() { return plugins_; }
@@ -465,6 +468,11 @@ class Editor3DScreen final : public IScreen {
   void draw_ui();
   void setup_dock_layout(unsigned int dockspace_id);
   void draw_menu_bar();
+  void draw_menus();  // menu bar contents (also harvested for the palette)
+  void setup_field_guide();
+  void draw_context_menus_for_audit();
+  ux::EditorUx ux_{true};
+  bool settings_requested_ = false;
   void draw_toolbar();
   void draw_status_bar();
   void draw_viewport();

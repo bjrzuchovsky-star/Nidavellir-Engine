@@ -4,6 +4,7 @@
 // auto-scroll, click-to-select and a status-bar badge.
 
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/Tooltip.h"
 #include "editor/plugins/ProfilerPanels.h"
 
 #include "editor/ui/Theme.h"
@@ -124,7 +125,7 @@ void Editor2DScreen::draw_console() {
       ImGui::PopStyleColor();
       if (e.entity != 0 && ImGui::IsItemHovered()) {
         const Entity2D* who = workspace_.find(e.entity);
-        ImGui::SetTooltip("%s", who ? ("Click to pick out " + who->name).c_str()
+        ux::SetTooltip("%s", who ? ("Click to pick out " + who->name).c_str()
                                     : "Spawned during the ride");
       }
       if (clicked) {
@@ -178,7 +179,7 @@ void Editor2DScreen::draw_telegraph_badge() {
   ImGui::PopStyleVar();
   ImGui::PopStyleColor(3);
   if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip("Open the Telegraph (script log, toasts, trigger "
+    ux::SetTooltip("Open the Telegraph (script log, toasts, trigger "
                       "events, editor notes)");
   }
 }

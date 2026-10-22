@@ -1,4 +1,5 @@
 #include "editor/audio/EditorAudio.h"
+#include "editor/ux/Tooltip.h"
 #include "editor/ui/Theme.h"
 #include "scene/SceneData.h"
 
@@ -127,7 +128,7 @@ AudioEdit draw_audio_source_fields(AudioSourceData& a,
     }
     after_drag("Audio Distance");
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("Full volume inside near; fades to silence at far.");
+      ux::SetTooltip("Full volume inside near; fades to silence at far.");
     }
     check("Doppler", &a.doppler, "Audio Doppler");
   }
