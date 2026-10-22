@@ -41,6 +41,7 @@ add_executable(ts_admin
   SmokeLocTiles.cpp
   SmokeTerrain.cpp
   SmokeVault.cpp
+  SmokeUpdate.cpp
   VaultCli.cpp
   TerrainShot.cpp
 )

@@ -1,5 +1,7 @@
 #include "editor/screens/SettingsScreen.h"
 
+#include "editor/update/UpdateService.h"
+
 #include "editor/ui/Theme.h"
 
 #include <imgui.h>
@@ -62,7 +64,7 @@ void SettingsScreen::draw_ui() {
 
   const ImVec2 avail = ImGui::GetContentRegionAvail();
   const float panel_w = std::min(avail.x * 0.72f, 660.0f);
-  const float panel_h = std::min(avail.y * 0.9f, 560.0f);
+  const float panel_h = std::min(avail.y * 0.94f, 680.0f);
   ImGui::SetCursorPos(ImVec2((avail.x - panel_w) * 0.5f,
                              (avail.y - panel_h) * 0.5f));
   theme::BeginCard("##SettingsCard", panel_w, panel_h);
@@ -104,6 +106,19 @@ void SettingsScreen::draw_ui() {
   ImGui::Combo("##theme", &theme_index_, themes, 2);
   ImGui::SameLine();
   ImGui::TextDisabled("Theme");
+
+  theme::SectionHeader("Supply Run", "engine updates");
+  ImGui::Checkbox("Check for updates on start", &draft_.check_updates_on_start);
+  if (update::url_supported(update::kLatestReleaseUrl)) {
+    theme::StatusInfo("Asks GitHub for a newer release when the Project Manager opens (at most every 6 hours).");
+  } else {
+    theme::StatusInfo("Update checks need the Windows editor (https); this build skips them.");
+  }
+  if (!draft_.update_skip_version.empty()) {
+    ImGui::TextDisabled("Skipping v%s", draft_.update_skip_version.c_str());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Stop skipping")) draft_.update_skip_version.clear();
+  }
 
   if (!draft_.last_project_path.empty()) {
     theme::SectionHeader("Trail", "last session");

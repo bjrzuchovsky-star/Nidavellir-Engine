@@ -7,7 +7,10 @@
 #include "editor/screens/LoginScreen.h"
 #include "editor/screens/ProjectManagerScreen.h"
 #include "editor/screens/SettingsScreen.h"
+#include "editor/update/UpdateService.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <utility>
 
@@ -101,6 +104,10 @@ bool AppFlow::try_apply_settings_from_screen() {
     return false;
   }
 
+  // The update check may have written these while Settings was open.
+  draft.update_last_check = settings_.update_last_check;
+  draft.update_cached_version = settings_.update_cached_version;
+  draft.update_cached_url = settings_.update_cached_url;
   settings_ = std::move(draft);
   persist_settings();
   if (!reload_projects()) {
@@ -118,6 +125,11 @@ bool AppFlow::try_apply_settings_from_screen() {
 void AppFlow::tick(float delta_seconds) {
   if (!screen_ || state_ == AppState::Quit) {
     return;
+  }
+
+  tick_updates();
+  if (state_ == AppState::Quit) {
+    return;  // the installer took over
   }
 
   handle_pending_screen_actions();
@@ -171,6 +183,44 @@ void AppFlow::tick(float delta_seconds) {
 
 void AppFlow::handle_pending_screen_actions() {
   if (auto* pm = dynamic_cast<ProjectManagerScreen*>(screen_.get())) {
+    switch (pm->take_update_action()) {
+      case UpdateAction::None:
+        break;
+      case UpdateAction::Update:
+        if (update_fake_) {
+          update_error_ = "That's a test notice (TS_FAKE_UPDATE): there's nothing to download.";
+          std::cout << "[Update] Update pressed on the TS_FAKE_UPDATE notice; nothing to fetch\n";
+        } else if (updates_ && !update_downloading_) {
+          update_error_.clear();
+          update_downloading_ = true;
+          updates_->start_download();
+          std::cout << "[Update] fetching v" << update_version_ << '\n';
+        }
+        break;
+      case UpdateAction::ReleaseNotes: {
+        const std::string url = update_url_.empty() ? update::kReleasesPageUrl : update_url_;
+        std::string err;
+        if (updates_ && updates_->options().dry_run) {
+          std::cout << "[Update] (dry run) would open " << url << '\n';
+        } else if (!update::open_url(url, &err)) {
+          std::cout << "[Update] could not open " << url << ": " << err << '\n';
+          update_error_ = "Couldn't open the browser; the notes are at " + url;
+        }
+        break;
+      }
+      case UpdateAction::Later:
+        update_visible_ = false;
+        update_later_ = true;
+        std::cout << "[Update] Later: v" << update_version_ << " hidden for this session\n";
+        break;
+      case UpdateAction::Skip:
+        update_visible_ = false;
+        settings_.update_skip_version = update_version_;
+        persist_settings();
+        std::cout << "[Update] skipping v" << update_version_ << " from now on\n";
+        break;
+    }
+    push_update_banner();
     if (pm->new_project_requested()) {
       const std::string name = pm->pending_new_project_name();
       const ProjectKind kind = pm->pending_new_project_kind();
@@ -574,6 +624,176 @@ void AppFlow::transition_to(AppState next) {
   if (screen_) {
     screen_->on_enter();
   }
+  if (state_ == AppState::ProjectManager) {
+    begin_update_check();
+    push_update_banner();
+  }
+}
+
+// ---- update notifier (docs/updates.md) ---------------------------------------
+
+void AppFlow::enable_update_checks(const update::ServiceOptions* opt) {
+  updates_enabled_ = true;
+  updates_ = std::make_unique<update::UpdateService>(opt ? *opt : update::ServiceOptions{});
+  update_checked_ = false;
+  update_check_running_ = false;
+  update_visible_ = false;
+  update_fake_ = false;
+  update_downloading_ = false;
+  update_later_ = false;
+  update_error_.clear();
+  if (state_ == AppState::ProjectManager) {
+    begin_update_check();
+    push_update_banner();
+  }
+}
+
+void AppFlow::press_update_action_for_smoke(UpdateAction action) {
+  auto* pm = dynamic_cast<ProjectManagerScreen*>(screen_.get());
+  if (!pm) return;
+  pm->request_update_action(action);
+  handle_pending_screen_actions();
+}
+
+void AppFlow::begin_update_check() {
+  if (!updates_enabled_ || !updates_ || update_check_running_ || update_downloading_) return;
+  const std::string current = updates_->options().current_version;
+  if (!update_checked_) {
+    const std::string fake = update::fake_update_version();
+    if (!fake.empty()) {
+      update_checked_ = true;
+      update_fake_ = true;
+      update_version_ = fake;
+      update_url_ = update::kReleasesPageUrl;
+      update_visible_ = true;
+      std::cout << "[Update] TS_FAKE_UPDATE=" << fake << ": showing the test notice\n";
+      return;
+    }
+  }
+  if (update_fake_ || update_later_) return;
+  if (const char* off = std::getenv("TS_NO_UPDATE_CHECK"); off && *off && *off != '0') {
+    if (!update_checked_) std::cout << "[Update] TS_NO_UPDATE_CHECK set; not checking\n";
+    update_checked_ = true;
+    return;
+  }
+  if (!settings_.check_updates_on_start) {
+    if (!update_checked_) std::cout << "[Update] checks are off in Settings\n";
+    update_checked_ = true;
+    update_visible_ = false;
+    return;
+  }
+  if (!update::url_supported(updates_->options().latest_url)) {
+    if (!update_checked_) std::cout << "[Update] update checks need https (the Windows editor); skipped here\n";
+    update_checked_ = true;
+    return;
+  }
+  const std::int64_t now = update::now_unix();
+  const std::int64_t last = std::atoll(settings_.update_last_check.c_str());
+  if (!update::check_due(last, now)) {
+    // Within 6 hours of the last check: use what it found.
+    if (!update_checked_) {
+      const std::string& cached = settings_.update_cached_version;
+      if (!cached.empty() && update::should_notify(cached, current, settings_.update_skip_version)) {
+        update::ReleaseInfo r;
+        r.tag = "v" + cached;
+        r.version = cached;
+        r.html_url = settings_.update_cached_url;
+        updates_->set_release(r);
+        update_version_ = cached;
+        update_url_ = r.html_url;
+        update_visible_ = true;
+      }
+      std::cout << "[Update] last checked " << (now - last) / 60 << " min ago; latest then: "
+                << (cached.empty() ? "(none)" : "v" + cached) << '\n';
+    }
+    update_checked_ = true;
+    return;
+  }
+  update_checked_ = true;
+  update_check_running_ = true;
+  std::cout << "[Update] asking GitHub for the latest release\n";
+  updates_->start_check();
+}
+
+void AppFlow::tick_updates() {
+  if (!updates_) return;
+  const std::string current = updates_->options().current_version;
+  if (update_check_running_) {
+    const auto st = updates_->check_state();
+    if (st != update::UpdateService::Check::Running && st != update::UpdateService::Check::Idle) {
+      update_check_running_ = false;
+      settings_.update_last_check = std::to_string(update::now_unix());
+      if (st == update::UpdateService::Check::Failed) {
+        // Offline, rate limited, GitHub down: say nothing in the UI.
+        std::cout << "[Update] check failed (quietly): " << updates_->last_error() << '\n';
+      } else {
+        const update::ReleaseInfo r = updates_->release();
+        settings_.update_cached_version = r.version;
+        settings_.update_cached_url = r.html_url;
+        if (update::should_notify(r.tag, current, settings_.update_skip_version)) {
+          update_version_ = r.version;
+          update_url_ = r.html_url;
+          update_visible_ = !update_later_;
+          std::cout << "[Update] v" << r.version << " is out (running v" << current << ")\n";
+        } else {
+          std::cout << "[Update] latest is " << r.tag << "; v" << current << " is up to date"
+                    << (update::is_newer(r.tag, current) ? " (skipped)" : "") << '\n';
+        }
+      }
+      persist_settings();
+    }
+  }
+  if (update_downloading_) {
+    const auto d = updates_->download_state();
+    if (d == update::UpdateService::Download::Ready) {
+      update_downloading_ = false;
+      const std::string path = updates_->downloaded_path();
+      std::cout << "[Update] downloaded " << path << (updates_->verified() ? " (SHA-256 verified)" : " (no checksum to verify)")
+                << '\n';
+      std::string err;
+      if (updates_->options().dry_run) {
+        std::cout << "[Update] (dry run) would run " << path << " and close the editor\n";
+        request_quit();
+        return;
+      }
+      if (update::launch_installer(path, &err)) {
+        std::cout << "[Update] installer started; closing the editor\n";
+        request_quit();
+        return;
+      }
+      update_error_ = "Couldn't start the installer: " + err;
+      std::cout << "[Update] " << update_error_ << '\n';
+    } else if (d == update::UpdateService::Download::Failed) {
+      update_downloading_ = false;
+      update_error_ = "Couldn't fetch the update: " + updates_->last_error();
+      std::cout << "[Update] " << update_error_ << '\n';
+    }
+  }
+  push_update_banner();
+}
+
+void AppFlow::push_update_banner() {
+  auto* pm = dynamic_cast<ProjectManagerScreen*>(screen_.get());
+  if (!pm) return;
+  UpdateBanner b;
+  b.visible = update_visible_;
+  b.version = update_version_;
+  b.current = updates_ ? updates_->options().current_version : update::current_version();
+  b.busy = update_downloading_;
+  b.fake = update_fake_;
+  b.error = update_error_;
+  if (update_downloading_ && updates_) {
+    b.progress = updates_->download_progress();
+    char buf[96];
+    if (b.progress >= 0.0) {
+      std::snprintf(buf, sizeof(buf), "Fetching v%s... %d%%", update_version_.c_str(),
+                    static_cast<int>(b.progress * 100.0 + 0.5));
+    } else {
+      std::snprintf(buf, sizeof(buf), "Fetching v%s...", update_version_.c_str());
+    }
+    b.note = buf;
+  }
+  pm->set_update_banner(std::move(b));
 }
 
 std::unique_ptr<IScreen> AppFlow::make_screen(AppState state) {

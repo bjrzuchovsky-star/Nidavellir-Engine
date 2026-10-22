@@ -6,6 +6,7 @@
 #include "editor/screens/IScreen.h"
 #include "editor/settings/Settings.h"
 #include "editor/templates/TemplateStore.h"
+#include "editor/update/UpdateBanner.h"
 #include "editor/workspace/Workspace2D.h"
 
 #include <memory>
@@ -18,6 +19,10 @@ namespace editor {
 
 class Editor2DScreen;
 class Editor3DScreen;
+namespace update {
+class UpdateService;
+struct ServiceOptions;
+}  // namespace update
 
 // Admin UI state machine:
 //   Loading -> Login -> ProjectManager -> Editor2D
@@ -74,6 +79,19 @@ class AppFlow {
   bool apply_settings_draft();  // persist + reload projects if root changed
   bool cancel_settings();
 
+  // Update notifier (docs/updates.md). Off until enabled: the GUI turns it
+  // on; headless smokes never reach the network. `opt` overrides the
+  // endpoint (the smoke points it at a loopback server).
+  void enable_update_checks(const update::ServiceOptions* opt = nullptr);
+  bool update_notice_visible() const { return update_visible_; }
+  const std::string& update_offer_version() const { return update_version_; }
+  update::UpdateService* update_service() { return updates_.get(); }
+  // Process this frame's update work now (the smoke drives it).
+  void pump_updates() { tick_updates(); }
+  // Press a notice button (Update / Release notes / Later / Skip) as the
+  // Project Manager would; no-op elsewhere.
+  void press_update_action_for_smoke(UpdateAction action);
+
   // Editor2D helpers.
   void request_back_to_projects();
   void request_quit();
@@ -108,6 +126,9 @@ class AppFlow {
   void handle_pending_screen_actions();
   // Returns false if apply failed (caller must stay on Settings).
   bool try_apply_settings_from_screen();
+  void begin_update_check();  // entering the Project Manager
+  void tick_updates();
+  void push_update_banner();
 
   AppState state_ = AppState::Quit;
   AppState settings_return_state_ = AppState::ProjectManager;
@@ -118,6 +139,19 @@ class AppFlow {
   std::unique_ptr<ProjectInfo> active_project_;
   std::string status_message_;
   std::string last_error_;
+
+  // Update notifier.
+  bool updates_enabled_ = false;
+  std::unique_ptr<update::UpdateService> updates_;
+  bool update_checked_ = false;     // this session
+  bool update_check_running_ = false;
+  bool update_visible_ = false;
+  bool update_fake_ = false;
+  bool update_downloading_ = false;
+  bool update_later_ = false;       // "Later": hidden for this session
+  std::string update_version_;
+  std::string update_url_;
+  std::string update_error_;
 };
 
 }  // namespace editor

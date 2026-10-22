@@ -133,10 +133,68 @@ void ProjectManagerScreen::draw_project_card(std::size_t i) {
   ImGui::Dummy(ImVec2(0, 2.0f));
 }
 
+void ProjectManagerScreen::draw_update_banner() {
+  const UpdateBanner& b = update_banner_;
+  if (!b.visible) return;
+  ImGui::PushID("update_banner");
+  const ImVec4 base = theme::PanelBg();
+  const ImVec4 lit = theme::Accent();
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(base.x + (lit.x - base.x) * 0.10f,
+                                                 base.y + (lit.y - base.y) * 0.10f,
+                                                 base.z + (lit.z - base.z) * 0.10f, 1.0f));
+  ImGui::PushStyleColor(ImGuiCol_Border, theme::AccentMuted());
+  ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, theme::metrics::kRadiusCard);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 8.0f));
+  const float h = ImGui::GetFrameHeight() * 2.0f + ImGui::GetStyle().ItemSpacing.y + 16.0f +
+                  (b.error.empty() ? 0.0f : ImGui::GetTextLineHeightWithSpacing());
+  ImGui::BeginChild("update", ImVec2(0, h), ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar);
+  {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 wp = ImGui::GetWindowPos();
+    dl->AddRectFilled(wp, ImVec2(wp.x + 4.0f, wp.y + ImGui::GetWindowSize().y), theme::U32(theme::Accent()),
+                      theme::metrics::kRadiusCard, ImDrawFlags_RoundCornersLeft);
+  }
+  ImGui::AlignTextToFramePadding();
+  ImGui::PushStyleColor(ImGuiCol_Text, theme::Accent());
+  ImGui::Text("New update available: v%s", b.version.c_str());
+  ImGui::PopStyleColor();
+  ImGui::SameLine();
+  ImGui::TextDisabled("You're riding v%s.  Fresh supplies are in from the trail.", b.current.c_str());
+  if (b.fake && ImGui::IsItemHovered()) ImGui::SetTooltip("Test notice (TS_FAKE_UPDATE); nothing to download.");
+
+  if (b.busy) {
+    const float frac = b.progress >= 0.0 ? static_cast<float>(b.progress) : 0.0f;
+    theme::BrandProgress(frac, ImVec2(220.0f, ImGui::GetFrameHeight()));
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("%s", b.note.empty() ? "Fetching the update..." : b.note.c_str());
+  } else {
+    if (theme::PrimaryButton("Update", ImVec2(96, 0))) update_action_ = UpdateAction::Update;
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Downloads the installer, checks it against SHA256SUMS.txt, runs it and closes the editor.\n"
+                        "Your claims, settings and Vault stay put.");
+    }
+    ImGui::SameLine();
+    if (theme::CopperButton("Release notes", ImVec2(130, 0))) update_action_ = UpdateAction::ReleaseNotes;
+    ImGui::SameLine();
+    if (theme::SecondaryButton("Later", ImVec2(80, 0))) update_action_ = UpdateAction::Later;
+    ImGui::SameLine();
+    if (theme::SecondaryButton("Skip this version", ImVec2(150, 0))) update_action_ = UpdateAction::Skip;
+  }
+  if (!b.error.empty()) {
+    theme::StatusError(b.error.c_str());
+  }
+  ImGui::EndChild();
+  ImGui::PopStyleVar(2);
+  ImGui::PopStyleColor(2);
+  ImGui::PopID();
+}
+
 void ProjectManagerScreen::draw_ui() {
   theme::BeginRoot("##ProjectManagerRoot");
 
   theme::TitleStrip("Project Manager", "Your claims on the frontier");
+  draw_update_banner();
 
   char caption[64];
   std::snprintf(caption, sizeof(caption), "%zu on file", projects_.size());

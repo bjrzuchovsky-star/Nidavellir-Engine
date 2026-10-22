@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 namespace ts {
@@ -26,6 +27,12 @@ struct Settings {
   std::string vault_local_dir;          // "" = Documents/TombStone/Vault
   std::string vault_url;                // ts_vault server, e.g. https://vault.example.com
   std::string vault_api_key;            // sent as a Bearer token; never logged
+  // Update notifier (docs/updates.md).
+  bool check_updates_on_start = true;   // ask GitHub for a newer release (Project Manager)
+  std::string update_skip_version;      // "Skip this version" (e.g. "0.2.0")
+  std::string update_last_check;        // unix seconds of the last check ("" = never)
+  std::string update_cached_version;    // latest release seen then (e.g. "0.2.0")
+  std::string update_cached_url;        // its release page (html_url)
 };
 
 class SettingsStore {

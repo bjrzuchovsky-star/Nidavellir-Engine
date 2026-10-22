@@ -3,6 +3,7 @@
 #include "editor/ProjectInfo.h"
 #include "editor/screens/IScreen.h"
 #include "editor/store/TradingPostPanel.h"
+#include "editor/update/UpdateBanner.h"
 #include "gfx/TextureCache.h"
 
 #include <optional>
@@ -107,7 +108,18 @@ class ProjectManagerScreen final : public IScreen {
   bool pending_vr() const { return pending_vr_; }
   void clear_set_vr_request() { set_vr_requested_ = false; }
 
+  // Update notice: AppFlow sets it each frame and takes the button press.
+  void set_update_banner(UpdateBanner b) { update_banner_ = std::move(b); }
+  const UpdateBanner& update_banner() const { return update_banner_; }
+  void request_update_action(UpdateAction a) { update_action_ = a; }
+  UpdateAction take_update_action() {
+    const UpdateAction a = update_action_;
+    update_action_ = UpdateAction::None;
+    return a;
+  }
+
  private:
+  void draw_update_banner();
   void draw_ui();
   void draw_project_card(std::size_t index);
   void draw_kind_picker();
@@ -162,6 +174,8 @@ class ProjectManagerScreen final : public IScreen {
   TradingPostUi trading_post_;
   bool set_vr_requested_ = false;
   bool pending_vr_ = false;
+  UpdateBanner update_banner_;
+  UpdateAction update_action_ = UpdateAction::None;
 };
 
 }  // namespace editor

@@ -78,6 +78,8 @@ add_library(ts_editor
   store/TradingPostPanel.cpp
   vault/VaultProject.cpp
   vault/VaultPanel.cpp
+  update/UpdateCheck.cpp
+  update/UpdateService.cpp
   scripting/BrandBook.cpp
   tools/StringsPanel.cpp
   tools/AutoTilePanel.cpp
@@ -122,6 +124,8 @@ target_link_libraries(ts_editor
 )
 
 target_compile_features(ts_editor PUBLIC cxx_std_20)
+# The update notifier compares GitHub's latest release with this (VERSION).
+target_compile_definitions(ts_editor PRIVATE TS_ENGINE_VERSION="${PROJECT_VERSION}")
 
 if(WIN32)
   # ShellExecuteW (open a script in the OS default editor).

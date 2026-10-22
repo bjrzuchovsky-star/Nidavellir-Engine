@@ -53,6 +53,7 @@
 #include "SmokeTradingPost.h"
 #include "SmokeTerrain.h"
 #include "VaultCli.h"
+#include "SmokeUpdate.h"
 #include "editor/vault/VaultPanel.h"
 int run_terrain_shot(const std::string& png);
 #include "store/TradingPost.h"
@@ -1312,6 +1313,10 @@ int run_console_smoke() {
   if (ts::tombstone::run_vault_smoke() != 0) {
     return 1;
   }
+  // Update notifier: canned GitHub JSON + loopback (see SmokeUpdate.cpp).
+  if (ts::tombstone::run_update_smoke() != 0) {
+    return 1;
+  }
   // Particles + 2D lighting (see SmokeFx.cpp).
   if (run_fx_smoke() != 0) {
     return 1;
@@ -1882,6 +1887,8 @@ int run_imgui_app() {
   }
 
   AppFlow flow;
+  // "New update available" on the Project Manager (docs/updates.md).
+  flow.enable_update_checks();
   flow.start();
   apply_theme(flow.settings());
   std::string last_theme = flow.settings().theme;
@@ -2008,6 +2015,10 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-vault") == 0) {
       return ts::tombstone::run_vault_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-update-check") == 0) {
+      // Update notifier: version compare, asset choice, verified download (no internet).
+      return ts::tombstone::run_update_smoke();
     }
     if (std::strcmp(argv[i], "--vault-shot") == 0 && i + 1 < argc) {
       return run_vault_shot(argv[i + 1]);

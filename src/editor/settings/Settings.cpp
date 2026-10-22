@@ -78,6 +78,12 @@ Settings SettingsStore::load(std::string* error_out) {
   s.vault_local_dir = json_mini::get_string(*parsed, "vault_local_dir", s.vault_local_dir);
   s.vault_url = json_mini::get_string(*parsed, "vault_url", s.vault_url);
   s.vault_api_key = json_mini::get_string(*parsed, "vault_api_key", s.vault_api_key);
+  s.check_updates_on_start =
+      json_mini::get_bool(*parsed, "check_updates_on_start", s.check_updates_on_start);
+  s.update_skip_version = json_mini::get_string(*parsed, "update_skip_version", s.update_skip_version);
+  s.update_last_check = json_mini::get_string(*parsed, "update_last_check", s.update_last_check);
+  s.update_cached_version = json_mini::get_string(*parsed, "update_cached_version", s.update_cached_version);
+  s.update_cached_url = json_mini::get_string(*parsed, "update_cached_url", s.update_cached_url);
 
   if (s.projects_root.empty()) {
     s.projects_root = default_projects_root();
@@ -124,9 +130,14 @@ bool SettingsStore::save(const Settings& settings, std::string* error_out) {
           {"vault_local_dir", normalized.vault_local_dir},
           {"vault_url", normalized.vault_url},
           {"vault_api_key", normalized.vault_api_key},
+          {"update_skip_version", normalized.update_skip_version},
+          {"update_last_check", normalized.update_last_check},
+          {"update_cached_version", normalized.update_cached_version},
+          {"update_cached_url", normalized.update_cached_url},
       },
       {
           {"auto_login_dev", normalized.auto_login_dev},
+          {"check_updates_on_start", normalized.check_updates_on_start},
       });
   out << body;
   if (!out) {
