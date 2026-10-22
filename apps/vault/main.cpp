@@ -13,6 +13,9 @@
 #include "vault/VaultBackend.h"
 #include "vault/VaultServer.h"
 #include "vault/VaultStore.h"
+#include "net/Net.h"
+#include "team/TeamClient.h"
+#include "team/TeamServer.h"
 
 #include <atomic>
 #include <chrono>
@@ -23,6 +26,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <mutex>
 #include <string>
@@ -60,9 +64,75 @@ void usage() {
       "  --add-key NAME      create an API key and print it once (add --read-only for pull-only)\n"
       "  --list-keys         list key names\n"
       "  --revoke-key NAME   delete a key\n"
+      "  --team              also host Live Team Claims sessions (UDP, every interface)\n"
+      "  --team-port N       team UDP port (default: HTTP port + 1)\n"
       "  --smoke             self-test on loopback and exit\n"
       "  --version\n"
       "You are responsible for having the rights to what is uploaded to your server.\n";
+}
+
+// Team sessions hosted beside the HTTP API: a key joins, a bad key is
+// refused, GET /api/v1/team lists the session.
+std::function<bool(const std::string&, std::string*, bool*)> key_check(tv::VaultStore& store) {
+  return [&store](const std::string& key, std::string* name, bool* can_write) {
+    tv::KeyInfo k;
+    if (!store.check_key(key, &k)) return false;
+    *name = k.name;
+    *can_write = k.can_write;
+    return true;
+  };
+}
+
+bool team_smoke(tv::VaultStore& store, const std::string& url, const std::string& key,
+                std::string* err) {
+  namespace team = ts::tombstone::team;
+  if (!ts::tombstone::net::net_startup(err)) return false;
+  team::TeamServer ts;
+  team::ServerOptions so;
+  so.port = 0;
+  so.check_key = key_check(store);
+  if (!ts.start(so, err)) return false;
+  team::TeamClient good, bad;
+  team::JoinOptions o;
+  o.port = ts.port();
+  o.claim = "vault-smoke";
+  o.dim = "2d";
+  o.key = key;
+  good.join(o, err);
+  o.key = "tsv_wrong";
+  bad.join(o, err);
+  const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (std::chrono::steady_clock::now() < until &&
+         !(good.joined() && bad.state() == team::TeamClient::State::Refused)) {
+    ts.poll();
+    good.poll();
+    bad.poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  bool ok = good.joined() && bad.state() == team::TeamClient::State::Refused &&
+            good.my_name() == "smoke";
+  if (!ok) *err = "join with a key / refuse a bad key";
+  std::string body;
+  int status = 0;
+  if (ok) {
+    tv::VaultServer probe(store);
+    probe.set_team_info([&ts] { return team::write_compact(ts.info_json()); });
+    tv::HttpRequest req;
+    req.method = "GET";
+    req.path = "/api/v1/team";
+    req.headers["authorization"] = "Bearer " + key;
+    tv::HttpResponse res;
+    probe.handle(req, &res);
+    status = res.status;
+    body = res.body;
+    ok = status == 200 && body.find("vault-smoke") != std::string::npos;
+    if (!ok) *err = "GET /api/v1/team (" + std::to_string(status) + ")";
+  }
+  good.leave();
+  ts.stop();
+  ts::tombstone::net::net_shutdown();
+  (void)url;
+  return ok;
 }
 
 int smoke() {
@@ -98,8 +168,9 @@ int smoke() {
     else if (!good.upload(src.string(), sha, blob.size(), &err)) std::cerr << "[ts_vault smoke] upload: " << err << '\n';
     else if (!good.download(sha, (root / "back.bin").string(), &err)) std::cerr << "[ts_vault smoke] download: " << err << '\n';
     else if (tv::sha256_file((root / "back.bin").string()) != sha) std::cerr << "[ts_vault smoke] round trip\n";
+    else if (!team_smoke(store, url, key, &err)) std::cerr << "[ts_vault smoke] team: " << err << '\n';
     else {
-      std::cout << "[ts_vault smoke] OK (" << info << ")\n";
+      std::cout << "[ts_vault smoke] OK (" << info << ", team sessions)\n";
       rc = 0;
     }
     server.stop();
@@ -115,7 +186,8 @@ int main(int argc, char** argv) {
   std::string host = env_or("TS_VAULT_HOST", "127.0.0.1");
   int port = std::atoi(env_or("TS_VAULT_PORT", "8740").c_str());
   std::string add_key, revoke;
-  bool read_only = false, list_keys = false;
+  bool read_only = false, list_keys = false, team_on = false;
+  int team_port = 0;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : std::string(); };
@@ -126,6 +198,8 @@ int main(int argc, char** argv) {
     else if (a == "--read-only") read_only = true;
     else if (a == "--list-keys") list_keys = true;
     else if (a == "--revoke-key") revoke = next();
+    else if (a == "--team") team_on = true;
+    else if (a == "--team-port") team_on = true, team_port = std::atoi(next().c_str());
     else if (a == "--smoke") return smoke();
     else if (a == "--version") {
       std::cout << "ts_vault " TS_ENGINE_VERSION "\n";
@@ -188,8 +262,48 @@ int main(int argc, char** argv) {
   std::signal(SIGTERM, on_signal);
   log_line("ts_vault " TS_ENGINE_VERSION " serving " + fs::absolute(root).string() + " on http://" + host + ":" +
            std::to_string(server.port()) + " (Ctrl+C to stop)");
+  // Live Team Claims (docs/team-claims.md): sessions on UDP beside the API,
+  // same API keys. Polled on its own thread; the HTTP route reads under a lock.
+  namespace team = ts::tombstone::team;
+  std::mutex team_mu;
+  team::TeamServer team_server;
+  std::thread team_thread;
+  if (team_on) {
+    if (!ts::tombstone::net::net_startup(&err)) {
+      std::cerr << "ts_vault: team: " << err << '\n';
+      return 1;
+    }
+    team::ServerOptions to;
+    to.port = static_cast<std::uint16_t>(team_port > 0 ? team_port : server.port() + 1);
+    to.check_key = key_check(store);
+    to.engine = TS_ENGINE_VERSION;
+    to.log = log_line;
+    if (!team_server.start(to, &err)) {
+      std::cerr << "ts_vault: team sessions: " << err << '\n';
+      return 1;
+    }
+    server.set_team_info([&] {
+      std::lock_guard<std::mutex> lock(team_mu);
+      return team::write_compact(team_server.info_json());
+    });
+    team_thread = std::thread([&] {
+      while (!g_stop) {
+        {
+          std::lock_guard<std::mutex> lock(team_mu);
+          team_server.poll();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      }
+    });
+    log_line("team sessions on UDP " + std::to_string(team_server.port()));
+  }
   while (!g_stop) std::this_thread::sleep_for(std::chrono::milliseconds(200));
   log_line("stopping");
+  if (team_thread.joinable()) team_thread.join();
+  if (team_on) {
+    team_server.stop();
+    ts::tombstone::net::net_shutdown();
+  }
   server.stop();
   return 0;
 }

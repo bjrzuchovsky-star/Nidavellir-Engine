@@ -42,6 +42,7 @@ add_executable(ts_admin
   SmokeTerrain.cpp
   SmokeVault.cpp
   SmokeUpdate.cpp
+  SmokeTeam.cpp
   VaultCli.cpp
   TerrainShot.cpp
 )
@@ -76,6 +77,7 @@ target_link_libraries(ts_admin
     ts_audio3d
     ts_ui
     ts_vault_lib
+    ts_team
     ts_fx
     ts_export
     ts_vfs

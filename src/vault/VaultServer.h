@@ -13,6 +13,7 @@
 //   GET  /api/v1/uploads/<id>                {"id", "received", "size", "complete"}
 //   PUT  /api/v1/uploads/<id>?offset=N       a chunk -> {"received"} (409 + received on a gap)
 //   POST /api/v1/uploads/<id>/complete       verify SHA-256 and store -> {"ok"}
+//   GET  /api/v1/team                        Live Team Claims: {"enabled", "port", "sessions"}
 //
 // Every route but health needs "Authorization: Bearer <key>" (or
 // X-Api-Key); writes need a key made without --read-only. Keys are stored
@@ -38,11 +39,15 @@ class VaultServer {
   int port() const { return http_.port(); }
   // The request handler alone (for tests and embedding).
   void handle(const HttpRequest& req, HttpResponse* res);
+  // Live Team Claims (ts_vault --team): JSON text for GET /api/v1/team.
+  // Called from the HTTP threads; the callback does its own locking.
+  void set_team_info(std::function<std::string()> fn) { team_info_ = std::move(fn); }
 
  private:
   VaultStore& store_;
   HttpServer http_;
   std::function<void(const std::string&)> log_;
+  std::function<std::string()> team_info_;
 };
 
 }  // namespace vault

@@ -109,6 +109,17 @@ void VaultServer::handle(const HttpRequest& req, HttpResponse* res) {
     v.set("can_write", Value::boolean(who.can_write));
     return reply(res, 200, v);
   }
+  if (r.size() == 1 && r[0] == "team" && req.method == "GET") {
+    if (team_info_) {
+      res->status = 200;
+      res->content_type = "application/json";
+      res->body = team_info_();
+      return;
+    }
+    Value v = Value::object();
+    v.set("enabled", Value::boolean(false));
+    return reply(res, 200, v);
+  }
   if (!r.empty() && r[0] == "items") {
     if (r.size() == 1 && req.method == "GET") {
       Query q;

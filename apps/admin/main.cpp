@@ -54,6 +54,7 @@
 #include "SmokeTerrain.h"
 #include "VaultCli.h"
 #include "SmokeUpdate.h"
+#include "SmokeTeam.h"
 #include "editor/vault/VaultPanel.h"
 int run_terrain_shot(const std::string& png);
 #include "store/TradingPost.h"
@@ -1317,6 +1318,9 @@ int run_console_smoke() {
   if (ts::tombstone::run_update_smoke() != 0) {
     return 1;
   }
+  if (ts::tombstone::run_team_smoke() != 0) {
+    return 1;
+  }
   // Particles + 2D lighting (see SmokeFx.cpp).
   if (run_fx_smoke() != 0) {
     return 1;
@@ -2015,6 +2019,10 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-vault") == 0) {
       return ts::tombstone::run_vault_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-team") == 0) {
+      // Live Team Claims: server + headless editors, convergence, locks.
+      return ts::tombstone::run_team_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-update-check") == 0) {
       // Update notifier: version compare, asset choice, verified download (no internet).
