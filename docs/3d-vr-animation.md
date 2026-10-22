@@ -7,7 +7,7 @@ Source: `src/render3d`, `ts_render3d`.
 - **OpenGL 3.3 core** forward renderer. GL functions are loaded through `glfwGetProcAddress`.
 - **Passes:** sun shadow map, sky, meshes, then unlit lines.
 - **Materials:** PBR-lite with albedo, normal and metal-rough textures, plus emissive. GGX specular.
-- **Meshes:** primitives `cube`, `plane`, `sphere`, `capsule`, plus glTF 2.0 `.gltf` / `.glb` via cgltf.
+- **Meshes:** primitives `cube`, `plane`, `sphere`, `capsule`, plus glTF 2.0 `.gltf` / `.glb` via cgltf, and Source `.mdl`, OBJ, FBX, DAE and more (see [model import](model-import.md)).
 - **Headless:** `make_null_renderer3d()`.
 
 ## 3D scenes and runtime

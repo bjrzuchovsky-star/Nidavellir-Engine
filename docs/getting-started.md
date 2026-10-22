@@ -11,6 +11,7 @@
   - ENet 1.3.18 (`FetchENet.cmake`). On Windows it links `ws2_32` and `winmm`.
   - miniaudio 0.11.21 and stb_vorbis (`FetchMiniaudio.cmake`)
   - cgltf v1.14 (`FetchCgltf.cmake`)
+  - Assimp 5.4.3, importers only (`FetchAssimp.cmake`)
   - OpenXR-SDK loader 1.1.63 (`FetchOpenXR.cmake`)
   - Monocypher 4.0.2 (`FetchMonocypher.cmake`)
   - Fonts: Rye and Arvo, SIL OFL (`FetchFonts.cmake`)
@@ -29,6 +30,7 @@ From `cmake/TombStoneOptions.cmake` and `cmake/FetchOpenXR.cmake`:
 | `TS_BUILD_CLIENT` | ON | `ts_client`, the multiplayer client |
 | `TS_BUILD_GAME` | ON | `ts_game`, the standalone and shipped runtime |
 | `TS_BUILD_SERVER` | ON | `ts_server`, the headless authoritative server (no GLFW / GL) |
+| `TS_WITH_ASSIMP` | ON | Model import through Assimp (OBJ, FBX, DAE, 3DS, PLY, STL, X...). When OFF, glTF, Source `.mdl` and `.blend` still load. See [model import](model-import.md). |
 | `TS_WITH_OPENXR` | ON | Links `ts_xr` against the OpenXR loader. When OFF, only the desktop VR simulator is built. |
 
 ## Configure and build (Developer PowerShell for VS 2022)
@@ -66,7 +68,7 @@ With the Visual Studio generator, binaries go under `build/apps/<app>/<Config>/`
 
 `ts_admin --smoke` runs the whole headless suite. Single areas, from the flags parsed in `apps/admin/main.cpp`:
 
-`--smoke-3d`, `--smoke-anim3d`, `--smoke-vr`, `--smoke-audio`, `--smoke-ui`, `--smoke-fx`, `--smoke-tools`, `--smoke-prefab`, `--smoke-assets`, `--smoke-graph`, `--smoke-cpp`, `--smoke-cs`, `--smoke-export`, `--smoke-templates`, `--smoke-store`, `--smoke-survival`, `--smoke-shipyard`
+`--smoke-3d`, `--smoke-anim3d`, `--smoke-vr`, `--smoke-audio`, `--smoke-ui`, `--smoke-fx`, `--smoke-tools`, `--smoke-prefab`, `--smoke-assets`, `--smoke-models`, `--smoke-mdl`, `--smoke-graph`, `--smoke-cpp`, `--smoke-cs`, `--smoke-export`, `--smoke-templates`, `--smoke-store`, `--smoke-survival`, `--smoke-shipyard`
 
 Also: `ts_game --smoke --project <dir>`, `ts_server --smoke` and `ts_client --smoke`.
 

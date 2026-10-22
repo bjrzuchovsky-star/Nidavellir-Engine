@@ -64,7 +64,7 @@ Source: `src/editor/editor3d/`.
 - **Camera:** orbit with RMB or Alt+LMB, pan with MMB, wheel to zoom, fly with RMB + WASD / Q / E, F to frame.
 - **Gizmos** (`Gizmo3D`): W / E / R for translate / rotate / scale. Shift+G toggles snap (defaults: 0.5 m, 15°, 0.25). Hold Ctrl to stick to a surface. End drops the selection to the ground.
 - **Panels:** Hierarchy, Inspector, Assets, Environment, Telegraph, Plugins, Animation Preview.
-- **Dropping assets:** drop a glTF in the viewport to place it with a fitted collider. Drop an image on an entity to make it the albedo texture.
+- **Dropping assets:** drop a model (glTF, `.mdl`, OBJ, FBX... see [model import](model-import.md)) in the viewport to place it with a fitted collider. Drop an image on an entity to make it the albedo texture.
 
 ## Play mode
 

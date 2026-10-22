@@ -69,7 +69,7 @@ Every system is built with performance as the primary goal:
 - Passes: sun shadow map (2048², 3×3 PCF, a box that follows the camera target), gradient sky with a sun disc, then meshes, then unlit lines (grid, colliders, gizmos).
 - PBR-lite material: albedo / normal / metal-rough textures (stb_image), metallic, roughness, emissive. GGX specular, hemisphere ambient, Reinhard tone map, gamma 2.2.
 - Lights: one directional sun plus up to 8 point lights per frame.
-- Meshes: built-in primitives `cube`, `plane`, `sphere`, `capsule`, and glTF 2.0 (`.gltf` / `.glb`) through cgltf v1.14, fetched by URL and SHA-256 like the other dependencies.
+- Meshes: built-in primitives `cube`, `plane`, `sphere`, `capsule`, and glTF 2.0 (`.gltf` / `.glb`) through cgltf v1.14, fetched by URL and SHA-256 like the other dependencies. Source engine `.mdl` (GMod; clean-room reader with VMT / VTF), OBJ, FBX, DAE, 3DS, PLY, STL, X and more through Assimp 5.4.3 (importers only), and `.blend` through a local Blender also import; see [docs/model-import.md](docs/model-import.md). You are responsible for having the rights to any model you import.
 - Draws into its own offscreen target (editor viewport, tests, `read_pixels`) or straight into the window (`ts_game`). `make_null_renderer3d()` is the headless backend.
 
 **Scene (`scene.json` v7).** A 3D scene carries `"dimension": "3d"` and entities with a transform (position, rotation quaternion, scale) and optional mesh, material, light, collider (box / capsule, trigger), player and script components, plus environment, editor camera and snap settings. 2D scenes are unchanged. The 2D reader refuses a 3D file (and the 3D reader a 2D one) with a clear reason.
