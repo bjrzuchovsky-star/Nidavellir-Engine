@@ -545,7 +545,7 @@ bool load_source_mdl(const std::string& path, const ModelImportOptions& opt, Mod
     const Mat4 local = Mat4::trs(bones[i].pos, bones[i].quat, {1, 1, 1});
     rest[i] = bones[i].parent >= 0 ? rest[bones[i].parent] * local : local;
   }
-  if (nbones > kMaxBones) append(&warn, std::to_string(nbones) + " bones (the renderer skins " + std::to_string(kMaxBones) + ")");
+  // (> kMaxBones bones: ModelImport splits the palettes per primitive.)
 
   // -- textures / skins --------------------------------------------------------
   const int ntex = mdl.i32(204);
@@ -854,6 +854,36 @@ bool load_source_mdl(const std::string& path, const ModelImportOptions& opt, Mod
       out->skeleton.joints.push_back(std::move(j));
     }
   }  // (single-bone props stay rigid: VVD vertices are in model space)
+
+  // -- hitboxes (studiohdr hitbox sets; set 0 = the default $hbox set) -------
+  // mstudiohitboxset_t {name, numhitboxes, hitboxindex} (12 bytes),
+  // mstudiobbox_t {bone, group, bbmin, bbmax, nameindex, unused[8]} (68).
+  {
+    const int nsets = mdl.i32(172);
+    const std::int64_t set_at = mdl.i32(176);
+    if (nsets > 0 && nsets < 64 && mdl.in(set_at, 12)) {
+      out->hitbox_set = mdl.str(set_at + mdl.i32(set_at), 64);
+      const int nhb = mdl.i32(set_at + 4);
+      const std::int64_t hb_at = set_at + mdl.i32(set_at + 8);
+      for (int i = 0; i < nhb && i < 1024; ++i) {
+        const std::int64_t o = hb_at + std::int64_t(i) * 68;
+        if (!mdl.in(o, 68)) break;
+        ModelHitbox h;
+        const int bone = mdl.i32(o);
+        if (bone < 0 || bone >= nbones) continue;
+        h.group = mdl.i32(o + 4);
+        const Vec3 a = mdl.vec3(o + 8), b = mdl.vec3(o + 20);
+        h.min = vmin(a, b);
+        h.max = vmax(a, b);
+        const std::int32_t ni = mdl.i32(o + 32);
+        if (ni != 0) h.name = mdl.str(o + ni, 64);
+        h.bone_name = bones[bone].name;
+        h.bone = skinned ? bone : -1;
+        h.bind = is_zero(bones[bone].pose_to_bone) ? rest[bone] : bones[bone].pose_to_bone.inverse();
+        out->hitboxes.push_back(std::move(h));
+      }
+    }
+  }
 
   // -- animations -------------------------------------------------------------
   if (opt.animations && skinned) {

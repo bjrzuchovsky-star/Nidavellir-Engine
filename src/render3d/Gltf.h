@@ -19,6 +19,26 @@ namespace render3d {
 struct ModelPrimitive {
   MeshData mesh;
   int material = -1;  // index into Model::materials (-1 = default)
+  // Scene node path it came from ("Armature/Body", Assimp / glTF), used to
+  // spot collision (UCX_...) and LOD (..._LOD1) meshes at import.
+  std::string node;
+  // Skinned primitives of skeletons with more joints than the renderer
+  // skins (kMaxBones): local joint index -> skeleton joint. The mesh's
+  // SkinVertex joints are local; palettes are gathered through this.
+  // Empty = the joints index the skeleton directly.
+  std::vector<int> joint_map;
+};
+
+// A per-bone hit box (Source $hbox / studiohdr hitbox sets): an oriented
+// box in its bone's space. `bind` takes bone space to model space in the
+// rest pose (import scale / up axis baked); posed, use the joint matrix.
+struct ModelHitbox {
+  std::string name;       // hitbox name (often empty in Source files)
+  std::string bone_name;
+  int bone = -1;          // Model::skeleton joint (-1 = rigid model)
+  int group = 0;          // Source hit group (head = 1, chest = 2 ...)
+  Vec3 min, max;          // bone space
+  Mat4 bind;              // bone -> model at rest
 };
 
 // Source engine body group (render3d/ModelImport.h): one is drawn per
@@ -40,9 +60,15 @@ struct Model {
   int skin = 0;
   int lods = 1;
   std::vector<std::vector<Vec3>> collision_hulls;
+  // Source hitbox set 0 ($hbox), when the file has one.
+  std::string hitbox_set;
+  std::vector<ModelHitbox> hitboxes;
   std::vector<ModelPrimitive> primitives;
   std::vector<MaterialDesc> materials;
   std::size_t textures = 0;  // images decoded
+  // Model-space bounds of what is drawn: rest-posed skinned vertices,
+  // referenced vertices only, after the import scale / up axis
+  // (ModelImport update_bounds). Collision / LOD > 0 meshes never count.
   Aabb bounds;
   // Skinned models (the first glTF skin): skinned primitives keep their
   // vertices in bind (mesh) space with MeshData::skin weights; the

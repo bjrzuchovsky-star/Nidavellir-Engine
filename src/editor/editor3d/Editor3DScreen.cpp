@@ -15,6 +15,7 @@
 #include "world3d/VrOverlay.h"
 
 #include "render3d/GlRenderer3D.h"
+#include "render3d/ColliderFit.h"
 #include "render3d/ModelImport.h"
 
 #include <GLFW/glfw3.h>
@@ -85,6 +86,7 @@ void Editor3DScreen::on_enter() {
   open_asset_browser();
   rescan_assets();
   ensure_renderer();
+  refit_model_colliders(true);
   note("Telegraph open for " + project_.name + " (" + std::to_string(scene_.entities.size()) +
        " entities, " + std::to_string(assets_.size()) + " assets)");
   std::cout << "[Editor3D] opened \"" << project_.name << "\" (" << scene_.entities.size()
@@ -262,6 +264,7 @@ bool Editor3DScreen::reload_scene(std::string* error) {
   redo_.clear();
   terrain::forget(project_.path);  // re-read heightfields from disk
   if (view_) view_->clear();
+  refit_model_colliders(true);
   return true;
 }
 
@@ -331,6 +334,59 @@ std::uint64_t Editor3DScreen::create_empty(const Vec3& pos) {
   return add_entity(std::move(e), "Create empty");
 }
 
+namespace {
+bool near_vec(const render3d::Vec3& a, const render3d::Vec3& b, float scale) {
+  const float eps = 1e-3f * std::max(1.0f, scale);
+  return std::fabs(a.x - b.x) <= eps && std::fabs(a.y - b.y) <= eps && std::fabs(a.z - b.z) <= eps;
+}
+}  // namespace
+
+int Editor3DScreen::refit_model_colliders(bool migrate) {
+  if (!view_ || playing()) return 0;
+  const scene3d::Scene3D before = scene_;
+  int changed = 0;
+  for (Entity3D& e : scene_.entities) {
+    if (!e.collider || !e.mesh || e.mesh->is_primitive()) continue;
+    const render3d::Model* m = view_->model(e.mesh->source);
+    if (!m) continue;
+    scene3d::Collider3D c = *e.collider;
+    std::string fit = c.fit;
+    if (fit.empty()) {
+      // Pre-fix scenes: a box collider sized from the old raw-vertex bounds.
+      if (!migrate || c.shape != scene3d::ColliderShape3D::Box) continue;
+      const render3d::Aabb old = render3d::legacy_vertex_bounds(*m);
+      const float span = length(old.extent());
+      if (!near_vec(c.size, old.extent(), span) || !near_vec(c.offset, old.center(), span)) continue;
+      if (near_vec(old.min, m->bounds.min, span) && near_vec(old.max, m->bounds.max, span)) continue;
+      fit = "auto";
+    }
+    if (!render3d::fit_collider(*m, render3d::collider_fit_from(fit), &c)) continue;
+    c.fit = fit;
+    if (c == *e.collider) continue;
+    e.collider = c;
+    ++changed;
+  }
+  if (changed > 0) {
+    push_undo("Refit model colliders", before);
+    note("Refitted " + std::to_string(changed) + " model collider" + (changed == 1 ? "" : "s") +
+         " to the model bounds");
+  }
+  return changed;
+}
+
+bool Editor3DScreen::fit_collider_to_mesh(std::uint64_t id, const std::string& fit) {
+  const Entity3D* cur = scene_.find(id);
+  if (!cur || !view_ || !cur->mesh || playing()) return false;
+  const render3d::Model* m = view_->model(cur->mesh->source);
+  if (!m) return false;
+  Entity3D e = *cur;
+  scene3d::Collider3D c = e.collider ? *e.collider : scene3d::Collider3D{};
+  if (!render3d::fit_collider(*m, render3d::collider_fit_from(fit), &c)) return false;
+  e.collider = c;
+  replace_entity(e, "Fit collider to mesh");
+  return true;
+}
+
 std::uint64_t Editor3DScreen::drop_asset(const std::string& rel, const Vec3& pos,
                                          std::uint64_t target) {
   if (rel.rfind("primitive:", 0) == 0) return create_primitive(rel, pos);
@@ -350,25 +406,21 @@ std::uint64_t Editor3DScreen::drop_asset(const std::string& rel, const Vec3& pos
     e.mesh = scene3d::MeshRef{rel, true};
     // Import settings from the .meta (Asset Browser).
     float scale = 1.0f;
-    bool collider = true;
+    render3d::ColliderFit fit = render3d::ColliderFit::Auto;
     if (const auto* a = asset_browser_.db().by_path(rel)) {
       scale = std::max(0.001f, a->meta.settings.flt("scale", 1.0f));
-      collider = a->meta.settings.flag("generate_collider", true);
+      fit = render3d::collider_fit_from(a->meta.settings.str("collider", "auto"));
+      if (!a->meta.settings.flag("generate_collider", true)) fit = render3d::ColliderFit::None;
     }
     e.transform.scale = {scale, scale, scale};
-    // Collider hugging the model's bounds; models with their own
-    // collision (Source .phy) use those convex hulls.
-    if (view_ && collider) {
-      const render3d::Aabb b = view_->mesh_bounds(rel);
+    // Collider fitted to what is drawn (tight box, capsule for characters,
+    // the model's own hulls...; render3d/ColliderFit.h). Refit when the
+    // model changes (refit_model_colliders).
+    if (view_) {
       scene3d::Collider3D c;
-      c.size = b.extent();
-      c.offset = b.center();
-      const render3d::Model* m = view_->model(rel);
-      if (m && !m->collision_hulls.empty()) {
-        c.shape = scene3d::ColliderShape3D::ConvexHull;
-        c.offset = {};
+      if (const render3d::Model* m = view_->model(rel); m && render3d::fit_collider(*m, fit, &c)) {
+        e.collider = c;
       }
-      e.collider = c;
     }
     return add_entity(std::move(e), "Place " + fs::path(rel).filename().string());
   }
@@ -653,6 +705,7 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
   if (playing()) {
     cam = free_camera_in_play_ ? editor_camera() : world_.camera();
     opt.colliders = world_.authored().physics.debug_draw;  // Physics Settings
+    opt.hitboxes = show_hitboxes_;
     if (world_.vr()) {
       // VR preview: the head's view plus the hands, lasers and menu.
       std::vector<scene3d::Entity3D> ents = world_.entities();
@@ -674,6 +727,7 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
     cam = editor_camera();
     opt.grid = scene_.show_grid;
     opt.colliders = show_colliders_;
+    opt.hitboxes = show_hitboxes_;
     opt.light_gizmos = true;
     opt.highlight = scene_.selection;
     const bool any_hidden = std::any_of(scene_.entities.begin(), scene_.entities.end(),

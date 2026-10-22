@@ -70,6 +70,7 @@ Value collider(const Collider3D& c) {
   o.set("offset", vec3(c.offset));
   if (c.trigger) o.set("trigger", Value::boolean(true));
   if (c.layer >= 0) o.set("layer", Value::number(c.layer));
+  if (!c.fit.empty()) o.set("fit", Value::string(c.fit));
   if (!c.parts.empty()) {
     Value parts = Value::array();
     for (const ColliderPart3D& p : c.parts) {
@@ -92,6 +93,7 @@ Collider3D read_collider(const Value& v) {
   read_vec3(v, "offset", &c.offset);
   c.trigger = v.flag("trigger", false);
   c.layer = std::clamp(static_cast<int>(v.num("layer", -1)), -1, 7);
+  c.fit = v.str("fit");
   for (const Value& q : v["parts"].items()) {
     if (!q.is_object() || c.parts.size() >= 32) continue;
     ColliderPart3D p;

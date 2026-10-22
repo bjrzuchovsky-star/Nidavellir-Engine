@@ -389,6 +389,9 @@ AssetDb::ScanReport AssetDb::scan() {
         m.kind = kind;
         dirty = reimport = true;
       }
+      if (kind == Kind::Model && m.info.num("importer_version", 1) < kModelImporterVersion) {
+        dirty = reimport = true;  // info from an older importer (bounds)
+      }
     } else {
       const std::string h = asset_hash(a);
       auto orphan = std::find_if(orphans.begin(), orphans.end(), [&](const Orphan& o) {

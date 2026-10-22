@@ -1,5 +1,6 @@
 // Inspector + Environment panels. Widgets edit a copy that is applied live;
 // one undo step is pushed when a widget is released after an edit.
+#include "render3d/ColliderFit.h"
 #include "editor/fx/FxInspector.h"
 #include "editor/editor3d/Editor3DScreen.h"
 
@@ -179,6 +180,8 @@ void Editor3DScreen::draw_inspector() {
                 [&] { e.collider.reset(); })) {
     using S = scene3d::ColliderShape3D;
     scene3d::Collider3D& c = *e.collider;
+    const scene3d::Collider3D c_before = c;
+    bool fitted_now = false;
     int shape = static_cast<int>(c.shape);
     if (ImGui::Combo("Shape", &shape, "Box\0Capsule\0Sphere\0Convex hull (model)\0Mesh (model, static)\0")) {
       c.shape = static_cast<S>(shape);
@@ -201,6 +204,34 @@ void Editor3DScreen::draw_inspector() {
     }
     ImGui::DragFloat3("Offset", &c.offset.x, 0.02f);
     t.after("Collider offset");
+    if (e.mesh && !e.mesh->is_primitive()) {
+      // Fit to the model: what is drawn (rest pose, import scale), not the
+      // raw file vertices. Fitted colliders follow model reimports.
+      static const char* fits[] = {"auto", "box", "capsule", "convex", "mesh"};
+      static const char* labels = "Auto\0Tight box\0Capsule\0Convex hull\0Mesh\0";
+      int fi = 0;
+      for (int k = 0; k < 5; ++k) {
+        if (c.fit == fits[k]) fi = k;
+      }
+      ImGui::SetNextItemWidth(120);
+      ImGui::Combo("##fitmode", &fi, labels);
+      ImGui::SameLine();
+      if (ImGui::Button("Fit to mesh") && view_) {
+        if (const render3d::Model* m = view_->model(e.mesh->source);
+            m && render3d::fit_collider(*m, render3d::collider_fit_from(fits[fi]), &c)) {
+          t.activated = true;
+          t.commit = "Fit collider to mesh";
+          fitted_now = true;
+        }
+      }
+      ImGui::SameLine();
+      ImGui::TextDisabled(c.fit.empty() ? "(manual)" : "(fitted: %s)", c.fit.c_str());
+    }
+    // Hand edits make it a manual collider (reimports leave it alone).
+    if (!fitted_now && !c.fit.empty() && c.fit == c_before.fit &&
+        (c.shape != c_before.shape || !(c.size == c_before.size) || !(c.offset == c_before.offset))) {
+      c.fit.clear();
+    }
     ImGui::Checkbox("Trigger", &c.trigger);
     t.after("Trigger");
     // Layer: -1 = by role (static / default / held / player ...).

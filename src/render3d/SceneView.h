@@ -29,6 +29,7 @@ struct SceneViewOptions {
   float grid_step = 1.0f;
   bool colliders = false;       // wire boxes for colliders
   bool light_gizmos = false;    // small crosses at point lights
+  bool hitboxes = false;        // per-bone hit boxes (Source $hbox) of models
   std::vector<std::uint64_t> highlight;  // selection outlines
 };
 
@@ -78,6 +79,8 @@ class SceneView {
   }
   // World-space box lines.
   void draw_box(const Mat4& world, const Aabb& local, const float* rgba, bool on_top);
+  // An entity model's hit boxes (posed by its skin palette when it has one).
+  void draw_hitboxes(const scene3d::Entity3D& e);
   void draw_circle(const Mat4& world, const Vec3& c, float r, int plane, const float* rgba);
   // Physics gizmos: collider shapes (compound parts included) coloured by
   // body motion, and joints (anchor -> target, hinge / slider axis).
@@ -108,6 +111,7 @@ class SceneView {
   Renderer3D* r_;
   std::string dir_;
   std::map<const void*, std::pair<std::uint64_t, Aabb>> terrain_bounds_;
+  std::vector<Mat4> prim_palette_;  // scratch: joint_map palettes
   std::map<std::string, ModelEntry> models_;
   std::map<std::string, MaterialEntry> materials_;  // key = serialized material
   std::map<std::string, std::shared_ptr<const Image>> images_;

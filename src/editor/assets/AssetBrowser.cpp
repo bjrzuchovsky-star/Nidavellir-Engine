@@ -457,9 +457,33 @@ void AssetBrowser::draw_settings(const AssetDb::Entry& e) {
           }
         }
       }
-      flag("generate_collider", e.meta.info.num("hulls", 0) > 0 ? "Collider (model hulls)" : "Collider");
+      {
+        // Collider a placed model gets (render3d/ColliderFit.h). "None"
+        // also skips the file's own collision (.phy / UCX_ meshes).
+        static const char* keys[] = {"auto", "box", "capsule", "convex", "mesh", "none"};
+        const bool hulls = e.meta.info.num("hulls", 0) > 0;
+        const char* labels = hulls ? "Auto (model hulls)\0Tight box\0Capsule\0Convex hull\0Mesh\0None\0"
+                                   : (e.meta.info.flag("skinned", false)
+                                          ? "Auto (capsule)\0Tight box\0Capsule\0Convex hull\0Mesh\0None\0"
+                                          : "Auto (tight box)\0Tight box\0Capsule\0Convex hull\0Mesh\0None\0");
+        int ci = 0;
+        const std::string cur = s.flag("generate_collider", true) ? s.str("collider", "auto") : "none";
+        for (int k = 0; k < 6; ++k) {
+          if (cur == keys[k]) ci = k;
+        }
+        ImGui::SetNextItemWidth(140);
+        if (ImGui::Combo("Collider", &ci, labels)) {
+          s.set("collider", Value::string(keys[ci]));
+          s.set("generate_collider", Value::boolean(ci != 5));
+          changed = true;
+        }
+      }
       ImGui::SameLine();
       flag("import_animations", "Animations");
+      if (e.meta.info.num("hitboxes", 0) > 0) {
+        ImGui::TextDisabled("%d hitboxes (set \"%s\"): View > Hitboxes shows them",
+                            static_cast<int>(e.meta.info.num("hitboxes", 0)), e.meta.info.str("hitbox_set").c_str());
+      }
       if (s.has("blender_path")) {
         path_field("blender_path", "Blender", blender_path_, sizeof(blender_path_), &blender_path_for_,
                    "auto (registry / PATH / Program Files)");

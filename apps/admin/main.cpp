@@ -19,6 +19,7 @@
 
 #include "Smoke3D.h"
 #include "SmokeAssets.h"
+#include "SmokeBounds.h"
 #include "SmokeModels.h"
 
 #ifndef TS_ENGINE_VERSION
@@ -2081,6 +2082,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-mdl") == 0) {
       // Just the Source engine model import (synthetic .mdl set).
       return run_mdl_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-bounds") == 0) {
+      // Model bounds / hit boxes / fitted colliders (see SmokeBounds.cpp).
+      return run_bounds_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-models") == 0) {
       // Every model format: Source .mdl, OBJ, FBX, DAE, PLY, STL, X, .blend.

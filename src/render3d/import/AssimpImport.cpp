@@ -11,12 +11,14 @@
 #if TS_WITH_ASSIMP
 #include <assimp/Importer.hpp>
 #include <assimp/material.h>
+#include <assimp/commonMetaData.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 #endif
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -332,9 +334,125 @@ bool load_assimp_model(const std::string& path, const ModelImportOptions& opt, M
       for (unsigned i = 0; i < n->mNumChildren; ++i) order(n->mChildren[i], me);
     };
     order(sc->mRootNode, -1);
-    if (out->skeleton.joints.size() > static_cast<std::size_t>(kMaxBones)) {
-      append(&warn, std::to_string(out->skeleton.joints.size()) + " joints (the renderer skins " + std::to_string(kMaxBones) + ")");
+  }
+
+  // Blender FBX quirk: an object parented to a bone is written with its
+  // transform relative to the armature (plus the bone's length along +Y),
+  // not relative to the bone, so read literally its parts fly metres away
+  // from the body. When the file says Blender wrote it and the armature
+  // reading puts clearly more of those meshes on the skeleton, use it.
+  int bone_fixes = 0;
+  {
+    aiString gen;
+    const bool blender = sc->mMetaData && sc->mMetaData->Get(AI_METADATA_SOURCE_GENERATOR, gen) &&
+                         lower(gen.C_Str()).find("blender") != std::string::npos;
+    struct Box {
+      Vec3 lo{0, 0, 0}, hi{0, 0, 0};
+      int n = 0;
+      void expand(const Vec3& p) {
+        lo = n ? vmin(lo, p) : p;
+        hi = n ? vmax(hi, p) : p;
+        ++n;
+      }
+    };
+    auto is_bone = [&](const aiNode* n) {
+      if (!n || n->mNumMeshes) return false;
+      for (const aiNode* q = n; q; q = q->mParent) {
+        if (joints.count(q)) return true;
+      }
+      return false;
+    };
+    auto rigid = [&](const aiNode* n) {
+      if (!n->mNumMeshes) return false;
+      for (unsigned k = 0; k < n->mNumMeshes; ++k) {
+        if (sc->mMeshes[n->mMeshes[k]]->mNumBones > 0) return false;
+      }
+      return true;
+    };
+    auto center_of = [&](const aiNode* n) {
+      Box b;
+      for (unsigned k = 0; k < n->mNumMeshes; ++k) {
+        const aiMesh* am = sc->mMeshes[n->mMeshes[k]];
+        for (unsigned v = 0; v < am->mNumVertices; ++v) b.expand({am->mVertices[v].x, am->mVertices[v].y, am->mVertices[v].z});
+      }
+      return b.n ? (b.lo + b.hi) * 0.5f : Vec3{};
+    };
+    struct Cand {
+      const aiNode* n;
+      const aiNode* arm;
+      Vec3 c;
+    };
+    std::vector<Cand> cands;
+    std::map<const aiNode*, std::vector<std::size_t>> by_bone;
+    if (blender && !joints.empty()) {
+      for (const auto& [n, g] : global) {
+        if (!rigid(n) || !is_bone(n->mParent)) continue;
+        const aiNode* arm = n->mParent;
+        while (arm && is_bone(arm)) arm = arm->mParent;
+        if (!arm) continue;
+        by_bone[n->mParent].push_back(cands.size());
+        cands.push_back({n, arm, center_of(n)});
+      }
     }
+    if (!cands.empty()) {
+      // Bone length: a connected child bone sits at (0, length, 0); else the
+      // larger of the mean child bone distance (Blender's own importer) and
+      // the length that lines the attached parts up with the bone in depth.
+      std::map<const aiNode*, float> len;
+      for (const auto& [b, list] : by_bone) {
+        float connected = -1.0f, avg = 0.0f;
+        int count = 0;
+        for (unsigned i = 0; i < b->mNumChildren; ++i) {
+          const aiNode* c = b->mChildren[i];
+          if (!is_bone(c)) continue;
+          const aiMatrix4x4& t = c->mTransformation;
+          const float tx = t.a4, ty = t.b4, tz = t.c4;
+          if (ty > 1e-6f && std::abs(tx) <= 0.02f * ty && std::abs(tz) <= 0.02f * ty) connected = std::max(connected, ty);
+          avg += std::sqrt(tx * tx + ty * ty + tz * tz);
+          ++count;
+        }
+        if (connected > 0.0f) {
+          len[b] = connected;
+          continue;
+        }
+        const aiNode* arm = cands[list.front()].arm;
+        const float head_y = (global[arm].inverse() * global[b]).at(1, 3);
+        float depth = 0.0f;
+        for (std::size_t k : list) depth += to_mat(cands[k].n->mTransformation).transform_point(cands[k].c).y - head_y;
+        depth /= static_cast<float>(list.size());
+        len[b] = std::max(count ? avg / count : 0.0f, std::max(depth, 0.0f));
+      }
+      Box heads;
+      for (const auto& [n, g] : global) {
+        if (is_bone(n)) heads.expand(g.transform_point({0, 0, 0}));
+      }
+      const Vec3 e = heads.hi - heads.lo;
+      const float pad = 0.25f * std::sqrt(e.x * e.x + e.y * e.y + e.z * e.z) + 1e-4f;
+      auto inside = [&](const Vec3& p) {
+        return p.x >= heads.lo.x - pad && p.x <= heads.hi.x + pad && p.y >= heads.lo.y - pad &&
+               p.y <= heads.hi.y + pad && p.z >= heads.lo.z - pad && p.z <= heads.hi.z + pad;
+      };
+      std::vector<Mat4> alt(cands.size());
+      int lit_in = 0, alt_in = 0;
+      for (std::size_t k = 0; k < cands.size(); ++k) {
+        const Cand& c = cands[k];
+        alt[k] = global[c.arm] * Mat4::translate({0, -len[c.n->mParent], 0}) * to_mat(c.n->mTransformation);
+        lit_in += inside(global[c.n].transform_point(c.c)) ? 1 : 0;
+        alt_in += inside(alt[k].transform_point(c.c)) ? 1 : 0;
+      }
+      if (alt_in > lit_in) {
+        std::function<void(const aiNode*, const Mat4&)> rewalk = [&](const aiNode* n, const Mat4& g) {
+          global[n] = g;
+          for (unsigned i = 0; i < n->mNumChildren; ++i) rewalk(n->mChildren[i], g * to_mat(n->mChildren[i]->mTransformation));
+        };
+        for (std::size_t k = 0; k < cands.size(); ++k) rewalk(cands[k].n, alt[k]);
+        bone_fixes = static_cast<int>(cands.size());
+      }
+    }
+  }
+  if (bone_fixes) {
+    append(&warn, "Blender FBX: " + std::to_string(bone_fixes) +
+                      " bone-parented meshes placed relative to the armature (exporter quirk)");
   }
 
   // Meshes.
@@ -344,6 +462,10 @@ bool load_assimp_model(const std::string& path, const ModelImportOptions& opt, M
       if (!(am->mPrimitiveTypes & aiPrimitiveType_TRIANGLE) || am->mNumVertices == 0) continue;
       ModelPrimitive p;
       p.mesh.name = am->mName.length ? am->mName.C_Str() : n->mName.C_Str();
+      for (const aiNode* q = n; q && q != sc->mRootNode; q = q->mParent) {
+        const std::string nm = q->mName.C_Str();
+        p.node = p.node.empty() ? nm : nm + "/" + p.node;
+      }
       p.material = am->mMaterialIndex < out->materials.size() ? static_cast<int>(am->mMaterialIndex) : -1;
       const bool skinned = am->mNumBones > 0 && !joint_index.empty();
       const Mat4& g = skinned ? skin_space : global[n];

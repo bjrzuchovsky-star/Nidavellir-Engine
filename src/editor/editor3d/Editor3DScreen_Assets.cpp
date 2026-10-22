@@ -19,6 +19,7 @@ void Editor3DScreen::open_asset_browser() {
   host.on_assets_changed = [this](const std::vector<std::string>&) {
     if (view_) view_->clear();  // models / textures reload on next draw
     rescan_assets();
+    refit_model_colliders(false);  // fitted colliders follow a reimport
   };
   host.payload_type = [](const assetdb::AssetDb::Entry& e) -> std::string {
     return e.meta.kind == assetdb::Kind::Font ? kAssetAnyPayload : "TS_ASSET3D";

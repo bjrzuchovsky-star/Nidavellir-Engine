@@ -122,6 +122,10 @@ struct Collider3D {
   bool trigger = false;          // reports overlaps, never blocks
   int layer = -1;                // collision layer 0..7; -1 = by role
   std::vector<ColliderPart3D> parts;  // v14: compound extras
+  // Fitted to the entity's model ("auto" / "box" / "capsule" / "convex" /
+  // "mesh", render3d/ColliderFit.h): the editor refits it when the model
+  // changes. Empty = hand-authored, never touched.
+  std::string fit;
   bool operator==(const Collider3D& o) const = default;
 };
 

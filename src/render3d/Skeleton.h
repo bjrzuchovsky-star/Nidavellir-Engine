@@ -78,8 +78,9 @@ void blend_poses(const Pose& a, const Pose& b, float w, Pose* out,
                  const std::vector<float>* mask = nullptr);
 // Model-space joint matrices for a pose.
 void joint_matrices(const Skeleton& skel, const Pose& pose, std::vector<Mat4>* out);
-// Skinning palette: joint matrix * inverse bind, one per joint (capped at
-// kMaxBones).
+// Skinning palette: joint matrix * inverse bind, one per joint (all of
+// them; a draw uploads at most kMaxBones, gathered per primitive through
+// ModelPrimitive::joint_map when the skeleton is bigger).
 void skin_palette(const Skeleton& skel, const Pose& pose, std::vector<Mat4>* out);
 // CPU reference skinning of one point / direction (weights normalised).
 Vec3 skin_point(const std::vector<Mat4>& palette, const float joints[4],

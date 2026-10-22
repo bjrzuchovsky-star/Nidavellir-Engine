@@ -112,11 +112,9 @@ const render3d::MeshData* World3D::phys_mesh(const std::string& source) {
     if (render3d::load_model(path, &model, &err)) {
       // Imported collision (Source .phy): convex pieces for hull colliders.
       if (!model.collision_hulls.empty()) phys_hulls_[source] = model.collision_hulls;
-      for (const render3d::ModelPrimitive& p : model.primitives) {
-        const std::uint32_t base = static_cast<std::uint32_t>(mesh->vertices.size());
-        mesh->vertices.insert(mesh->vertices.end(), p.mesh.vertices.begin(), p.mesh.vertices.end());
-        for (std::uint32_t i : p.mesh.indices) mesh->indices.push_back(base + i);
-      }
+      // What is drawn: skinned primitives in the rest pose (the raw bind
+      // vertices can sit at another scale / place), no collision / LOD meshes.
+      render3d::rest_pose_mesh(model, mesh.get());
       ok = mesh->valid();
     }
   }

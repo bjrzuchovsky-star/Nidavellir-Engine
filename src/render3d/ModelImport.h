@@ -76,8 +76,33 @@ std::string find_blender(const std::string& override_path);
 // Bake uniform scale and Z-up -> Y-up into a model (vertices, normals,
 // tangents, skeleton roots / inverse binds, hulls, bounds).
 void bake_import_transform(Model* m, float scale, bool z_up);
-// Recompute Model::bounds from the primitives.
+// Recompute Model::bounds from what is drawn: the vertices the triangles
+// reference, skinned primitives posed by the rest pose (the palette the
+// renderer uses), after the import transform.
 void update_bounds(Model* m);
+// The pre-0.1.1 bounds (every vertex, skinned ones unposed). Only for
+// spotting colliders that were sized from them (scene migration).
+Aabb legacy_vertex_bounds(const Model& m);
+// Palette for one primitive from the skeleton palette (gathers through
+// ModelPrimitive::joint_map; the full palette when the map is empty).
+void primitive_palette(const ModelPrimitive& p, const std::vector<Mat4>& full,
+                       std::vector<Mat4>* out);
+// Every visual primitive merged into one rigid mesh in the rest pose
+// (positions + indices; physics hulls / triangle colliders).
+void rest_pose_mesh(const Model& m, MeshData* out);
+// Moves collision meshes (UCX_ / UBX_ / UCP_ / USP_ prefixes, -colonly /
+// _collision suffixes, a "collision" node) into collision_hulls (when
+// `keep_hulls`) and keeps one level of detail of meshes tagged LOD<n>
+// (_LOD1, LOD2 nodes...), so neither is drawn nor counted in the bounds.
+// Returns how many primitives it took out. Sets Model::lods.
+int split_special_meshes(Model* m, int lod, bool keep_hulls);
+// Skeletons with more than kMaxBones joints: give each skinned primitive
+// a joint_map (splitting primitives that use more than kMaxBones joints)
+// so every draw's palette fits the renderer.
+void limit_skin_joints(Model* m);
+// Bone -> model matrices for Model::hitboxes: the rest pose (`palette`
+// null / empty) or the pose a skeleton palette (skin_palette) carries.
+void hitbox_matrices(const Model& m, const std::vector<Mat4>* palette, std::vector<Mat4>* out);
 // 8x8 magenta / black checker shown where a texture is missing.
 std::shared_ptr<const Image> missing_texture_image();
 

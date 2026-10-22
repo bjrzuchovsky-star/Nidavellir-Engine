@@ -8,6 +8,7 @@ add_library(ts_render3d
   Gltf.cpp
   GltfSkinned.cpp
   ModelImport.cpp
+  ColliderFit.cpp
   import/SourceMdl.cpp
   import/SourceVtf.cpp
   import/AssimpImport.cpp
