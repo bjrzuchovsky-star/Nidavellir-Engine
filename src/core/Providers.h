@@ -32,9 +32,11 @@ class Providers {
  public:
   using Factory = std::function<T()>;
 
+  // Never destroyed: holds released by other statics at exit must still
+  // find the registry (static destruction order is not ours to pick).
   static Providers& instance() {
-    static Providers p;
-    return p;
+    static Providers* p = new Providers;
+    return *p;
   }
 
   // Idempotent; a second offer for the same id replaces the factory.

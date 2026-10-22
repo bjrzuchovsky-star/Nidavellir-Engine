@@ -146,16 +146,16 @@ std::vector<game::HudToast> client_toasts(const mp::GameClient& client) {
 // The 2D physics / movement plugins (0.2.0 split): the smoke's posse claim
 // and a client without --project ride with all of them, as before the
 // split (the server's world decides; prediction should match it).
-plugins::ProviderHold& all_2d_providers() {
-  static plugins::ProviderHold hold;
+void hold_all_2d_providers(plugins::ProviderHold& hold) {
   plugins::offer_builtin_providers();
   hold.clear();
   hold.hold({plugins::kBox2DId, plugins::kTopDownId, plugins::kPlatformerId});
-  return hold;
 }
 
 int run_smoke() {
-  all_2d_providers();
+  // A local hold (a static one could outlive the provider registry).
+  plugins::ProviderHold hold;
+  hold_all_2d_providers(hold);
   mp::PosseSmokeOptions opt;
   opt.riders = 2;
   opt.sim = net::LinkSim{70, 20, 0.08f};
@@ -247,6 +247,7 @@ int run_window(const Options& opt) {
   // The project's plugins (needs --project: the client reads project.json
   // locally). Declared before the client so they outlive its world.
   plugins::RuntimePlugins rp;
+  plugins::ProviderHold hold2d;
   if (!opt.project.empty()) {
     const std::size_t loaded = rp.open(opt.project, "client", [](const plugin::Diagnostic& d) {
       std::cout << "[plugins] [" << runtime::to_string(d.level) << "] "
@@ -254,7 +255,7 @@ int run_window(const Options& opt) {
     });
     std::cout << "[ts_client] " << loaded << " plugin(s) riding\n";
   } else {
-    all_2d_providers();
+    hold_all_2d_providers(hold2d);
   }
   mp::GameClient client;
   rp.attach(client.world());
