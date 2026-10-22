@@ -136,12 +136,11 @@ void Editor2DScreen::draw_viewport() {
         "%s: LMB on the selected TileMap | Alt+click pick tile | V select | "
         "MMB/RMB pan | wheel zoom",
         to_string(tool_));
-  } else {
-    ImGui::TextUnformatted(
-        "LMB drag move | handles: resize (Shift aspect) / rotate | Alt+drag "
-        "copy | RMB menu | MMB/RMB-drag pan | wheel zoom | F frame | K collision");
   }
   ImGui::PopStyleColor();
+  if (!tile_mode) {
+    draw_transform_header();  // gizmo / orientation / pivot + hints or the modal line
+  }
 
   const ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
   ImVec2 canvas_size = ImGui::GetContentRegionAvail();
@@ -165,6 +164,32 @@ void Editor2DScreen::draw_viewport() {
   const bool shift = io.KeyShift;
   viewport_w_ = canvas_size.x;
   viewport_h_ = canvas_size.y;
+  viewport_hovered_ = hovered;
+  viewport_x_ = canvas_pos.x;
+  viewport_y_ = canvas_pos.y;
+
+  // --- Modal transform (G / R / S or a gizmo drag) owns the mouse ----------
+  // LMB confirms (release for a gizmo drag), RMB cancels; nothing else in
+  // the viewport sees those clicks this frame.
+  bool swallow = false;
+  if (modal_active()) {
+    swallow = true;
+    if (is_playing() || tile_mode) {
+      modal_cancel();
+    } else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+      modal_cancel();
+      swallow_rmb_ = true;
+    } else {
+      modal_mouse(io.MousePos.x - canvas_pos.x, io.MousePos.y - canvas_pos.y, ctrl, shift);
+      if (modal_.from_gizmo ? !ImGui::IsMouseDown(ImGuiMouseButton_Left)
+                            : ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        modal_confirm();
+      }
+    }
+  }
+  if (!ImGui::IsMouseDown(ImGuiMouseButton_Right) && !ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
+    swallow_rmb_ = false;
+  }
 
   // Alt+click over the target TileMap picks a tile instead of panning.
   std::uint64_t target = paint_target();
@@ -178,7 +203,7 @@ void Editor2DScreen::draw_viewport() {
 
   // Alt+LMB on an entity (select tool) = duplicate drag, on empty = pan.
   bool alt_dup = false;
-  if (!tile_mode && alt && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+  if (!tile_mode && !swallow && alt && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     const ViewXform pre{workspace_.pan_x(), workspace_.pan_y(),
                         workspace_.zoom(), canvas_pos, canvas_size};
     const ImVec2 w = pre.to_world(io.MousePos.x, io.MousePos.y);
@@ -192,7 +217,7 @@ void Editor2DScreen::draw_viewport() {
   if (ImGui::IsMouseDragging(ImGuiMouseButton_Right, 4.0f)) {
     rmb_dragged_ = true;
   }
-  if (hovered && (ImGui::IsMouseClicked(ImGuiMouseButton_Middle) ||
+  if (hovered && !swallow && (ImGui::IsMouseClicked(ImGuiMouseButton_Middle) ||
                   ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
                   (alt && !alt_pick && !alt_dup &&
                    ImGui::IsMouseClicked(ImGuiMouseButton_Left)))) {
@@ -210,7 +235,7 @@ void Editor2DScreen::draw_viewport() {
     panning_ = false;
   }
 
-  if (hovered && std::abs(io.MouseWheel) > 0.0f) {
+  if (hovered && !swallow && std::abs(io.MouseWheel) > 0.0f) {
     const float factor = (io.MouseWheel > 0.0f) ? 1.1f : (1.0f / 1.1f);
     workspace_.adjust_zoom(factor, io.MousePos.x - canvas_pos.x,
                            io.MousePos.y - canvas_pos.y, canvas_size.x,
@@ -223,8 +248,13 @@ void Editor2DScreen::draw_viewport() {
   workspace_.set_snap_threshold(6.0f / std::max(view.zoom, 0.01f));
 
   // --- RMB click (no drag): context menu on the entity under the cursor ------
-  if (!tile_mode && hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
-      !rmb_dragged_ && drag_mode_ == DragMode::None) {
+  if (!tile_mode && hovered && !swallow && !swallow_rmb_ && shift && !ctrl && !alt &&
+      ImGui::IsMouseReleased(ImGuiMouseButton_Right) && !rmb_dragged_ &&
+      drag_mode_ == DragMode::None) {
+    set_cursor2d(mouse_world.x, mouse_world.y);  // Shift+RMB click: 2D cursor
+  } else if (!tile_mode && hovered && !swallow && !swallow_rmb_ &&
+             ImGui::IsMouseReleased(ImGuiMouseButton_Right) && !rmb_dragged_ &&
+             drag_mode_ == DragMode::None) {
     const std::optional<std::uint64_t> hit =
         workspace_.pick(mouse_world.x, mouse_world.y);
     context_id_ = hit.value_or(0);
@@ -266,7 +296,7 @@ void Editor2DScreen::draw_viewport() {
   };
 
   // --- Tile tools -----------------------------------------------------------
-  if (tile_mode && hovered && !panning_ &&
+  if (tile_mode && hovered && !panning_ && !swallow &&
       ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     cancel_rename();
     int c = 0;
@@ -354,8 +384,21 @@ void Editor2DScreen::draw_viewport() {
   bool hot_rot = false;
   bool hot_handle = false;
   const Entity2D* prim = workspace_.selected();
-  const bool handles_on = !tile_mode && prim && !workspace_.effectively_locked(*prim) &&
-                          !workspace_.effectively_hidden(*prim) && !is_playing();
+  const bool xform_ok = !tile_mode && prim && !workspace_.effectively_locked(*prim) &&
+                        !workspace_.effectively_hidden(*prim) && !is_playing();
+  // Box handles in Tweak mode; the Blender-style gizmo otherwise.
+  const bool handles_on = xform_ok && gizmo_.mode == GizmoMode::None && !modal_active();
+  gizmo_hover_ = {};
+  if (xform_ok && gizmo_.mode != GizmoMode::None && !swallow && !modal_active() && hovered &&
+      drag_mode_ == DragMode::None && !panning_ && !alt) {
+    const float px = io.MousePos.x - canvas_pos.x, py = io.MousePos.y - canvas_pos.y;
+    gizmo_hover_ = gizmo_pick(px, py);
+    if (gizmo_hover_.any() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+      cancel_rename();
+      modal_begin_handle(gizmo_hover_, px, py);
+      swallow = true;
+    }
+  }
   if (handles_on && hovered && drag_mode_ == DragMode::None && !panning_) {
     hot_handle = hit_handle(view.to_screen(prim->x, prim->y),
                             view.to_screen(prim->x + prim->w, prim->y + prim->h),
@@ -404,7 +447,7 @@ void Editor2DScreen::draw_viewport() {
     }
   }
 
-  if (!tile_mode && hovered && !alt && !panning_ && !hot_handle &&
+  if (!tile_mode && hovered && !alt && !panning_ && !hot_handle && !swallow &&
       drag_mode_ == DragMode::None &&
       ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     cancel_rename();
@@ -762,6 +805,11 @@ void Editor2DScreen::draw_viewport() {
       draw->AddText(ImVec2(io.MousePos.x + 14.0f, io.MousePos.y + 10.0f),
                     primary_col, buf);
     }
+  }
+
+  // --- Gizmo, 2D cursor, modal guides ------------------------------------------
+  if (!tile_mode) {
+    draw_gizmo_overlay(draw, canvas_pos.x, canvas_pos.y);
   }
 
   // --- Marquee ----------------------------------------------------------------

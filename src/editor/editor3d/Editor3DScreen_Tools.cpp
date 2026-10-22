@@ -486,34 +486,7 @@ bool Editor3DScreen::surface_point(float px, float py, float vw, float vh,
   return true;
 }
 
-// ---- Alt+drag copies ----------------------------------------------------------------------
-
-bool Editor3DScreen::gizmo_begin_duplicate(float px, float py, float vw, float vh) {
-  const Entity3D* e = scene_.find(primary());
-  if (!e || playing() || effectively_locked(*e)) return false;
-  const int axis = gizmo_.hit(editor_camera(), vw, vh, e->transform.position, px, py);
-  if (axis < 0) return false;
-  const scene3d::Scene3D before = scene_;
-  // Keep the primary's copy last so it stays the gizmo's entity.
-  const std::uint64_t prim = primary();
-  std::vector<std::uint64_t> sel = scene_.selection;
-  sel.erase(std::remove(sel.begin(), sel.end(), prim), sel.end());
-  sel.push_back(prim);
-  scene_.selection = sel;
-  if (duplicate_roots(false) == 0) {
-    scene_ = before;
-    return false;
-  }
-  const Entity3D* copy = scene_.find(primary());
-  if (!copy) {
-    scene_ = before;
-    return false;
-  }
-  gizmo_before_ = before;
-  dup_drag_ = true;
-  gizmo_.begin(axis, copy->transform, editor_camera(), vw, vh, px, py);
-  return true;
-}
+// Alt+drag copies: gizmo_begin_duplicate in Editor3DScreen_Transform.cpp.
 
 }  // namespace editor
 }  // namespace tombstone

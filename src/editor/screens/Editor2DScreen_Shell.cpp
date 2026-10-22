@@ -104,9 +104,19 @@ void Editor2DScreen::draw_help_menu_contents() {
   theme::KeyHint("Del", "Delete selection");
   theme::KeyHint("Ctrl+A / Esc", "Select all / clear (Esc cancels drag)");
   theme::KeyHint("F2", "Rename primary");
-  theme::KeyHint("G / Shift+G", "Toggle grid / snap");
+  theme::KeyHint("' / Shift+G", "Toggle grid / snap (also Shift+Tab)");
   theme::KeyHint("[ / ]", "Halve / double grid size");
   theme::KeyHint("Handles", "Drag edges/corners resize (Shift aspect), knob rotates");
+  ImGui::Separator();
+  theme::KeyHint("G / R / S", "Move / rotate / scale (mouse over the viewport)");
+  theme::KeyHint("  X / Y", "Lock an axis (twice: local); Shift+X/Y the other");
+  theme::KeyHint("  0-9 . - Tab", "Exact value (Backspace edits, Tab next field)");
+  theme::KeyHint("  Ctrl / Shift", "Toggle snap / precision while moving");
+  theme::KeyHint("  Enter / Esc", "Confirm (LMB) / cancel (RMB)");
+  theme::KeyHint("Alt+G / R / S", "Clear location / rotation / size (64 x 64)");
+  theme::KeyHint("Q W T Y / 0-4", "Gizmo: Tweak / Move / Scale / Transform (2 Rotate)");
+  theme::KeyHint(", / .", "Local-Global toggle / pivot menu");
+  theme::KeyHint("Shift+RMB", "Place the 2D cursor (Shift+C resets)");
   theme::KeyHint("Alt+drag", "Duplicate and drag the copy");
   theme::KeyHint("RMB click", "Context menu (viewport + hierarchy)");
   theme::KeyHint("Ctrl+C/X/V", "Copy / cut / paste (works across scenes)");
@@ -121,7 +131,7 @@ void Editor2DScreen::draw_help_menu_contents() {
   theme::KeyHint("V", "Select tool");
   theme::KeyHint("B / E", "Brush / Erase tiles (drag = 1 undo step)");
   theme::KeyHint("U", "Bucket fill");
-  theme::KeyHint("R", "Rect fill (Shift: erase box)");
+  theme::KeyHint("R", "Rect fill (Shift: erase box); over a selection: rotate");
   theme::KeyHint("I / Alt+click", "Pick tile from the map");
   theme::KeyHint("1 / 2 / 3", "Brush size (tile tools)");
   theme::KeyHint("Drag asset", "Supply Wagon -> viewport: new sprite");
@@ -297,7 +307,7 @@ void Editor2DScreen::draw_menu_bar() {
     // Grid / snap / camera are saved with the scene: edit mode only.
     ImGui::BeginDisabled(is_playing());
     const bool grid = workspace_.show_grid();
-    if (ImGui::MenuItem("Show Grid", "G", grid)) {
+    if (ImGui::MenuItem("Show Grid", "'", grid)) {
       workspace_.set_show_grid(!grid);
       mark_dirty_and_autosave();
     }
@@ -426,7 +436,7 @@ void Editor2DScreen::draw_toolbar() {
     mark_dirty_and_autosave();
   }
   if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip("Show grid (G)");
+    ImGui::SetTooltip("Show grid (')");
   }
   ImGui::SameLine();
   bool snap = workspace_.snap_enabled();
@@ -436,7 +446,30 @@ void Editor2DScreen::draw_toolbar() {
   }
   if (ImGui::IsItemHovered()) {
     ImGui::SetTooltip(
-        "Snap drags, nudges and Inspector X/Y/W/H to the grid (Shift+G)");
+        "Snap drags, nudges and Inspector X/Y/W/H to the grid (Shift+G). "
+        "Hold Ctrl while transforming to flip it.");
+  }
+  ImGui::SameLine();
+  {
+    // Gizmo mode + orientation (also in the viewport header).
+    const struct { GizmoMode m; const char* l; const char* tip; } modes[] = {
+        {GizmoMode::None, "Tweak", "Box handles, no gizmo (Q / 0)"},
+        {GizmoMode::Translate, "Move", "Move gizmo (W / 1)"},
+        {GizmoMode::Rotate, "Rotate", "Rotate gizmo (2)"},
+        {GizmoMode::Scale, "Scale", "Scale gizmo (T / 3)"},
+        {GizmoMode::Transform, "All", "Move, rotate and scale gizmo (Y / 4)"}};
+    for (const auto& m : modes) {
+      if (ImGui::RadioButton(m.l, gizmo_.mode == m.m)) gizmo_.mode = m.m;
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", m.tip);
+      ImGui::SameLine();
+    }
+    bool local = orientation_ == XformSpace::Local;
+    if (ImGui::Checkbox("Local", &local)) {
+      orientation_ = local ? XformSpace::Local : XformSpace::Global;
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Gizmo and axis locks follow the active entity's turn (,)");
+    }
   }
   ImGui::SameLine();
   int grid_px = static_cast<int>(workspace_.grid_size() + 0.5f);
@@ -635,6 +668,35 @@ void Editor2DScreen::handle_hotkeys() {
     return;  // every edit hotkey is locked while playing
   }
 
+  // A running G / R / S transform takes every key (X / Y / digits / Enter /
+  // Esc ...) until it is confirmed or cancelled; docs/transforms.md.
+  if (modal_active()) {
+    handle_modal_keys();
+    return;
+  }
+
+  // G / R / S: modal move / rotate / scale with the mouse over the
+  // viewport (Select tool, something selected). Alt+G / R / S clear
+  // location / rotation / size. Off the viewport R stays the Rect tool.
+  const bool xform_keys = viewport_hovered_ && tool_ == TileTool::Select &&
+                          drag_mode_ == DragMode::None && !ctrl && !shift &&
+                          workspace_.selection_count() > 0 && !ImGui::IsAnyItemActive() &&
+                          !ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+                          !ImGui::IsMouseDown(ImGuiMouseButton_Right);
+  if (xform_keys) {
+    const struct { ImGuiKey key; XformOp op; } kXformKeys[] = {
+        {ImGuiKey_G, XformOp::Move}, {ImGuiKey_R, XformOp::Rotate}, {ImGuiKey_S, XformOp::Scale}};
+    for (const auto& k : kXformKeys) {
+      if (!ImGui::IsKeyPressed(k.key, false)) continue;
+      if (alt) {
+        reset_transform(k.op);
+      } else {
+        modal_begin(k.op, io.MousePos.x - viewport_x_, io.MousePos.y - viewport_y_);
+      }
+      return;
+    }
+  }
+
   // Undo / redo (with key repeat). Not mid-drag or while a widget is held.
   if (drag_mode_ == DragMode::None && !ImGui::IsAnyItemActive()) {
     const ImGuiKeyChord mods = io.KeyMods;
@@ -711,14 +773,44 @@ void Editor2DScreen::handle_hotkeys() {
     }
   }
 
-  if (!ctrl && !alt) {
-    if (ImGui::IsKeyPressed(ImGuiKey_G, false)) {
-      if (shift) {
-        workspace_.set_snap_enabled(!workspace_.snap_enabled());
-        note(workspace_.snap_enabled() ? "Snap on" : "Snap off");
-      } else {
-        workspace_.set_show_grid(!workspace_.show_grid());
+  // Gizmo mode (Select tool): Q Tweak, W Move, T Scale, Y Transform, or
+  // 0-4 (E stays Erase, so Rotate is 2 or the header button). ',' flips
+  // Global / Local, '.' opens the pivot menu, Shift+C puts the 2D cursor
+  // back at 0, 0.
+  if (!ctrl && !alt && drag_mode_ == DragMode::None && tool_ == TileTool::Select &&
+      (scene_focus || viewport_hovered_)) {
+    if (!shift) {
+      const struct { ImGuiKey key; GizmoMode mode; } kGizmoKeys[] = {
+          {ImGuiKey_Q, GizmoMode::None},      {ImGuiKey_W, GizmoMode::Translate},
+          {ImGuiKey_T, GizmoMode::Scale},     {ImGuiKey_Y, GizmoMode::Transform},
+          {ImGuiKey_0, GizmoMode::None},      {ImGuiKey_1, GizmoMode::Translate},
+          {ImGuiKey_2, GizmoMode::Rotate},    {ImGuiKey_3, GizmoMode::Scale},
+          {ImGuiKey_4, GizmoMode::Transform},
+      };
+      for (const auto& k : kGizmoKeys) {
+        if (ImGui::IsKeyPressed(k.key, false)) gizmo_.mode = k.mode;
       }
+      if (ImGui::IsKeyPressed(ImGuiKey_Comma, false)) {
+        orientation_ = orientation_ == XformSpace::Local ? XformSpace::Global : XformSpace::Local;
+        note(std::string("Orientation: ") + xform_space_label(orientation_));
+      }
+      if (ImGui::IsKeyPressed(ImGuiKey_Period, false)) open_pivot_menu_ = true;
+    } else if (ImGui::IsKeyPressed(ImGuiKey_C, false)) {
+      set_cursor2d(0.0f, 0.0f);
+      note("2D cursor back at 0, 0");
+    }
+  }
+
+  if (!ctrl && !alt) {
+    // Shift+G / Shift+Tab: snap. ' : grid (G is the modal move now).
+    if ((shift && ImGui::IsKeyPressed(ImGuiKey_G, false)) ||
+        (shift && ImGui::IsKeyPressed(ImGuiKey_Tab, false) && (scene_focus || viewport_hovered_))) {
+      workspace_.set_snap_enabled(!workspace_.snap_enabled());
+      note(workspace_.snap_enabled() ? "Snap on" : "Snap off");
+      mark_dirty_and_autosave();
+    }
+    if (!shift && ImGui::IsKeyPressed(ImGuiKey_Apostrophe, false)) {
+      workspace_.set_show_grid(!workspace_.show_grid());
       mark_dirty_and_autosave();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket, false) ||

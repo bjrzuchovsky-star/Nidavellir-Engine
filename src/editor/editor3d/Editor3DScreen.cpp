@@ -636,68 +636,7 @@ bool Editor3DScreen::ground_point(float px, float py, float vw, float vh, Vec3* 
 
 // ---- Gizmo -----------------------------------------------------------------------
 
-bool Editor3DScreen::gizmo_begin(float px, float py, float vw, float vh) {
-  const Entity3D* e = scene_.find(primary());
-  if (!e || playing() || effectively_locked(*e)) return false;
-  const int axis = gizmo_.hit(editor_camera(), vw, vh, e->transform.position, px, py);
-  if (axis < 0) return false;
-  return gizmo_begin_axis(axis, px, py, vw, vh);
-}
-
-bool Editor3DScreen::gizmo_begin_axis(int axis, float px, float py, float vw, float vh) {
-  const Entity3D* e = scene_.find(primary());
-  if (!e || playing() || axis < 0 || axis > 2) return false;
-  gizmo_before_ = scene_;
-  gizmo_.begin(axis, e->transform, editor_camera(), vw, vh, px, py);
-  return true;
-}
-
-void Editor3DScreen::gizmo_move(float px, float py, float vw, float vh) {
-  if (!gizmo_.active()) return;
-  Entity3D* e = scene_.find(primary());
-  if (!e) return;
-  const GizmoSnap steps = snap_steps();
-  const render3d::Transform prev = e->transform;
-  e->transform = gizmo_.drag(editor_camera(), vw, vh, px, py, scene_.snap ? &steps : nullptr);
-  if (surface_snap_ && gizmo_.mode == GizmoMode::Translate) {
-    // Stick the bounds' bottom onto whatever is under the mouse.
-    std::vector<std::uint64_t> skip{e->id};
-    for (std::uint64_t d : scene3d::descendants_of(scene_.entities, e->id)) skip.push_back(d);
-    Vec3 hit;
-    if (surface_point(px, py, vw, vh, skip, &hit)) {
-      const render3d::Aabb b = world_bounds(*e);
-      const Vec3 foot{b.center().x, b.min.y, b.center().z};
-      e->transform.position += hit - foot;
-    }
-    e = scene_.find(primary());
-  }
-  carry_descendants(e->id, prev);
-}
-
-void Editor3DScreen::gizmo_end() {
-  if (!gizmo_.active() || !gizmo_before_) return;
-  const Entity3D* e = scene_.find(primary());
-  const Entity3D* was = gizmo_before_->find(primary());
-  gizmo_.cancel();
-  if (dup_drag_) {
-    // The copies stay even when they did not move.
-    dup_drag_ = false;
-    push_undo("Duplicate", *gizmo_before_);
-  } else if (e && was && !(e->transform == was->transform)) {
-    const char* what = gizmo_.mode == GizmoMode::Translate
-                           ? "Move"
-                           : (gizmo_.mode == GizmoMode::Rotate ? "Rotate" : "Scale");
-    push_undo(std::string(what) + " " + e->name, *gizmo_before_);
-  }
-  gizmo_before_.reset();
-}
-
-void Editor3DScreen::gizmo_cancel() {
-  if (gizmo_.active() && gizmo_before_) scene_ = *gizmo_before_;  // copies go too
-  dup_drag_ = false;
-  gizmo_.cancel();
-  gizmo_before_.reset();
-}
+// Gizmo drags and modal transforms: Editor3DScreen_Transform.cpp.
 
 // ---- Rendering + play --------------------------------------------------------------
 

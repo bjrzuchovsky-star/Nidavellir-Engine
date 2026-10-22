@@ -271,7 +271,7 @@ void Editor3DScreen::draw_menu_bar() {
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("View")) {
-    ImGui::MenuItem("Grid", "G", &scene_.show_grid);
+    ImGui::MenuItem("Grid", "'", &scene_.show_grid);
     ImGui::MenuItem("Colliders + joints", nullptr, &show_colliders_);
     ImGui::MenuItem("Hitboxes (model $hbox)", nullptr, &show_hitboxes_);
     ImGui::MenuItem("Physics Settings", nullptr, &show_physics_);
@@ -301,8 +301,13 @@ void Editor3DScreen::draw_menu_bar() {
     theme::KeyHint("Wheel", "Zoom");
     theme::KeyHint("RMB + WASD/QE", "Fly");
     theme::KeyHint("LMB", "Select (Ctrl: add / remove)");
-    theme::KeyHint("W / E / R", "Move / rotate / scale gizmo");
-    theme::KeyHint("Shift+G", "Toggle snap");
+    theme::KeyHint("G / R / S", "Move / rotate / scale (then X/Y/Z, numbers, Enter)");
+    theme::KeyHint("Alt+G / R / S", "Clear location / rotation / scale");
+    theme::KeyHint("Q / W / E / T / Y", "Tweak / move / rotate / scale / transform gizmo");
+    theme::KeyHint(", / .", "Global-Local toggle / pivot menu");
+    theme::KeyHint("Shift+RMB / Shift+C", "Place / reset the 3D cursor");
+    theme::KeyHint("Shift+G / Shift+Tab", "Toggle snap (hold Ctrl to flip while dragging)");
+    theme::KeyHint("'", "Toggle grid");
     theme::KeyHint("F", "Frame selection");
     theme::KeyHint("Ctrl+Z / Ctrl+Y", "Undo / redo");
     theme::KeyHint("Ctrl+D / Del", "Duplicate / delete");
@@ -345,13 +350,28 @@ void Editor3DScreen::draw_toolbar() {
   ImGui::SameLine(0, 18);
   ImGui::BeginDisabled(playing());
   const struct { GizmoMode m; const char* l; } modes[] = {
-      {GizmoMode::Translate, "Move (W)"}, {GizmoMode::Rotate, "Rotate (E)"}, {GizmoMode::Scale, "Scale (R)"}};
+      {GizmoMode::None, "Tweak (Q)"},      {GizmoMode::Translate, "Move (W)"},
+      {GizmoMode::Rotate, "Rotate (E)"},   {GizmoMode::Scale, "Scale (T)"},
+      {GizmoMode::Transform, "All (Y)"}};
   for (const auto& m : modes) {
     if (ImGui::RadioButton(m.l, gizmo_.mode == m.m)) gizmo_.mode = m.m;
     ImGui::SameLine();
   }
+  {
+    bool local = orientation_ == XformSpace::Local;
+    if (ImGui::Checkbox("Local (,)", &local)) {
+      orientation_ = local ? XformSpace::Local : XformSpace::Global;
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Gizmo and axis keys use the active entity's axes");
+    ImGui::SameLine();
+  }
   bool snap = scene_.snap;
   if (ImGui::Checkbox("Snap", &snap)) set_snapping(snap);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(84);
+  int target = snap_surface_ ? 1 : 0;
+  if (ImGui::Combo("##snaptarget", &target, "Increment\0Surface\0")) snap_surface_ = target == 1;
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Snap moves to the grid step or onto surfaces under the mouse");
   ImGui::SameLine();
   ImGui::SetNextItemWidth(60);
   ImGui::DragFloat("##st", &scene_.snap_translate, 0.05f, 0.05f, 10.0f, "%.2fm");
@@ -444,6 +464,12 @@ void Editor3DScreen::handle_shortcuts() {
     }
     return;
   }
+  // A running G / R / S transform owns the keyboard (X / Y / Z, digits,
+  // Enter, Esc ...); nothing else fires until it ends.
+  if (modal_active()) {
+    handle_modal_keys();
+    return;
+  }
   if (io.KeyCtrl) {
     if (ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
       if (io.KeyShift) redo();
@@ -467,23 +493,52 @@ void Editor3DScreen::handle_shortcuts() {
     }
     return;
   }
-  // Single keys only when the viewport has focus (RMB-fly uses WASD).
-  if (!viewport_focused_ || ImGui::IsMouseDown(ImGuiMouseButton_Right)) return;
-  if (ImGui::IsKeyPressed(ImGuiKey_W, false)) gizmo_.mode = GizmoMode::Translate;
-  if (ImGui::IsKeyPressed(ImGuiKey_E, false)) gizmo_.mode = GizmoMode::Rotate;
-  if (ImGui::IsKeyPressed(ImGuiKey_R, false)) gizmo_.mode = GizmoMode::Scale;
-  if (ImGui::IsKeyPressed(ImGuiKey_F, false)) frame_selection();
-  if (ImGui::IsKeyPressed(ImGuiKey_G, false)) {
-    if (io.KeyShift) set_snapping(!scene_.snap);
-    else scene_.show_grid = !scene_.show_grid;
+  if (ImGui::IsMouseDown(ImGuiMouseButton_Right) || ImGui::IsMouseDown(ImGuiMouseButton_Left)) return;
+  // G / R / S (and Alt+ to clear) with the mouse over the viewport.
+  if (viewport_hovered_ && !io.KeyShift) {
+    const float mx = io.MousePos.x - viewport_x_, my = io.MousePos.y - viewport_y_;
+    const struct { ImGuiKey k; XformOp op; } ops[] = {
+        {ImGuiKey_G, XformOp::Move}, {ImGuiKey_R, XformOp::Rotate}, {ImGuiKey_S, XformOp::Scale}};
+    for (const auto& o : ops) {
+      if (!ImGui::IsKeyPressed(o.k, false)) continue;
+      if (io.KeyAlt) reset_transform(o.op);
+      else modal_begin(o.op, mx, my, viewport_w_, viewport_h_);
+      return;
+    }
   }
+  // Other single keys when the viewport has focus or the mouse (RMB-fly uses WASD).
+  if (!viewport_focused_ && !viewport_hovered_) return;
+  if (io.KeyAlt) return;
+  if (ImGui::IsKeyPressed(ImGuiKey_Q, false) || ImGui::IsKeyPressed(ImGuiKey_0, false)) {
+    gizmo_.mode = GizmoMode::None;
+  }
+  if (ImGui::IsKeyPressed(ImGuiKey_W, false) || ImGui::IsKeyPressed(ImGuiKey_1, false)) {
+    gizmo_.mode = GizmoMode::Translate;
+  }
+  if (ImGui::IsKeyPressed(ImGuiKey_E, false) || ImGui::IsKeyPressed(ImGuiKey_2, false)) {
+    gizmo_.mode = GizmoMode::Rotate;
+  }
+  if (ImGui::IsKeyPressed(ImGuiKey_T, false) || ImGui::IsKeyPressed(ImGuiKey_3, false)) {
+    gizmo_.mode = GizmoMode::Scale;
+  }
+  if (ImGui::IsKeyPressed(ImGuiKey_Y, false) || ImGui::IsKeyPressed(ImGuiKey_4, false)) {
+    gizmo_.mode = GizmoMode::Transform;
+  }
+  if (ImGui::IsKeyPressed(ImGuiKey_Comma, false)) {
+    orientation_ = orientation_ == XformSpace::Global ? XformSpace::Local : XformSpace::Global;
+    note(std::string("Orientation: ") + xform_space_label(orientation_));
+  }
+  if (ImGui::IsKeyPressed(ImGuiKey_Period, false)) open_pivot_menu_ = true;
+  if (ImGui::IsKeyPressed(ImGuiKey_F, false)) frame_selection();
+  if (ImGui::IsKeyPressed(ImGuiKey_Apostrophe, false)) scene_.show_grid = !scene_.show_grid;
+  if (io.KeyShift && (ImGui::IsKeyPressed(ImGuiKey_G, false) || ImGui::IsKeyPressed(ImGuiKey_Tab, false))) {
+    set_snapping(!scene_.snap);
+  }
+  if (io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_C, false)) cursor3d_ = {0, 0, 0};
   if (ImGui::IsKeyPressed(ImGuiKey_Delete, false)) delete_selected();
   if (ImGui::IsKeyPressed(ImGuiKey_H, false)) hide_selected(!io.KeyShift);
   if (ImGui::IsKeyPressed(ImGuiKey_End, false)) drop_to_ground();
-  if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
-    if (gizmo_.active()) gizmo_cancel();
-    else clear_selection();
-  }
+  if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) clear_selection();
 }
 
 void Editor3DScreen::draw_viewport() {
@@ -492,6 +547,8 @@ void Editor3DScreen::draw_viewport() {
   viewport_w_ = vw;
   viewport_h_ = vh;
   const ImVec2 origin = ImGui::GetCursorScreenPos();
+  viewport_x_ = origin.x;
+  viewport_y_ = origin.y;
   const float scale = ImGui::GetIO().DisplayFramebufferScale.x > 0 ? ImGui::GetIO().DisplayFramebufferScale.x : 1.0f;
   render_frame(static_cast<int>(vw * scale), static_cast<int>(vh * scale));
   const std::uint64_t tex = viewport_texture();
@@ -534,9 +591,56 @@ void Editor3DScreen::draw_viewport() {
     ImGui::EndDragDropTarget();
   }
 
-  // RMB: drag orbits / flies, a click (no drag) opens the context menu.
+  // A running G / R / S (or gizmo drag): the mouse drives it, LMB confirms
+  // (release for a gizmo drag), RMB cancels; nothing else gets the mouse.
+  if (modal_active()) {
+    modal_.vw = vw;
+    modal_.vh = vh;
+    if (playing()) {
+      modal_cancel();
+    } else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+      modal_cancel();
+      rmb_dragged_ = true;  // no context menu on release
+    } else {
+      modal_mouse(mx, my, io.KeyCtrl, io.KeyShift);
+      if (modal_.from_gizmo ? !ImGui::IsMouseDown(ImGuiMouseButton_Left)
+                            : ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        modal_confirm();
+        swallow_lmb_ = !modal_.from_gizmo;
+      }
+    }
+    draw_gizmo_overlay(origin.x, origin.y, vw, vh);
+    draw_transform_header(origin.x, origin.y, vw);
+    return;
+  }
+  if (swallow_lmb_) {
+    // The click that confirmed a transform does not also select.
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) swallow_lmb_ = false;
+  }
+  if (open_pivot_menu_) {
+    ImGui::OpenPopup("##PivotMenu3D");
+    open_pivot_menu_ = false;
+  }
+  if (ImGui::BeginPopup("##PivotMenu3D")) {
+    ImGui::TextDisabled("Pivot point");
+    for (int i = 0; i < kPivotModeCount; ++i) {
+      const PivotMode p = static_cast<PivotMode>(i);
+      if (ImGui::MenuItem(pivot_label(p), nullptr, p == pivot_mode_)) pivot_mode_ = p;
+    }
+    ImGui::EndPopup();
+  }
+
+  // RMB: drag orbits / flies, a click (no drag) opens the context menu;
+  // Shift+click places the 3D cursor.
   if (viewport_hovered_ && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) rmb_dragged_ = false;
   if (ImGui::IsMouseDragging(ImGuiMouseButton_Right, 4.0f)) rmb_dragged_ = true;
+  if (!playing() && viewport_hovered_ && io.KeyShift && ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
+      !rmb_dragged_) {
+    Vec3 at;
+    const std::vector<std::uint64_t> none;
+    if (surface_point(mx, my, vw, vh, none, &at) || ground_point(mx, my, vw, vh, &at)) cursor3d_ = at;
+    rmb_dragged_ = true;
+  }
   if (!playing() && viewport_hovered_ && ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
       !rmb_dragged_ && !gizmo_.active()) {
     context_id_ = pick(mx, my, vw, vh);
@@ -590,24 +694,18 @@ void Editor3DScreen::draw_viewport() {
 
   // Selection + gizmo (left button; Alt only while an Alt+drag copy runs).
   if (!playing() && !terrain_brush && (!io.KeyAlt || dup_drag_)) {
-    // Ctrl while dragging the move gizmo: stick to the surface under the mouse.
-    set_surface_snap(io.KeyCtrl && gizmo_.active());
-    if (viewport_hovered_ && !dup_drag_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    // A click on a gizmo handle starts a drag (a modal transform with that
+    // handle's constraint: Ctrl flips snapping, Shift = precision).
+    gizmo_hover_ = viewport_hovered_ ? gizmo_pick(mx, my, vw, vh) : GizmoHandle{};
+    if (viewport_hovered_ && !dup_drag_ && !swallow_lmb_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       if (!gizmo_begin(mx, my, vw, vh)) {
         const std::uint64_t id = pick(mx, my, vw, vh);
         if (id) select(id, io.KeyCtrl);
         else if (!io.KeyCtrl) clear_selection();
       }
     }
-    if (gizmo_.active()) {
-      if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) gizmo_move(mx, my, vw, vh);
-      else gizmo_end();
-    }
-    if (gizmo_.active() && surface_snap_) {
-      ImGui::GetWindowDrawList()->AddText(ImVec2(origin.x + 10, origin.y + 10),
-                                          theme::U32(theme::Accent()), "surface snap");
-    }
     draw_gizmo_overlay(origin.x, origin.y, vw, vh);
+    draw_transform_header(origin.x, origin.y, vw);
   }
 
   // In-game UI (ui/*.ui.json, Lua ui.*) over the Play view.
@@ -651,52 +749,6 @@ void Editor3DScreen::draw_viewport() {
     }
     dl->AddText(ImVec2(origin.x + 10, origin.y + vh - 22), IM_COL32(240, 220, 170, 220), hint);
   }
-}
-
-void Editor3DScreen::draw_gizmo_overlay(float x0, float y0, float vw, float vh) {
-  const scene3d::Entity3D* e = find(primary());
-  if (!e) return;
-  const render3d::Camera3D cam = editor_camera();
-  const Vec3 o = e->transform.position;
-  float ox = 0, oy = 0;
-  if (!cam.project(o, vw, vh, &ox, &oy)) return;
-  ImDrawList* dl = ImGui::GetWindowDrawList();
-  const float len = Gizmo3D::handle_length(cam, vh, o);
-  const ImGuiIO& io = ImGui::GetIO();
-  const int hover = gizmo_.active() ? gizmo_.axis()
-                                    : gizmo_.hit(cam, vw, vh, o, io.MousePos.x - x0, io.MousePos.y - y0);
-  for (int a = 0; a < 3; ++a) {
-    const float th = hover == a ? 4.0f : 2.5f;
-    if (gizmo_.mode == GizmoMode::Rotate) {
-      // Ring around the axis.
-      const Vec3 ax = Gizmo3D::axis_dir(a);
-      const Vec3 u = std::fabs(ax.y) > 0.9f ? Vec3{1, 0, 0} : render3d::normalize(render3d::cross(ax, {0, 1, 0}));
-      const Vec3 v = render3d::cross(ax, u);
-      ImVec2 prev;
-      bool have = false;
-      for (int i = 0; i <= 48; ++i) {
-        const float t = 6.2831853f * static_cast<float>(i) / 48.0f;
-        float sx, sy;
-        if (!cam.project(o + (u * std::cos(t) + v * std::sin(t)) * (len * 0.8f), vw, vh, &sx, &sy)) {
-          have = false;
-          continue;
-        }
-        const ImVec2 p(x0 + sx, y0 + sy);
-        if (have) dl->AddLine(prev, p, axis_color(a), th);
-        prev = p;
-        have = true;
-      }
-      continue;
-    }
-    float ex, ey;
-    if (!cam.project(o + Gizmo3D::axis_dir(a) * len, vw, vh, &ex, &ey)) continue;
-    dl->AddLine(ImVec2(x0 + ox, y0 + oy), ImVec2(x0 + ex, y0 + ey), axis_color(a), th);
-    if (gizmo_.mode == GizmoMode::Scale)
-      dl->AddRectFilled(ImVec2(x0 + ex - 5, y0 + ey - 5), ImVec2(x0 + ex + 5, y0 + ey + 5), axis_color(a));
-    else
-      dl->AddCircleFilled(ImVec2(x0 + ex, y0 + ey), 5.5f, axis_color(a));
-  }
-  dl->AddCircleFilled(ImVec2(x0 + ox, y0 + oy), 3.5f, IM_COL32(240, 230, 200, 255));
 }
 
 void Editor3DScreen::draw_hierarchy() {

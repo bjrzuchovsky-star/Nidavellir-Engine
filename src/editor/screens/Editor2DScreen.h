@@ -11,6 +11,8 @@
 #include "editor/console/TelegraphLog.h"
 #include "editor/plugins/EditorPlugins.h"
 #include "editor/plugins/PluginsPanel.h"
+#include "editor/transform/Gizmo2D.h"
+#include "editor/transform/ModalTransform.h"
 #include "editor/screens/IScreen.h"
 #include "editor/ui/FolderBrowser.h"
 #include "editor/ui/PlayUi.h"
@@ -177,6 +179,43 @@ class Editor2DScreen final : public IScreen {
   // Alt+drag: copies of the selection on the spot, then a normal drag
   // moves the copies. One "Duplicate N" step; Esc takes the copies back.
   bool begin_duplicate_drag();
+  // --- Modal transforms + gizmo (Editor2DScreen_Transform.cpp) ---------------
+  // G / R / S with the mouse over the viewport (Select tool), or a gizmo
+  // drag; docs/transforms.md. px / py are canvas pixels (0, 0 = the
+  // viewport's top-left). One undo step per confirm; cancel restores.
+  bool modal_begin(XformOp op, float px, float py);
+  bool modal_begin_handle(const GizmoHandle& h, float px, float py);
+  void modal_mouse(float px, float py, bool ctrl = false, bool shift = false);
+  void modal_axis(int axis, bool shift = false);
+  bool modal_type(const std::string& chars);
+  void modal_backspace();
+  void modal_next_component();
+  void modal_switch(XformOp op);
+  bool modal_confirm();
+  void modal_cancel();
+  bool modal_active() const { return modal_.m.active(); }
+  const ModalTransform& modal() const { return modal_.m; }
+  std::string modal_header() const;
+  // Alt+G / Alt+R / Alt+S on the selection.
+  bool reset_transform(XformOp what);
+  PivotMode pivot_mode() const { return pivot_mode_; }
+  void set_pivot_mode(PivotMode p) { pivot_mode_ = p; }
+  XformSpace orientation() const { return orientation_; }
+  void set_orientation(XformSpace s) { orientation_ = s; }
+  GizmoMode gizmo_mode() const { return gizmo_.mode; }
+  void set_gizmo_mode(GizmoMode m) { gizmo_.mode = m; }
+  // 2D cursor (Shift+RMB click; Shift+C back to 0, 0), world units.
+  float cursor2d_x() const { return cursor2d_x_; }
+  float cursor2d_y() const { return cursor2d_y_; }
+  void set_cursor2d(float x, float y) { cursor2d_x_ = x; cursor2d_y_ = y; }
+  // Where rotate / scale turn about for the current pivot mode (world).
+  void pivot_point(float* wx, float* wy) const;
+  // Gizmo handle under canvas pixel (px, py) (part None = nothing).
+  GizmoHandle gizmo_pick(float px, float py) const;
+  // Canvas pixels <-> world with the current camera and canvas size.
+  void canvas_to_world(float px, float py, float* wx, float* wy) const;
+  void world_to_canvas(float wx, float wy, float* px, float* py) const;
+
   // Scene Hierarchy filter (case-insensitive substring of the name).
   void set_hierarchy_filter(const std::string& text);
   bool hierarchy_row_visible(const Entity2D& e) const;
@@ -544,6 +583,35 @@ class Editor2DScreen final : public IScreen {
   bool handle_active_ = false;
   float handle_start_wx_ = 0.0f, handle_start_wy_ = 0.0f;
   float viewport_w_ = 800.0f, viewport_h_ = 600.0f;  // last canvas size
+  // Modal transforms + gizmo (Editor2DScreen_Transform.cpp).
+  struct ModalState {
+    ModalTransform m;
+    std::size_t active = 0;        // index into the workspace's root starts
+    float pivot_x = 0, pivot_y = 0;  // world
+    float mx = 0, my = 0;          // last mouse (canvas px)
+    bool snap = false;
+    bool from_gizmo = false;
+    float shown[2] = {0, 0};       // header values
+    Workspace2D::Snapshot before;  // the undo step's before-state
+  };
+  ModalState modal_;
+  Gizmo2D gizmo_;
+  PivotMode pivot_mode_ = PivotMode::Median;
+  XformSpace orientation_ = XformSpace::Global;
+  float cursor2d_x_ = 0.0f, cursor2d_y_ = 0.0f;
+  GizmoHandle gizmo_hover_;
+  bool viewport_hovered_ = false;
+  float viewport_x_ = 0.0f, viewport_y_ = 0.0f;  // canvas corner on screen
+  bool open_pivot_menu_ = false;
+  bool swallow_rmb_ = false;  // the RMB that cancelled: no context menu
+  void modal_apply();
+  void handle_modal_keys();
+  // Header widgets (gizmo, orientation, pivot) or the modal line.
+  void draw_transform_header();
+  // Cursor, gizmo / modal guides; x0 / y0 = canvas corner on screen.
+  void draw_gizmo_overlay(ImDrawList* draw, float x0, float y0);
+  // Gizmo centre (canvas px) and its move / scale axes (degrees).
+  void gizmo_frame(float* cx, float* cy, float* axes_deg, float* scale_deg) const;
   bool rmb_dragged_ = false;         // RMB press panned (no context menu)
   std::uint64_t context_id_ = 0;     // entity the context menu opened on
   char hierarchy_filter_[96]{};

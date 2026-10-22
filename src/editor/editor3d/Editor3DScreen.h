@@ -8,7 +8,9 @@
 //   Viewport3D  GL 3.3 render of the scene (offscreen target shown as an
 //               image): orbit (RMB / Alt+LMB), pan (MMB), zoom (wheel), fly
 //               (hold RMB + WASD/QE), F frames the selection, click picks,
-//               W / E / R translate / rotate / scale gizmo with snap.
+//               Blender-style gizmos (Q / W / E / T / Y) and modal
+//               G / R / S transforms with pivots, orientation and snap
+//               (Editor3DScreen_Transform.cpp, docs/transforms.md).
 //   Hierarchy   entities; click / Ctrl+click selection, create menu.
 //   Inspector   transform (position, rotation in degrees, scale) and the
 //               components: mesh, material, light, collider, player, script.
@@ -35,6 +37,7 @@
 #include "editor/vault/VaultPanel.h"
 #include "editor/ProjectInfo.h"
 #include "editor/editor3d/Gizmo3D.h"
+#include "editor/transform/ModalTransform.h"
 #include "editor/plugins/EditorPlugins.h"
 #include "editor/plugins/PluginsPanel.h"
 #include "editor/screens/IScreen.h"
@@ -169,13 +172,52 @@ class Editor3DScreen final : public IScreen {
   GizmoSnap snap_steps() const;
   bool snapping() const { return scene_.snap; }
   void set_snapping(bool on);
-  // Gizmo drag on the primary selection: begin (false on a miss), move,
-  // end (one undo step). Same code the mouse drives.
+  // Gizmo drag on the selection: begin (false on a miss), move, end (one
+  // undo step). Same code the mouse drives; a drag runs as a modal
+  // transform with the handle's constraint (Editor3DScreen_Transform.cpp).
   bool gizmo_begin(float px, float py, float vw, float vh);
   bool gizmo_begin_axis(int axis, float px, float py, float vw, float vh);
   void gizmo_move(float px, float py, float vw, float vh);
   void gizmo_end();
   void gizmo_cancel();
+  // Handle under the mouse for the current selection (part None = miss).
+  GizmoHandle gizmo_pick(float px, float py, float vw, float vh) const;
+
+  // ---- Modal transforms (Editor3DScreen_Transform.cpp) ----------------------
+  // G / R / S: move / rotate / scale the selection roots (children ride
+  // along) from the mouse at (px, py). modal_mouse each frame (ctrl flips
+  // snapping, shift = precision); axis keys, typed numbers; confirm = one
+  // undo step, cancel restores. See docs/transforms.md.
+  bool modal_begin(XformOp op, float px, float py, float vw, float vh);
+  bool modal_begin_handle(const GizmoHandle& h, float px, float py, float vw, float vh);
+  void modal_mouse(float px, float py, bool ctrl = false, bool shift = false);
+  void modal_axis(int axis, bool shift = false);
+  bool modal_type(const std::string& chars);  // "2", "-90", "0.5"
+  void modal_backspace();
+  void modal_next_component();
+  void modal_trackball();
+  void modal_switch(XformOp op);
+  bool modal_confirm();
+  void modal_cancel();
+  bool modal_active() const { return modal_.m.active(); }
+  const ModalTransform& modal() const { return modal_.m; }
+  // Header line while a transform runs ("Move  Dx 2.000 ...").
+  std::string modal_header() const;
+  // Alt+G / Alt+R / Alt+S: clear location / rotation / scale of the
+  // selection roots (world values; one undo step).
+  bool reset_transform(XformOp what);
+  PivotMode pivot_mode() const { return pivot_mode_; }
+  void set_pivot_mode(PivotMode p) { pivot_mode_ = p; }
+  XformSpace orientation() const { return orientation_; }
+  void set_orientation(XformSpace s) { orientation_ = s; }
+  const render3d::Vec3& cursor3d() const { return cursor3d_; }
+  void set_cursor3d(const render3d::Vec3& p) { cursor3d_ = p; }
+  // Where rotate / scale turn about for the current selection.
+  render3d::Vec3 pivot_point() const;
+  GizmoFrame gizmo_frame() const;
+  // Snap targets for moves: grid increments or the surface under the mouse.
+  bool snap_to_surface() const { return snap_surface_; }
+  void set_snap_to_surface(bool on) { snap_surface_ = on; }
 
   // One frame of the scene (editor or play view) through the renderer
   // (GL offscreen when a context exists, else the null backend).
@@ -243,7 +285,8 @@ class Editor3DScreen final : public IScreen {
   // Alt+drag on the gizmo: copy the selection, then drag the copies (one
   // "Duplicate" undo step; Esc removes the copies).
   bool gizmo_begin_duplicate(float px, float py, float vw, float vh);
-  // Translate drags stick to surfaces under the mouse while on (Ctrl).
+  // Moves stick to surfaces under the mouse while on (also: Snap target
+  // Surface with snapping on).
   void set_surface_snap(bool on) { surface_snap_ = on; }
 
   // ---- Assets ---------------------------------------------------------------
@@ -391,7 +434,31 @@ class Editor3DScreen final : public IScreen {
   std::unique_ptr<render3d::SceneView> view_;
   bool gl_ = false;
   Gizmo3D gizmo_;
-  std::optional<scene3d::Scene3D> gizmo_before_;
+  // The running modal transform (G / R / S or a gizmo drag).
+  struct ModalState {
+    ModalTransform m;
+    std::optional<scene3d::Scene3D> before;
+    std::vector<std::uint64_t> roots;
+    std::vector<render3d::Transform> start;  // per root
+    std::vector<std::pair<std::uint64_t, render3d::Transform>> all;  // roots + subtrees
+    std::size_t active = 0;  // index into roots
+    render3d::Vec3 pivot{0, 0, 0};
+    float vw = 1, vh = 1, mx = 0, my = 0;
+    bool snap = false;
+    bool from_gizmo = false;
+    // Values shown in the header (degrees / factors / world delta).
+    render3d::Vec3 shown{0, 0, 0};
+    std::string shown_label;  // undo label ("Move Crate")
+  } modal_;
+  void modal_apply();
+  void draw_transform_header(float x0, float y0, float vw);
+  void draw_cursor3d(float x0, float y0, float vw, float vh);
+  void handle_modal_keys();
+  PivotMode pivot_mode_ = PivotMode::Median;
+  XformSpace orientation_ = XformSpace::Global;
+  render3d::Vec3 cursor3d_{0, 0, 0};
+  bool snap_surface_ = false;
+  GizmoHandle gizmo_hover_;
   std::optional<scene3d::Scene3D> inspector_before_;
   std::string inspector_label_;
   world3d::World3D world_;
@@ -432,6 +499,9 @@ class Editor3DScreen final : public IScreen {
   bool show_physics_ = false;  // Physics Settings window
   void draw_physics_settings();
   float viewport_w_ = 1280.0f, viewport_h_ = 720.0f;
+  float viewport_x_ = 0.0f, viewport_y_ = 0.0f;  // screen position of the view
+  bool open_pivot_menu_ = false;                 // '.' pressed
+  bool swallow_lmb_ = false;                     // the click that confirmed
   char rename_buf_[128] = {0};
   PluginsPanelState plugins_panel_;
   std::unique_ptr<xr::XrSession> vr_session_;

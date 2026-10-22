@@ -8,6 +8,7 @@ add_library(ts_editor
   workspace/Workspace2D_History.cpp
   workspace/Workspace2D_Tiles.cpp
   workspace/Workspace2D_Tools.cpp
+  workspace/Workspace2D_Xform.cpp
   workspace/SceneIO_Load.cpp
   workspace/SceneIO_Save.cpp
   assets/AssetLibrary.cpp
@@ -44,6 +45,12 @@ add_library(ts_editor
   screens/Editor2DScreen_Scripts.cpp
   screens/Editor2DScreen_Plugins.cpp
   editor3d/Gizmo3D.cpp
+  editor3d/Editor3DScreen_Transform.cpp
+  transform/ModalTransform.cpp
+  transform/ModalKeys.cpp
+  transform/GizmoShapes.cpp
+  transform/Gizmo2D.cpp
+  screens/Editor2DScreen_Transform.cpp
   editor3d/Editor3DScreen.cpp
   editor3d/Editor3DScreen_UI.cpp
   editor3d/Editor3DScreen_Panels.cpp
