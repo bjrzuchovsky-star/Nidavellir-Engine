@@ -4,6 +4,8 @@ All notable changes to TombStone Engine. The version number lives in the `VERSIO
 
 ## Unreleased (0.2.0)
 
+Work in progress for 0.2.0. Optional features ship as Trading Post plugins rather than in every game, starting with physics and player movement.
+
 ### Source engine formats (.mdl/.vtf/.vmt/.gma)
 - `.gma` addon import: **Asset Browser > Import... > Import Source addon (.gma)...** (or dropping a `.gma` on the editor window) opens a picker (addon name / author, files grouped as Models / Materials / Sounds / Other with checkboxes, CRC32 checked per file) and extracts the chosen files into `assets/Models/<Addon>/`, keeping Source paths. A selected `.mdl` brings its `.vvd` / `.vtx` / `.phy`; existing files are never overwritten; unsafe paths are refused. LZMA-compressed Workshop downloads (`.bin`) are decompressed by a new clean-room LZMA decoder. CLI: `ts_admin --import-gma <file> --claim <dir> [--dest] [--only] [--list]`.
 - Source materials are found far more often: each `$cdmaterials` folder is tried against the asset's search path, the folders above the model, the claim (including every addon extracted into it) and the new **Settings > Tools > Source content search folders** (with `garrysmod/`, `addons/*` and `download/` below them; Steam game folders are suggested, read-only). Missing ones keep the checker, and the model's `.meta` lists which `.vmt` files were tried where. **Relink...** in the Asset Browser fixes one by hand (`material_overrides`).
@@ -12,6 +14,16 @@ All notable changes to TombStone Engine. The version number lives in the `VERSIO
 - `.vtf` files are texture assets (info, thumbnails). Model `importer_version` is now 3, so models imported earlier re-resolve their materials on the next scan; **Reimport** now also reloads the model in the open scene.
 - Rights check: files extracted from a `.gma` are tagged in `.tombstone/provenance.json` (origin `gma:<addon>`, author); Source-format files count even untagged. Ship It warns "you need the rights to ship these" with an **I have the rights** acknowledgement per file or per claim (saved, never a block); `ts_admin --ack-rights`.
 - `ts_admin --smoke-gmod` (also in `--smoke`): everything above with generated files only. Docs: [docs/model-import.md](docs/model-import.md#source-engine-formats-mdlvtfvmtgma). TombStone is not affiliated with Valve or Facepunch; import and ship only content you have the rights to.
+
+### Physics and movement are Trading Post plugins
+- Five new built-in plugins (category **Engine**, off by default), listed in the Trading Post and the Outfitter's Wagon: **Jolt Physics (3D)** `ts.physics.jolt`, **Box2D Physics (2D)** `ts.physics.box2d`, **Rider 3D (first / third person)** `ts.move.rider3d` (mouse look with Look Mouse / Keys, Sensitivity, Invert Y, Smoothing and Capture cursor on Play), **Top-down Rider (2D)** `ts.move.topdown` (with Face mouse) and **Platformer Rider (2D)** `ts.move.platformer`. See [docs/physics.md](docs/physics.md).
+- The engine core keeps small interfaces (a physics world for 3D and 2D, rider controllers for 3D and 2D). The editor, scripting (Lua, graphs, C++ and C# hooks including `on_trigger_enter` / `on_trigger_exit`), VR grabbing and exported games all go through them.
+- A claim without the plugins still opens and plays. Without a physics plugin, bodies stay put while colliders and triggers still work. Without a movement plugin, the Player stands still. Either way the Telegraph says which plugin to switch on. VR rig locomotion doesn't need a rider plugin.
+- Templates list the plugins they need, and a new claim also gets whatever its scenes use. Adding a Player, Rigid Body, Joint, Grabbable or VR Rig in the editor switches on its plugin the next time you press Play, and the Telegraph says so. A plugin you switch off stays off.
+- **Older claims migrate on first open.** The editor adds the plugins the claim's scenes use and backs up `project.json` to `.tombstone/backup/project.json.pre-0.2.0` first. It also writes `.tombstone/plugin_split.json` and logs what it did to `.tombstone/migrations.log` and the Telegraph. A claim that uses no physics or Player is only marked. Until a claim is opened, `ts_game`, the servers and export add the plugins in memory, so nothing breaks.
+- **Exports ship only the plugins the claim uses.** The list goes into the cooked `project.json` and into `game.json` under `"plugins"`, and the export report has a `plugins:` line. `ts_game` prints what it rides with.
+- The scene formats are unchanged (Scene3D v16, 2D v11), and so are the Player and collider inspector settings.
+- `ts_admin --smoke-plugin-split` (also in `--smoke`) checks four things. Templates add their plugins automatically. An old claim migrates (backup, marker, log, a second open changes nothing, a plugin switched off stays off). 2D and 3D Play work with and without the plugins. Four exported games ship only their plugins, and each one runs.
 
 ## 0.1.2 — 2026-10-23
 
