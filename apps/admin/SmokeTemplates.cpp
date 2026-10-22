@@ -1,4 +1,5 @@
 #include "SmokeTemplates.h"
+#include "SmokeMouseLook.h"
 
 #include "editor/projects/ProjectStore.h"
 #include "editor/templates/TemplateStore.h"
@@ -242,6 +243,8 @@ int run_templates_smoke() {
   // editor, ridden headless for a few frames (SmokeTemplatesPlay.cpp).
   std::string play_note;
   if (run_template_play_smoke(&play_note) != 0) return 1;
+  // 9. Mouse look on the Empty templates' riders (see SmokeMouseLook.cpp).
+  if (ts::tombstone::run_mouselook_smoke() != 0) return 1;
 
   std::cout << "[smoke] templates OK (" << made
             << " engine templates created, VR switch, no seeding, Save as Template, generator fallback; "

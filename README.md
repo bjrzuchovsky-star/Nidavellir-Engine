@@ -84,7 +84,7 @@ Every system is built with performance as the primary goal:
 
 **Play (F5).**
 - The scene rides in a `World3D` copy, and Stop puts everything back.
-- The rider (Player component) is a capsule. WASD moves relative to the follow camera, Space jumps and E interacts (within 2.5 m). Q / Z or RMB turn the camera.
+- The rider (Player component) is a capsule. The mouse looks about: first person turns and tilts the view, third person orbits the camera (scroll zooms). Play captures the cursor; Esc frees it and a click in the view takes it back. WASD moves relative to the camera, Space jumps and E interacts (within 2.5 m). Q / Z and the right stick turn too. Set the Player's **Look** to **Keys** for the old keyboard turn. See [docs/projects-and-templates.md](docs/projects-and-templates.md#mouse-look-3d-player).
 - Collision is the capsule against static box / capsule colliders, with gravity. Trigger colliders fire enter / exit.
 - Lua scripts run as in 2D (`self:x()` / `self:y()` map to x / z). 3D adds `pos3`, `set_pos3`, `move3`, `yaw`, `set_yaw`, `spin(deg, axis)`, `scale3` and `set_scale3`.
 

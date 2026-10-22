@@ -357,6 +357,34 @@ void Editor3DScreen::draw_inspector() {
       ImGui::DragFloat("Eye height", &p.eye_height, 0.01f, 0.1f, 10.0f, "%.2f m");
       t.after("Eye height");
     }
+    using Look = scene3d::Player3D::Look;
+    int look = p.look == Look::Keys ? 1 : 0;
+    if (ImGui::Combo("Look", &look, "Mouse\0Keys (Q / Z, Page Up / Down)\0")) {
+      p.look = look == 1 ? Look::Keys : Look::Mouse;
+      t.activated = true;
+      t.commit = "Player look";
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip(p.view == scene3d::Player3D::View::FirstPerson
+                            ? "Mouse: turn the body and tilt the eyes with the mouse.\n"
+                              "Keys: Q / Z turn, Page Up / Down look, right-drag."
+                            : "Mouse: orbit the camera with the mouse, scroll to zoom.\n"
+                              "Keys: Q / Z or right-drag orbit.");
+    }
+    if (p.look == Look::Mouse) {
+      ImGui::DragFloat("Sensitivity", &p.mouse_sensitivity, 0.002f,
+                       scene3d::Player3D::kMinSensitivity, scene3d::Player3D::kMaxSensitivity,
+                       "%.3f deg / count", ImGuiSliderFlags_AlwaysClamp);
+      t.after("Mouse sensitivity");
+      ImGui::Checkbox("Invert Y", &p.invert_y);
+      t.after("Invert Y");
+      ImGui::SliderFloat("Smoothing", &p.smoothing, 0.0f, scene3d::Player3D::kMaxSmoothing,
+                         p.smoothing <= 0.0f ? "off" : "%.2f", ImGuiSliderFlags_AlwaysClamp);
+      t.after("Look smoothing");
+      ImGui::Checkbox("Capture cursor on Play", &p.capture_cursor);
+      t.after("Capture cursor");
+      ImGui::TextDisabled("Esc frees the cursor; click the view to look again.");
+    }
   }
   if (component("Camera", e.camera.has_value(), [&] { e.camera = scene3d::PlayCamera3D{}; },
                 [&] { e.camera.reset(); })) {

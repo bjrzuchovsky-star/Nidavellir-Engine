@@ -348,6 +348,9 @@ class Editor3DScreen final : public IScreen {
   void draw_telegraph();
   void handle_shortcuts();
   world3d::Input3D poll_play_input() const;
+ public:
+  bool look_captured() const { return look_captured_; }
+ private:
   void draw_vr_mirror();
   void draw_context_menu(std::uint64_t clicked);
   void draw_hierarchy_row(const scene3d::Entity3D& e, int depth);
@@ -384,6 +387,14 @@ class Editor3DScreen final : public IScreen {
   std::string inspector_label_;
   world3d::World3D world_;
   bool free_camera_in_play_ = false;
+  // Mouse look while riding (Player look = Mouse): the cursor is captured
+  // in the viewport; Esc, Pause, Free cam or losing focus free it, a click
+  // in the viewport takes it back. ImGui ignores the mouse while captured.
+  bool look_captured_ = false;
+  bool look_swallow_click_ = false;
+  double look_mx_ = 0.0, look_my_ = 0.0;
+  void set_look_capture(bool on);
+  void update_mouse_look(world3d::Input3D* in);
   std::vector<AssetEntry> assets_;
   std::vector<std::string> scripts_;
   std::vector<std::string> sounds_;  // project sounds (Audio Source picker)

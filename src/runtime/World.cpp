@@ -313,6 +313,48 @@ void World::step_players(const InputFrame& input) {
   }
 }
 
+void World::face_aim(Actor& a, const PlayerInput& in) {
+  if (!a.data.player || !a.data.player->face_mouse ||
+      a.data.player->mode != PlayerControllerData::Mode::TopDown) {
+    a.aiming = false;
+    return;
+  }
+  a.aiming = true;
+  if (!in.aim) return;  // no cursor this tick: keep the last heading
+  const float dx = in.aim_x - (a.data.x + a.data.w * 0.5f);
+  const float dy = in.aim_y - (a.data.y + a.data.h * 0.5f);
+  if (dx * dx + dy * dy < 1.0f) return;  // on top of the rider: hold still
+  a.aim_deg = top_down_aim_degrees(dx, dy);
+}
+
+float top_down_aim_degrees(float dx, float dy) {
+  // atan2 on screen axes (y down) is clockwise from +x; art faces up.
+  float deg = std::atan2(dy, dx) * 57.29577951308232f + 90.0f;
+  if (deg < 0.0f) deg += 360.0f;
+  if (deg >= 360.0f) deg -= 360.0f;
+  return deg;
+}
+
+void aim_at_screen(PlayerInput* in, const CameraView& cam, float view_w, float view_h,
+                   float sx, float sy) {
+  if (!in || view_w <= 0.0f || view_h <= 0.0f) return;
+  const WorldRect r = World::view_rect(cam, view_w, view_h);
+  in->aim = true;
+  in->aim_x = r.x0 + sx / view_w * (r.x1 - r.x0);
+  in->aim_y = r.y0 + sy / view_h * (r.y1 - r.y0);
+}
+
+bool aim_along_stick(PlayerInput* in, const World& world, int slot, float x, float y) {
+  if (!in || x * x + y * y < 0.3f * 0.3f) return false;
+  const Actor* p = world.player(slot);
+  if (!p) return false;
+  const float len = std::sqrt(x * x + y * y);
+  in->aim = true;
+  in->aim_x = p->data.x + p->data.w * 0.5f + x / len * 128.0f;
+  in->aim_y = p->data.y + p->data.h * 0.5f + y / len * 128.0f;
+  return true;
+}
+
 void World::move_rider(Actor& a, const PlayerInput& in) {
   const float dt = static_cast<float>(kTickSeconds);
   float mx = std::clamp(in.move_x, -1.0f, 1.0f);
@@ -362,6 +404,7 @@ void World::move_rider(Actor& a, const PlayerInput& in) {
     return;
   }
   move_body(a, mx * a.data.player->speed * dt, my * a.data.player->speed * dt);
+  face_aim(a, in);
   // Report what actually happened (0 when stopped flush on a wall).
   a.vx = (a.data.x - x0) / dt;
   a.vy = (a.data.y - y0) / dt;
@@ -569,7 +612,7 @@ void World::build_draw_list(const WorldRect& view, float alpha,
       q.rgba[i] = e.color[i];
     }
     q.entity = e.id;
-    q.rotation = e.rotation;
+    q.rotation = e.rotation + (a.aiming ? a.aim_deg : 0.0f);
     const AnimLibrary::Entry* anim = anim_set(a);
     if (anim && anim->ok) {
       const AnimClip* clip = anim->set.find(a.anim.clip);

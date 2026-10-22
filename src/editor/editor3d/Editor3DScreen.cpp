@@ -148,9 +148,11 @@ AppState Editor3DScreen::on_update(float delta_seconds) {
     vr_preview_frame(delta_seconds);
     for (const world3d::Toast3D& t : world_.take_toasts()) toasts_.push_back({t.text, t.seconds});
   } else if (playing()) {
-    world_.update(delta_seconds, ImGui::GetCurrentContext() && !play_ui_.wants_input()
-                                     ? poll_play_input()
-                                     : world3d::Input3D{});
+    world3d::Input3D in = ImGui::GetCurrentContext() && !play_ui_.wants_input()
+                              ? poll_play_input()
+                              : world3d::Input3D{};
+    update_mouse_look(&in);
+    world_.update(delta_seconds, in);
     ui::apply_ui_commands(play_ui_.system(), world_.take_ui_commands());
     for (const world3d::Toast3D& t : world_.take_toasts()) toasts_.push_back({t.text, t.seconds});
   }
@@ -731,7 +733,61 @@ bool Editor3DScreen::play_start() {
   play_ui_.load(project_.path);
   if (debug_tools_on_) debug_tools_.attach(play_ui_.system());
   note("Riding \"" + project_.name + "\" (Stop puts everything back)");
+  if (world_.wants_cursor_capture() && !free_camera_in_play_) {
+    set_look_capture(true);
+    if (look_captured_) note("Mouse look: Esc frees the cursor, click the view to look again");
+  }
   return true;
+}
+
+void Editor3DScreen::set_look_capture(bool on) {
+  GLFWwindow* win = glfwGetCurrentContext();
+  if (!win || !ImGui::GetCurrentContext()) on = false;  // headless smokes
+  if (on == look_captured_) return;
+  look_captured_ = on;
+  if (win) {
+    glfwSetInputMode(win, GLFW_CURSOR, on ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+    if (glfwRawMouseMotionSupported()) {
+      glfwSetInputMode(win, GLFW_RAW_MOUSE_MOTION, on ? GLFW_TRUE : GLFW_FALSE);
+    }
+    glfwGetCursorPos(win, &look_mx_, &look_my_);
+  }
+  if (ImGui::GetCurrentContext()) {
+    ImGuiIO& io = ImGui::GetIO();
+    if (on) io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
+    else io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+  }
+}
+
+void Editor3DScreen::update_mouse_look(world3d::Input3D* in) {
+  GLFWwindow* win = glfwGetCurrentContext();
+  if (!win || !ImGui::GetCurrentContext()) return;
+  const bool focused = glfwGetWindowAttrib(win, GLFW_FOCUSED) == GLFW_TRUE;
+  const bool want = world_.wants_cursor_capture() && !free_camera_in_play_;
+  // Focus loss, Pause, Free cam or an in-game menu: hand the cursor back.
+  if (look_captured_ && (!want || !focused || world_.paused() || play_ui_.wants_input())) {
+    set_look_capture(false);
+  }
+  double mx = 0.0, my = 0.0;
+  glfwGetCursorPos(win, &mx, &my);
+  const float dx = static_cast<float>(mx - look_mx_), dy = static_cast<float>(my - look_my_);
+  look_mx_ = mx;
+  look_my_ = my;
+  const ImGuiIO& io = ImGui::GetIO();
+  if (world_.mouse_look() && !free_camera_in_play_) {
+    // Captured: every count looks. Capture off: the free cursor looks
+    // while it moves over the viewport.
+    if (look_captured_ || (!world_.wants_cursor_capture() && viewport_hovered_)) {
+      in->mouse_dx = dx;
+      in->mouse_dy = dy;
+    }
+  }
+  if (!free_camera_in_play_ && (look_captured_ || viewport_hovered_)) in->zoom = io.MouseWheel;
+  // The click that took the cursor back is not a throw.
+  if (look_swallow_click_) {
+    in->throw_held = false;
+    if (!glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT)) look_swallow_click_ = false;
+  }
 }
 
 void Editor3DScreen::play_stop() {
@@ -742,6 +798,7 @@ void Editor3DScreen::play_stop() {
     vr_status_.clear();
   }
   end_sound();
+  set_look_capture(false);
   if (!playing()) return;
   world_.stop();
   toasts_.clear();

@@ -209,6 +209,7 @@ bool apply_components(Entity2D& e, const FlatMap& nested, std::string* why) {
     }
     p.gravity = map_float(*pl, "gravity", p.gravity);
     p.jump_speed = map_float(*pl, "jump_speed", p.jump_speed);
+    p.face_mouse = map_bool(*pl, "face_mouse", false);
     e.player = p;
   } else if (nested.count("player")) {
     return bad("bad player object");
@@ -471,6 +472,7 @@ void write_entity(std::ostringstream& out, const Entity2D& e) {
       out << ", \"mode\": \"platformer\", \"gravity\": " << format_float(e.player->gravity)
           << ", \"jump_speed\": " << format_float(e.player->jump_speed);
     }
+    if (e.player->face_mouse) out << ", \"face_mouse\": true";
     out << "}";
   }
   if (e.camera) {

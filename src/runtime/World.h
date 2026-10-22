@@ -70,6 +70,11 @@ struct Actor {
   // is +) and whether the latest tick ended standing on something solid.
   float fall_vy = 0.0f;
   bool grounded = false;
+  // Top-down "face mouse" riders: where the sprite looks, degrees clockwise
+  // from facing up (0 = up, 90 = right; y grows down). Added to the drawn
+  // rotation only; colliders keep the authored rotation.
+  bool aiming = false;
+  float aim_deg = 0.0f;
   AnimState anim;
   // Script-driven state (World_Script.cpp).
   bool hidden = false;   // hide(): skipped by the draw list
@@ -79,6 +84,10 @@ struct Actor {
   std::map<std::string, ScriptValue> state;  // e:get / e:set
 };
 
+// Top-down "face mouse": the sprite turn (degrees clockwise from facing
+// up, 0..360) that looks along (dx, dy) on screen axes (y grows down).
+float top_down_aim_degrees(float dx, float dy);
+
 // What the camera shows: world point at the view centre plus scale
 // (screen px per world px).
 struct CameraView {
@@ -86,6 +95,15 @@ struct CameraView {
   float y = 0.0f;
   float zoom = 1.0f;
 };
+
+class World;
+// Hosts: aim a slot at the mouse cursor (sx, sy in pixels, top-left
+// origin) over a view of view_w x view_h pixels showing `cam`.
+void aim_at_screen(PlayerInput* in, const CameraView& cam, float view_w, float view_h,
+                   float sx, float sy);
+// Hosts: aim a slot along a stick (x, y in -1..1, y down) from that slot's
+// rider. False (aim untouched) while the stick rests in its dead zone.
+bool aim_along_stick(PlayerInput* in, const World& world, int slot, float x, float y);
 
 struct WorldRect {
   float x0 = 0.0f;
@@ -481,6 +499,7 @@ class World final : public ScriptWorld {
   void step_players(const InputFrame& input);
   // One rider, one tick of input (step_players / predict_rider).
   void move_rider(Actor& a, const PlayerInput& in);
+  void face_aim(Actor& a, const PlayerInput& in);  // top-down face_mouse riders
   void step_camera();
   void setup_animation();
   void setup_actor_animation(Actor& a);

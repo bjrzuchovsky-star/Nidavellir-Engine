@@ -99,6 +99,7 @@ Entity2D player_2d(std::uint64_t id, float x, float y, bool platformer) {
   PlayerControllerData pc;
   pc.speed = platformer ? 200.0f : 160.0f;
   if (platformer) pc.mode = PlayerControllerData::Mode::Platformer;
+  else pc.face_mouse = true;  // top-down: the sprite looks at the mouse
   p.player = pc;
   p.collider = default_collider(p);
   ScriptData s;
@@ -199,12 +200,14 @@ bool write_2d(const std::string& id, const fs::path& dir, const std::string& nam
     doc.selected_id = 3;
     doc.selection = {3};
     title = "Empty 2D Top-down";
-    what = "A top-down 2D claim: a Player with top-down movement (Player Controller, slot P1) "
-           "and a collider, a follow camera (Camera2D) and an empty tilemap layer.";
-    play = "WASD / arrow keys / the left stick move the player on both axes. Solid tiles and "
-           "static colliders block it.";
+    what = "A top-down 2D claim: a Player with top-down movement (Player Controller, slot P1, "
+           "Face mouse on) and a collider, a follow camera (Camera2D) and an empty tilemap layer.";
+    play = "WASD / arrow keys / the left stick move the player on both axes, and it turns to "
+           "face the mouse cursor (or the right stick). Solid tiles and static colliders block "
+           "it.";
     next = "- Paint walls with solid tiles (Stone, Brick, Water...) on the TileMap.\n"
-           "- Give the Player a sprite and an animator (idle_/walk_ clips per direction).\n"
+           "- Give the Player a sprite drawn facing up (it turns toward the mouse), or untick "
+           "Face mouse and use an animator with idle_/walk_ clips per direction.\n"
            "- Write your rules in scripts/player.lua.";
   } else {  // empty-2d-platformer
     Entity2D map = tilemap_2d(2, 40, 12);
@@ -315,6 +318,7 @@ Entity3D player_3d(std::uint64_t id, bool first_person) {
   c.size = {0.4f, 2.0f, 0.4f};
   p.collider = c;
   scene3d::Player3D pl;
+  pl.look = scene3d::Player3D::Look::Mouse;  // mouse look, cursor captured on Play
   if (first_person) {
     pl.view = scene3d::Player3D::View::FirstPerson;
     pl.eye_height = 1.6f;
@@ -362,8 +366,10 @@ bool write_3d(const std::string& id, const fs::path& dir, const std::string& nam
     what = "A first-person 3D claim: an FPS character controller (Player component, View: "
            "First person, capsule collider), its Camera at eye height (a child of the player), a "
            "sun, a sky and a ground plane.";
-    play = "WASD move, Space jumps, Q / Z or right-drag turn, right-drag / Page Up / Page Down "
-           "look up and down, E interacts.";
+    play = "The mouse looks (Play captures the cursor; Esc frees it, click the view to look "
+           "again), WASD move where you look, Space jumps, E interacts. A gamepad's right stick "
+           "looks too. Q / Z and Page Up / Page Down still turn and tilt; set the Player's Look "
+           "to Keys to leave the cursor alone.";
     next = "- Move the Camera child to change the eye point; its FOV is the view's FOV.\n"
            "- Add level geometry with Create > Primitive or glTF models.\n"
            "- Write your rules in scripts/player.lua.";
@@ -376,8 +382,10 @@ bool write_3d(const std::string& id, const fs::path& dir, const std::string& nam
     what = "A third-person 3D claim: a character controller (Player component, capsule mesh "
            "and collider) with the orbit camera behind it (Cam distance 5 m, Cam height 2 m), a "
            "sun, a sky and a ground plane.";
-    play = "WASD move relative to the camera, Space jumps, Q / Z or right-drag orbit the "
-           "camera, E interacts.";
+    play = "The mouse orbits the camera round the player (Play captures the cursor; Esc frees "
+           "it, click the view to look again) and the scroll wheel zooms. WASD move relative to "
+           "the camera and the player turns to face where it walks. Space jumps, E interacts. Q / "
+           "Z still orbit; set the Player's Look to Keys to leave the cursor alone.";
     next = "- Swap the capsule for a skinned glTF and add an Animator (idle / walk / run).\n"
            "- Add level geometry with Create > Primitive or glTF models.\n"
            "- Write your rules in scripts/player.lua.";

@@ -288,6 +288,11 @@ runtime::InputFrame Editor2DScreen::poll_play_input() const {
     if (ImGui::IsKeyDown(ImGuiKey_C)) keys.buttons |= runtime::kButtonFire;
     if (ImGui::IsKeyDown(ImGuiKey_X)) keys.buttons |= runtime::kButtonNext;
     if (ImGui::IsKeyDown(ImGuiKey_Q)) keys.buttons |= runtime::kButtonPrev;
+    if (play_aim_) {
+      keys.aim = true;
+      keys.aim_x = play_aim_x_;
+      keys.aim_y = play_aim_y_;
+    }
     frame.slot(0) = keys;
   }
   // Gamepads 1-4 ride slots 0-3 (slot 0 shares with the keyboard).
@@ -308,6 +313,10 @@ runtime::InputFrame Editor2DScreen::poll_play_input() const {
       if (pad.buttons[GLFW_GAMEPAD_BUTTON_A]) in.buttons |= runtime::kButtonAction;
       if (pad.buttons[GLFW_GAMEPAD_BUTTON_B]) in.buttons |= runtime::kButtonAlt;
       if (pad.buttons[GLFW_GAMEPAD_BUTTON_START]) in.buttons |= runtime::kButtonStart;
+      if (is_playing()) {
+        runtime::aim_along_stick(&in, play_.world(), slot, pad.axes[GLFW_GAMEPAD_AXIS_RIGHT_X],
+                                 pad.axes[GLFW_GAMEPAD_AXIS_RIGHT_Y]);
+      }
       frame.slot(slot) = runtime::merge_input(frame.slot(slot), in);
     }
   }
@@ -562,6 +571,13 @@ void Editor2DScreen::draw_play_viewport() {
       play_free_cam_
           ? runtime::CameraView{play_cam_x_, play_cam_y_, play_cam_zoom_}
           : world.camera(alpha);
+  // Face-mouse riders look at the cursor while it is over the canvas.
+  play_aim_ = hovered && !play_free_cam_;
+  if (play_aim_) {
+    const float z = cam.zoom > 0.0f ? cam.zoom : 1.0f;
+    play_aim_x_ = cam.x + (io.MousePos.x - canvas_pos.x - canvas_size.x * 0.5f) / z;
+    play_aim_y_ = cam.y + (io.MousePos.y - canvas_pos.y - canvas_size.y * 0.5f) / z;
+  }
   auto to_screen = [&](float wx, float wy) {
     return ImVec2(canvas_pos.x + canvas_size.x * 0.5f + (wx - cam.x) * cam.zoom,
                   canvas_pos.y + canvas_size.y * 0.5f + (wy - cam.y) * cam.zoom);
@@ -710,6 +726,19 @@ void Editor2DScreen::draw_inspector_gameplay(std::uint64_t id) {
                                      : PlayerControllerData::Mode::TopDown;
         }
       });
+    }
+    if (const Entity2D* t = workspace_.find(id);
+        t && t->player && t->player->mode == PlayerControllerData::Mode::TopDown) {
+      bool face = t->player->face_mouse;
+      if (ImGui::Checkbox("Face mouse", &face)) {
+        edit(face ? "Player Faces Mouse" : "Player Faces Ahead", "", [&](Entity2D& t) {
+          if (t.player) t.player->face_mouse = face;
+        });
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Turn the sprite toward the mouse cursor (or the right stick) while "
+                          "riding. Draw the art facing up; the collider does not turn.");
+      }
     }
     if (Entity2D* t = workspace_.find(id);
         t && t->player && t->player->mode == PlayerControllerData::Mode::Platformer) {

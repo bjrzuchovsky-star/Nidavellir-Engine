@@ -56,6 +56,7 @@
 #include "VaultCli.h"
 #include "SmokeUpdate.h"
 #include "SmokeTeam.h"
+#include "SmokeMouseLook.h"
 #include "editor/vault/VaultPanel.h"
 int run_terrain_shot(const std::string& png);
 #include "store/TradingPost.h"
@@ -2173,6 +2174,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-team") == 0) {
       // Live Team Claims: server + headless editors, convergence, locks.
       return ts::tombstone::run_team_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-mouselook") == 0) {
+      // Mouse look: synthetic deltas through the 3D rider and 2D face-mouse.
+      return ts::tombstone::run_mouselook_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-update-check") == 0) {
       // Update notifier: version compare, asset choice, verified download (no internet).
