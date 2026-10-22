@@ -7,7 +7,7 @@ These pages are written from the source in this repository (`src/`, `apps/`, `sd
 | [Getting started (Windows, VS2022, CMake)](getting-started.md) | Requirements, configure and build, the executables, first run, smoke tests |
 | [Editor guide](editor-guide.md) | Admin flow, the 2D and 3D editors, tools, TileMaps, the Stable, Play mode, the Telegraph |
 | [Prefabs](prefabs.md) | `.prefab.json` assets in the 2D and 3D editors: instances, overrides, apply / revert, undo, `--smoke-prefab` |
-| [Assets](assets.md) | Asset browser, importers, `.meta` GUIDs, move-safe references, hot reload, `--smoke-assets` |
+| [Assets](assets.md) | Asset browser, importers, `.meta` GUIDs in `.tombstone/meta`, sorted imports, move-safe references, hot reload, `--smoke-assets`, `--smoke-meta` |
 | [Model import](model-import.md) | glTF, Source `.mdl` (GMod), OBJ, FBX, DAE, PLY, STL, X and more through Assimp, `.blend` via Blender; import settings, VMT / VTF, limits, `--smoke-models` / `--smoke-mdl` |
 | [The Vault](vault.md) | The asset library shared by every claim: local folder or self-hosted `ts_vault` server, Send to Vault / Pull, GUID-stable pulls, versions and pins, API, CLI, hosting, `--smoke-vault` |
 | [Project types and templates](projects-and-templates.md) | 2D / 3D / VR, `project.json`, claim templates, plugins per project |

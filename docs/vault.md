@@ -23,7 +23,7 @@ Pick the library under **Vault > Settings** (password field for the API key, **T
 
 An item is one asset with everything it needs. Its id is the main asset's GUID.
 
-- The files: the main file, its `.meta` (GUID and import settings), and the files it needs that are not assets of their own (a glTF's `.bin`, an `.mtl`).
+- The files: the main file, its `.meta` (GUID and import settings, read from `.tombstone/meta`), and the files it needs that are not assets of their own (a glTF's `.bin`, an `.mtl`).
 - Its **dependencies**: other items it uses. A model depends on its textures (glTF `images[].uri`, OBJ `map_*`), and a prefab depends on the models, textures and prefabs it names. Pulling an item pulls its dependencies too.
 - A name, kind (texture, model, audio, font, prefab), tags, **2D / 3D / VR** tags, an author, a licence, a description, and a thumbnail (made from the texture, or a model's first texture; PNG, at most 128 px).
 - **Versions**. Sending an asset again whose files changed makes a new version (v2, v3, …) with an optional note. Sending unchanged files makes no new version but updates the metadata. When a dependency gets a new version, the item that uses it gets one too.
@@ -41,7 +41,7 @@ Network and disk work runs off the main thread. While a job is running, the Asse
 
 ## How a pull keeps references stable
 
-A pull copies the files and the `.meta` with the **same GUID**. Files go to the paths they had in the claim they were sent from (`assets/models/crate.gltf`), because scenes name assets by path. If the GUID already lives elsewhere in this claim (you moved the file), the pull writes to that location instead. The `.meta`'s `path` field is rewritten to the destination, so the next Asset Browser scan sees a known asset, not a move or a copy.
+A pull copies the files and the `.meta` with the **same GUID**. The `.meta` goes into the claim's metadata folder (`.tombstone/meta/<path>.meta`, see [assets.md](assets.md)). In the library it's still named by its sidecar path (`assets/models/crate.gltf.meta`), so items sent from claims that kept sidecar `.meta` files pull the same way and are converted on arrival. When the claim sorts imports (the default), a **new** item goes to a type folder: a model and the texture items it depends on go to `assets/Models/<Name>/` with their relative layout kept, so its texture paths still work, and a texture, sound or font goes to `assets/Textures/`, `assets/Audio/` or `assets/Fonts/`. Prefabs, which name their parts by path, keep the paths from the claim they were sent from. So does everything when sorting is off (`assets/models/crate.gltf`). If the GUID already lives elsewhere in this claim (you moved the file), or the claim's lock file already lists the item, the pull writes to that location instead. The `.meta`'s `path` field is rewritten to the destination, so the next Asset Browser scan sees a known asset, not a move or a copy.
 
 A pull refuses to overwrite:
 
