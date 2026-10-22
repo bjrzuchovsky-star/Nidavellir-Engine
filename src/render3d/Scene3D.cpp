@@ -188,6 +188,18 @@ Value entity_json(const Entity3D& e) {
       p.set("view", Value::string("first_person"));
       p.set("eye_height", Value::number(e.player->eye_height));
     }
+    // Look settings: only what differs from the defaults (older files and
+    // untouched riders stay byte-identical).
+    const Player3D def;
+    if (e.player->look == Player3D::Look::Keys) p.set("look", Value::string("keys"));
+    if (e.player->mouse_sensitivity != def.mouse_sensitivity) {
+      p.set("mouse_sensitivity", Value::number(e.player->mouse_sensitivity));
+    }
+    if (e.player->invert_y) p.set("invert_y", Value::boolean(true));
+    if (e.player->smoothing != def.smoothing) {
+      p.set("look_smoothing", Value::number(e.player->smoothing));
+    }
+    if (!e.player->capture_cursor) p.set("capture_cursor", Value::boolean(false));
     o.set("player", std::move(p));
   }
   if (e.camera) {
@@ -345,6 +357,13 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     p.camera_height = std::clamp(v.flt("camera_height", p.camera_height), -20.0f, 50.0f);
     if (v.str("view") == "first_person") p.view = Player3D::View::FirstPerson;
     p.eye_height = std::clamp(v.flt("eye_height", p.eye_height), 0.1f, 10.0f);
+    // Optional (no version bump): a missing "look" means mouse look.
+    if (v.str("look") == "keys") p.look = Player3D::Look::Keys;
+    p.mouse_sensitivity = std::clamp(v.flt("mouse_sensitivity", p.mouse_sensitivity),
+                                     Player3D::kMinSensitivity, Player3D::kMaxSensitivity);
+    p.invert_y = v.flag("invert_y", p.invert_y);
+    p.smoothing = std::clamp(v.flt("look_smoothing", p.smoothing), 0.0f, Player3D::kMaxSmoothing);
+    p.capture_cursor = v.flag("capture_cursor", p.capture_cursor);
     e.player = p;
   }
   if (o["camera"].is_object()) {

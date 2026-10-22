@@ -57,6 +57,25 @@ void print_log(world3d::World3D& w, std::size_t* seen) {
   *seen = log.size();
 }
 
+// Scroll steps since the last frame (third-person zoom).
+double g_scroll = 0.0;
+void on_scroll_3d(GLFWwindow*, double, double dy) { g_scroll += dy; }
+
+float stick_deadzone(float v) {
+  constexpr float kDead = 0.2f;
+  if (std::fabs(v) < kDead) return 0.0f;
+  const float s = (std::fabs(v) - kDead) / (1.0f - kDead);
+  return v < 0.0f ? -s : s;
+}
+
+// Mouse look: hide + lock the cursor (raw motion where the platform has it).
+void capture_cursor(GLFWwindow* win, bool on) {
+  glfwSetInputMode(win, GLFW_CURSOR, on ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+  if (glfwRawMouseMotionSupported()) {
+    glfwSetInputMode(win, GLFW_RAW_MOUSE_MOTION, on ? GLFW_TRUE : GLFW_FALSE);
+  }
+}
+
 int fail(const std::string& what) {
   std::cerr << "[smoke] ts_game 3D FAILED: " << what << '\n';
   return 1;
@@ -223,6 +242,22 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
       GameUi gui;
       gui.load(dir);
       gui.attach(win);
+      // Mouse look: the cursor is captured while riding; Esc (the pause
+      // menu) or losing focus lets it go, a click in the window (or
+      // resuming from the menu) takes it back.
+      bool captured = false, swallow_click = false, was_menu = false;
+      auto set_captured = [&](bool on) {
+        if (on == captured) return;
+        captured = on;
+        capture_cursor(win, on);
+        glfwGetCursorPos(win, &mx0, &my0);  // no jump on the next delta
+      };
+      if (world.wants_cursor_capture()) {
+        set_captured(true);
+        std::cout << "[ts_game] mouse look: cursor captured (Esc frees it, click to look again)\n";
+      }
+      g_scroll = 0.0;
+      glfwSetScrollCallback(win, on_scroll_3d);
       gui.enable_debug_tools(prof);
       bool menu_paused = false;
       double ui_last = glfwGetTime();
@@ -246,28 +281,60 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
         }
         const bool keys_free = !gui.wants_input();
         auto key = [&](int k) { return keys_free && glfwGetKey(win, k) == GLFW_PRESS; };
+        const bool focused = glfwGetWindowAttrib(win, GLFW_FOCUSED) == GLFW_TRUE;
+        const bool menu = gui.pause_open() || gui.wants_input();
+        const bool lmb = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+        if (captured && (menu || !focused)) set_captured(false);
+        if (!captured && world.wants_cursor_capture() && focused && !menu && (was_menu || lmb)) {
+          set_captured(true);
+          swallow_click = lmb;  // the click that took the cursor back is not a grab
+        }
+        was_menu = menu;
+        if (!lmb) swallow_click = false;
         world3d::Input3D in;
         in.move_right = (key(GLFW_KEY_D) || key(GLFW_KEY_RIGHT) ? 1.0f : 0.0f) -
                         (key(GLFW_KEY_A) || key(GLFW_KEY_LEFT) ? 1.0f : 0.0f);
         in.move_forward = (key(GLFW_KEY_W) || key(GLFW_KEY_UP) ? 1.0f : 0.0f) -
                           (key(GLFW_KEY_S) || key(GLFW_KEY_DOWN) ? 1.0f : 0.0f);
+        // Keyboard turn works in both look modes (the fallback).
         in.turn = (key(GLFW_KEY_Q) ? 2.0f : 0.0f) - (key(GLFW_KEY_Z) ? 2.0f : 0.0f);
         double mx = 0, my = 0;
         glfwGetCursorPos(win, &mx, &my);
-        if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
-          in.turn -= static_cast<float>(mx - mx0) * 0.3f;
-          in.look -= static_cast<float>(my - my0) * 0.3f;  // first person
+        const float dx = static_cast<float>(mx - mx0), dy = static_cast<float>(my - my0);
+        if (world.mouse_look()) {
+          // Captured: every count looks. Capture off: the free cursor looks
+          // while it moves over the focused window.
+          if (!menu && focused && (captured || !world.wants_cursor_capture())) {
+            in.mouse_dx = dx;
+            in.mouse_dy = dy;
+          }
+        } else if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+          in.turn -= dx * 0.3f;  // Keys look: right-drag turns
+          in.look -= dy * 0.3f;
         }
         in.look += (key(GLFW_KEY_PAGE_UP) ? 2.0f : 0.0f) - (key(GLFW_KEY_PAGE_DOWN) ? 2.0f : 0.0f);
         mx0 = mx;
         my0 = my;
-        in.jump = key(GLFW_KEY_SPACE);
+        if (!menu) in.zoom = static_cast<float>(g_scroll);
+        g_scroll = 0.0;
+        // Pad 1: left stick walks, right stick looks, A jumps.
+        GLFWgamepadstate pad;
+        if (keys_free && glfwGetGamepadState(GLFW_JOYSTICK_1, &pad)) {
+          const float lx = stick_deadzone(pad.axes[GLFW_GAMEPAD_AXIS_LEFT_X]);
+          const float ly = stick_deadzone(pad.axes[GLFW_GAMEPAD_AXIS_LEFT_Y]);
+          if (std::fabs(lx) > std::fabs(in.move_right)) in.move_right = lx;
+          if (std::fabs(ly) > std::fabs(in.move_forward)) in.move_forward = -ly;
+          in.stick_x = stick_deadzone(pad.axes[GLFW_GAMEPAD_AXIS_RIGHT_X]);
+          in.stick_y = stick_deadzone(pad.axes[GLFW_GAMEPAD_AXIS_RIGHT_Y]);
+          in.jump = pad.buttons[GLFW_GAMEPAD_BUTTON_A] == GLFW_PRESS;
+        }
+        in.jump = in.jump || key(GLFW_KEY_SPACE);
         const bool action = key(GLFW_KEY_E);
         in.action = action && !prev_action;
         prev_action = action;
         // Physics gun: hold F (or the left mouse button) to carry the body
         // ahead; G throws it.
-        in.grab = key(GLFW_KEY_F) || glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+        in.grab = key(GLFW_KEY_F) || (keys_free && lmb && !swallow_click);
         const bool throw_key = key(GLFW_KEY_G);
         in.throw_held = throw_key && !prev_throw;
         prev_throw = throw_key;
@@ -278,6 +345,7 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
           scene3d::Scene3D fresh;
           if (scene3d::load_file(scene3d::scene_path(dir), &fresh, &err) &&
               world.start(fresh, dir, &err)) {
+            if (!world.wants_cursor_capture()) set_captured(false);
             view.clear();
             sound.restart(dir, true);
             sound3d.reset();
@@ -323,6 +391,8 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
         profiler::Profiler::get().end_frame();
         if (frames >= 0 && ++n >= frames) break;
       }
+      glfwSetScrollCallback(win, nullptr);
+      set_captured(false);
       gui.detach(win);
       std::cout << "[ts_game] rode " << world.tick() << " ticks. So long.\n";
       world.stop();

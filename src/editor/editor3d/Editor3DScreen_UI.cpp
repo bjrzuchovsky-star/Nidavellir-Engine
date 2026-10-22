@@ -390,6 +390,11 @@ void Editor3DScreen::draw_status_bar() {
                      : " | VR preview: headset (" + vr_status_ + ")";
   } else if (playing()) {
     play_state = world_.grounded() ? " | rider grounded" : " | rider airborne";
+    if (world_.mouse_look() && !free_camera_in_play_) {
+      play_state += look_captured_ ? " | mouse look (Esc frees the cursor)"
+                    : world_.wants_cursor_capture() ? " | click the view to look"
+                                                    : " | mouse look";
+    }
   }
   ImGui::TextDisabled("%s | %zu entities | %zu sel | %zu draws, %zu tris, %zu lights | %s%s",
                       renderer_backend(), scene_.entities.size(), selection().size(),
@@ -431,7 +436,11 @@ void Editor3DScreen::handle_shortcuts() {
   }
   if (playing()) {
     if (ImGui::IsKeyPressed(ImGuiKey_C, false)) free_camera_in_play_ = !free_camera_in_play_;
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) play_stop();
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+      // Mouse look: the first Esc frees the cursor, the next one stops.
+      if (look_captured_) set_look_capture(false);
+      else play_stop();
+    }
     return;
   }
   if (io.KeyCtrl) {
@@ -498,6 +507,13 @@ void Editor3DScreen::draw_viewport() {
   viewport_hovered_ = ImGui::IsItemHovered();
   viewport_focused_ = ImGui::IsWindowFocused();
   const ImGuiIO& io = ImGui::GetIO();
+  // Mouse look: a click in the Play view takes the cursor back.
+  if (playing() && !vr_previewing() && !look_captured_ && !free_camera_in_play_ &&
+      !world_.paused() && viewport_hovered_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+      world_.wants_cursor_capture() && !play_ui_.wants_input()) {
+    set_look_capture(true);
+    look_swallow_click_ = look_captured_;
+  }
   const float mx = io.MousePos.x - origin.x, my = io.MousePos.y - origin.y;
 
   // Asset drops.
@@ -621,6 +637,10 @@ void Editor3DScreen::draw_viewport() {
   }
   if (playing()) {
     const char* hint = "WASD move, Space jump, E interact, RMB/Q/Z turn camera, Esc stops";
+    if (world_.mouse_look() && !free_camera_in_play_) {
+      hint = look_captured_ ? "Mouse looks, WASD move, Space jump, E interact, Esc frees the cursor"
+                            : "Click the view to look, WASD move, Space jump, E interact, Esc stops";
+    }
     if (vr_previewing()) {
       hint = (vr_session_ && vr_session_->simulated())
                  ? "VR sim: RMB look, WASD move, Q/E turn, T teleport, LMB trigger, "

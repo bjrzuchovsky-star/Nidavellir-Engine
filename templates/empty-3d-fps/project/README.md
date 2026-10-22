@@ -4,7 +4,7 @@ A first-person 3D claim: an FPS character controller (Player component, View: Fi
 
 ## Play
 
-WASD move, Space jumps, Q / Z or right-drag turn, right-drag / Page Up / Page Down look up and down, E interacts.
+The mouse looks (Play captures the cursor; Esc frees it, click the view to look again), WASD move where you look, Space jumps, E interacts. A gamepad's right stick looks too. Q / Z and Page Up / Page Down still turn and tilt; set the Player's Look to Keys to leave the cursor alone.
 
 ## Next steps
 

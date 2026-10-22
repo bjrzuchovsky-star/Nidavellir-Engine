@@ -183,6 +183,20 @@ struct Player3D {
   float camera_height = 2.5f;
   View view = View::ThirdPerson;  // "view": "first_person" in scene.json
   float eye_height = 1.6f;        // first person: metres above the feet
+  // Looking about. Mouse (the default): the mouse turns the view (first
+  // person: yaw on the body, pitch on the eyes; third person: it orbits the
+  // camera) and Play captures the cursor. Keys: the old Q / Z turn, Page Up
+  // / Page Down look and right-drag, cursor left alone. Q / Z, Page Up /
+  // Page Down and a gamepad's right stick work in both modes.
+  enum class Look : std::uint8_t { Mouse, Keys };
+  static constexpr float kMinSensitivity = 0.01f;  // degrees per mouse count
+  static constexpr float kMaxSensitivity = 2.0f;
+  static constexpr float kMaxSmoothing = 0.9f;
+  Look look = Look::Mouse;          // "look": "keys" in scene.json
+  float mouse_sensitivity = 0.15f;  // degrees per mouse count
+  bool invert_y = false;            // mouse / stick up looks down
+  float smoothing = 0.0f;           // 0 = off .. 0.9 = heavy (per-tick ease)
+  bool capture_cursor = true;       // hide + lock the cursor while riding
   bool operator==(const Player3D& o) const = default;
 };
 

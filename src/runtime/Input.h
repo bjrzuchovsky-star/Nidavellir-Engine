@@ -32,6 +32,12 @@ struct PlayerInput {
   float move_y = 0.0f;  // -1 up .. +1 down (world y grows down)
   std::uint32_t buttons = 0;
   bool connected = false;  // a device / client is driving this slot
+  // Top-down "face mouse" riders: the world point to face (the mouse
+  // cursor under the camera, or a point along the right stick). Local
+  // only: the network does not carry it.
+  bool aim = false;
+  float aim_x = 0.0f;
+  float aim_y = 0.0f;
 
   bool held(Button b) const { return (buttons & b) != 0; }
 };
@@ -66,6 +72,11 @@ inline PlayerInput merge_input(const PlayerInput& a, const PlayerInput& b) {
   out.move_y = pick(a.move_y, b.move_y);
   out.buttons = a.buttons | b.buttons;
   out.connected = a.connected || b.connected;
+  // The latest aim source wins (a pushed stick over the mouse).
+  const PlayerInput& aim = b.aim ? b : a;
+  out.aim = aim.aim;
+  out.aim_x = aim.aim_x;
+  out.aim_y = aim.aim_y;
   return out;
 }
 

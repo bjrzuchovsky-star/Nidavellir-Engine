@@ -40,6 +40,10 @@ struct PlayerControllerData {
   Mode mode = Mode::TopDown;
   float gravity = 1400.0f;    // px / s^2 (platformer)
   float jump_speed = 560.0f;  // px / s take-off speed (platformer)
+  // Top-down: turn the drawn sprite to face the mouse cursor (or the right
+  // stick). Draw the art facing up; colliders do not turn. scene.json
+  // "face_mouse": true. Platformer riders ignore it.
+  bool face_mouse = false;
 
   bool operator==(const PlayerControllerData& o) const = default;
 };

@@ -50,7 +50,7 @@
       "b": 0.28,
       "a": 1,
       "layer": 5,
-      "player": {"slot": 0, "speed": 160},
+      "player": {"slot": 0, "speed": 160, "face_mouse": true},
       "collider": {"x": 0, "y": 0, "w": 24, "h": 40, "type": "solid", "body": "dynamic"},
       "script": {"path": "scripts/player.lua", "props": []}
     }

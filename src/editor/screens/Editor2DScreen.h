@@ -616,6 +616,10 @@ class Editor2DScreen final : public IScreen {
   float play_cam_x_ = 0.0f;
   float play_cam_y_ = 0.0f;
   float play_cam_zoom_ = 1.0f;
+  // The mouse over the Play canvas in world px (top-down "face mouse").
+  bool play_aim_ = false;
+  float play_aim_x_ = 0.0f;
+  float play_aim_y_ = 0.0f;
   std::vector<runtime::DrawQuad> play_quads_;
   PlayUi play_ui_;  // the project's ui/ documents over the Play view
   profiler::DebugTools debug_tools_;  // ts.profiler overlay (F3) + console (backtick)

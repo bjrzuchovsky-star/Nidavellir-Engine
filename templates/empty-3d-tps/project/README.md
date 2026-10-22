@@ -4,7 +4,7 @@ A third-person 3D claim: a character controller (Player component, capsule mesh 
 
 ## Play
 
-WASD move relative to the camera, Space jumps, Q / Z or right-drag orbit the camera, E interacts.
+The mouse orbits the camera round the player (Play captures the cursor; Esc frees it, click the view to look again) and the scroll wheel zooms. WASD move relative to the camera and the player turns to face where it walks. Space jumps, E interacts. Q / Z still orbit; set the Player's Look to Keys to leave the cursor alone.
 
 ## Next steps
 

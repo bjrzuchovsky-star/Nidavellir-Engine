@@ -200,7 +200,10 @@ float deadzone(float v) {
   return v < 0.0f ? -s : s;
 }
 
-runtime::InputFrame poll_input(GLFWwindow* win) {
+// world: when given, slot 0 aims at the mouse cursor and each pad aims
+// along its right stick (top-down "face mouse" riders).
+runtime::InputFrame poll_input(GLFWwindow* win, const runtime::World* world = nullptr,
+                               float alpha = 1.0f) {
   runtime::InputFrame frame;
   auto down = [win](int a, int b) {
     return glfwGetKey(win, a) == GLFW_PRESS || glfwGetKey(win, b) == GLFW_PRESS;
@@ -231,6 +234,17 @@ runtime::InputFrame poll_input(GLFWwindow* win) {
   if (glfwGetKey(win, GLFW_KEY_C) == GLFW_PRESS) keys.buttons |= runtime::kButtonFire;
   if (glfwGetKey(win, GLFW_KEY_X) == GLFW_PRESS) keys.buttons |= runtime::kButtonNext;
   if (glfwGetKey(win, GLFW_KEY_Q) == GLFW_PRESS) keys.buttons |= runtime::kButtonPrev;
+  if (world && glfwGetWindowAttrib(win, GLFW_FOCUSED)) {
+    int ww = 0, wh = 0;
+    double mx = 0.0, my = 0.0;
+    glfwGetWindowSize(win, &ww, &wh);
+    glfwGetCursorPos(win, &mx, &my);
+    if (mx >= 0.0 && my >= 0.0 && mx < ww && my < wh) {
+      runtime::aim_at_screen(&keys, world->camera(alpha), static_cast<float>(ww),
+                             static_cast<float>(wh), static_cast<float>(mx),
+                             static_cast<float>(my));
+    }
+  }
   frame.slot(0) = keys;
   // Gamepads 1-4 ride slots 0-3 (slot 0 shares with the keyboard).
   for (int slot = 0; slot < kMaxPlayers; ++slot) {
@@ -250,6 +264,10 @@ runtime::InputFrame poll_input(GLFWwindow* win) {
     if (pad.buttons[GLFW_GAMEPAD_BUTTON_B]) in.buttons |= runtime::kButtonAlt;
     if (pad.buttons[GLFW_GAMEPAD_BUTTON_START]) {
       in.buttons |= runtime::kButtonStart;
+    }
+    if (world) {
+      runtime::aim_along_stick(&in, *world, slot, pad.axes[GLFW_GAMEPAD_AXIS_RIGHT_X],
+                               pad.axes[GLFW_GAMEPAD_AXIS_RIGHT_Y]);
     }
     frame.slot(slot) = runtime::merge_input(frame.slot(slot), in);
   }
@@ -547,7 +565,7 @@ void on_key(GLFWwindow* win, int key, int /*scancode*/, int action,
   if ((key == GLFW_KEY_P || key == GLFW_KEY_F6) && !repeat) {
     g->session.toggle_pause();
   } else if (key == GLFW_KEY_F10) {
-    g->session.step_once(poll_input(win));
+    g->session.step_once(poll_input(win, &g->session.world(), g->session.alpha()));
   } else if ((key == GLFW_KEY_R || key == GLFW_KEY_F5) && !repeat &&
              (mods & GLFW_MOD_CONTROL) == 0) {
     g->reload = true;
@@ -658,7 +676,9 @@ int run_window(const Options& opt, Telegraph& telegraph) {
         {
           TS_PROFILE_SCOPE("game.update");
           g.session.update(now - last,
-                           gui.wants_input() ? runtime::InputFrame{} : poll_input(win));
+                           gui.wants_input()
+                               ? runtime::InputFrame{}
+                               : poll_input(win, &g.session.world(), g.session.alpha()));
         }
         ui::apply_ui_commands(gui.system(), g.session.world().take_ui_commands());
         {

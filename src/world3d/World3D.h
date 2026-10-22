@@ -7,7 +7,11 @@
 //   * One rider (the entity with a `player` component): a capsule moved
 //     with WASD / stick relative to the camera yaw, gravity, jump, slides
 //     along static colliders (boxes and capsules, as world AABBs).
-//   * Follow camera behind the rider (yaw from input, smoothed).
+//   * Follow camera behind the rider (yaw from input, smoothed). Mouse
+//     look (Player look = Mouse, the default): first person turns the body
+//     (yaw) and tilts the eyes (pitch, +-89 deg); third person orbits the
+//     camera (yaw / pitch, clamped; scroll zooms; pulled in front of static
+//     colliders) and the rider turns to face where it walks.
 //   * Trigger colliders report enter / exit; the action button reaches the
 //     nearest scripted entity within kInteractReach (on_interact).
 //   * Lua gameplay scripts through the same sandboxed ScriptHost as 2D.
@@ -83,7 +87,19 @@ struct Input3D {
   float move_right = 0.0f;    // -1 .. 1
   float move_forward = 0.0f;  // -1 .. 1 (away from the camera)
   float turn = 0.0f;          // camera yaw, degrees this tick (+ = left)
-  float look = 0.0f;          // first person: pitch, degrees this tick (+ = up)
+  float look = 0.0f;          // pitch, degrees this tick (+ = up)
+  // Mouse look (riders with Player look = Mouse): raw mouse counts since the
+  // last update (+x right, +y down). update() applies them once per frame
+  // however many ticks run; step() / run_ticks() apply them every tick.
+  // The rider's sensitivity, invert Y and smoothing shape them.
+  float mouse_dx = 0.0f;
+  float mouse_dy = 0.0f;
+  // Gamepad right stick, -1..1 (+x right, +y down): turns at kStickLookSpeed
+  // in both look modes (invert Y applies).
+  float stick_x = 0.0f;
+  float stick_y = 0.0f;
+  // Third person: scroll steps since the last update (+ = zoom in).
+  float zoom = 0.0f;
   bool jump = false;
   bool action = false;
   // Desktop physics-gun: hold `grab` to pick up the dynamic body in front of
@@ -139,6 +155,11 @@ class World3D final : public runtime::ScriptWorld {
   static constexpr float kInteractReach = 2.5f;   // m
   static constexpr float kKillY = -50.0f;         // fell off the world
   static constexpr int kMaxCatchUpTicks = 8;
+  // Look limits (degrees; + pitch looks up).
+  static constexpr float kFirstPersonPitchLimit = 89.0f;
+  static constexpr float kThirdPersonPitchMin = -70.0f;  // camera high, looking down
+  static constexpr float kThirdPersonPitchMax = 30.0f;   // camera low, looking up
+  static constexpr float kStickLookSpeed = 150.0f;       // deg / s at full stick
 
   using LogSink = std::function<void(const runtime::LogEntry&)>;
 
@@ -181,6 +202,18 @@ class World3D final : public runtime::ScriptWorld {
   const render3d::Camera3D& camera() const { return camera_; }
   float camera_yaw() const { return cam_yaw_; }
   float camera_pitch() const { return cam_pitch_; }
+  // Mouse look: the rider looks with the mouse (Player look = Mouse, not
+  // VR); hosts capture the cursor when wants_cursor_capture() too.
+  bool mouse_look() const;
+  bool wants_cursor_capture() const;
+  // Turn the view by raw mouse counts now (sensitivity / invert / smoothing
+  // as the rider's settings say). No-op unless mouse_look().
+  void apply_mouse_look(float dx, float dy);
+  // Third-person camera distance after scroll zoom (metres).
+  float camera_distance() const { return cam_dist_; }
+  // Look target before smoothing (degrees).
+  float look_target_yaw() const { return want_yaw_; }
+  float look_target_pitch() const { return want_pitch_; }
   std::size_t static_colliders() const { return statics_.size(); }
   std::size_t contacts_last_tick() const { return contacts_; }
   std::size_t script_count() const;
@@ -435,7 +468,13 @@ class World3D final : public runtime::ScriptWorld {
   bool action_latched_ = false;
   bool jump_latched_ = false;
   float cam_yaw_ = 0.0f;
-  float cam_pitch_ = 0.0f;  // first person only, degrees (-85..85)
+  float cam_pitch_ = 0.0f;  // degrees, + up (see the pitch limits)
+  float want_yaw_ = 0.0f;   // look targets: input lands here, smoothing eases
+  float want_pitch_ = 0.0f; // cam_yaw_ / cam_pitch_ toward them each tick
+  float cam_dist_ = 6.0f;   // third person, after zoom
+  void clamp_look(const scene3d::Player3D& cfg);
+  void apply_zoom(float steps);
+  void ease_look(const scene3d::Player3D& cfg);
   std::size_t contacts_ = 0;
   std::uint64_t trigger_events_ = 0;
   std::uint64_t tick_ = 0;

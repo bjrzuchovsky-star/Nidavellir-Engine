@@ -120,6 +120,7 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
     for (Entity3D& e : ents_) {
       if (e.vr_rig) {
         e.player = scene3d::Player3D{};
+        e.player->look = scene3d::Player3D::Look::Keys;  // flat fallback: keys, cursor free
         player_ = e.id;
         post(LogLevel::Info, "play", "VR scene on the desktop: " + e.name + " (VR Rig) rides as the rider");
         break;
@@ -135,8 +136,10 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
   rebuild_statics();
   phys_build();
   // Camera starts behind the rider, looking the way the editor camera did.
-  cam_yaw_ = scene.editor_camera.yaw;
-  cam_pitch_ = 0.0f;
+  cam_yaw_ = want_yaw_ = scene.editor_camera.yaw;
+  cam_pitch_ = want_pitch_ = 0.0f;
+  cam_dist_ = 6.0f;
+  if (const Entity3D* p = find(player_); p && p->player) cam_dist_ = p->player->camera_distance;
   camera_.position = {0, 3, 8};
   camera_.target = {0, 1, 0};
   camera_.fov_y_degrees = 60.0f;
@@ -300,11 +303,15 @@ void World3D::follow_camera(bool snap) {
     (void)snap;
     return;
   }
+  // Orbit: yaw round the rider, pitch tilts the orbit (looking up drops
+  // the camera, looking down lifts it); 0 pitch is the authored height.
   const float yaw = render3d::radians(cam_yaw_);
+  const float elev = render3d::radians(-cam_pitch_);
+  const float dist = cam_dist_;
   const Vec3 target = p->transform.position + Vec3{0, 1.0f, 0};
-  Vec3 want = p->transform.position +
-              Vec3{std::sin(yaw) * cfg.camera_distance, cfg.camera_height,
-                   std::cos(yaw) * cfg.camera_distance};
+  Vec3 want = target + Vec3{std::sin(yaw) * std::cos(elev) * dist,
+                            std::sin(elev) * dist + (cfg.camera_height - 1.0f),
+                            std::cos(yaw) * std::cos(elev) * dist};
   // Pull in when a static box sits between the rider and the camera.
   const render3d::Ray ray{target, render3d::normalize(want - target)};
   const float full = render3d::length(want - target);
@@ -323,14 +330,69 @@ void World3D::follow_camera(bool snap) {
   }
 }
 
+bool World3D::mouse_look() const {
+  if (vr_ || !running_) return false;
+  const Entity3D* p = find(player_);
+  return p && p->player && p->player->look == scene3d::Player3D::Look::Mouse;
+}
+
+bool World3D::wants_cursor_capture() const {
+  return mouse_look() && find(player_)->player->capture_cursor;
+}
+
+void World3D::apply_mouse_look(float dx, float dy) {
+  if (!mouse_look() || (dx == 0.0f && dy == 0.0f)) return;
+  const scene3d::Player3D& cfg = *find(player_)->player;
+  const float sens = std::clamp(cfg.mouse_sensitivity, scene3d::Player3D::kMinSensitivity,
+                                scene3d::Player3D::kMaxSensitivity);
+  want_yaw_ -= dx * sens;                            // right turns right
+  want_pitch_ += (cfg.invert_y ? dy : -dy) * sens;   // up looks up
+  clamp_look(cfg);
+}
+
+void World3D::clamp_look(const scene3d::Player3D& cfg) {
+  if (cfg.view == scene3d::Player3D::View::FirstPerson) {
+    want_pitch_ = std::clamp(want_pitch_, -kFirstPersonPitchLimit, kFirstPersonPitchLimit);
+  } else {
+    want_pitch_ = std::clamp(want_pitch_, kThirdPersonPitchMin, kThirdPersonPitchMax);
+  }
+  // Keep yaw small without a visible jump (both move together).
+  if (std::fabs(want_yaw_) > 720.0f) {
+    const float wrap = 360.0f * std::trunc(want_yaw_ / 360.0f);
+    want_yaw_ -= wrap;
+    cam_yaw_ -= wrap;
+  }
+}
+
+void World3D::ease_look(const scene3d::Player3D& cfg) {
+  const float smooth = std::clamp(cfg.smoothing, 0.0f, scene3d::Player3D::kMaxSmoothing);
+  if (smooth <= 0.0f) {
+    cam_yaw_ = want_yaw_;
+    cam_pitch_ = want_pitch_;
+    return;
+  }
+  const float k = 1.0f - smooth;
+  cam_yaw_ += (want_yaw_ - cam_yaw_) * k;
+  cam_pitch_ += (want_pitch_ - cam_pitch_) * k;
+  if (std::fabs(want_yaw_ - cam_yaw_) < 1e-3f) cam_yaw_ = want_yaw_;
+  if (std::fabs(want_pitch_ - cam_pitch_) < 1e-3f) cam_pitch_ = want_pitch_;
+}
+
 void World3D::move_player(const Input3D& in) {
   contacts_ = 0;
   Entity3D* p = live(player_);
   if (!p) return;
   const scene3d::Player3D cfg = p->player ? *p->player : scene3d::Player3D{};
-  cam_yaw_ += in.turn;
   const bool first_person = cfg.view == scene3d::Player3D::View::FirstPerson;
-  if (first_person) cam_pitch_ = std::clamp(cam_pitch_ + in.look, -85.0f, 85.0f);
+  // Look: keys (Q / Z, Page Up / Down), the right stick, then the mouse
+  // (already in want_*) all steer the target; smoothing eases toward it.
+  want_yaw_ += in.turn;
+  want_pitch_ += in.look;
+  const float stick_step = kStickLookSpeed * static_cast<float>(kTickSeconds);
+  want_yaw_ -= std::clamp(in.stick_x, -1.0f, 1.0f) * stick_step;
+  want_pitch_ += std::clamp(cfg.invert_y ? in.stick_y : -in.stick_y, -1.0f, 1.0f) * stick_step;
+  clamp_look(cfg);
+  ease_look(cfg);
   const float yaw = render3d::radians(cam_yaw_);
   const Vec3 fwd{-std::sin(yaw), 0.0f, -std::cos(yaw)};
   const Vec3 right{std::cos(yaw), 0.0f, -std::sin(yaw)};
@@ -497,6 +559,10 @@ void World3D::step(const Input3D& input0) {
   if (!running_) return;
   TS_PROFILE_SCOPE("world3d.step");
   Input3D input = input0;
+  // Direct steps (tests, F10) carry their own mouse / scroll.
+  apply_mouse_look(input.mouse_dx, input.mouse_dy);
+  apply_zoom(input.zoom);
+  input.mouse_dx = input.mouse_dy = input.zoom = 0.0f;
   input.jump = input.jump || jump_latched_;
   input.action = input.action || action_latched_;
   jump_latched_ = action_latched_ = false;
@@ -554,8 +620,21 @@ void World3D::step(const Input3D& input0) {
   if (!vr_) follow_camera(false);
 }
 
-int World3D::update(double real_seconds, const Input3D& input) {
+void World3D::apply_zoom(float steps) {
+  if (steps == 0.0f) return;
+  const Entity3D* p = find(player_);
+  if (vr_ || !p || !p->player || p->player->view == scene3d::Player3D::View::FirstPerson) return;
+  const float far = std::max(12.0f, p->player->camera_distance * 3.0f);
+  cam_dist_ = std::clamp(cam_dist_ * std::pow(0.88f, steps), 1.5f, far);
+}
+
+int World3D::update(double real_seconds, const Input3D& input0) {
   if (!running_ || paused_) return 0;
+  // Mouse and scroll are per frame: apply once, however many ticks run.
+  apply_mouse_look(input0.mouse_dx, input0.mouse_dy);
+  apply_zoom(input0.zoom);
+  Input3D input = input0;
+  input.mouse_dx = input.mouse_dy = input.zoom = 0.0f;
   accumulator_ += std::min(real_seconds, 0.25);
   int n = 0;
   jump_latched_ = jump_latched_ || input.jump;
