@@ -20,6 +20,10 @@
 #include "Smoke3D.h"
 #include "SmokeAssets.h"
 #include "SmokeModels.h"
+
+#ifndef TS_ENGINE_VERSION
+#define TS_ENGINE_VERSION "0.0.0"
+#endif
 #include "SmokePrefab.h"
 #include "SmokeTools.h"
 #include "SmokeVR.h"
@@ -1766,6 +1770,11 @@ int main(int argc, char** argv) {
 #endif
   }
   for (int i = 1; i < argc; ++i) {
+    if (std::strcmp(argv[i], "--version") == 0) {
+      // The repo's VERSION file, baked in at configure time.
+      std::printf("TombStone Engine %s\n", TS_ENGINE_VERSION);
+      return 0;
+    }
     if (std::strcmp(argv[i], "--export") == 0) {
       // Headless Ship It: ts_admin --export <project> --out <dir> [...]
       return ts::tombstone::run_export_cli(argc, argv);

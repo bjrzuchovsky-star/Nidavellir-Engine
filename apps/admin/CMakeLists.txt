@@ -80,7 +80,8 @@ target_compile_features(ts_admin PRIVATE cxx_std_20)
 
 # --smoke loads the sample dynamic plugin from the build tree.
 target_compile_definitions(ts_admin PRIVATE
-  TS_SAMPLE_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugins")
+  TS_SAMPLE_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugins"
+  TS_ENGINE_VERSION="${PROJECT_VERSION}")
 add_dependencies(ts_admin ts_plugin_lantern)
 
 # Ship the engine templates next to ts_admin (<exe dir>/templates); runs

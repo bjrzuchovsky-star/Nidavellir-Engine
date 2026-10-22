@@ -20,6 +20,7 @@ These pages are written from the source in this repository (`src/`, `apps/`, `sd
 | [Weather](weather.md) | Optional `ts.weather`: rain, snow, dust, fog, storms with lightning, wind, time of day, 2D and 3D, `weather.json`, Lua `weather` |
 | [Particles and lighting](particles-and-lighting.md) | `ts_fx` emitters and presets, 2D lighting, 3D lights |
 | [Export and the Freight Office](export.md) | Export UI and CLI, profiles, `.tspak`, the output folder |
+| [Releasing the engine](release.md) | `VERSION`, `tools/release/build_release.ps1`, the engine installer and zip, silent install test |
 | [Distributing a game](distribution.md) | Windows setup installer (Inno Setup), portable zip, app-local VC++ runtime, dependency check, GPU check |
 | [3D, VR and animation](3d-vr-animation.md) | `ts_render3d`, the 3D editor, VR / OpenXR, 2D sprite and 3D skeletal animation |
 | AI toolkit (`ts.ai`) | See "Pathfinder AI toolkit (ts.ai)" in the root `README.md`: behaviour trees, 2D grid / 3D navmesh paths, crowds, perception, the BT panel |

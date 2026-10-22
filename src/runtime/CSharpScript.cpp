@@ -1,4 +1,5 @@
 #include "runtime/CSharpScript.h"
+#include "core/AppPaths.h"
 
 #include "runtime/ScriptAbi.h"
 
@@ -137,6 +138,10 @@ fs::path dotnet_dir(const std::string& project) { return fs::path(project) / ".t
 fs::path binding_sources() {
   std::error_code ec;
   if (const char* e = std::getenv("TS_DOTNET_SDK"); e && *e) return fs::path(e) / "TombStone.Scripting";
+  if (const std::string exe = core::executable_dir(); !exe.empty()) {
+    const fs::path installed = fs::path(exe) / "sdk" / "dotnet" / "TombStone.Scripting";
+    if (fs::exists(installed / "Host.cs", ec)) return installed;
+  }
   const fs::path p = fs::path(TS_DOTNET_SDK_DIR) / "TombStone.Scripting";
   return fs::exists(p / "Host.cs", ec) ? p : fs::path();
 }

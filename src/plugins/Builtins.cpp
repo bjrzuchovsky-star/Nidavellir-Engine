@@ -1,4 +1,5 @@
 #include "plugins/Builtins.h"
+#include "core/AppPaths.h"
 
 #include "plugins/survival/SurvivalPlugin.h"
 #include "runtime/World.h"
@@ -90,6 +91,11 @@ std::vector<std::string> plugin_search_dirs(const std::string& project_dir) {
     }
     std::sort(installed.begin(), installed.end());
     dirs.insert(dirs.end(), installed.begin(), installed.end());
+  }
+  // Installed engine: plugins shipped next to the executables.
+  if (const std::string exe = core::executable_dir(); !exe.empty()) {
+    const std::filesystem::path shipped = std::filesystem::path(exe) / "plugins";
+    if (std::filesystem::is_directory(shipped, ec)) dirs.push_back(shipped.string());
   }
 #if defined(TS_SAMPLE_PLUGIN_DIR)
   dirs.push_back(TS_SAMPLE_PLUGIN_DIR);

@@ -351,6 +351,10 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
   // Plugins the project enables that live in DLLs.
   std::vector<std::string> extra;
   if (!broot.empty()) extra.push_back((broot / "plugins").string());
+  // Installed engine: plugins/ beside ts_game.
+  if (fs::is_directory(fs::path(game_exe).parent_path() / "plugins", ec)) {
+    extra.push_back((fs::path(game_exe).parent_path() / "plugins").string());
+  }
   for (const PluginNeed& p : project_plugins(proj.string(), extra)) {
     if (!p.dynamic || p.library.empty() || p.editor_only) continue;
     const fs::path lib(p.library);

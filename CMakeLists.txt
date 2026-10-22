@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
-project(TombStoneEngine VERSION 0.1.0 LANGUAGES CXX)
+# The one version number: VERSION at the repo root (CMake, ts_admin
+# --version, the release installer and zip all read it).
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" TS_VERSION LIMIT_COUNT 1 REGEX "^[0-9]+\\.[0-9]+\\.[0-9]+")
+if(NOT TS_VERSION)
+  message(FATAL_ERROR "VERSION must hold a MAJOR.MINOR.PATCH version")
+endif()
+project(TombStoneEngine VERSION ${TS_VERSION} LANGUAGES CXX)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

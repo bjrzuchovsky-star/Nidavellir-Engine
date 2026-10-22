@@ -1,4 +1,5 @@
 add_library(ts_core
+  AppPaths.cpp
   Engine.cpp
   MemImages.cpp
   Localization.cpp

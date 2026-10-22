@@ -68,3 +68,6 @@ TombStoneConfig/
 # FetchContent / dependency downloads (never commit)
 _deps/
 **/_deps/
+
+# Engine release tooling (not a build output folder)
+!tools/release/

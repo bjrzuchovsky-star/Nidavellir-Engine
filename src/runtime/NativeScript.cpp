@@ -1,4 +1,5 @@
 #include "runtime/NativeScript.h"
+#include "core/AppPaths.h"
 
 #include "runtime/ScriptAbi.h"
 
@@ -55,6 +56,11 @@ std::string cmake_exe() {
 fs::path sdk_dir() {
   std::error_code ec;
   if (const char* e = std::getenv("TS_SCRIPT_SDK"); e && *e) return e;
+  // Installed engine: <exe dir>/sdk/include; build tree: the source sdk.
+  if (const std::string exe = core::executable_dir(); !exe.empty()) {
+    const fs::path installed = fs::path(exe) / "sdk" / "include";
+    if (fs::exists(installed / "tombstone" / "script_sdk.h", ec)) return installed;
+  }
   if (fs::exists(fs::path(TS_SCRIPT_SDK_DIR) / "tombstone" / "script_sdk.h", ec)) return TS_SCRIPT_SDK_DIR;
   return {};
 }

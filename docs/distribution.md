@@ -1,5 +1,7 @@
 # Distributing an exported game
 
+To install the engine itself, see [release.md](release.md).
+
 The Freight Office (see [export.md](export.md)) turns a project into a game folder. This page covers getting that folder onto other people's Windows PCs. Store publishing isn't covered.
 
 Source: `src/export/Installer.*` (settings, Inno Setup script, PE import check, `.ico`), `src/export/Exporter.cpp`, `src/editor/export/FreightOffice.*`, `apps/game/GpuCheck.*`, `tools/installer/`.

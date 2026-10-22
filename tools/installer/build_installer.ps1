@@ -27,5 +27,5 @@ if ($Publisher) { $exportArgs += "--publisher", $Publisher }
 if ($License) { $exportArgs += "--license", $License }
 if ($InstallMode) { $exportArgs += "--install-mode", $InstallMode }
 if ($Version) { $exportArgs += "--version", $Version }
-& $Admin @args
+& $Admin @exportArgs
 exit $LASTEXITCODE
