@@ -36,6 +36,10 @@ struct Settings {
   // Tools: Blender for .blend import ("" = find it: TS_BLENDER, PATH,
   // registry, Program Files, Store / winget, Steam libraries).
   std::string blender_path;
+  // Source engine formats (.mdl / .vtf / .vmt / .gma): extra read-only
+  // content folders searched for materials (';' separated), e.g. a game's
+  // content folder or extracted addons. See docs/model-import.md.
+  std::string source_search_folders;
 };
 
 class SettingsStore {

@@ -16,6 +16,7 @@ add_library(ts_editor
   assets/AssetImport.cpp
   assets/ImportSort.cpp
   assets/AssetBrowser.cpp
+  assets/GmaImport.cpp
   screens/Editor2DScreen_Assets.cpp
   editor3d/Editor3DScreen_Assets.cpp
   screens/Editor2DScreen_Prefabs.cpp

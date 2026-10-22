@@ -11,6 +11,9 @@ add_library(ts_render3d
   ColliderFit.cpp
   import/SourceMdl.cpp
   import/SourceVtf.cpp
+  import/SourceMaterials.cpp
+  import/Gma.cpp
+  import/Lzma.cpp
   import/AssimpImport.cpp
   import/BlenderImport.cpp
   Skeleton.cpp

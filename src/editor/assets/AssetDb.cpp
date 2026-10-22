@@ -141,7 +141,8 @@ bool move_file(const fs::path& from, const fs::path& to) {
 
 Kind kind_for(const std::string& path) {
   const std::string e = lower_ext(path);
-  if (e == ".png" || e == ".jpg" || e == ".jpeg" || e == ".bmp" || e == ".tga" || e == ".gif") {
+  if (e == ".png" || e == ".jpg" || e == ".jpeg" || e == ".bmp" || e == ".tga" || e == ".gif" ||
+      e == ".vtf") {
     return Kind::Texture;
   }
   // glTF, Source .mdl, Assimp formats, .blend (render3d/ModelImport.h).

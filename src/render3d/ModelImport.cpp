@@ -168,6 +168,11 @@ ModelImportOptions model_options_from_settings(const json::Value& s, const std::
     for (const auto& [k, v] : bg.members()) o.body_groups[k] = static_cast<int>(v.as_number(0));
   }
   o.blender_path = s.str("blender_path");
+  if (const json::Value& mo = s["material_overrides"]; mo.is_object()) {
+    for (const auto& [k, v] : mo.members()) {
+      if (v.is_string() && !v.as_string().empty()) o.material_overrides[lower(k)] = v.as_string();
+    }
+  }
   return o;
 }
 

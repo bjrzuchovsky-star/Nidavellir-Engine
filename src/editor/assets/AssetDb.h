@@ -53,8 +53,9 @@ enum class Kind { Texture, Model, Audio, Font, Unknown };
 
 inline constexpr const char* kMetaExt = ".meta";
 // Model importer revision stored in .meta info ("importer_version"); a
-// lower one is reimported on the next scan (2 = bounds fix).
-inline constexpr int kModelImporterVersion = 2;
+// lower one is reimported on the next scan (2 = bounds fix, 3 = Source
+// materials through the content search folders).
+inline constexpr int kModelImporterVersion = 3;
 
 Kind kind_for(const std::string& path);   // by extension
 const char* kind_name(Kind k);            // "texture" / "model" / ...

@@ -4,8 +4,11 @@
 #include "gfx/TextureCache.h"
 #include "render3d/Gltf.h"
 #include "render3d/ModelImport.h"
+#include "render3d/import/SourceFormats.h"
 
+#include <cctype>
 #include <cstdio>
+#include <iterator>
 #include <filesystem>
 #include <fstream>
 #include <vector>
@@ -89,7 +92,28 @@ bool import_asset(const std::string& abs_path, Kind kind, const Value& settings,
     case Kind::Texture: {
       std::vector<unsigned char> rgba;
       int w = 0, h = 0;
-      if (!gfx::TextureCache::decode_file(abs_path, &rgba, &w, &h, error)) return false;
+      std::string ext = fs::u8path(abs_path).extension().string();
+      for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      if (ext == ".vtf") {
+        // Source engine texture (render3d/import/SourceFormats.h).
+        std::ifstream in(fs::u8path(abs_path), std::ios::binary);
+        std::vector<unsigned char> b((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        render3d::source::VtfInfo vi;
+        render3d::Image im;
+        if (!render3d::source::vtf_info(b.data(), b.size(), &vi, error) ||
+            !render3d::source::decode_vtf(b.data(), b.size(), &im, error)) {
+          return false;
+        }
+        rgba = std::move(im.rgba);
+        w = im.width;
+        h = im.height;
+        o.set("format", Value::string("VTF " + std::to_string(vi.major) + "." + std::to_string(vi.minor) + " " +
+                                      render3d::source::vtf_format_name(vi.format)));
+        o.set("origin", Value::string("source-engine"));
+        if (vi.normal_map()) o.set("normal_map", Value::boolean(true));
+      } else if (!gfx::TextureCache::decode_file(abs_path, &rgba, &w, &h, error)) {
+        return false;
+      }
       bool alpha = false;
       for (std::size_t i = 3; i < rgba.size(); i += 4) {
         if (rgba[i] != 255) {
@@ -148,7 +172,8 @@ bool import_asset(const std::string& abs_path, Kind kind, const Value& settings,
         o.set("hitbox_set", Value::string(m.hitbox_set));
       }
       // Bumped when what the importer reports changes (2: bounds of what
-      // is drawn - rest pose, import scale, no collision / LOD meshes);
+      // is drawn - rest pose, import scale, no collision / LOD meshes;
+      // 3: Source materials re-resolved through the content search order);
       // older .meta info is reimported on the next scan.
       o.set("importer_version", Value::number(assetdb::kModelImporterVersion));
       if (!m.clips.empty()) {
@@ -156,6 +181,26 @@ bool import_asset(const std::string& abs_path, Kind kind, const Value& settings,
         for (const render3d::Clip& c : m.clips) names.push(Value::string(c.name));
         o.set("clip_names", names);
       }
+      if (!m.material_sources.empty()) {
+        // Source materials: which .vmt / .vtf each one resolved to, or
+        // where it was looked for (relink: settings.material_overrides).
+        Value mats = Value::array();
+        int missing = 0;
+        for (const render3d::MaterialSource& ms : m.material_sources) {
+          Value mv = Value::object();
+          mv.set("name", Value::string(ms.name));
+          mv.set("status", Value::string(ms.status));
+          if (!ms.shader.empty()) mv.set("shader", Value::string(ms.shader));
+          if (!ms.material.empty()) mv.set("material", Value::string(ms.material));
+          if (!ms.texture.empty()) mv.set("texture", Value::string(ms.texture));
+          if (!ms.searched.empty()) mv.set("searched", Value::string(ms.searched));
+          if (ms.status == "missing" || ms.status == "partial") ++missing;
+          mats.push(mv);
+        }
+        o.set("source_materials", mats);
+        o.set("missing_materials", Value::number(missing));
+      }
+      if (m.format == "source-mdl") o.set("origin", Value::string("source-engine"));
       if (!warn.empty()) o.set("warning", Value::string(warn));
       break;
     }

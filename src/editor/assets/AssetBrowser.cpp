@@ -81,8 +81,17 @@ void AssetBrowser::set_import_settings(const importsort::Settings& s) {
   if (!importsort::save_settings(db_.project_dir(), s, &err) && host_.note) host_.note("Import settings: " + err);
 }
 
-importsort::Result AssetBrowser::import_files(const std::vector<std::string>& sources, const std::string& dest_folder) {
+importsort::Result AssetBrowser::import_files(const std::vector<std::string>& all_sources, const std::string& dest_folder) {
   importsort::Result r;
+  // Source addons (.gma) open the addon picker instead of being copied in.
+  std::vector<std::string> sources;
+  for (const std::string& src : all_sources) {
+    std::string ext = src.size() >= 4 ? src.substr(src.size() - 4) : std::string();
+    for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+    if (ext == ".gma") import_gma(src);
+    else sources.push_back(src);
+  }
+  if (sources.empty()) return r;
   importsort::import_files(db_.project_dir(), sources, dest_folder, import_settings_, &r);
   rescan();
   if (host_.note) {
@@ -115,6 +124,11 @@ void AssetBrowser::draw_import_popup() {
     if (ImGui::MenuItem("Import folder (model pack)...")) {
       import_pick_folder_ = true;
       import_picker_.open({});
+    }
+    if (ImGui::MenuItem("Import Source addon (.gma)...")) gma_dialog_.open_picker(db_.project_dir());
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Source engine formats (.mdl/.vtf/.vmt/.gma): pick the models / materials / sounds\n"
+                        "to extract into assets/Models/<Addon>/. Dropping a .gma here does the same.");
     }
     ImGui::Separator();
     ImGui::TextDisabled("Destination: %s", folder_.empty() ? (import_settings_.sort_imports ? "sorted by type" : "assets/")
@@ -220,6 +234,12 @@ void AssetBrowser::accept_vault_drop() {
   ImGui::EndDragDropTarget();
 }
 
+void AssetBrowser::reimport(const std::string& rel) {
+  db_.reimport(rel);
+  thumbs_.invalidate(db_.abs(rel));
+  if (host_.on_assets_changed) host_.on_assets_changed({rel});
+}
+
 void AssetBrowser::draw() {
   thumbs_.poll_changes(ImGui::GetTime());
   // Toolbar.
@@ -270,6 +290,15 @@ void AssetBrowser::draw() {
     ImGui::Separator();
     ImGui::TextDisabled("Metadata (.meta) lives in .tombstone/meta");
     ImGui::EndPopup();
+  }
+  if (gma_dialog_.draw()) {
+    const gmaimport::Result& r = gma_dialog_.result();
+    rescan();
+    if (!r.models.empty()) selected_ = r.models.front();
+    if (host_.note) {
+      host_.note("Imported " + std::to_string(r.written.size()) + " file(s) from the addon into " + r.dest +
+                 (r.skipped.empty() ? "" : " (" + std::to_string(r.skipped.size()) + " skipped)"));
+    }
   }
   ImGui::SameLine();
   ImGui::TextDisabled("%zu assets", db_.entries().size());
@@ -449,7 +478,7 @@ bool AssetBrowser::tile(const AssetDb::Entry& e, float size) {
       refs_for_ = e.rel;
       refs_shown_ = db_.find_references(e.rel);
     }
-    if (ImGui::MenuItem("Reimport")) db_.reimport(e.rel);
+    if (ImGui::MenuItem("Reimport")) reimport(e.rel);
     if (host_.send_to_vault && ImGui::MenuItem("Send to Vault...")) host_.send_to_vault(e.rel);
     if (ImGui::MenuItem("Delete")) {
       std::vector<assetdb::Ref> refs;
@@ -698,7 +727,7 @@ void AssetBrowser::draw_details() {
       refs_shown_ = db_.find_references(entry.rel);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Reimport")) db_.reimport(entry.rel);
+    if (ImGui::Button("Reimport")) reimport(entry.rel);
     if (host_.send_to_vault) {
       ImGui::SameLine();
       if (ImGui::Button("Send to Vault")) host_.send_to_vault(entry.rel);
@@ -723,6 +752,10 @@ void AssetBrowser::draw_details() {
     ImGui::TableNextColumn();
     ImGui::TextColored(theme::Accent(), "Import settings");
     draw_settings(entry);
+    if (entry.meta.kind == Kind::Model &&
+        gmaimport::draw_source_materials(db_, entry, &relink_picker_, &relink_for_)) {
+      reimport(entry.rel);
+    }
     ImGui::EndTable();
   }
 }

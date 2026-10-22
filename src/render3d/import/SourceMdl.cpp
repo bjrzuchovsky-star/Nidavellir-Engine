@@ -19,6 +19,7 @@
 // the unit scale and the Z -> Y up conversion afterwards.
 #include "render3d/ModelImport.h"
 #include "render3d/import/SourceFormats.h"
+#include "render3d/import/SourceMaterials.h"
 
 #include <algorithm>
 #include <cctype>
@@ -89,50 +90,6 @@ std::string lower(std::string s) {
   return s;
 }
 
-std::string clean(std::string s) {
-  std::replace(s.begin(), s.end(), '\\', '/');
-  while (!s.empty() && s.front() == '/') s.erase(s.begin());
-  return s;
-}
-
-// Exact path, else a case-insensitive walk (Source content is mixed case
-// and case-insensitive on Windows).
-bool find_ci(const fs::path& root, const std::string& rel, fs::path* out) {
-  std::error_code ec;
-  const fs::path direct = root / fs::u8path(rel);
-  if (fs::is_regular_file(direct, ec)) {
-    *out = direct;
-    return true;
-  }
-  fs::path cur = root;
-  std::stringstream ss(rel);
-  std::string part;
-  std::vector<std::string> parts;
-  while (std::getline(ss, part, '/')) {
-    if (!part.empty()) parts.push_back(part);
-  }
-  for (std::size_t i = 0; i < parts.size(); ++i) {
-    const fs::path next = cur / fs::u8path(parts[i]);
-    if (fs::exists(next, ec)) {
-      cur = next;
-      continue;
-    }
-    if (!fs::is_directory(cur, ec)) return false;
-    bool found = false;
-    const std::string want = lower(parts[i]);
-    for (const auto& it : fs::directory_iterator(cur, ec)) {
-      if (lower(it.path().filename().string()) == want) {
-        cur = it.path();
-        found = true;
-        break;
-      }
-    }
-    if (!found) return false;
-  }
-  if (!fs::is_regular_file(cur, ec)) return false;
-  *out = cur;
-  return true;
-}
 
 // ---- half floats, compressed quaternions ---------------------------------
 
@@ -217,148 +174,6 @@ struct VtxLayout {
   int strip_group = 25;  // StripGroupHeader_t bytes (33 with topology)
   int strip = 27;        // StripHeader_t bytes (35 with topology)
 };
-
-// ---- materials -------------------------------------------------------------
-
-struct MaterialFinder {
-  std::vector<fs::path> roots;  // content roots (holding materials/) or materials dirs
-  fs::path model_dir;
-  std::map<std::string, std::shared_ptr<const Image>> cache;
-
-  bool find(const std::string& rel_in, const char* ext, fs::path* out) const {
-    const std::string rel = clean(rel_in) + ext;
-    for (const fs::path& r : roots) {
-      if (find_ci(r / "materials", rel, out) || find_ci(r, rel, out)) return true;
-    }
-    return false;
-  }
-  bool find_flat(const std::string& name, const char* ext, fs::path* out) const {
-    const std::string base = fs::u8path(clean(name)).filename().string() + ext;
-    return find_ci(model_dir, base, out) || find_ci(model_dir / "materials", base, out);
-  }
-  std::shared_ptr<const Image> vtf(const fs::path& p, std::string* warn) {
-    const std::string key = p.string();
-    auto it = cache.find(key);
-    if (it != cache.end()) return it->second;
-    Bytes b;
-    std::shared_ptr<const Image> img;
-    if (read_file(p, &b)) {
-      auto im = std::make_shared<Image>();
-      std::string err;
-      if (source::decode_vtf(b.d.data(), b.d.size(), im.get(), &err)) {
-        img = std::move(im);
-      } else if (warn) {
-        *warn += (warn->empty() ? "" : "; ") + p.filename().string() + ": " + err;
-      }
-    }
-    cache[key] = img;
-    return img;
-  }
-  bool read_vmt(const fs::path& p, source::Vmt* out) const {
-    std::ifstream in(p, std::ios::binary);
-    if (!in) return false;
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    if (!source::parse_vmt(ss.str(), out)) return false;
-    if (!out->include.empty()) {  // patch material: merge its include
-      std::string inc = clean(out->include);
-      if (lower(inc).rfind("materials/", 0) == 0) inc = inc.substr(10);
-      if (inc.size() > 4 && lower(inc.substr(inc.size() - 4)) == ".vmt") inc.resize(inc.size() - 4);
-      fs::path ip;
-      source::Vmt base;
-      if (find(inc, ".vmt", &ip) && read_vmt_plain(ip, &base)) {
-        for (const auto& [k, v] : base.params) out->params.emplace(k, v);
-        if (out->shader == "patch") out->shader = base.shader;
-      }
-    }
-    return true;
-  }
-  static bool read_vmt_plain(const fs::path& p, source::Vmt* out) {
-    std::ifstream in(p, std::ios::binary);
-    if (!in) return false;
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    return source::parse_vmt(ss.str(), out);
-  }
-  std::shared_ptr<const Image> texture(const std::string& name, const fs::path& near_dir,
-                                       std::string* warn) {
-    fs::path p;
-    if (find(name, ".vtf", &p) || find_ci(near_dir, fs::u8path(clean(name)).filename().string() + ".vtf", &p) ||
-        find_flat(name, ".vtf", &p)) {
-      return vtf(p, warn);
-    }
-    return nullptr;
-  }
-};
-
-void parse_color(const std::string& s, float* rgb) {
-  std::string t;
-  for (char c : s) t += (c == '[' || c == ']' || c == '{' || c == '}') ? ' ' : c;
-  std::istringstream in(t);
-  float v[3];
-  if (in >> v[0] >> v[1] >> v[2]) {
-    const bool bytes = s.find('{') != std::string::npos || v[0] > 1.0f || v[1] > 1.0f || v[2] > 1.0f;
-    for (int k = 0; k < 3; ++k) rgb[k] = bytes ? v[k] / 255.0f : v[k];
-  }
-}
-
-MaterialDesc source_material(MaterialFinder& mf, const std::string& tex,
-                             const std::vector<std::string>& cd_paths, std::string* missing,
-                             std::string* warn) {
-  MaterialDesc m;
-  m.name = tex;
-  m.base_color[0] = m.base_color[1] = m.base_color[2] = m.base_color[3] = 1.0f;
-  m.roughness = 0.75f;
-  std::vector<std::string> names;
-  for (const std::string& cd : cd_paths) {
-    std::string c = clean(cd);
-    if (!c.empty() && c.back() != '/') c += '/';
-    names.push_back(c + clean(tex));
-  }
-  names.push_back(clean(tex));
-  fs::path vmt_path;
-  bool have_vmt = false;
-  for (const std::string& n : names) {
-    if (mf.find(n, ".vmt", &vmt_path)) {
-      have_vmt = true;
-      break;
-    }
-  }
-  if (!have_vmt) have_vmt = mf.find_flat(tex, ".vmt", &vmt_path);
-  std::shared_ptr<const Image> base;
-  if (have_vmt) {
-    source::Vmt vmt;
-    if (mf.read_vmt(vmt_path, &vmt)) {
-      const std::string bt = vmt.param("$basetexture");
-      if (!bt.empty()) base = mf.texture(bt, vmt_path.parent_path(), warn);
-      const std::string bump = vmt.param("$bumpmap").empty() ? vmt.param("$normalmap") : vmt.param("$bumpmap");
-      if (!bump.empty()) {
-        if (auto n = mf.texture(bump, vmt_path.parent_path(), warn)) {
-          // Source normal maps are Y-down (DirectX); the renderer wants Y-up.
-          auto flipped = std::make_shared<Image>(*n);
-          for (std::size_t i = 1; i < flipped->rgba.size(); i += 4) flipped->rgba[i] = static_cast<unsigned char>(255 - flipped->rgba[i]);
-          m.normal_image = std::move(flipped);
-        }
-      }
-      if (vmt.param("$nocull") == "1") m.double_sided = true;
-      if (!vmt.param("$color2").empty()) parse_color(vmt.param("$color2"), m.base_color);
-      else if (!vmt.param("$color").empty()) parse_color(vmt.param("$color"), m.base_color);
-      if (vmt.shader == "unlitgeneric") m.unlit = true;
-      if (!vmt.param("$alpha").empty()) m.base_color[3] = std::clamp(std::strtof(vmt.param("$alpha").c_str(), nullptr), 0.0f, 1.0f);
-    }
-  } else {
-    for (const std::string& n : names) {
-      if ((base = mf.texture(n, mf.model_dir, warn))) break;
-    }
-  }
-  if (base) {
-    m.base_color_image = std::move(base);
-  } else {
-    m.base_color_image = missing_texture_image();
-    if (missing) *missing += (missing->empty() ? "" : ", ") + tex;
-  }
-  return m;
-}
 
 // ---- phy -------------------------------------------------------------------
 
@@ -568,23 +383,19 @@ bool load_source_mdl(const std::string& path, const ModelImportOptions& opt, Mod
     return mdl.in(o, 2) ? static_cast<int>(mdl.i16(o)) : ref;
   };
 
-  MaterialFinder mf;
-  mf.model_dir = mdl_path.parent_path();
-  for (const std::string& r : opt.material_paths) mf.roots.push_back(fs::u8path(r));
-  {
-    // Content roots above the model: <root>/models/... -> <root>/materials.
-    std::error_code ec;
-    fs::path p = mf.model_dir;
-    for (int up = 0; up < 10 && !p.empty(); ++up) {
-      if (fs::is_directory(p / "materials", ec)) mf.roots.push_back(p);
-      if (lower(p.filename().string()) == "models") mf.roots.push_back(p.parent_path());
-      const fs::path parent = p.parent_path();
-      if (parent == p) break;
-      p = parent;
-    }
-  }
+  // Materials: $cdmaterials x content roots (SourceMaterials.h).
+  source::MaterialResolver mr(source::content_roots(path, opt.material_paths), [&] { const auto u = mdl_path.parent_path().u8string(); return std::string(u.begin(), u.end()); }());
   std::string missing;
-  for (const std::string& t : textures) out->materials.push_back(source_material(mf, t, cd, &missing, &warn));
+  for (const std::string& t : textures) {
+    MaterialSource ms;
+    auto ov = opt.material_overrides.find(lower(t));
+    out->materials.push_back(mr.resolve(t, cd, ov == opt.material_overrides.end() ? std::string() : ov->second, &ms));
+    if (ms.status == "missing" || ms.status == "partial") {
+      missing += (missing.empty() ? "" : ", ") + t;
+      if (!ms.searched.empty()) append(&warn, "material '" + t + "': " + ms.searched);
+    }
+    out->material_sources.push_back(std::move(ms));
+  }
   if (!missing.empty()) append(&warn, "missing textures (magenta): " + missing);
 
   // -- vertices (vvd, LOD fixups) ----------------------------------------------

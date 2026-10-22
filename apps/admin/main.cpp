@@ -24,6 +24,8 @@
 #include "SmokeBounds.h"
 #include "SmokeMeta.h"
 #include "SmokeModels.h"
+#include "SmokeGmod.h"
+#include "GmodCli.h"
 
 #ifndef TS_ENGINE_VERSION
 #define TS_ENGINE_VERSION "0.0.0"
@@ -1294,6 +1296,10 @@ int run_console_smoke() {
   if (run_models_smoke() != 0) {
     return 1;
   }
+  // Source engine formats: .gma / .vtf / .vmt, search order, rights (see SmokeGmod.cpp).
+  if (ts::tombstone::run_gmod_smoke() != 0) {
+    return 1;
+  }
   // Prefabs in the 2D and 3D editors (see SmokePrefab.cpp).
   if (run_prefab_smoke() != 0) {
     return 1;
@@ -2314,6 +2320,18 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-mdl") == 0) {
       // Just the Source engine model import (synthetic .mdl set).
       return run_mdl_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-gmod") == 0) {
+      // Source engine formats: .gma addons, VTF / VMT, material search order.
+      return ts::tombstone::run_gmod_smoke();
+    }
+    if (std::strcmp(argv[i], "--import-gma") == 0) {
+      // ts_admin --import-gma <file> --claim <dir> [--dest rel] [--only ...] [--list]
+      return ts::tombstone::run_import_gma_cli(argc, argv);
+    }
+    if (std::strcmp(argv[i], "--ack-rights") == 0) {
+      // ts_admin --ack-rights <claim> [<asset>] [--revoke] (Ship It rights check)
+      return ts::tombstone::run_ack_rights_cli(argc, argv);
     }
     if (std::strcmp(argv[i], "--smoke-bounds") == 0) {
       // Model bounds / hit boxes / fitted colliders (see SmokeBounds.cpp).

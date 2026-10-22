@@ -40,6 +40,13 @@ class TextureUploader {
 void set_texture_uploader(TextureUploader* uploader);
 TextureUploader* texture_uploader();
 
+// Extra in-memory decoder tried before stb_image (the editor registers the
+// Source .vtf decoder so .vtf thumbnails work). Returns false when the
+// bytes are not its format.
+using ExtraImageDecoder = bool (*)(const unsigned char* data, std::size_t size,
+                                   std::vector<unsigned char>* rgba, int* width, int* height);
+void set_extra_image_decoder(ExtraImageDecoder decoder);
+
 // Decodes images with stb_image (png/jpg/bmp/tga/gif/psd/pnm) and caches
 // them by path, including failures, so a missing file costs one stat per
 // poll instead of one decode per frame.

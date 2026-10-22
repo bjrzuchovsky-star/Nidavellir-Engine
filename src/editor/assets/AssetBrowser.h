@@ -10,6 +10,7 @@
 // clean-up.
 
 #include "editor/assets/AssetDb.h"
+#include "editor/assets/GmaImport.h"
 #include "editor/assets/ImportSort.h"
 #include "editor/ui/FolderBrowser.h"
 #include "gfx/TextureCache.h"
@@ -70,6 +71,10 @@ class AssetBrowser {
   const std::vector<std::string>& orphans() const { return orphans_; }
 
   void draw();
+  // Source addon import (.gma): opens the picker on a file (drops).
+  void import_gma(const std::string& path) { gma_dialog_.open_file(db_.project_dir(), path); }
+  // Reimport and tell the host (the scene reloads the model / texture).
+  void reimport(const std::string& rel);
   const std::string& selected() const { return selected_; }
   void select(const std::string& rel) { selected_ = rel; }
 
@@ -112,6 +117,9 @@ class AssetBrowser {
   double drop_seen_ = -1.0;
   std::string delete_pending_;
   std::vector<assetdb::Ref> delete_refs_;
+  gmaimport::Dialog gma_dialog_;
+  FolderBrowser relink_picker_;
+  std::string relink_for_;  // "rel|material" while the relink picker is open
 };
 
 }  // namespace editor

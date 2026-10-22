@@ -1,4 +1,5 @@
 #include "render3d/ModelImport.h"
+#include "render3d/import/SourceMaterials.h"
 #include "editor/screens/SettingsScreen.h"
 
 #include "editor/update/UpdateService.h"
@@ -40,6 +41,8 @@ void SettingsScreen::sync_buffers_from_draft() {
                sizeof(username_buf_) - 1);
   std::memset(blender_buf_, 0, sizeof(blender_buf_));
   std::strncpy(blender_buf_, draft_.blender_path.c_str(), sizeof(blender_buf_) - 1);
+  std::memset(source_folders_buf_, 0, sizeof(source_folders_buf_));
+  std::strncpy(source_folders_buf_, draft_.source_search_folders.c_str(), sizeof(source_folders_buf_) - 1);
   theme_index_ = theme_to_index(draft_.theme);
 }
 
@@ -47,6 +50,7 @@ void SettingsScreen::sync_draft_from_buffers() {
   draft_.projects_root = projects_root_buf_;
   draft_.username = username_buf_;
   draft_.blender_path = blender_buf_;
+  draft_.source_search_folders = source_folders_buf_;
   draft_.theme = index_to_theme(theme_index_);
 }
 
@@ -57,6 +61,8 @@ void SettingsScreen::on_enter() {
   folder_browser_.close();
   blender_browser_.close();
   blender_probed_ = false;
+  source_browser_.close();
+  source_probed_ = false;
   sync_buffers_from_draft();
   std::cout << "[Settings] edit config\n";
 }
@@ -164,6 +170,43 @@ void SettingsScreen::draw_ui() {
     } else {
       theme::StatusInfo("Blender not found automatically; pick blender.exe (Steam: <library>\\steamapps\\common\\Blender).");
     }
+  }
+
+  {
+    // Source engine formats (.mdl / .vtf / .vmt / .gma): read-only content
+    // folders searched for materials (render3d/import/SourceMaterials.h).
+    ImGui::SetNextItemWidth(-110.0f);
+    ImGui::InputTextWithHint("Source content search folders##srcdirs",
+                             "folders with materials/ (';' separated), e.g. ...\\GarrysMod\\garrysmod",
+                             source_folders_buf_, sizeof(source_folders_buf_));
+    ImGui::SameLine();
+    if (theme::SecondaryButton("Add...##srcdirs", ImVec2(100, 0))) source_browser_.open(std::string());
+    auto add_folder = [&](const std::string& f) {
+      std::vector<std::string> list = render3d::source::split_folder_list(source_folders_buf_);
+      if (std::find(list.begin(), list.end(), f) == list.end()) list.push_back(f);
+      const std::string joined = render3d::source::join_folder_list(list);
+      std::memset(source_folders_buf_, 0, sizeof(source_folders_buf_));
+      std::strncpy(source_folders_buf_, joined.c_str(), sizeof(source_folders_buf_) - 1);
+    };
+    if (source_browser_.draw("Select a Source content folder")) {
+      const std::string picked = source_browser_.take_result();
+      if (!picked.empty()) add_folder(picked);
+    }
+    if (!source_probed_) {
+      source_found_ = render3d::source::detect_content_folders();
+      source_probed_ = true;
+    }
+    for (const std::string& f : source_found_) {
+      const std::vector<std::string> list = render3d::source::split_folder_list(source_folders_buf_);
+      if (std::find(list.begin(), list.end(), f) != list.end()) continue;
+      ImGui::TextDisabled("Found: %s", f.c_str());
+      ImGui::SameLine();
+      ImGui::PushID(f.c_str());
+      if (ImGui::SmallButton("Add")) add_folder(f);
+      ImGui::PopID();
+    }
+    theme::StatusInfo("Source engine formats (.mdl/.vtf/.vmt/.gma): materials are looked up here after the model's "
+                      "own folders and the claim. Only read, never copied. Import only content you have the rights to.");
   }
 
   if (!draft_.last_project_path.empty()) {

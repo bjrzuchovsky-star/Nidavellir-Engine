@@ -44,6 +44,10 @@ struct ModelImportOptions {
   int skin = 0;                              // Source skin family
   std::map<std::string, int> body_groups;    // Source: group -> option
   std::string blender_path;                  // override for .blend
+  // Source materials relinked by hand: material name (as in the model,
+  // lower case) -> .vmt / .vtf / image file (absolute, or relative to the
+  // model's folder). Settings key "material_overrides".
+  std::map<std::string, std::string> material_overrides;
 };
 
 // Options from a .meta "settings" object (missing keys: format defaults).
