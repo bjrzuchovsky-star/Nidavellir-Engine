@@ -8,6 +8,7 @@ add_library(ts_editor
   team/TeamSession.cpp
   team/Team2D.cpp
   team/Team3D.cpp
+  team/TeamPanel.cpp
   workspace/Workspace2D_History.cpp
   workspace/Workspace2D_Tiles.cpp
   workspace/Workspace2D_Tools.cpp

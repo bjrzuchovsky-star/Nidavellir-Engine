@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/team/TeamPanel.h"
 #include "editor/export/FreightOffice.h"
 #include "editor/tools/AutoTilePanel.h"
 #include "editor/tools/SpriteSlicerPanel.h"
@@ -332,6 +333,11 @@ void Editor2DScreen::draw_menu_bar() {
 
   draw_play_menu();
   draw_plugin_top_menus();
+
+  if (ImGui::BeginMenu("Team")) {
+    team_ui::draw_menu(team(), &show_team_);
+    ImGui::EndMenu();
+  }
 
   if (ImGui::BeginMenu("Help")) {
     draw_help_menu_contents();
@@ -881,6 +887,7 @@ void Editor2DScreen::draw_ui() {
     }
     ImGui::End();
   }
+  if (show_team_) draw_team_panel();
   if (show_vault_) {
     ImGui::SetNextWindowSize(ImVec2(720, 320), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Vault", &show_vault_)) {
