@@ -2,6 +2,17 @@
 
 All notable changes to TombStone Engine. The version number lives in the `VERSION` file at the repo root.
 
+## Unreleased (0.2.0)
+
+### Source engine formats (.mdl/.vtf/.vmt/.gma)
+- `.gma` addon import: **Asset Browser > Import... > Import Source addon (.gma)...** (or dropping a `.gma` on the editor window) opens a picker (addon name / author, files grouped as Models / Materials / Sounds / Other with checkboxes, CRC32 checked per file) and extracts the chosen files into `assets/Models/<Addon>/`, keeping Source paths. A selected `.mdl` brings its `.vvd` / `.vtx` / `.phy`; existing files are never overwritten; unsafe paths are refused. LZMA-compressed Workshop downloads (`.bin`) are decompressed by a new clean-room LZMA decoder. CLI: `ts_admin --import-gma <file> --claim <dir> [--dest] [--only] [--list]`.
+- Source materials are found far more often: each `$cdmaterials` folder is tried against the asset's search path, the folders above the model, the claim (including every addon extracted into it) and the new **Settings > Tools > Source content search folders** (with `garrysmod/`, `addons/*` and `download/` below them; Steam game folders are suggested, read-only). Missing ones keep the checker, and the model's `.meta` lists which `.vmt` files were tried where. **Relink...** in the Asset Browser fixes one by hand (`material_overrides`).
+- VMT: proper KeyValues parsing (comments, case, `[$X360]` conditions, fallback blocks, proxies ignored), nested `patch` materials with `insert` / `replace`, `$color2`, `$translucent`, `$alphatest` (+ reference), `$additive`, `$iris`, `$ssbump` skipped. VTF: correct cube-map face count (sphere map before 7.5), format names, header info.
+- Renderer: materials have an alpha mode (opaque / mask with cutoff / blend). Masked materials discard below the cutoff; blended ones draw after the opaque meshes.
+- `.vtf` files are texture assets (info, thumbnails). Model `importer_version` is now 3, so models imported earlier re-resolve their materials on the next scan; **Reimport** now also reloads the model in the open scene.
+- Rights check: files extracted from a `.gma` are tagged in `.tombstone/provenance.json` (origin `gma:<addon>`, author); Source-format files count even untagged. Ship It warns "you need the rights to ship these" with an **I have the rights** acknowledgement per file or per claim (saved, never a block); `ts_admin --ack-rights`.
+- `ts_admin --smoke-gmod` (also in `--smoke`): everything above with generated files only. Docs: [docs/model-import.md](docs/model-import.md#source-engine-formats-mdlvtfvmtgma). TombStone is not affiliated with Valve or Facepunch; import and ship only content you have the rights to.
+
 ## 0.1.2 — 2026-10-23
 
 A small patch release: the Vault without opening a claim. `TombStone-0.1.2-update.exe` upgrades a 0.1.0 or 0.1.1 install in place and keeps your claims, settings and the Vault.

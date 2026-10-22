@@ -1,6 +1,6 @@
 # Model import
 
-> **Rights:** you are responsible for having the rights to any model you import. The engine only reads the file formats. It ships no Valve, Garry's Mod or other third-party models or textures, and its tests build their own tiny files in a temp folder.
+> **Rights:** you are responsible for having the rights to any model you import, and to anything you ship. The engine only reads the file formats. It ships no Valve, Garry's Mod or other third-party models or textures, and its tests build their own tiny files in a temp folder. TombStone is not affiliated with or endorsed by Valve Corporation or Facepunch Studios; their names are used only to say which file formats are read.
 
 Every 3D model goes through one loader, `render3d::load_model` (`src/render3d/ModelImport.h`). The 3D editor, Play, the Jolt colliders, exported games and the Asset Browser all use it, so a format that imports in the editor also loads in a shipped game.
 
@@ -23,9 +23,49 @@ Assimp is fetched with `FetchContent` from the v5.4.3 release archive, pinned by
 ### Textures
 
 - glTF / Assimp: PNG, JPG, TGA, BMP, PSD, GIF, HDR (stb_image), embedded textures (compressed or raw), and `.vtf`. Texture paths are looked up next to the model, in `textures/` beside it, and in the material search path; a missing extension is tried as `.png`, `.jpg`, `.tga`.
-- Source: each `$cdmaterials` folder plus texture name is looked up as `materials/<cd>/<name>.vmt` in the material roots: the material search path, any parent folder that has a `materials/` folder, the folder above a `models/` folder, and the model folder itself. Lookups ignore case. The VMT gives `$basetexture`, `$bumpmap` / `$normalmap` (green flipped to OpenGL), `$color`, `$alpha`, `$nocull`, `UnlitGeneric`, and `patch` / `include`.
+- Source: each `$cdmaterials` folder plus material name is looked up as `materials/<cd>/<name>.vmt` in the content roots (see [Source engine formats](#source-engine-formats-mdlvtfvmtgma) for the order). Lookups ignore case. The VMT gives `$basetexture`, `$bumpmap` / `$normalmap` (green flipped to OpenGL), `$color` / `$color2` (tint), `$alpha`, `$translucent`, `$alphatest`, `$nocull`, `UnlitGeneric`, and `patch` / `include`.
 - VTF 7.0 to 7.5 (with 7.3+ resources): DXT1, DXT1 with one-bit alpha, DXT3, DXT5, RGBA8888, ABGR8888, RGB888, BGR888, BGRA8888, BGRX8888, ARGB8888, BGR565, RGB565, BGRA4444, BGRA5551, BGRX5551, I8, IA88, A8, UV88, RGB888_BLUESCREEN, BGR888_BLUESCREEN, UVWQ8888, UVLX8888, RGBA16161616F and RGBA16161616 (P8 is read as greyscale).
 - A texture that can't be found or decoded shows a **magenta checker** and is listed in the asset's warning.
+
+## Source engine formats (.mdl/.vtf/.vmt/.gma)
+
+Source engine content (models from Garry's Mod addons, Half-Life 2 and other Source games) comes in as `.mdl` models with `.vmt` materials and `.vtf` textures, often packed in `.gma` addon archives. You need the rights to anything you import, and to anything you ship (see *Rights check* below).
+
+### Importing a .gma addon
+
+- **Asset Browser > Import... > Import Source addon (.gma)...**, or dropping a `.gma` file onto the editor window, picks a `.gma` (or a compressed Workshop download, often `.bin`). A picker lists the addon's name, author and files, grouped as Models, Materials, Sounds and Other, with a checkbox per group and per file. Every file's CRC32 is checked; damaged files are greyed out and never extracted. Paths that try to leave the folder (`..`, drive letters, absolute paths) are refused.
+- **Import selected** copies the chosen files into the claim under `assets/Models/<Addon>/`, keeping their Source paths (`models/...`, `materials/...`, `sound/...`), so a model finds its materials the way the game would. A selected `.mdl` brings its `.vvd` / `.vtx` / `.phy` / `.ani`. Existing files are never overwritten (a second import of the same addon goes to `<Addon>_2`). The Asset Browser then rescans: models, `.vtf` textures (with thumbnails) and sounds are imported.
+- From the command line: `ts_admin --import-gma <file.gma|.bin> --claim <claim folder> [--dest assets/Models/MyAddon] [--only models,materials,sound,other] [--list]`. It prints the contents and CRC status, extracts, imports, and lists each model's materials (found, or where they were looked for).
+- Compressed downloads: LZMA "alone" streams (5-byte properties + 8-byte size header) are detected and decompressed by our own small LZMA decoder (`src/render3d/import/Lzma.cpp`). Other compression formats are reported as "not a .gma".
+
+### Where materials are looked for
+
+For each material the model names, every `$cdmaterials` folder is tried in the model's order, each against every content root, in this order (first hit wins):
+
+1. the asset's **Material search path** import setting (`;`-separated; relative paths start at the model's folder);
+2. folders above the model: any with a `materials/` folder, and the folder holding a `models/` folder (an extracted addon or a game folder);
+3. the claim: its root, `assets/`, every pack under `assets/Models/` and `assets/` that has a `materials/` folder (so a model addon and a separate material addon both extracted into the claim find each other), `assets/Materials/`, `assets/Textures/`;
+4. **Settings > Tools > Source content search folders** (`;`-separated, **Add...** button): each folder, its `garrysmod/` child, and their `addons/*` and `download/` folders. Settings lists Source game folders it found in your Steam libraries (for example `...\steamapps\common\GarrysMod\garrysmod`) with an **Add** button. These folders are only read, never copied or changed. `.vpk` archives are not read: extract what you need first.
+
+A material that is still missing keeps the magenta checker. The model's `.meta` info lists every material (`source_materials`: status `ok` / `partial` / `missing` / `override`, the `.vmt` and `.vtf` used, and for missing ones exactly which `materials/<cd>/<name>.vmt` files were tried in which folders); the warning says the same, and the Asset Browser shows it under **Source materials** in the model's details. **Relink...** picks a `.vmt`, `.vtf` or image for one material by hand (saved in the model's `material_overrides` setting, relative to the model when it is inside the claim); **Clear** removes it.
+
+### Materials
+
+- `.vmt` files are KeyValues text: the shader name (`VertexLitGeneric`, `LightmappedGeneric`, `UnlitGeneric`, `Eyes` / `EyeRefract`...), keys in any case, `//` comments, `[$X360]`-style conditions skipped, dx-level fallback blocks used for keys the main block lacks, `Proxies` ignored. `patch` materials follow `include` (nested patches too); `insert` adds keys the included material lacks and `replace` overrides them.
+- Mapped onto the engine's material: `$basetexture` (or `$iris`) -> albedo, `$bumpmap` / `$normalmap` -> normal map (not `$ssbump`), `$color2` / `$color` -> tint, `$translucent` / `$additive` / `$alpha` < 1 -> alpha blend, `$alphatest` (+ `$alphatestreference`) -> alpha mask, `$nocull` -> double sided, `UnlitGeneric` -> unlit. `$phong`, `$envmap`, `$detail`, `$selfillum` and proxies are ignored.
+- The renderer draws alpha-mask materials with a cutoff and alpha-blend materials after the opaque ones (no depth writes, not sorted). Albedo textures are treated as sRGB and normal maps as linear, as for every other format.
+
+### Already-imported models
+
+The model importer version is now 3: models imported before this change are reimported on the next Asset Browser scan, so their materials are looked up again through the new search order. **Reimport** (right-click, or the details pane) does it by hand and reloads the model in the open scene; do that after changing the search folders.
+
+### Rights check (Ship It)
+
+Files extracted from a `.gma` are tagged in the claim's ledger, `.tombstone/provenance.json` (origin `gma:<addon name>`, the addon's author, the source file and the time); imported `.mdl` and `.vtf` assets get `"origin": "source-engine"` in their `.meta` info. Files with Source extensions that have no tag (copied in by hand) count as `source-engine` too. **Ship It** (the Freight Office and `ts_export`) lists the ones that would ship in a *Rights check* warning, "you need the rights to ship these", until you tick **I have the rights to ship all of these** (the claim) or the box next to each file under *Rights*. The acknowledgement is saved in the ledger. It never blocks an export. `ts_admin --ack-rights <claim> [<asset>] [--revoke]` does the same from the command line. The ledger is editor data and never ships.
+
+### Clean-room and licences
+
+The `.gma`, VMT / KeyValues, VTF and material lookup code and the LZMA decoder were written from public descriptions of the formats (the Valve Developer Community wiki pages, the public LZMA specification, which is in the public domain). No Source SDK code or headers are included, and no GPL / LGPL code (VTFLib, gmad) was used or linked.
 
 ## Settings (Asset Browser)
 
@@ -99,7 +139,7 @@ Settings shows the Blender it found when the field is empty. The importer runs `
 ## Limits
 
 - Source: flexes (face morphs), eyeballs, eye and mouth shaders, jigglebones, attachments, hitbox sets other than the first, and ragdoll constraints are not imported. Delta (additive) animations, animations in `.ani` blocks and `$includemodel` animations are skipped with a warning; blended sequences use their first animation. MDL versions outside 44 to 49 are refused (v53 is Titanfall / CS:GO-era).
-- VTF: only the largest mip of frame 0, face 0, slice 0 is used; the ATI formats (ATI1N / ATI2N) and palette lookups for P8 are not supported. VMT proxies, `$detail`, `$envmap` and `$phong` are ignored.
+- VTF: only the largest mip of frame 0, face 0, slice 0 is used (animated textures show their first frame, cube maps their first face); the ATI formats (ATI1N / ATI2N), the console / special formats past UVLX8888 and palette lookups for P8 are not supported and keep the checker. VMT proxies, `$detail`, `$envmap` and `$phong` are ignored. `.vpk` archives are not read.
 - 4 weights per vertex (Source: 3). More than 128 bones are split into per-primitive palettes.
 - Assimp: DDS textures show magenta. Morph targets and cameras or lights in the file are not imported. FBX files in centimetres get a warning; set *Unit scale* to `0.01`.
 - `.blend` needs Blender on every machine that loads it, including players' machines. For a shipped game, export to glTF.
@@ -116,4 +156,5 @@ The Source reader was written from public descriptions of the formats: the Valve
 - `TS_AUDIO=null ts_admin --smoke-models` runs the above and then writes tiny OBJ + MTL + TGA, Collada (skinned and animated, Z-up), ASCII FBX, PLY, STL and DirectX `.x` files, imports each, checks hot reload from the `.mtl`, and checks the `.blend` message without Blender.
 - `TS_AUDIO=null ts_admin --smoke-bounds` (also run by `--smoke-models`) checks bounds against the drawn vertex extents. Its cases: a skinned rig with a 0.01 armature, a helper bone 500 m away and a stray vertex at 10 km; the same rig as Collada through Assimp at two unit scales; glTF with a unit scale; OBJ with `UCX_` and `_LOD1` meshes; a 200-joint skeleton split into palettes of 128 or fewer that pose exactly like the full one; and the box / capsule / convex collider fits. `--smoke-mdl` also checks the Source hitbox set: a named head box, swapped min / max, and placement at rest and posed.
 - `--smoke-models` also checks the Steam `libraryfolders.vdf` parser on canned files (the current layout with `"path"` keys and escaped backslashes, and the old numbered layout), checks that the editor's Blender setting is used, and checks the "not found" message.
+- `TS_AUDIO=null ts_admin --smoke-gmod` builds an addon in memory (our own model, VMTs, DXT1 and BGRA8888 VTFs, a WAV, a Lua file and an unsafe `../` path) and checks: CRC32, `.gma` read / write, per-file CRC mismatch, truncation, an LZMA-compressed download, the import picker selection (a `.mdl` bringing its siblings), extraction into a claim (no overwrites, no unsafe paths) and its provenance records; VTF 7.1-7.5 decode of DXT1 / DXT3 / DXT5 and 11 uncompressed formats pixel by pixel, mips x frames, cube maps with and without the sphere map; VMT comments / case / conditionals / fallback blocks and a two-level `patch` chain; the content root order, `$cdmaterials` order (the first folder wins), a material found in a search folder's `addons/`, the missing-material log, a relink; the asset database info; and the Ship It rights warning with per-asset, revoked and claim-wide acknowledgement.
 - All of these are part of `ts_admin --smoke`.
