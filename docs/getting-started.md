@@ -68,7 +68,7 @@ With the Visual Studio generator, binaries go under `build/apps/<app>/<Config>/`
 
 `ts_admin --smoke` runs the whole headless suite. Single areas, from the flags parsed in `apps/admin/main.cpp`:
 
-`--smoke-3d`, `--smoke-anim3d`, `--smoke-vr`, `--smoke-audio`, `--smoke-ui`, `--smoke-fx`, `--smoke-tools`, `--smoke-transform`, `--smoke-prefab`, `--smoke-assets`, `--smoke-meta`, `--smoke-models`, `--smoke-mdl`, `--smoke-graph`, `--smoke-cpp`, `--smoke-cs`, `--smoke-export`, `--smoke-templates`, `--smoke-store`, `--smoke-survival`, `--smoke-shipyard`
+`--smoke-3d`, `--smoke-anim3d`, `--smoke-vr`, `--smoke-audio`, `--smoke-ui`, `--smoke-fx`, `--smoke-tools`, `--smoke-transform`, `--smoke-camera`, `--smoke-attach`, `--smoke-prefab`, `--smoke-assets`, `--smoke-meta`, `--smoke-models`, `--smoke-mdl`, `--smoke-graph`, `--smoke-cpp`, `--smoke-cs`, `--smoke-export`, `--smoke-templates`, `--smoke-store`, `--smoke-survival`, `--smoke-shipyard`
 
 Also: `ts_game --smoke --project <dir>`, `ts_server --smoke` and `ts_client --smoke`.
 
