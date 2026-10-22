@@ -66,6 +66,23 @@ bool copy_tree(const fs::path& from, const fs::path& to, std::string* error) {
     return false;
   }
   for (const auto& e : fs::directory_iterator(from, ec)) {
+    if (e.path().filename() == ".tombstone" && e.is_directory(ec)) {
+      // Asset metadata (GUIDs + import settings, editor/assets/AssetDb.h)
+      // and the import options travel; script builds, logs, backups don't.
+      const fs::path dst = to / ".tombstone";
+      std::error_code mec;
+      if (fs::is_directory(e.path() / "meta", mec)) {
+        fs::create_directories(dst / "meta", mec);
+        fs::copy(e.path() / "meta", dst / "meta", fs::copy_options::recursive | fs::copy_options::overwrite_existing, mec);
+      }
+      for (const char* f : {"meta.json", "import.json"}) {
+        if (fs::is_regular_file(e.path() / f, mec)) {
+          fs::create_directories(dst, mec);
+          fs::copy_file(e.path() / f, dst / f, fs::copy_options::overwrite_existing, mec);
+        }
+      }
+      continue;
+    }
     if (skip_entry(e.path().filename())) continue;
     const fs::path dst = to / e.path().filename();
     if (e.is_directory(ec)) {

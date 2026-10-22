@@ -183,6 +183,9 @@ void write_wav(const fs::path& p, float seconds) {
   ts::audio::write_wav(p.string(), c);
 }
 
+// Where an asset's .meta lives: the claim's metadata folder.
+fs::path meta_of(const fs::path& dir, const std::string& rel) { return dir / ".tombstone/meta" / (rel + ".meta"); }
+
 void bump_mtime(const fs::path& p) {
   std::error_code ec;
   fs::last_write_time(p, fs::last_write_time(p, ec) + std::chrono::seconds(3), ec);
@@ -215,7 +218,8 @@ int check_db() {
   adb::AssetDb::ScanReport rep = db.scan();
   if (rep.created.size() != 5 || db.entries().size() != 5) return fail("first scan creates 5 metas");
   for (const auto& e : db.entries()) {
-    if (!fs::exists(dir / (e.rel + ".meta")) || e.meta.guid.size() != 32) return fail("meta for " + e.rel);
+    if (!fs::exists(meta_of(dir, e.rel)) || e.meta.guid.size() != 32) return fail("meta for " + e.rel);
+    if (fs::exists(dir / (e.rel + ".meta"))) return fail("no sidecar .meta next to " + e.rel);
   }
   const auto* png_e = db.by_path("assets/hero.png");
   const auto* gl = db.by_path("assets/models/tri.gltf");
@@ -251,7 +255,7 @@ int check_db() {
   ts::tombstone::json::Value s = png_e->meta.settings;
   s.set("filter", ts::tombstone::json::Value::string("linear"));
   if (!db.set_settings("assets/hero.png", s)) return fail("set_settings");
-  if (slurp(dir / "assets/hero.png.meta").find("\"linear\"") == std::string::npos) {
+  if (slurp(meta_of(dir, "assets/hero.png")).find("\"linear\"") == std::string::npos) {
     return fail("settings written to .meta");
   }
   // References.
@@ -266,13 +270,15 @@ int check_db() {
     return fail("move in editor");
   }
   if (slurp(dir / "scene.json").find("assets/chars/hero_idle.png") == std::string::npos ||
-      !fs::exists(dir / "assets/chars/hero_idle.png.meta") || db.path_of(hero_guid) != "assets/chars/hero_idle.png") {
+      !fs::exists(meta_of(dir, "assets/chars/hero_idle.png")) || fs::exists(meta_of(dir, "assets/hero.png")) ||
+      db.path_of(hero_guid) != "assets/chars/hero_idle.png") {
     return fail("editor move kept references + guid");
   }
-  // 2) Moved outside the editor, with its .meta (Explorer, git mv).
+  // 2) Moved outside the editor together with its mirrored .meta (git mv of both).
   fs::create_directories(dir / "assets/audio");
+  fs::create_directories(meta_of(dir, "assets/audio/x").parent_path());
   fs::rename(dir / "assets/sfx/bell.wav", dir / "assets/audio/bell.wav");
-  fs::rename(dir / "assets/sfx/bell.wav.meta", dir / "assets/audio/bell.wav.meta");
+  fs::rename(meta_of(dir, "assets/sfx/bell.wav"), meta_of(dir, "assets/audio/bell.wav"));
   rep = db.scan();
   if (rep.moved.size() != 1 || rep.moved[0].second != "assets/audio/bell.wav") return fail("outside move seen");
   if (db.fix_references(rep) != 1 ||
@@ -284,7 +290,7 @@ int check_db() {
   fs::rename(dir / "assets/chars/hero_idle.png", dir / "assets/chars/hero.png");
   rep = db.scan();
   if (rep.moved.size() != 1 || db.path_of(hero_guid) != "assets/chars/hero.png" ||
-      fs::exists(dir / "assets/chars/hero_idle.png.meta") || !rep.created.empty()) {
+      fs::exists(meta_of(dir, "assets/chars/hero_idle.png")) || !rep.created.empty() || rep.relinked.size() != 1) {
     return fail("rename without meta adopts the guid");
   }
   db.fix_references(rep);
@@ -293,7 +299,7 @@ int check_db() {
   }
   // 4) A copy (file + meta) gets its own GUID.
   fs::copy_file(dir / "assets/chars/hero.png", dir / "assets/chars/hero_copy.png");
-  fs::copy_file(dir / "assets/chars/hero.png.meta", dir / "assets/chars/hero_copy.png.meta");
+  fs::copy_file(meta_of(dir, "assets/chars/hero.png"), meta_of(dir, "assets/chars/hero_copy.png"));
   rep = db.scan();
   const auto* copy = db.by_path("assets/chars/hero_copy.png");
   if (rep.duplicated.size() != 1 || !copy || copy->meta.guid == hero_guid ||
@@ -314,7 +320,7 @@ int check_db() {
       !fs::exists(dir / "assets/chars/hero.png")) {
     return fail("delete refuses an asset in use");
   }
-  if (!db.remove("assets/chars/hero_copy.png", false) || fs::exists(dir / "assets/chars/hero_copy.png.meta")) {
+  if (!db.remove("assets/chars/hero_copy.png", false) || fs::exists(meta_of(dir, "assets/chars/hero_copy.png"))) {
     return fail("delete unused asset + meta");
   }
   if (!db.remove("assets/broken.png", true)) return fail("forced delete");
@@ -348,7 +354,7 @@ int check_2d() {
   // Outside move picked up by the poll path.
   fs::create_directories(dir / "assets/props/wood");
   fs::rename(dir / "assets/props/crate.png", dir / "assets/props/wood/crate.png");
-  fs::rename(dir / "assets/props/crate.png.meta", dir / "assets/props/wood/crate.png.meta");
+  // (no .meta to carry: the metadata folder keeps it; found by content hash)
   ab.rescan();
   e = scr->workspace().find(id);
   if (!e || !e->sprite || e->sprite->path != "assets/props/wood/crate.png") {
@@ -405,7 +411,7 @@ int run_assets_smoke() {
   if (check_2d() != 0) return 1;
   if (check_3d() != 0) return 1;
   std::cout << "[smoke] assets OK (.meta + stable GUIDs, PNG / glTF / WAV / font import info, "
-               "import errors, settings persisted, find references (JSON + Lua), moves in the "
+               "import errors, settings persisted, find references (JSON + Lua), .meta in .tombstone/meta, moves in the "
                "editor and outside it with / without .meta, copies re-GUIDed, hot reload "
                "reimport, delete-in-use refusal, folders; 2D + 3D open scenes follow moves, "
                "3D drops use model scale / collider and sound bus / loop)\n";

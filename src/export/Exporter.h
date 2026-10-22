@@ -96,6 +96,10 @@ bool export_project(const ExportOptions& opt, ExportResult* out,
 // editor-only data skipped (dot folders, exports, builds, imgui.ini, *.bak,
 // thumbnails, plugin binaries).
 std::vector<std::string> content_files(const std::string& project_dir);
+// content_files plus every asset's .meta under its logical sidecar name
+// ("assets/a.gltf.meta"; the file itself is in .tombstone/meta, see
+// core/AssetMeta.h). The exporter packs only models' ones.
+std::vector<std::string> content_files_with_metas(const std::string& project_dir);
 bool is_editor_only(const std::string& rel);
 
 // Lowercase dash slug of a display name ("Ghost Town 3D" -> "ghost-town-3d").

@@ -13,7 +13,7 @@
 //                       Assimp (BSD-3, fetched by hash; TS_WITH_ASSIMP)
 //   .blend              Blender, run headless to export glTF (when found)
 //
-// Import settings come from the Asset Browser's "<file>.meta" (settings
+// Import settings come from the Asset Browser's .meta (settings
 // object) and are shared by every format: unit_scale and up_axis are baked
 // into the vertices / skeleton / hulls; material_path adds texture search
 // roots; lod picks a level of detail (Source); skin / body_groups pick
@@ -51,10 +51,11 @@ ModelImportOptions model_options_from_settings(const json::Value& settings,
                                                const std::string& path);
 // Settings a fresh .meta gets for this model file.
 json::Value default_model_settings(const std::string& path);
-// Reads "<path>.meta" when it exists (false = defaults used).
+// Reads the model's .meta when it exists (the claim's .tombstone/meta
+// folder, else a "<path>.meta" sidecar; false = defaults used).
 bool read_model_options(const std::string& path, ModelImportOptions* out);
 
-// Load any supported model; settings from "<path>.meta" when present.
+// Load any supported model; settings from its .meta when present.
 // Success with a non-empty *error = warnings (missing textures...).
 bool load_model(const std::string& path, Model* out, std::string* error);
 bool load_model(const std::string& path, const ModelImportOptions& opt, Model* out,

@@ -5,6 +5,7 @@
 #include "export/WinIcon.h"
 #include "export/Zip.h"
 
+#include "core/AssetMeta.h"
 #include "core/JsonMini.h"
 #include "runtime/CSharpScript.h"
 #include "runtime/NativeScript.h"
@@ -26,6 +27,23 @@ namespace exporter {
 namespace fs = std::filesystem;
 
 namespace {
+
+// Where a content path's bytes are (a logical .meta -> its file).
+fs::path content_source(const fs::path& proj, const std::string& rel) {
+  if (core::asset_meta::is_meta_rel(rel)) {
+    const std::string m = core::asset_meta::resolve(proj.string(), rel);
+    if (!m.empty()) return fs::u8path(m);
+  }
+  return proj / fs::u8path(rel);
+}
+
+// Only a model's .meta ships: the runtime importer reads its unit scale /
+// up axis / LOD / skin from there (as a "<model>.meta" sidecar in the pak).
+bool shipped_meta(const fs::path& proj, const std::string& rel) {
+  std::ifstream meta(content_source(proj, rel), std::ios::binary);
+  std::string text((std::istreambuf_iterator<char>(meta)), std::istreambuf_iterator<char>());
+  return text.find("\"kind\": \"model\"") != std::string::npos;
+}
 
 #if defined(_WIN32)
 constexpr const char* kExeExt = ".exe";
@@ -99,6 +117,28 @@ std::string json_num_object(const std::vector<std::pair<std::string, std::string
 }
 
 }  // namespace
+
+// The claim's content plus each asset's .meta by its logical sidecar name
+// ("assets/a.gltf.meta"): the metadata lives in .tombstone/meta (a dot
+// folder content_files skips), older claims may still have sidecars.
+std::vector<std::string> content_files_with_metas(const std::string& project_dir) {
+  const fs::path proj = fs::u8path(project_dir);
+  std::vector<std::string> out = content_files(proj.string());
+  std::set<std::string> have(out.begin(), out.end());
+  const std::size_t n = out.size();
+  for (std::size_t i = 0; i < n; ++i) {
+    const std::string& rel = out[i];
+    if (core::asset_meta::is_meta_rel(rel)) continue;
+    const std::string logical = rel + core::asset_meta::kMetaExt;
+    if (!have.count(logical) && !core::asset_meta::find_for_asset(proj.string(), rel).empty()) {
+      out.push_back(logical);
+      have.insert(logical);
+    }
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
 
 std::string ExportResult::text() const {
   std::ostringstream o;
@@ -256,7 +296,7 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
     }
     r.report.notes.push_back("C# scripts: shipped dotnet/ProjectScripts.dll + TombStone.Scripting (needs the .NET 8+ runtime)");
   }
-  const std::vector<std::string> content = content_files(proj.string());
+  const std::vector<std::string> content = content_files_with_metas(proj.string());
   // The Vault: pulled items nothing in the game uses stay home.
   const std::set<std::string> vault_unused = vault::unused_pulled_files(proj.string(), content);
   if (!vault_unused.empty()) {
@@ -265,12 +305,12 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
   }
   for (const std::string& rel : content) {
     if (vault_unused.count(rel)) continue;
-    if (rel.size() > 5 && rel.compare(rel.size() - 5, 5, ".meta") == 0) {
-      // Editor import settings stay behind, except a model's: the runtime
-      // importer reads its unit scale / up axis / LOD / skin from there.
-      std::ifstream meta(proj / fs::u8path(rel), std::ios::binary);
-      std::string text((std::istreambuf_iterator<char>(meta)), std::istreambuf_iterator<char>());
-      if (text.find("\"kind\": \"model\"") == std::string::npos) continue;
+    if (core::asset_meta::is_meta_rel(rel)) {
+      // Editor import settings stay behind, except a model's (see
+      // shipped_meta), packed as a sidecar from .tombstone/meta.
+      if (!shipped_meta(proj, rel)) continue;
+      if (!pak.add_file(rel, content_source(proj, rel).string(), &err)) return fail(err);
+      continue;
     }
     if (!dev && rel.rfind("scripts/", 0) == 0 && rel.size() > 3 && rel.compare(rel.size() - 3, 3, ".cs") == 0) {
       continue;  // compiled into dotnet/
@@ -450,8 +490,10 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
       }
       fs::permissions(sbin, fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
                       fs::perm_options::add, ec);
-      for (const std::string& rel : content_files(proj.string())) {
-        if (!copy_into(proj / rel, sdir / "content" / rel, &err)) return fail(err);
+      for (const std::string& rel : content_files_with_metas(proj.string())) {
+        // The server loads models too (colliders): their .meta as a sidecar.
+        if (core::asset_meta::is_meta_rel(rel) && !shipped_meta(proj, rel)) continue;
+        if (!copy_into(content_source(proj, rel), sdir / "content" / rel, &err)) return fail(err);
       }
 #if defined(_WIN32)
       write_all(sdir / "run_server.bat",

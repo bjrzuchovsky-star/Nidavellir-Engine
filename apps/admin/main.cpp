@@ -6,7 +6,9 @@
 #include "editor/tools/StringsPanel.h"
 #include "editor/AppFlow.h"
 #include "editor/AppState.h"
+#include "editor/assets/AssetBrowser.h"
 #include "editor/assets/AssetLibrary.h"
+#include "editor/assets/ImportSort.h"
 #include "editor/assets/TextureCache.h"
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/settings/Settings.h"
@@ -20,6 +22,7 @@
 #include "Smoke3D.h"
 #include "SmokeAssets.h"
 #include "SmokeBounds.h"
+#include "SmokeMeta.h"
 #include "SmokeModels.h"
 
 #ifndef TS_ENGINE_VERSION
@@ -1019,7 +1022,7 @@ int run_console_smoke() {
       return fail("missing tileset falls back to the built-in palette");
     }
 
-    // Import copies into assets/ and never overwrites.
+    // Import copies into assets/Textures/ (sorted imports) and never overwrites.
     const fs::path outside = smoke_root / "outside_art.tga";
     write_test_tga(outside, 4, 4, [](int, int) -> std::uint32_t {
       return 0xDEA034FFu;
@@ -1028,8 +1031,8 @@ int run_console_smoke() {
     std::string rel2;
     if (!scr->import_asset(outside.string(), &rel1) ||
         !scr->import_asset(outside.string(), &rel2) ||
-        rel1 != "assets/outside_art.tga" || rel2 != "assets/outside_art_2.tga" ||
-        !fs::exists(assets_dir / "outside_art_2.tga")) {
+        rel1 != "assets/Textures/outside_art.tga" || rel2 != "assets/Textures/outside_art_2.tga" ||
+        !fs::exists(assets_dir / "Textures" / "outside_art_2.tga")) {
       return fail("import (" + rel1 + ", " + rel2 + ")");
     }
     if (scr->import_asset((smoke_root / "nope.png").string())) {
@@ -1281,6 +1284,10 @@ int run_console_smoke() {
   }
   // Asset database, importers, Asset Browser (see SmokeAssets.cpp).
   if (run_assets_smoke() != 0) {
+    return 1;
+  }
+  // Metadata folder, migration, relinks, sorted imports (see SmokeMeta.cpp).
+  if (run_meta_smoke() != 0) {
     return 1;
   }
   // Model import: Source .mdl + Assimp formats + .blend (see SmokeModels.cpp).
@@ -1839,6 +1846,97 @@ int run_vault_shot(const char* png) {
   return 0;
 }
 
+// ts_admin --assets-shot <out.png>: the Asset Browser over a demo claim
+// whose imports were sorted into type folders (metadata in .tombstone/meta).
+int run_assets_shot(const char* png) {
+  namespace fs = std::filesystem;
+  const std::string project = make_sorted_demo_claim((fs::temp_directory_path() / "ts_assets_shot").string());
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+  const int W = 1280, H = 720;
+  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Asset Browser", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(window);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGui::GetIO().IniFilename = nullptr;
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  static gfx::GlTextureUploader gl_uploader;
+  gfx::set_texture_uploader(&gl_uploader);
+  Settings defaults;
+  apply_theme(defaults);
+  int fw = 0, fh = 0;
+  std::vector<unsigned char> px;
+  std::vector<std::string> notes;
+  {
+    editor::AssetBrowser browser;
+    editor::AssetBrowserHost host;
+    host.note = [&](const std::string& n) { notes.push_back(n); };
+    browser.open(project, host);
+    browser.select("assets/Models/lantern/lantern.gltf");
+    for (int frame = 0; frame < 30 && !glfwWindowShouldClose(window); ++frame) {
+      glfwPollEvents();
+      glfwGetFramebufferSize(window, &fw, &fh);
+      ImGui_ImplOpenGL3_NewFrame();
+      ImGui_ImplGlfw_NewFrame();
+      ImGui::NewFrame();
+      ImGui::SetNextWindowPos(ImVec2(0, 0));
+      ImGui::SetNextWindowSize(ImVec2(static_cast<float>(fw), static_cast<float>(fh) - 70));
+      ImGui::Begin("Asset Browser", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+      browser.draw();
+      ImGui::End();
+      ImGui::SetNextWindowPos(ImVec2(0, static_cast<float>(fh) - 70));
+      ImGui::SetNextWindowSize(ImVec2(static_cast<float>(fw), 70));
+      ImGui::Begin("Telegraph", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+      for (std::size_t k = notes.size() > 2 ? notes.size() - 2 : 0; k < notes.size(); ++k) ImGui::TextUnformatted(notes[k].c_str());
+      ImGui::End();
+      ImGui::Render();
+      glViewport(0, 0, fw, fh);
+      const ImVec4 clear = editor::theme::Charcoal();
+      glClearColor(clear.x, clear.y, clear.z, 1.0f);
+      glClear(GL_COLOR_BUFFER_BIT);
+      ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+      if (frame == 29) {
+        px.assign(static_cast<std::size_t>(fw) * fh * 4, 0);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadBuffer(GL_BACK);
+        glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+      }
+      glfwSwapBuffers(window);
+    }
+  }
+  gfx::set_texture_uploader(nullptr);
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  if (px.empty()) return 1;
+  std::vector<unsigned char> flipped(px.size());
+  for (int y = 0; y < fh; ++y) {
+    std::memcpy(&flipped[static_cast<std::size_t>(y) * fw * 4],
+                &px[static_cast<std::size_t>(fh - 1 - y) * fw * 4], static_cast<std::size_t>(fw) * 4);
+  }
+  for (std::size_t k = 3; k < flipped.size(); k += 4) flipped[k] = 255;
+  if (!write_png_rgba(png, fw, fh, flipped)) {
+    std::cerr << "cannot write " << png << '\n';
+    return 1;
+  }
+  std::cout << "Asset Browser screenshot: " << png << " (" << fw << "x" << fh << ")\n";
+  return 0;
+}
+
 int run_imgui_app() {
   if (!glfwInit()) {
     std::cerr << "glfwInit failed\n";
@@ -1873,6 +1971,13 @@ int run_imgui_app() {
 
   ImGui_ImplGlfw_InitForOpenGL(window, true);
   ImGui_ImplOpenGL3_Init("#version 330");
+  // Files dropped from Explorer / Finder: the Asset Browser imports them
+  // (sorted into type folders, or into the folder under the mouse).
+  glfwSetDropCallback(window, [](GLFWwindow*, int count, const char** paths) {
+    std::vector<std::string> v;
+    for (int i = 0; i < count; ++i) v.emplace_back(paths[i]);
+    editor::importsort::push_os_drop(v);
+  });
   // Sprites / tilesets upload through this while the GL context lives.
   static gfx::GlTextureUploader gl_uploader;
   gfx::set_texture_uploader(&gl_uploader);
@@ -2026,6 +2131,9 @@ int main(int argc, char** argv) {
       // Update notifier: version compare, asset choice, verified download (no internet).
       return ts::tombstone::run_update_smoke();
     }
+    if (std::strcmp(argv[i], "--assets-shot") == 0 && i + 1 < argc) {
+      return run_assets_shot(argv[i + 1]);
+    }
     if (std::strcmp(argv[i], "--vault-shot") == 0 && i + 1 < argc) {
       return run_vault_shot(argv[i + 1]);
     }
@@ -2094,6 +2202,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-assets") == 0) {
       // Just the asset pipeline checks (database, importers, browser ops).
       return run_assets_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-meta") == 0) {
+      // Just the metadata folder / migration / sorted import checks.
+      return run_meta_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-prefab") == 0) {
       // Just the prefab checks (2D + 3D).

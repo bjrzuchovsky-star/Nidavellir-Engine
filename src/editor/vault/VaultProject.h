@@ -80,6 +80,11 @@ struct PullOptions {
   int version = 0;     // 0 = latest
   bool force = false;  // overwrite files changed in this project since the last pull
   bool pin = false;    // keep this version when updating everything
+  // New items land in type folders when the claim sorts imports
+  // (editor/assets/ImportSort.h): a model with its textures in
+  // assets/Models/<Name>/, a texture in assets/Textures/... Prefabs and
+  // items this claim already holds keep their paths.
+  bool sort = true;
 };
 
 struct PullResult {

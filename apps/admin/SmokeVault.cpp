@@ -6,6 +6,7 @@
 // key, and checks that exports leave out pulled items the game never uses.
 #include "VaultCli.h"
 
+#include "core/AssetMeta.h"
 #include "core/PngWrite.h"
 #include "editor/assets/AssetDb.h"
 #include "editor/assets/AssetImport.h"
@@ -130,12 +131,16 @@ fs::path fresh(const fs::path& p) {
   fs::remove_all(p, ec);
   fs::create_directories(p / "assets", ec);
   spit(p / "project.json", R"({"name": ")" + p.filename().string() + R"(", "kind": "3d"})");
+  // These claims check that pulls keep the library's paths; sorted pulls
+  // (type folders) are covered by --smoke-meta.
+  spit(p / ".tombstone/import.json", R"({"sort_imports": false, "keep_model_packs": true})");
   return p;
 }
 
 std::string guid_of(const fs::path& project, const std::string& rel) {
   adb::Meta m;
-  if (!adb::read_meta((project / (rel + ".meta")).string(), &m)) return {};
+  const std::string file = ts::tombstone::core::asset_meta::find_for_asset(project.string(), rel);
+  if (file.empty() || !adb::read_meta(file, &m)) return {};
   return m.guid;
 }
 
@@ -275,7 +280,7 @@ int check_local(const fs::path& root) {
   if (!vp::push_asset(a.string(), &db, "assets/sfx/bell.wav", lib, po, &pr, &err)) return fail("push bell: " + err);
   if (!vp::pull_item(b.string(), nullptr, lib, pr.item, {}, &r, &err)) return fail("pull bell: " + err);
   spit(b / "scene3d.json", R"({"entities": [{"name": "Crate", "mesh": {"model": "assets/models/crate.gltf"}}]})");
-  const std::vector<std::string> content = exporter::content_files(b.string());
+  const std::vector<std::string> content = exporter::content_files_with_metas(b.string());
   const std::set<std::string> unused = tv::unused_pulled_files(b.string(), content);
   if (!unused.count("assets/sfx/bell.wav") || !unused.count("assets/sfx/bell.wav.meta")) {
     return fail("export leaves out the unused pulled sound");

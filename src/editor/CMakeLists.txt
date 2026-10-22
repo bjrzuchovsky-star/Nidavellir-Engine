@@ -14,6 +14,7 @@ add_library(ts_editor
   assets/PrefabLibrary.cpp
   assets/AssetDb.cpp
   assets/AssetImport.cpp
+  assets/ImportSort.cpp
   assets/AssetBrowser.cpp
   screens/Editor2DScreen_Assets.cpp
   editor3d/Editor3DScreen_Assets.cpp
