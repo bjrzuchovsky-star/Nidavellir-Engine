@@ -1,7 +1,8 @@
 #pragma once
 
-// Project asset database: every importable file (images, glTF / GLB models,
-// sounds, fonts) gets a sidecar "<file>.meta" holding a stable GUID, its
+// Project asset database: every importable file (images, 3D models of any
+// supported format - glTF, Source .mdl, FBX / OBJ / DAE... see
+// render3d/ModelImport.h - sounds, fonts) gets a sidecar "<file>.meta" holding a stable GUID, its
 // import settings and what the importer found. The GUID is the asset's
 // identity: when a file is renamed or moved (in the Asset Browser, in
 // Explorer together with its .meta, or even without the .meta - matched by
@@ -37,8 +38,8 @@ inline constexpr const char* kMetaExt = ".meta";
 Kind kind_for(const std::string& path);   // by extension
 const char* kind_name(Kind k);            // "texture" / "model" / ...
 Kind kind_from_name(const std::string& name);
-// Import settings a fresh .meta gets.
-json::Value default_settings(Kind k);
+// Import settings a fresh .meta gets (models: per format, from the path).
+json::Value default_settings(Kind k, const std::string& path = {});
 
 struct Meta {
   std::string guid;
@@ -51,6 +52,11 @@ struct Meta {
 
 std::string new_guid();
 std::string file_hash(const std::string& abs_path);  // "" when unreadable
+// file_hash, folding in a model's sibling files (.vvd / .vtx / .phy, .mtl).
+std::string asset_hash(const std::string& abs_path);
+// Newest mtime / total size of the file and those siblings.
+void asset_stat(const std::string& abs_path, std::filesystem::file_time_type* mtime,
+                std::uintmax_t* size);
 bool read_meta(const std::string& meta_abs, Meta* out, std::string* error = nullptr);
 bool write_meta(const std::string& meta_abs, const Meta& meta, std::string* error = nullptr);
 
@@ -118,9 +124,11 @@ class AssetDb {
   std::size_t rewrite_references(const std::string& old_rel, const std::string& new_rel) const;
 
   // Rename / move a file with its .meta (GUID kept) and rewrite references.
+  // A Source .mdl takes its .vvd / .vtx / .phy along (same base name).
   bool move(const std::string& old_rel, const std::string& new_rel, std::string* error = nullptr,
             std::size_t* refs_rewritten = nullptr);
-  // Delete a file and its .meta. Refuses while referenced unless force
+  // Delete a file and its .meta (a .mdl: its .vvd / .vtx / .phy too).
+  // Refuses while referenced unless force
   // (refs_out receives the references either way).
   bool remove(const std::string& rel, bool force, std::vector<Ref>* refs_out = nullptr,
               std::string* error = nullptr);

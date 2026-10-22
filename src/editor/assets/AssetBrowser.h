@@ -74,6 +74,11 @@ class AssetBrowser {
   char new_folder_[128] = "";
   std::vector<assetdb::Ref> refs_shown_;
   std::string refs_for_;
+  // Model import text fields (kept while typing; owner = "rel|key").
+  char material_path_[1024] = "";
+  std::string material_path_for_;
+  char blender_path_[512] = "";
+  std::string blender_path_for_;
   std::string delete_pending_;
   std::vector<assetdb::Ref> delete_refs_;
 };

@@ -15,6 +15,7 @@
 #include "world3d/VrOverlay.h"
 
 #include "render3d/GlRenderer3D.h"
+#include "render3d/ModelImport.h"
 
 #include <GLFW/glfw3.h>
 #include <imgui.h>
@@ -333,7 +334,7 @@ std::uint64_t Editor3DScreen::drop_asset(const std::string& rel, const Vec3& pos
   std::string ext = fs::path(rel).extension().string();
   std::transform(ext.begin(), ext.end(), ext.begin(),
                  [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  if (ext == ".gltf" || ext == ".glb") {
+  if (render3d::is_model_file(rel)) {  // glTF, Source .mdl, FBX / OBJ / DAE..., .blend
     if (view_ && !view_->model(rel)) {
       collect_problems();
       note("Could not place " + rel + " (see above)", LogLevel::Error);
@@ -351,12 +352,18 @@ std::uint64_t Editor3DScreen::drop_asset(const std::string& rel, const Vec3& pos
       collider = a->meta.settings.flag("generate_collider", true);
     }
     e.transform.scale = {scale, scale, scale};
-    // Collider hugging the model's bounds.
+    // Collider hugging the model's bounds; models with their own
+    // collision (Source .phy) use those convex hulls.
     if (view_ && collider) {
       const render3d::Aabb b = view_->mesh_bounds(rel);
       scene3d::Collider3D c;
       c.size = b.extent();
       c.offset = b.center();
+      const render3d::Model* m = view_->model(rel);
+      if (m && !m->collision_hulls.empty()) {
+        c.shape = scene3d::ColliderShape3D::ConvexHull;
+        c.offset = {};
+      }
       e.collider = c;
     }
     return add_entity(std::move(e), "Place " + fs::path(rel).filename().string());
@@ -396,7 +403,7 @@ std::uint64_t Editor3DScreen::drop_asset(const std::string& rel, const Vec3& pos
     e.audio = src;
     return add_entity(std::move(e), "Place " + fs::path(rel).filename().string());
   }
-  note("Can't place " + rel + " (models: .gltf / .glb, sounds, or images onto an entity)",
+  note("Can't place " + rel + " (models: glTF, .mdl, FBX, OBJ, DAE..., sounds, or images onto an entity)",
        LogLevel::Warn);
   return 0;
 }
@@ -794,7 +801,7 @@ void Editor3DScreen::rescan_assets() {
     AssetEntry a;
     a.rel = rel;
     a.label = rel;
-    a.model = ext == ".gltf" || ext == ".glb";
+    a.model = render3d::is_model_file(rel);
     a.image = ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".bmp";
     if (a.model || a.image) files.push_back(a);
   }

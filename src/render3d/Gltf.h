@@ -21,8 +21,25 @@ struct ModelPrimitive {
   int material = -1;  // index into Model::materials (-1 = default)
 };
 
+// Source engine body group (render3d/ModelImport.h): one is drawn per
+// group; `selected` is the option the import kept.
+struct ModelBodyGroup {
+  std::string name;
+  std::vector<std::string> options;
+  int selected = 0;
+};
+
 struct Model {
   std::string source;  // path it came from
+  std::string format;  // "gltf", "source-mdl", "fbx", "obj", "blend"...
+  // Imported extras (ModelImport): Source body groups / skin families (the
+  // primitives hold the selected option and skin), LOD count, collision
+  // hulls in model space (Source .phy; one convex piece each).
+  std::vector<ModelBodyGroup> body_groups;
+  int skin_families = 0;
+  int skin = 0;
+  int lods = 1;
+  std::vector<std::vector<Vec3>> collision_hulls;
   std::vector<ModelPrimitive> primitives;
   std::vector<MaterialDesc> materials;
   std::size_t textures = 0;  // images decoded

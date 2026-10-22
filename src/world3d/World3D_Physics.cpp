@@ -5,6 +5,7 @@
 #include "world3d/World3D.h"
 
 #include "render3d/Gltf.h"
+#include "render3d/ModelImport.h"
 #include "render3d/Mesh.h"
 #include "runtime/ScriptHost.h"
 #include "terrain/TerrainView.h"
@@ -108,7 +109,9 @@ const render3d::MeshData* World3D::phys_mesh(const std::string& source) {
     render3d::Model model;
     std::string err;
     const std::string path = (std::filesystem::path(project_dir_) / source).string();
-    if (render3d::load_gltf(path, &model, &err)) {
+    if (render3d::load_model(path, &model, &err)) {
+      // Imported collision (Source .phy): convex pieces for hull colliders.
+      if (!model.collision_hulls.empty()) phys_hulls_[source] = model.collision_hulls;
       for (const render3d::ModelPrimitive& p : model.primitives) {
         const std::uint32_t base = static_cast<std::uint32_t>(mesh->vertices.size());
         mesh->vertices.insert(mesh->vertices.end(), p.mesh.vertices.begin(), p.mesh.vertices.end());
@@ -211,7 +214,16 @@ void World3D::phys_add(const Entity3D& e) {
       post(LogLevel::Warn, "physics",
            e.name + ": a mesh collider can only be static; using its convex hull", e.id);
     }
-    if (m) {
+    auto hulls = hull && m ? phys_hulls_.find(e.mesh->source) : phys_hulls_.end();
+    if (hulls != phys_hulls_.end() && !hulls->second.empty()) {
+      // The model's own collision hulls (one convex shape per piece).
+      for (const auto& piece : hulls->second) {
+        p3::ShapeDesc ps;
+        ps.type = p3::ShapeType::ConvexHull;
+        for (const Vec3& v : piece) ps.points.push_back(render3d::mul(v, scale));
+        d.shapes.push_back(std::move(ps));
+      }
+    } else if (m) {
       s.points.reserve(m->vertices.size());
       for (const auto& v : m->vertices) {
         s.points.push_back(render3d::mul(Vec3{v.position.x, v.position.y, v.position.z}, scale));
@@ -219,7 +231,7 @@ void World3D::phys_add(const Entity3D& e) {
       s.indices = m->indices;
     }
     s.offset = render3d::mul(c.offset, scale);
-    d.shapes.push_back(std::move(s));
+    if (d.shapes.empty()) d.shapes.push_back(std::move(s));
   } else {
     p3::ShapeDesc s = prim_shape(c.shape, c.size, scale);
     s.offset = render3d::mul(c.offset, scale);

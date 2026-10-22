@@ -1,5 +1,7 @@
 #include "editor/assets/AssetDb.h"
 
+#include "render3d/ModelImport.h"
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -92,6 +94,20 @@ std::size_t replace_all(std::string& text, const std::string& from, const std::s
   return n;
 }
 
+// A Source .mdl's sibling files (.vvd, .dx90.vtx, .phy...) as
+// (path, suffix after the base name): they move and delete with it.
+std::vector<std::pair<fs::path, std::string>> mdl_siblings(const std::string& abs_mdl) {
+  std::vector<std::pair<fs::path, std::string>> out;
+  if (lower_ext(abs_mdl) != ".mdl") return out;
+  fs::path base = fs::u8path(abs_mdl);
+  base.replace_extension();
+  const std::string b = base.string();
+  for (const std::string& d : render3d::model_dependencies(abs_mdl)) {
+    if (d.size() > b.size() && d.compare(0, b.size(), b) == 0) out.emplace_back(fs::u8path(d), d.substr(b.size()));
+  }
+  return out;
+}
+
 }  // namespace
 
 Kind kind_for(const std::string& path) {
@@ -99,7 +115,8 @@ Kind kind_for(const std::string& path) {
   if (e == ".png" || e == ".jpg" || e == ".jpeg" || e == ".bmp" || e == ".tga" || e == ".gif") {
     return Kind::Texture;
   }
-  if (e == ".gltf" || e == ".glb") return Kind::Model;
+  // glTF, Source .mdl, Assimp formats, .blend (render3d/ModelImport.h).
+  if (render3d::is_model_file(path)) return Kind::Model;
   if (e == ".wav" || e == ".ogg" || e == ".mp3" || e == ".flac") return Kind::Audio;
   if (e == ".ttf" || e == ".otf" || e == ".ttc") return Kind::Font;
   return Kind::Unknown;
@@ -123,7 +140,8 @@ Kind kind_from_name(const std::string& n) {
   return Kind::Unknown;
 }
 
-Value default_settings(Kind k) {
+Value default_settings(Kind k, const std::string& path) {
+  if (k == Kind::Model) return render3d::default_model_settings(path);
   Value s = Value::object();
   switch (k) {
     case Kind::Texture:
@@ -132,11 +150,6 @@ Value default_settings(Kind k) {
       s.set("srgb", Value::boolean(true));
       s.set("max_size", Value::number(4096));
       s.set("pixels_per_unit", Value::number(32));
-      break;
-    case Kind::Model:
-      s.set("scale", Value::number(1));
-      s.set("generate_collider", Value::boolean(true));
-      s.set("import_animations", Value::boolean(true));
       break;
     case Kind::Audio:
       s.set("bus", Value::string("sfx"));
@@ -179,6 +192,36 @@ std::string file_hash(const std::string& abs_path) {
   return hex64(h);
 }
 
+std::string asset_hash(const std::string& abs_path) {
+  std::string h = file_hash(abs_path);
+  if (h.empty() || !render3d::is_model_file(abs_path)) return h;
+  const std::vector<std::string> deps = render3d::model_dependencies(abs_path);
+  if (deps.empty()) return h;
+  // Sibling files (Source .vvd / .vtx / .phy, OBJ .mtl...) count too, so
+  // editing one of them hot-reloads the model.
+  std::uint64_t x = 1469598103934665603ULL;
+  for (const std::string& part : deps) h += "|" + file_hash(part);
+  for (unsigned char c : h) {
+    x ^= c;
+    x *= 1099511628211ULL;
+  }
+  return hex64(x);
+}
+
+void asset_stat(const std::string& abs_path, std::filesystem::file_time_type* mtime,
+                std::uintmax_t* size) {
+  std::error_code ec;
+  *mtime = fs::last_write_time(fs::u8path(abs_path), ec);
+  *size = fs::file_size(fs::u8path(abs_path), ec);
+  if (!render3d::is_model_file(abs_path)) return;
+  for (const std::string& d : render3d::model_dependencies(abs_path)) {
+    const auto t = fs::last_write_time(fs::u8path(d), ec);
+    if (!ec && t > *mtime) *mtime = t;
+    const auto n = fs::file_size(fs::u8path(d), ec);
+    if (!ec) *size += n;
+  }
+}
+
 bool read_meta(const std::string& meta_abs, Meta* out, std::string* error) {
   std::string text;
   if (!slurp(fs::u8path(meta_abs), &text)) {
@@ -199,7 +242,7 @@ bool read_meta(const std::string& meta_abs, Meta* out, std::string* error) {
   if (v["settings"].is_object()) m.settings = v["settings"];
   if (v["info"].is_object()) m.info = v["info"];
   // Missing settings keys come back with their defaults.
-  const Value defaults = default_settings(m.kind);
+  const Value defaults = default_settings(m.kind, m.path);
   for (const auto& [k, d] : defaults.members()) {
     if (!m.settings.has(k)) m.settings.set(k, d);
   }
@@ -311,8 +354,7 @@ AssetDb::ScanReport AssetDb::scan() {
     Entry e;
     e.rel = rel;
     const std::string a = abs(rel);
-    e.mtime = fs::last_write_time(fs::u8path(a), ec);
-    e.size = fs::file_size(fs::u8path(a), ec);
+    asset_stat(a, &e.mtime, &e.size);
     const Kind kind = kind_for(rel);
     const auto old = known.find(rel);
     const bool unchanged_stat =
@@ -337,7 +379,7 @@ AssetDb::ScanReport AssetDb::scan() {
         }
         dirty = true;
       }
-      const std::string h = unchanged_stat ? old->second.meta.hash : file_hash(a);
+      const std::string h = unchanged_stat ? old->second.meta.hash : asset_hash(a);
       if (h != m.hash) {
         m.hash = h;
         reimport = dirty = true;
@@ -348,7 +390,7 @@ AssetDb::ScanReport AssetDb::scan() {
         dirty = reimport = true;
       }
     } else {
-      const std::string h = file_hash(a);
+      const std::string h = asset_hash(a);
       auto orphan = std::find_if(orphans.begin(), orphans.end(), [&](const Orphan& o) {
         return !o.used && o.meta.hash == h && o.meta.kind == kind && !guids.count(o.meta.guid);
       });
@@ -361,7 +403,7 @@ AssetDb::ScanReport AssetDb::scan() {
       } else {
         m.guid = new_guid();
         m.kind = kind;
-        m.settings = default_settings(kind);
+        m.settings = default_settings(kind, rel);
         m.hash = h;
         reimport = true;
         rep.created.push_back(rel);
@@ -465,7 +507,7 @@ bool AssetDb::set_settings(const std::string& rel, const Value& settings, std::s
 bool AssetDb::reimport(const std::string& rel) {
   for (Entry& e : entries_) {
     if (e.rel != clean_rel(rel)) continue;
-    e.meta.hash = file_hash(abs(e.rel));
+    e.meta.hash = asset_hash(abs(e.rel));
     import_entry(&e);
     write_meta(abs(e.rel) + kMetaExt, e.meta);
     return e.import_ok;
@@ -531,9 +573,16 @@ bool AssetDb::move(const std::string& old_in, const std::string& new_in, std::st
   std::error_code ec;
   const fs::path src = fs::u8path(abs(from)), dst = fs::u8path(abs(to));
   if (fs::exists(dst, ec)) return fail(to + " already exists");
+  const auto siblings = mdl_siblings(abs(from));
+  fs::path dst_base = dst;
+  dst_base.replace_extension();
+  for (const auto& [p, suffix] : siblings) {
+    if (fs::exists(fs::u8path(dst_base.string() + suffix), ec)) return fail(dst_base.filename().string() + suffix + " already exists");
+  }
   fs::create_directories(dst.parent_path(), ec);
   fs::rename(src, dst, ec);
   if (ec) return fail("rename failed: " + ec.message());
+  for (const auto& [p, suffix] : siblings) fs::rename(p, fs::u8path(dst_base.string() + suffix), ec);
   fs::rename(fs::u8path(abs(from) + kMetaExt), fs::u8path(abs(to) + kMetaExt), ec);
   e->rel = to;
   e->meta.path = to;
@@ -555,10 +604,12 @@ bool AssetDb::remove(const std::string& rel_in, bool force, std::vector<Ref>* re
     return false;
   }
   std::error_code ec;
+  const auto siblings = mdl_siblings(abs(rel));
   if (!fs::remove(fs::u8path(abs(rel)), ec) || ec) {
     if (error) *error = "cannot delete " + rel;
     return false;
   }
+  for (const auto& [p, suffix] : siblings) fs::remove(p, ec);
   fs::remove(fs::u8path(abs(rel) + kMetaExt), ec);
   entries_.erase(std::remove_if(entries_.begin(), entries_.end(),
                                 [&](const Entry& e) { return e.rel == rel; }),

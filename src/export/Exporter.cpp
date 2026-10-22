@@ -256,7 +256,13 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
     r.report.notes.push_back("C# scripts: shipped dotnet/ProjectScripts.dll + TombStone.Scripting (needs the .NET 8+ runtime)");
   }
   for (const std::string& rel : content_files(proj.string())) {
-    if (rel.size() > 5 && rel.compare(rel.size() - 5, 5, ".meta") == 0) continue;  // editor import settings
+    if (rel.size() > 5 && rel.compare(rel.size() - 5, 5, ".meta") == 0) {
+      // Editor import settings stay behind, except a model's: the runtime
+      // importer reads its unit scale / up axis / LOD / skin from there.
+      std::ifstream meta(proj / fs::u8path(rel), std::ios::binary);
+      std::string text((std::istreambuf_iterator<char>(meta)), std::istreambuf_iterator<char>());
+      if (text.find("\"kind\": \"model\"") == std::string::npos) continue;
+    }
     if (!dev && rel.rfind("scripts/", 0) == 0 && rel.size() > 3 && rel.compare(rel.size() - 3, 3, ".cs") == 0) {
       continue;  // compiled into dotnet/
     }

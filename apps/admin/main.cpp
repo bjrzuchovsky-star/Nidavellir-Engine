@@ -19,6 +19,7 @@
 
 #include "Smoke3D.h"
 #include "SmokeAssets.h"
+#include "SmokeModels.h"
 #include "SmokePrefab.h"
 #include "SmokeTools.h"
 #include "SmokeVR.h"
@@ -1268,6 +1269,10 @@ int run_console_smoke() {
   if (run_assets_smoke() != 0) {
     return 1;
   }
+  // Model import: Source .mdl + Assimp formats + .blend (see SmokeModels.cpp).
+  if (run_models_smoke() != 0) {
+    return 1;
+  }
   // Prefabs in the 2D and 3D editors (see SmokePrefab.cpp).
   if (run_prefab_smoke() != 0) {
     return 1;
@@ -1827,6 +1832,14 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-vr") == 0) {
       // Just the VR checks.
       return run_vr_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-mdl") == 0) {
+      // Just the Source engine model import (synthetic .mdl set).
+      return run_mdl_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-models") == 0) {
+      // Every model format: Source .mdl, OBJ, FBX, DAE, PLY, STL, X, .blend.
+      return run_models_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-assets") == 0) {
       // Just the asset pipeline checks (database, importers, browser ops).

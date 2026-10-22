@@ -1,7 +1,8 @@
 #pragma once
 
-// Importers behind the asset database: PNG / JPG (stb_image), glTF / GLB
-// (cgltf through render3d::load_gltf), WAV / OGG / MP3 / FLAC (ts_audio
+// Importers behind the asset database: PNG / JPG (stb_image), 3D models
+// (render3d::load_model: glTF via cgltf, Source .mdl, Assimp formats,
+// .blend through Blender), WAV / OGG / MP3 / FLAC (ts_audio
 // decoders) and TrueType / OpenType fonts (sfnt tables read directly).
 // Each validates the file and reports what it found in the .meta "info".
 

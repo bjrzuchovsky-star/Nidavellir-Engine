@@ -6,6 +6,7 @@
 #include "world3d/World3D.h"
 
 #include "render3d/Gltf.h"
+#include "render3d/ModelImport.h"
 #include "runtime/ScriptState.h"
 
 #include "lauxlib.h"
@@ -48,7 +49,7 @@ std::shared_ptr<render3d::Model> load_model(World3D::AnimSystem* a, const std::s
   if (it != a->models.end()) return it->second;
   auto m = std::make_shared<render3d::Model>();
   std::string err;
-  if (!render3d::load_gltf((fs::path(dir) / fs::path(rel)).string(), m.get(), &err) ||
+  if (!render3d::load_model((fs::path(dir) / fs::path(rel)).string(), m.get(), &err) ||
       !m->skinned()) {
     if (why) *why = err.empty() ? rel + " has no skin" : err;
     m.reset();

@@ -3,6 +3,7 @@
 #include "audio/Audio.h"
 #include "gfx/TextureCache.h"
 #include "render3d/Gltf.h"
+#include "render3d/ModelImport.h"
 
 #include <cstdio>
 #include <filesystem>
@@ -104,8 +105,20 @@ bool import_asset(const std::string& abs_path, Kind kind, const Value& settings,
       break;
     }
     case Kind::Model: {
+      // Every model format through the one importer (render3d/ModelImport.h)
+      // with this asset's settings.
       render3d::Model m;
-      if (!render3d::load_gltf(abs_path, &m, error)) return false;
+      std::string warn;
+      const render3d::ModelImportOptions opt = render3d::model_options_from_settings(settings, abs_path);
+      if (!render3d::load_model(abs_path, opt, &m, &warn)) {
+        if (error) *error = warn;
+        return false;
+      }
+      std::size_t verts = 0;
+      for (const render3d::ModelPrimitive& p : m.primitives) verts += p.mesh.vertices.size();
+      o.set("format", Value::string(render3d::model_format_name(abs_path)));
+      o.set("vertices", Value::number(static_cast<double>(verts)));
+      o.set("bones", Value::number(static_cast<double>(m.skeleton.joints.size())));
       o.set("primitives", Value::number(static_cast<double>(m.primitives.size())));
       o.set("triangles", Value::number(static_cast<double>(m.triangles())));
       o.set("materials", Value::number(static_cast<double>(m.materials.size())));
@@ -115,6 +128,27 @@ bool import_asset(const std::string& abs_path, Kind kind, const Value& settings,
       const float sz[3] = {m.bounds.max.x - m.bounds.min.x, m.bounds.max.y - m.bounds.min.y,
                            m.bounds.max.z - m.bounds.min.z};
       o.set("size", json::floats(sz, 3));
+      if (m.lods > 1) o.set("lods", Value::number(m.lods));
+      if (m.skin_families > 1) o.set("skins", Value::number(m.skin_families));
+      if (!m.body_groups.empty()) {
+        Value groups = Value::array();
+        for (const render3d::ModelBodyGroup& g : m.body_groups) {
+          Value gv = Value::object();
+          gv.set("name", Value::string(g.name));
+          Value opts = Value::array();
+          for (const std::string& n : g.options) opts.push(Value::string(n));
+          gv.set("options", opts);
+          groups.push(gv);
+        }
+        o.set("body_groups", groups);
+      }
+      if (!m.collision_hulls.empty()) o.set("hulls", Value::number(static_cast<double>(m.collision_hulls.size())));
+      if (!m.clips.empty()) {
+        Value names = Value::array();
+        for (const render3d::Clip& c : m.clips) names.push(Value::string(c.name));
+        o.set("clip_names", names);
+      }
+      if (!warn.empty()) o.set("warning", Value::string(warn));
       break;
     }
     case Kind::Audio: {
@@ -149,9 +183,11 @@ std::string info_summary(const Value& info, Kind kind) {
                     info.flag("alpha", false) ? ", alpha" : "");
       return buf;
     case Kind::Model:
-      std::snprintf(buf, sizeof(buf), "%d prim, %d tris%s%s", int(info.num("primitives", 0)),
+      std::snprintf(buf, sizeof(buf), "%s%s%d prim, %d tris%s%s%s", info.str("format").c_str(),
+                    info.str("format").empty() ? "" : ": ", int(info.num("primitives", 0)),
                     int(info.num("triangles", 0)), info.flag("skinned", false) ? ", skinned" : "",
-                    info.num("clips", 0) > 0 ? ", animated" : "");
+                    info.num("clips", 0) > 0 ? ", animated" : "",
+                    info.num("hulls", 0) > 0 ? ", hulls" : "");
       return buf;
     case Kind::Audio:
       std::snprintf(buf, sizeof(buf), "%.2f s %s", info.num("seconds", 0),

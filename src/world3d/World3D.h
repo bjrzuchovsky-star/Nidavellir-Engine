@@ -467,6 +467,8 @@ class World3D final : public runtime::ScriptWorld {
   std::map<std::uint64_t, std::uint64_t> impact_quiet_until_;  // tick
   std::set<std::uint64_t> flying_;              // grabbables in flight
   std::map<std::string, std::unique_ptr<render3d::MeshData>> phys_meshes_;
+  // Imported convex collision pieces per model source (Source .phy).
+  std::map<std::string, std::vector<std::vector<Vec3>>> phys_hulls_;
   ImpactStats impact_stats_;
   struct Carry {
     std::uint64_t id = 0;

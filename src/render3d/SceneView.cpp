@@ -1,4 +1,5 @@
 #include "render3d/SceneView.h"
+#include "render3d/ModelImport.h"
 #include "profiler/Profiler.h"
 
 #include "core/MemImages.h"
@@ -84,7 +85,7 @@ SceneView::ModelEntry& SceneView::entry(const std::string& source) {
   if (source.empty()) return m;
   const std::string path = (fs::path(dir_) / fs::path(source)).string();
   std::string err;
-  if (!load_gltf(path, model.get(), &err)) {
+  if (!load_model(path, model.get(), &err)) {
     problem("model:" + source, "3D model " + source + " would not load: " + err);
     return m;
   }

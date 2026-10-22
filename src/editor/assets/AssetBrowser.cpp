@@ -2,12 +2,14 @@
 
 #include "editor/assets/AssetImport.h"
 #include "editor/ui/Theme.h"
+#include "render3d/ModelImport.h"
 
 #include <imgui.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 namespace ts {
@@ -365,11 +367,90 @@ void AssetBrowser::draw_settings(const AssetDb::Entry& e) {
       number("pixels_per_unit", "Pixels / unit", 1, 1024, "%.0f");
       break;
     }
-    case Kind::Model:
-      number("scale", "Scale", 0.001f, 1000, "%.3f");
-      flag("generate_collider", "Collider from bounds");
+    case Kind::Model: {
+      // One import panel for every model format (glTF, Source .mdl, FBX,
+      // OBJ, DAE, ... .blend): the same settings, applied by
+      // render3d::load_model wherever the model loads.
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextColored(theme::Warning(), "%s", render3d::kModelRightsNote);
+      ImGui::PopTextWrapPos();
+      number("unit_scale", "Unit scale", 0.0001f, 100, "%.4f");
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("File units to metres (Source: 0.0254, centimetres: 0.01)");
+      int up = s.str("up_axis") == "y" ? 1 : s.str("up_axis") == "z" ? 2 : 0;
+      const char* ups[] = {"Auto (file)", "Y up", "Z up (convert)"};
+      ImGui::SetNextItemWidth(140);
+      if (ImGui::Combo("Up axis", &up, ups, 3)) {
+        s.set("up_axis", Value::string(up == 1 ? "y" : up == 2 ? "z" : "auto"));
+        changed = true;
+      }
+      number("scale", "Placement scale", 0.001f, 1000, "%.3f");
+      auto path_field = [&](const char* key, const char* label, char* buf, std::size_t n,
+                            std::string* owner, const char* hint) {
+        const std::string want = e.rel + "|" + key;
+        if (*owner != want) {
+          *owner = want;
+          std::snprintf(buf, n, "%s", s.str(key).c_str());
+        }
+        ImGui::SetNextItemWidth(220);
+        ImGui::InputTextWithHint(label, hint, buf, n);
+        if (ImGui::IsItemDeactivatedAfterEdit() && s.str(key) != buf) {
+          s.set(key, Value::string(buf));
+          changed = true;
+        }
+      };
+      path_field("material_path", "Material search path", material_path_, sizeof(material_path_),
+                 &material_path_for_, "e.g. C:/.../GarrysMod/garrysmod; more with ;");
+      const int lods = std::max(1, static_cast<int>(e.meta.info.num("lods", 1)));
+      if (lods > 1 || s.num("lod", 0) > 0) {
+        int lod = static_cast<int>(s.num("lod", 0));
+        ImGui::SetNextItemWidth(140);
+        if (ImGui::SliderInt("LOD", &lod, 0, std::max(1, lods - 1))) s.set("lod", Value::number(lod));
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+      }
+      const int skins = static_cast<int>(e.meta.info.num("skins", 0));
+      if (skins > 1) {
+        int sk = static_cast<int>(s.num("skin", 0));
+        ImGui::SetNextItemWidth(140);
+        if (ImGui::SliderInt("Skin", &sk, 0, skins - 1)) s.set("skin", Value::number(sk));
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+      }
+      const Value& groups = e.meta.info["body_groups"];
+      if (groups.is_array()) {
+        for (const Value& g : groups.items()) {
+          const Value& opts = g["options"];
+          if (!opts.is_array() || opts.items().size() < 2) continue;
+          const std::string name = g.str("name");
+          Value bg = s["body_groups"].is_object() ? s["body_groups"] : Value::object();
+          int cur = static_cast<int>(bg.num(name, 0));
+          const std::string preview = cur >= 0 && cur < static_cast<int>(opts.items().size())
+                                          ? opts.items()[cur].as_string() : std::string("?");
+          ImGui::SetNextItemWidth(140);
+          if (ImGui::BeginCombo(("Body: " + name).c_str(), preview.c_str())) {
+            for (int i = 0; i < static_cast<int>(opts.items().size()); ++i) {
+              if (ImGui::Selectable(opts.items()[i].as_string().c_str(), i == cur)) {
+                bg.set(name, Value::number(i));
+                s.set("body_groups", bg);
+                changed = true;
+              }
+            }
+            ImGui::EndCombo();
+          }
+        }
+      }
+      flag("generate_collider", e.meta.info.num("hulls", 0) > 0 ? "Collider (model hulls)" : "Collider");
+      ImGui::SameLine();
       flag("import_animations", "Animations");
+      if (s.has("blender_path")) {
+        path_field("blender_path", "Blender", blender_path_, sizeof(blender_path_), &blender_path_for_,
+                   "auto (registry / PATH / Program Files)");
+      }
+      if (e.meta.info.has("warning")) {
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(theme::TextMuted(), "%s", e.meta.info.str("warning").c_str());
+        ImGui::PopTextWrapPos();
+      }
       break;
+    }
     case Kind::Audio: {
       int b = 0;
       const char* buses[] = {"sfx", "music", "voice", "ambience", "ui"};
