@@ -106,17 +106,18 @@ bool GameClient::connect(ClientConfig config, std::string* error_out) {
   return true;
 }
 
-void GameClient::disconnect() {
+void GameClient::disconnect(const std::function<void()>& pump) {
   if (!transport_) return;
   if (server_ != net::kNoPeer &&
       (state_ == ClientState::Joined || state_ == ClientState::Connecting)) {
     transport_->disconnect(server_, kReasonQuit);
-    // Give the goodbye time to cross (the lag sim holds it too) and wait
-    // for the server's acknowledgement, so the seat frees at once instead
-    // of after a timeout.
+    // Wait on the condition (the server's acknowledgement), not a fixed
+    // time: the goodbye crosses the lag sim, and ENet only sends it once
+    // every queued reliable packet is acked. Bounded so a dead server can't
+    // hold us; then the server frees the seat on its own peer timeout.
     const net::LinkSim sim = link_sim();
     const double wait =
-        std::min(1.5, 2.0 * (sim.latency_ms + sim.jitter_ms) / 1000.0 + 0.25);
+        std::max(2.0, 4.0 * (sim.latency_ms + sim.jitter_ms) / 1000.0 + 0.5);
     const double until = wall_seconds() + wait;
     TransportEvent ev;
     bool acknowledged = false;
@@ -125,6 +126,7 @@ void GameClient::disconnect() {
       while (transport_->poll(&ev)) {
         acknowledged |= ev.type == TransportEvent::Type::Disconnected;
       }
+      if (pump) pump();
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     transport_->flush();

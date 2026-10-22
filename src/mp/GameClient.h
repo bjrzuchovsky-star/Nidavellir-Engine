@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -70,8 +71,12 @@ class GameClient {
   GameClient& operator=(const GameClient&) = delete;
 
   bool connect(ClientConfig config, std::string* error_out = nullptr);
-  // Ride off politely (kReasonQuit) and close.
-  void disconnect();
+  // Ride off politely (kReasonQuit) and close. Waits (bounded) for the
+  // server's acknowledgement so the seat frees at once. `pump` runs on every
+  // wait step: an in-process server (LocalPosse) must keep servicing its
+  // host meanwhile, or it can never acknowledge and the seat only frees
+  // after the ENet timeout.
+  void disconnect(const std::function<void()>& pump = {});
   // Drop the link with no goodbye (tests: the server must time us out).
   void vanish();
 

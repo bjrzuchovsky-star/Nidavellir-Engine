@@ -50,7 +50,8 @@ bool LocalPosse::start(PosseConfig config, std::string* error_out) {
 }
 
 void LocalPosse::stop() {
-  for (auto& c : clients_) c->disconnect();
+  // Newest first, servicing the server so each goodbye is acknowledged.
+  while (!clients_.empty()) remove_rider();
   clients_.clear();
   server_.stop();
 }
@@ -76,7 +77,16 @@ bool LocalPosse::add_rider(std::string* error_out) {
 
 bool LocalPosse::remove_rider() {
   if (clients_.empty()) return false;
-  clients_.back()->disconnect();
+  // Keep the in-process server (and the riders staying) serviced while the
+  // leaver waits for its acknowledgement.
+  GameClient* leaving = clients_.back().get();
+  clients_.back()->disconnect([this, leaving] {
+    if (!server_.running()) return;
+    server_.poll();
+    for (auto& c : clients_) {
+      if (c.get() != leaving) c->poll();
+    }
+  });
   clients_.pop_back();
   return true;
 }

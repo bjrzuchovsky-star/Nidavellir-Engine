@@ -299,7 +299,9 @@ PosseSmokeResult run_posse_smoke(const PosseSmokeOptions& opt) {
     const std::uint64_t gone_rider = posse.clients().back()->rider();
     for (const auto& c : posse.clients()) c->take_events();
     posse.remove_rider();
-    const bool left = wait_for(4.0, [&] {
+    // Wait on the condition, with a timeout past ENet's longest peer
+    // timeout (10 s), so a slow runner can't fail on timing alone.
+    const bool left = wait_for(12.0, [&] {
       if (posse.server().rider_count() != n - 1) return false;
       for (const auto& c : posse.clients()) {
         if (c->roster().riders.size() != static_cast<std::size_t>(n - 1)) return false;
