@@ -608,6 +608,7 @@ class Editor3DScreen final : public IScreen {
   bool show_ui_preview_ = false;  // the project's ui/ documents over the Play view
   render3d::FrameStats last_stats_;
   bool dock_initialized_ = false;
+  bool dock_reset_requested_ = false;  // Window > Layouts > Reset layout
   bool viewport_hovered_ = false;
   bool viewport_focused_ = false;
   bool show_colliders_ = true;

@@ -615,6 +615,7 @@ class Editor2DScreen final : public IScreen {
   bool show_mixer_ = false;
   bool focus_console_ = false;  // bring the Telegraph forward next frame
   bool dock_layout_initialized_ = false;
+  bool dock_reset_requested_ = false;  // Window > Layouts > Reset layout
 
   // Hierarchy rename state.
   bool renaming_ = false;

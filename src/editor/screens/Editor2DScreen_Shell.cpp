@@ -28,6 +28,12 @@ namespace tombstone {
 namespace editor {
 
 void Editor2DScreen::setup_default_dock_layout(unsigned int dockspace_id) {
+  if (dock_reset_requested_) {
+    // Window > Layouts > Default 2D / Reset layout: rebuild from scratch.
+    dock_reset_requested_ = false;
+    dock_layout_initialized_ = false;
+    ImGui::DockBuilderRemoveNode(dockspace_id);
+  }
   if (dock_layout_initialized_) {
     return;
   }
@@ -369,8 +375,11 @@ void Editor2DScreen::draw_menus() {
   draw_play_menu();
   draw_plugin_top_menus();
 
+  ux_.draw_window_menu();
+
   if (ux::BeginMenu("Help")) {
     if (ux::MenuItem("Command Palette...", "Ctrl+Shift+P")) ux_.palette().open();
+    ux_.draw_walkthrough_menu_item();
     ImGui::Separator();
     draw_help_menu_contents();
     ux::EndMenu();
@@ -1091,6 +1100,7 @@ void Editor2DScreen::draw_ui() {
 
 void Editor2DScreen::setup_field_guide() {
   ux_.set_menu_drawer([this] { draw_menus(); });
+  ux_.set_layout_reset([this] { dock_reset_requested_ = true; });
   ux_.set_context_drawer([this] { draw_context_menus_for_audit(); });
   struct Panel {
     const char* label;

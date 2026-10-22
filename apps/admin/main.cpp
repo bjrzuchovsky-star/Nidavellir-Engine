@@ -2,6 +2,7 @@
 #include "plugins/split/Split.h"
 #include "core/Engine.h"
 #include "profiler/Profiler.h"
+#include "editor/ux/Walkthrough.h"
 #include "editor/audio/EditorAudio.h"
 #include "editor/tools/AutoTilePanel.h"
 #include "editor/tools/SpriteSlicerPanel.h"
@@ -2749,7 +2750,14 @@ int main(int argc, char** argv) {
   ts::tombstone::plugins::offer_3d_providers();
   ts::tombstone::plugins::offer_builtin_providers();
   for (int i = 1; i < argc; ++i) {
+    const std::size_t len = std::strlen(argv[i]);
+    if (len > 5 && argv[i][0] == '-' && std::strcmp(argv[i] + len - 5, "-shot") == 0) {
+      ts::tombstone::editor::ux::Walkthrough::set_autostart(false);
+    }
+  }
+  for (int i = 1; i < argc; ++i) {
     if (std::strncmp(argv[i], "--smoke", 7) == 0 || std::strcmp(argv[i], "--templates-shot") == 0) {
+      ts::tombstone::editor::ux::Walkthrough::set_autostart(false);
       smoke_provider_hold().hold(ts::tombstone::plugins::split_plugin_ids());
       break;
     }

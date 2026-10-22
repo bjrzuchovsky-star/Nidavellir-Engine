@@ -8,6 +8,7 @@
 #include "editor/ux/Actions.h"
 #include "editor/ux/CommandPalette.h"
 #include "editor/ux/UxPrefs.h"
+#include "editor/ux/Walkthrough.h"
 
 #include <functional>
 #include <string>
@@ -38,8 +39,25 @@ class EditorUx {
   // Palette entries for recent claims / assets (from ux::prefs()).
   void refresh_recent(std::function<void(const RecentItem&)> open);
 
-  // Per frame: shortcuts, palette draw + run, pending menu invokes, focus.
+  // Start of the editor's frame, before any panel: applies a queued layout.
+  void begin_frame();
+  // Per frame: shortcuts, palette draw + run, pending menu invokes, focus,
+  // the walkthrough card and the layout popups.
   void frame();
+
+  // First-run tour (Help > Walkthrough).
+  Walkthrough& walkthrough() { return walk_; }
+  // Help menu item "Walkthrough" (inside the screen's Help menu).
+  void draw_walkthrough_menu_item();
+  // The "Window" menu (Layouts submenu) for the screen's menu bar.
+  void draw_window_menu();
+  // Rebuild this editor's default docking (Default 2D/3D, Reset layout).
+  void set_layout_reset(std::function<void()> f) { reset_layout_ = std::move(f); }
+  void reset_layout();
+  // Window > Layouts > Save current... (opens the name popup).
+  void request_save_layout(const std::string& suggested = {});
+  // Last layout message ("Saved layout ..."), for the smoke / status line.
+  const std::string& layout_status() const { return layout_status_; }
   // Harvest the menus now (smoke + palette); invoke = id to run.
   void harvest(const std::string& invoke = {});
   void harvest_contexts();
@@ -54,6 +72,14 @@ class EditorUx {
   std::function<void()> draw_contexts_;
   std::string focus_window_;
   int focus_tries_ = 0;
+  Walkthrough walk_;
+  std::function<void()> reset_layout_;
+  bool save_popup_ = false;
+  char save_name_[64] = {};
+  std::string confirm_delete_;
+  bool confirm_delete_open_ = false;
+  std::string layout_status_;
+  void draw_layout_popups();
 };
 
 // Hand-offs to AppFlow (read once).

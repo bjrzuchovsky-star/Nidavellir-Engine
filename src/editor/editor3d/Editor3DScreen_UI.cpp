@@ -52,6 +52,12 @@ ImU32 axis_color(int axis, float alpha = 1.0f) {
 }  // namespace
 
 void Editor3DScreen::setup_dock_layout(unsigned int dockspace_id) {
+  if (dock_reset_requested_) {
+    // Window > Layouts > Default 3D / Reset layout: rebuild from scratch.
+    dock_reset_requested_ = false;
+    dock_initialized_ = false;
+    ImGui::DockBuilderRemoveNode(dockspace_id);
+  }
   if (dock_initialized_) return;
   dock_initialized_ = true;
   if (ImGui::DockBuilderGetNode(dockspace_id) != nullptr) return;
@@ -321,8 +327,10 @@ void Editor3DScreen::draw_menus() {
     if (ux::MenuItem("Frame selection", "F")) frame_selection();
     ux::EndMenu();
   }
+  ux_.draw_window_menu();
   if (ux::BeginMenu("Help")) {
     if (ux::MenuItem("Command Palette...", "Ctrl+Shift+P")) ux_.palette().open();
+    ux_.draw_walkthrough_menu_item();
     ImGui::Separator();
     theme::KeyHint("RMB / Alt+LMB", "Orbit");
     theme::KeyHint("MMB", "Pan");
@@ -1151,6 +1159,7 @@ void Editor3DScreen::draw_telegraph() {
 
 void Editor3DScreen::setup_field_guide() {
   ux_.set_menu_drawer([this] { draw_menus(); });
+  ux_.set_layout_reset([this] { dock_reset_requested_ = true; });
   ux_.set_context_drawer([this] { draw_context_menus_for_audit(); });
   struct Panel {
     const char* label;

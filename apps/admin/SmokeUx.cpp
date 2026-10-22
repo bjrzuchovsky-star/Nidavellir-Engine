@@ -13,6 +13,8 @@
 #include "editor/ux/EditorUx.h"
 #include "editor/ux/EmptyState.h"
 #include "editor/ux/FriendlyError.h"
+#include "editor/ux/Layouts.h"
+#include "editor/ux/Walkthrough.h"
 #include "editor/vault/VaultPanel.h"
 #include "editor/workspace/SceneIO.h"
 #include "editor/ux/Tooltip.h"
@@ -22,6 +24,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -450,6 +453,147 @@ int check_errors(Ctx& ctx, const fs::path& root, int* cases) {
   return 0;
 }
 
+// Reads settings.json back the way the next launch would.
+ux::Prefs prefs_on_disk() {
+  const ux::Prefs live = ux::prefs();
+  ux::import_from(editor::SettingsStore::load());
+  ux::Prefs disk = ux::prefs();
+  ux::prefs() = live;
+  return disk;
+}
+
+std::string find_action(const std::vector<ux::Action>& v, const std::string& tail) {
+  for (const ux::Action& a : v)
+    if (a.id.size() >= tail.size() && a.id.compare(a.id.size() - tail.size(), tail.size(), tail) == 0) return a.id;
+  return {};
+}
+
+// First-run tour: auto start, every step points at a live panel, skip vs
+// "Don't show again", finish, Help > Walkthrough re-run, nothing on the
+// second visit. Then layouts: save / load / reset round trip.
+template <class Screen>
+int check_tour_and_layouts(Ctx& ctx, Screen& s, bool three_d, int* steps_out) {
+  const std::string t = three_d ? "3D" : "2D";
+  ux::EditorUx& u = s.field_guide();
+  ux::Walkthrough& w = u.walkthrough();
+  auto tick = [&](int n) { ctx.frames(n, [&] { s.on_update(1.0f / 60.0f); }); };
+  auto done = [&](const ux::Prefs& p) { return three_d ? p.walkthrough_3d_done : p.walkthrough_2d_done; };
+
+  tick(8);
+  if (!w.active() || !w.auto_started()) return fail(t + ": walkthrough didn't start on the first visit");
+  if (!ImGui::FindWindowByName("###ts_walkthrough")) return fail(t + ": no walkthrough card drawn");
+  const auto& steps = ux::walkthrough_steps(three_d);
+  if (w.step_count() < 5 || w.step_count() > 8) return fail(t + ": walkthrough wants 5-8 steps");
+  bool saw_gizmo = false, saw_import = false, saw_play = false, saw_post = false, saw_vault = false, saw_add = false;
+  for (int i = 0; i < w.step_count(); ++i) {
+    if (w.step() != i) return fail(t + ": walkthrough step order");
+    const ux::WalkStep& st = steps[static_cast<std::size_t>(i)];
+    tick(4);
+    if (*st.window) {
+      ImGuiWindow* win = ImGui::FindWindowByName(st.window);
+      if (!win || !win->WasActive) return fail(t + ": walkthrough step '" + st.title + "' points at a panel that isn't up: " + st.window);
+    }
+    const std::string body = std::string(st.title) + " " + st.body;
+    saw_gizmo |= body.find("G") != std::string::npos && body.find("R") != std::string::npos && body.find("S") != std::string::npos &&
+                 std::string(st.window).find("Viewport") != std::string::npos;
+    saw_add |= body.find("Add Component") != std::string::npos;
+    saw_import |= body.find("mport") != std::string::npos;
+    saw_play |= body.find("Play") != std::string::npos;
+    saw_post |= body.find("Trading Post") != std::string::npos;
+    saw_vault |= body.find("Vault") != std::string::npos;
+    if (i + 1 < w.step_count()) w.next();
+  }
+  if (!(saw_gizmo && saw_add && saw_import && saw_play && saw_post && saw_vault))
+    return fail(t + ": walkthrough misses a stop (viewport G/R/S, Add Component, import, Play, Trading Post, Vault)");
+  w.back();
+  if (w.step() != w.step_count() - 2) return fail(t + ": walkthrough Back");
+  // Skip without "Don't show again": comes back next launch.
+  w.dont_show_again = false;
+  w.stop(w.dont_show_again);
+  tick(2);
+  if (w.active() || ImGui::FindWindowByName("###ts_walkthrough")->WasActive) return fail(t + ": Skip left the card up");
+  if (done(ux::prefs()) || done(prefs_on_disk())) return fail(t + ": Skip without 'Don't show again' still marked the tour seen");
+  // Help > Walkthrough runs it again.
+  u.harvest();
+  const std::string help = find_action(u.actions().harvested("menu"), "/Walkthrough");
+  if (help.empty() || !u.run_now(help)) return fail(t + ": no Help > Walkthrough");
+  if (!w.active() || w.step() != 0) return fail(t + ": Help > Walkthrough didn't restart the tour");
+  // Skip with "Don't show again" ticked (the default): saved to settings.json.
+  if (!w.dont_show_again) return fail(t + ": 'Don't show again' should start ticked");
+  w.stop(w.dont_show_again);
+  if (!done(prefs_on_disk())) return fail(t + ": 'Don't show again' didn't reach settings.json");
+  // Finishing also counts; run it from Help and Next all the way.
+  (three_d ? ux::prefs().walkthrough_3d_done : ux::prefs().walkthrough_2d_done) = false;
+  u.run_now(help);
+  for (int i = 0; i < 20 && w.active(); ++i) w.next();
+  if (w.active() || !done(prefs_on_disk())) return fail(t + ": Finish didn't mark the tour seen");
+  *steps_out = w.step_count();
+
+  // ---- layouts ----
+  const char* panel = three_d ? "Inspector###Inspector3D" : "Inspector";
+  u.run_now("Panel/Inspector");
+  tick(4);
+  ImGuiWindow* insp = ImGui::FindWindowByName(panel);
+  if (!insp || insp->DockId == 0) return fail(t + ": Inspector isn't docked by default");
+  const ImGuiID docked = insp->DockId;
+  const std::string a = "_ux smoke docked", b = "_ux smoke floating";
+  std::string err;
+  if (!ux::save_layout(three_d, a, &err)) return fail(t + ": save layout: " + err);
+  // Float the Inspector, save that too.
+  ImGui::DockContextQueueUndockWindow(ImGui::GetCurrentContext(), insp);
+  tick(3);
+  if (insp->DockId != 0) return fail(t + ": couldn't float the Inspector for the layout test");
+  // Save through the menu + popup path (Window > Layouts > Save current...).
+  u.harvest();
+  const std::vector<ux::Action> menu = u.actions().harvested("menu");
+  const std::string save_id = find_action(menu, "Layouts/Save current...");
+  const std::string reset_id = find_action(menu, "Layouts/Reset layout");
+  const std::string def_id = find_action(menu, three_d ? "Layouts/Default 3D" : "Layouts/Default 2D");
+  if (save_id.empty() || reset_id.empty() || def_id.empty()) return fail(t + ": Window > Layouts menu incomplete");
+  if (!ux::save_layout(three_d, b, &err)) return fail(t + ": save layout: " + err);
+  const std::vector<std::string> names = ux::list_layouts(three_d);
+  if (std::find(names.begin(), names.end(), a) == names.end() || std::find(names.begin(), names.end(), b) == names.end())
+    return fail(t + ": saved layouts not listed");
+  {
+    std::ifstream in(fs::path(ux::layouts_dir(three_d)) / (a + ".ini"));
+    std::stringstream ss;
+    ss << in.rdbuf();
+    if (ss.str().find("[Docking]") == std::string::npos) return fail(t + ": saved layout has no docking section");
+  }
+  // Load the docked one from the menu: applied at the start of the next frame.
+  u.harvest();
+  const std::string load_a = find_action(u.actions().harvested("menu"), "Layouts/" + a);
+  if (load_a.empty() || !u.run_now(load_a)) return fail(t + ": saved layout not in Window > Layouts");
+  if (!ux::layout_pending()) return fail(t + ": layout load not queued");
+  tick(3);
+  insp = ImGui::FindWindowByName(panel);
+  if (!insp || insp->DockId == 0) return fail(t + ": loading the docked layout left the Inspector floating");
+  if (!ux::queue_load_layout(three_d, b, &err)) return fail(t + ": load " + b + ": " + err);
+  tick(3);
+  insp = ImGui::FindWindowByName(panel);
+  if (!insp || insp->DockId != 0) return fail(t + ": loading the floating layout didn't float the Inspector");
+  if (!u.run_now(reset_id)) return fail(t + ": Reset layout");
+  tick(3);
+  insp = ImGui::FindWindowByName(panel);
+  if (!insp || insp->DockId == 0) return fail(t + ": Reset layout left the Inspector floating");
+  (void)docked;
+  // The name popup, with a path-ish name: cleaned, stays in layouts/.
+  if (ux::clean_layout_name("../../evil\\name?") != "evilname") return fail("layout names aren't cleaned");
+  if (!u.run_now(save_id)) return fail(t + ": Save current...");
+  tick(2);
+  if (!ImGui::FindWindowByName("Save layout###ts_save_layout")) return fail(t + ": Save current... didn't ask for a name");
+  ctx.frames(1, [&] {
+    s.on_update(1.0f / 60.0f);
+    ImGui::ClosePopupToLevel(0, false);
+  });
+  tick(2);
+  for (const std::string& n : {a, b})
+    if (!ux::delete_layout(three_d, n, &err)) return fail(t + ": delete layout: " + err);
+  for (const std::string& n : ux::list_layouts(three_d))
+    if (n == a || n == b) return fail(t + ": deleted layout still listed");
+  return 0;
+}
+
 int run_ux_smoke() {
   SettingsBackup keep;
   const fs::path root = fs::absolute("./TombStoneProjects/_ux_smoke");
@@ -607,6 +751,50 @@ int run_ux_smoke() {
   }
   int error_cases = 0;
   if (int r = check_errors(ctx, root, &error_cases)) return r;
+  // First-run tours + layouts, on fresh prefs (nothing seen yet).
+  int tour2d = 0, tour3d = 0;
+  {
+    const bool was = ux::Walkthrough::autostart();
+    ux::Walkthrough::set_autostart(true);
+    ux::prefs().walkthrough_2d_done = ux::prefs().walkthrough_3d_done = false;
+    int r = 0;
+    {
+      editor::ProjectInfo info;
+      info.id = "_ux_2d";
+      info.name = "UX 2D";
+      info.path = (root / "p2d").string();
+      editor::Editor2DScreen s(info);
+      s.on_enter();
+      r = check_tour_and_layouts(ctx, s, false, &tour2d);
+      s.on_exit();
+    }
+    if (!r) {
+      editor::ProjectInfo info;
+      info.id = "_ux_3d";
+      info.name = "UX 3D";
+      info.kind = editor::ProjectKind::ThreeD;
+      info.path = (root / "p3d").string();
+      editor::Editor3DScreen e(info);
+      e.on_enter();
+      r = check_tour_and_layouts(ctx, e, true, &tour3d);
+      e.on_exit();
+    }
+    if (!r) {
+      // Seen once: a second visit doesn't start it again.
+      editor::ProjectInfo info;
+      info.id = "_ux_2d";
+      info.name = "UX 2D";
+      info.path = (root / "p2d").string();
+      editor::Editor2DScreen s(info);
+      s.on_enter();
+      ctx.frames(8, [&] { s.on_update(1.0f / 60.0f); });
+      if (s.field_guide().walkthrough().active()) r = fail("2D: walkthrough came back after it was seen");
+      s.on_exit();
+    }
+    ux::Walkthrough::set_autostart(was);
+    if (r) return r;
+  }
+  fs::remove_all(root, ec);
   fs::remove_all(root, ec);
   // Trading Post rows explain themselves: what, where it works, what next.
   {
@@ -630,6 +818,7 @@ int run_ux_smoke() {
             << " 3D menu actions, palette fuzzy find + run + Ctrl+Shift+P; tooltips on " << tips2d
             << " 2D / " << tips3d << " 3D toolbar + Inspector widgets + every menu item + Trading Post rows; "
             << "empty states in 6 2D / 6 3D panels; readable errors for " << error_cases
-            << " cases incl. a newer scene.json left untouched)\n";
+            << " cases incl. a newer scene.json left untouched; walkthrough " << tour2d << " 2D / " << tour3d
+            << " 3D steps, skip + don't-show-again + finish persisted; layouts save / load / reset round trip)\n";
   return 0;
 }
