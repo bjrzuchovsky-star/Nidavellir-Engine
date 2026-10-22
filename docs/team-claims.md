@@ -1,6 +1,14 @@
 # Live Team Claims (design, 0.2.0)
 
-> Status: **stage 1 in progress** on `feature/team-claims` (target 0.2.0). Stages 2 and 3 are designed here and not built yet.
+> Status: **stage 1 in progress** on `feature/team-claims`.
+>
+> | Stage | What | Ships in |
+> |---|---|---|
+> | 1 | Basic team claims: live op sync, presence / cursors / selection outlines, soft locks, late-join snapshot, Team menu (Host / Join / Users) | **0.2.0** |
+> | 2 | Chat, roles, follow camera, play-test together | **1.0.0** |
+> | 3 | Offline edits + merge, change history with rollback | **1.0.0** |
+>
+> Stages 2 and 3 are designed here and not built yet.
 
 A *team claim* is a claim (project) that several people work on at once, live, the way a posse works a gold claim together. Everyone sees the others ride in: who is in which scene, where their cursor is, what they have selected, and every edit lands on every screen within a few hundred milliseconds.
 
@@ -21,7 +29,7 @@ One self-hosted server does both jobs: `ts_vault` already keeps the asset librar
 - Version guard: the session records the engine version and scene formats; a mismatched editor is refused (format) or warned (engine patch level).
 - `ts_admin --smoke-team`: a server and two headless editors in one process making conflicting edits; asserts convergence, lock behaviour and lock release on disconnect.
 
-**Not in stage 1:** chat, roles beyond read-only keys, follow camera, play-testing together (stage 2); offline edits, merge and history rollback (stage 3); syncing terrain heightfield *data* files live (they go through the Vault as assets, see 7).
+**Not in stage 1 (0.2.0):** chat, roles beyond read-only keys, follow camera, play-testing together (stage 2, 1.0.0); offline edits, merge and history rollback (stage 3, 1.0.0); syncing terrain heightfield *data* files live (they go through the Vault as assets, see 7).
 
 ---
 
@@ -142,14 +150,14 @@ The session records the creator's engine version and scene formats (`scene2d` = 
 
 ---
 
-## 8. Stage 2 (designed, not built)
+## 8. Stage 2 (1.0.0; designed, not built)
 
 - **Chat**: `chat` messages relayed and kept in the session (last 200), with `@name` mentions; a Telegraph-style panel.
 - **Roles**: owner / editor / viewer per session. The owner is the creator (or a key flagged `--team-owner`); owners can promote, demote and kick. Viewers' batches are rejected server-side; the role travels in `welcome` and `member`.
 - **Follow camera**: click a user to follow their editor camera (they publish `cam` in presence at 10 Hz; the follower lerps).
 - **Play-test together**: the host presses Play for the posse; the session spins up a `GameServer` (ts_mp) on the current confirmed scene and every member joins as a client; Stop returns everyone to editing. Edits are frozen while the posse rides.
 
-## 9. Stage 3 (designed, not built)
+## 9. Stage 3 (1.0.0; designed, not built)
 
 - **Offline edits + merge**: the client journals its batches with the last seq it saw. On reconnect the server replays them on top of the current state: entities untouched since are applied; entities both sides changed are conflicts, shown in a merge dialog (theirs / mine / both as a copy).
 - **Change history with rollback**: the server persists the commit log in SQLite next to `vault.db` (seq, author, label, time, ops, inverse ops). A History panel lists commits; **Roll back** commits the inverse ops as a new batch (history is never rewritten). Snapshots every N commits keep join fast.
