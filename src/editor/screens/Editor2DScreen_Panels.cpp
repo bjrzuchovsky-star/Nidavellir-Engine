@@ -163,6 +163,7 @@ void Editor2DScreen::draw_hierarchy() {
     }
     if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
       context_id_ = 0;
+      context_in_viewport_ = false;
       ImGui::OpenPopup("##HierarchyEmptyContext");
     }
     if (ImGui::BeginPopup("##HierarchyEmptyContext")) {
@@ -324,6 +325,7 @@ void Editor2DScreen::draw_hierarchy_row(const Entity2D& e, int depth) {
   if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
     if (!selected) workspace_.select(e.id);
     context_id_ = e.id;
+    context_in_viewport_ = false;
     hier_open_context_ = true;
   }
 
@@ -524,11 +526,17 @@ void Editor2DScreen::draw_inspector() {
     }
     e = workspace_.find(eid);
   }
+  if (header_op_) {
+    // A component header's right-click menu (reset / paste / remove).
+    std::function<void()> op;
+    op.swap(header_op_);
+    op();
+  }
 
   ImGui::Spacing();
   theme::Divider();
   if (theme::SecondaryButton("Back to Projects", ImVec2(-1, 0))) {
-    request_back_to_projects();
+    leave_or_ask(false);
   }
 }
 

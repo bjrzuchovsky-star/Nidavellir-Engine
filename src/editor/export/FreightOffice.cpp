@@ -1,4 +1,5 @@
 #include "editor/export/FreightOffice.h"
+#include "editor/ux/FriendlyError.h"
 #include "editor/ux/Tooltip.h"
 
 #include "editor/launch/GameLauncher.h"
@@ -201,6 +202,13 @@ void FreightOffice::ship() {
   opt.desktop_icon = desktop_icon_;
   exporter::export_project(opt, &result_);
   shipped_ = true;
+  if (!result_.ok) {
+    const std::string first = result_.report.errors.empty() ? std::string("export failed") : result_.report.errors.front();
+    ux::FriendlyError f = ux::explain(first, ux::ErrorKind::ExportFailed, "Export to " + opt.out_dir + "\n" + result_.text());
+    if (result_.report.errors.size() > 1)
+      f.what += " (" + std::to_string(result_.report.errors.size() - 1) + " more problem(s) in the Manifest.)";
+    ux::show_error(std::move(f));
+  }
 }
 
 void FreightOffice::draw() {

@@ -17,6 +17,19 @@ Work in progress for 0.2.0. Optional features ship as Trading Post plugins rathe
 - `ts_admin --smoke-team` (also in `--smoke`). Docs: [docs/team-claims.md](docs/team-claims.md).
 - Not yet: a merge dialog for conflicting edits made while away (last write wins per entity), chat, roles, follow camera and playing together (1.0.0).
 
+### Editor Field Guide: easier to learn, harder to lose work (2D and 3D)
+- **Tooltips** on toolbar buttons, Inspector fields, every menu item and Trading Post rows, all kept in one strings table. Settings > Field Guide turns them off and sets the hover delay.
+- **Empty states** in the Hierarchy, Inspector, Asset Browser, Scripts, Vault and Telegraph explain what belongs there and give you a button to start.
+- **First-run walkthroughs:** separate 2D and 3D tours (8 stops each). You can skip them or tick "Don't show again", and re-run them from **Help > Walkthrough**.
+- **Command palette on Ctrl+Shift+P** with fuzzy search over one action registry that covers the menus, panels and settings. **No shortcuts changed:** Ctrl+P is still 2D Play, so the palette is only on Ctrl+Shift+P.
+- **Context menus** on the viewport, objects, Hierarchy rows, Asset Browser files and Inspector component headers (copy / paste component values, reset transform, rename, delete...).
+- **Readable errors:** what happened, why and what to do, with **Details** and **Copy details**. A scene saved by a newer TombStone opens read-only and is left untouched.
+- **Saved layouts** under **Window > Layouts** (save, load, delete, reset), stored per user. `imgui.ini` is untouched.
+- **Safety:** confirmation before deleting assets, Trading Post plugins and string keys. An unsaved-changes prompt (Stay / Try saving again / Leave without saving) appears when a save has failed and you leave the editor or close the window. Shortcut labels use one format everywhere.
+- Fixed: the stray ImGui "Debug" window that appeared in the editors.
+- `ts_admin --smoke-ux` (also in `--smoke`); `ts_admin --ux-shot palette|walkthrough|error <out.png>`. Docs: [docs/editor-guide.md](docs/editor-guide.md#field-guide-help-built-into-both-editors).
+- Not yet: a corrupt 2D `scene.json` is still replaced with a fresh scene. The 2D Audio Source header has no context menu, and built-in components have no Move up / down.
+
 ### Cameras are scene objects (2D and 3D)
 - **Create > Camera** in both editors. A camera is an ordinary object: select it, move it with the gizmo, parent it, give it scripts. It has a viewport icon and a frustum (3D) or view rectangle (2D), with the Play camera drawn in brass. Icons are hidden in Play.
 - Inspector: active, priority, perspective / orthographic, FOV, near / far, ortho size, clear colour and viewport rect (split screen, picture-in-picture). 3D adds the Fixed / Orbit / First person rig with distance, height and collision. 2D adds zoom, follow target, smoothing, dead zone and bounds.

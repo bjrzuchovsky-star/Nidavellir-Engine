@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/FriendlyError.h"
 #include "editor/plugins/PluginNeeds.h"
 
 #include "editor/assets/AssetLibrary.h"
@@ -71,12 +72,21 @@ void Editor2DScreen::on_enter() {
   std::vector<std::string> camera_log;
   pick_action2d_.clear();
   camera_backup2d_.clear();
+  scene_locked_ = false;
+  scene_locked_why_.clear();
   if (!project_.path.empty() && scene_io::load(workspace_, scene_path_, &err, &camera_log)) {
     std::cout << "[Editor2D] loaded scene.json (" << workspace_.entities().size()
               << " entities) from " << scene_path_ << '\n';
     // Pre-0.2.0 scenes: the implicit rider camera becomes a Camera entity
     // (backup + claim log first; docs/camera.md "Migration").
     migrate_cameras_on_open_2d(camera_log);
+  } else if (ux::classify(err) == ux::ErrorKind::SceneVersion) {
+    // Keep the file as it is: an empty workspace, saving switched off.
+    std::cout << "[Editor2D] " << err << " -- not opened, not saved over\n";
+    workspace_.reset_defaults();
+    scene_locked_ = true;
+    scene_locked_why_ = err;
+    ux::show_error(ux::explain(err, ux::ErrorKind::SceneVersion, "Opening claim " + project_.name));
   } else {
     if (!err.empty()) {
       std::cout << "[Editor2D] no scene.json yet (" << err << ") -- seeding defaults\n";
@@ -174,10 +184,18 @@ void Editor2DScreen::on_exit() {
 
 void Editor2DScreen::mark_dirty() { dirty_ = true; }
 
+void Editor2DScreen::report_save_failure(const std::string& err) {
+  std::cout << "[Editor2D] save failed: " << err << '\n';
+  telegraph_.add(runtime::LogLevel::Error, "editor", "Save failed: " + err);
+  ux::show_error(ux::explain(err, scene_locked_ ? ux::ErrorKind::SceneVersion : ux::ErrorKind::SaveFailed,
+                             "Saving " + scene_path_));
+}
+
 void Editor2DScreen::mark_dirty_and_autosave() {
   dirty_ = true;
   std::string err;
   if (!save_scene(&err) && !err.empty()) {
+    last_save_error_ = err;
     std::cout << "[Editor2D] autosave failed: " << err << '\n';
     telegraph_.add(runtime::LogLevel::Warn, "editor", "Autosave failed: " + err);
   }
@@ -197,6 +215,12 @@ bool Editor2DScreen::save_scene(std::string* error_out) {
     }
     return false;
   }
+  if (scene_locked_) {
+    if (error_out) {
+      *error_out = "Not saved: " + scene_locked_why_ + ". The file on disk is left as it is.";
+    }
+    return false;
+  }
   if (scene_path_.empty()) {
     scene_path_ = scene_io::scene_path_for_project(project_.path);
   }
@@ -209,6 +233,7 @@ bool Editor2DScreen::save_scene(std::string* error_out) {
     return false;
   }
   dirty_ = false;
+  last_save_error_.clear();
   std::cout << "[Editor2D] saved scene.json (" << workspace_.entities().size()
             << " entities) -> " << scene_path_ << '\n';
   return true;
@@ -543,6 +568,7 @@ void Editor2DScreen::cancel_rename() {
 }
 
 AppState Editor2DScreen::on_update(float delta_seconds) {
+  ux_.begin_frame();  // a layout chosen last frame lands before any panel draws
   tick_team(delta_seconds);
   if (ImGui::GetCurrentContext() != nullptr) {
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
@@ -550,7 +576,7 @@ AppState Editor2DScreen::on_update(float delta_seconds) {
       if (is_playing()) {
         note("Not while riding. Stop play (F5) to save.");
       } else if (!save_scene(&err) && !err.empty()) {
-        std::cout << "[Editor2D] save failed: " << err << '\n';
+        report_save_failure(err);
       }
     }
     if (!is_playing() && ImGui::GetTime() - prefab_poll_time_ > 1.0) {
@@ -578,6 +604,17 @@ AppState Editor2DScreen::on_update(float delta_seconds) {
 
 void Editor2DScreen::request_quit() {
   quit_requested_ = true;
+}
+
+void Editor2DScreen::leave_or_ask(bool quit) {
+  auto go = [this, quit] { quit ? request_quit() : request_back_to_projects(); };
+  if (!has_unsaved()) return go();
+  ux::EditorUx::LeaveAsk a;
+  a.action = quit ? "Quit" : "Leave";
+  a.why = last_save_error_.empty() ? (scene_locked_ ? scene_locked_why_ : std::string()) : last_save_error_;
+  a.save = [this](std::string* err) { return save_scene(err); };
+  a.leave = go;
+  ux_.ask_leave(std::move(a));
 }
 
 void Editor2DScreen::request_back_to_projects() {

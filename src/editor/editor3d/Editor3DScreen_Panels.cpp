@@ -2,6 +2,7 @@
 // one undo step is pushed when a widget is released after an edit.
 #include "render3d/ColliderFit.h"
 #include "editor/ux/Tooltip.h"
+#include "editor/ux/ContextMenus.h"
 #include "editor/ux/EmptyState.h"
 #include "editor/fx/FxInspector.h"
 #include "editor/editor3d/Editor3DScreen.h"
@@ -43,6 +44,26 @@ bool edit_text(const char* label, std::string* s) {
 }
 
 }  // namespace
+
+// Inspector header > Paste values: the named component from src onto dst.
+bool paste_component_values_3d(scene3d::Entity3D& dst, const scene3d::Entity3D& src, const std::string& name) {
+  if (name == "Mesh") dst.mesh = src.mesh;
+  else if (name == "Material") dst.material = src.material;
+  else if (name == "Light") dst.light = src.light;
+  else if (name == "Collider") dst.collider = src.collider;
+  else if (name == "Rigid Body") dst.rigid_body = src.rigid_body;
+  else if (name == "Joint") dst.joint = src.joint;
+  else if (name == "Player (rider)") dst.player = src.player;
+  else if (name == "Camera") dst.camera = src.camera;
+  else if (name == "Follow") dst.follow = src.follow;
+  else if (name == "Animator") dst.animator = src.animator;
+  else if (name == "VR Rig") dst.vr_rig = src.vr_rig;
+  else if (name == "Grabbable") dst.grabbable = src.grabbable;
+  else if (name == "Audio Source") dst.audio = src.audio;
+  else if (name == "Particles") dst.particles = src.particles;
+  else return false;
+  return true;
+}
 
 void Editor3DScreen::draw_inspector() {
   const scene3d::Entity3D* cur = find(primary());
@@ -106,6 +127,38 @@ void Editor3DScreen::draw_inspector() {
       return false;
     }
     const bool open = ImGui::CollapsingHeader(name, ImGuiTreeNodeFlags_DefaultOpen);
+    // Right-click the header: reset / copy / paste values / remove / docs.
+    bool menu_removed = false;
+    {
+      ux::HeaderOps ops;
+      ops.reset = [&] {
+        remove();
+        add();
+        t.activated = true;
+        t.commit = "Reset component";
+      };
+      ops.copy = [&] {
+        comp_clip_ = e;
+        comp_clip_name_ = name;
+        note(std::string("Copied ") + name + " values from " + e.name);
+      };
+      ops.can_paste = comp_clip_.has_value() && comp_clip_name_ == name;
+      if (ops.can_paste) ops.paste_from = std::string(name) + " on " + comp_clip_->name;
+      ops.paste = [&] {
+        if (paste_component_values_3d(e, *comp_clip_, name)) {
+          t.activated = true;
+          t.commit = "Paste component values";
+        }
+      };
+      ops.remove = [&] {
+        remove();
+        t.activated = true;
+        t.commit = "Remove component";
+        menu_removed = true;
+      };
+      ux::ComponentHeaderMenu(name, ops);
+    }
+    if (menu_removed) return false;
     ImGui::SameLine(ImGui::GetContentRegionMax().x - 20);
     if (ImGui::SmallButton((std::string("x##rm") + name).c_str())) {
       remove();

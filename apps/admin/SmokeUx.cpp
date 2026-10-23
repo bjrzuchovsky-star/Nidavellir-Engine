@@ -12,6 +12,11 @@
 #include "editor/ux/CommandPalette.h"
 #include "editor/ux/EditorUx.h"
 #include "editor/ux/EmptyState.h"
+#include "editor/ux/FriendlyError.h"
+#include "editor/ux/Layouts.h"
+#include "editor/ux/Walkthrough.h"
+#include "editor/vault/VaultPanel.h"
+#include "editor/workspace/SceneIO.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/UxPrefs.h"
 #include "editor/ux/UxStrings.h"
@@ -19,6 +24,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -120,6 +126,67 @@ void dump_actions(const char* what, const std::vector<ux::Action>& v) {
   for (const auto& a : v)
     std::cout << "  [" << what << "] " << a.id << " | " << a.label << " | " << a.shortcut
               << (a.enabled ? "" : " (disabled)") << (a.tip.empty() ? " (no tip)" : "") << "\n";
+}
+
+// ---- unsaved changes ------------------------------------------------------------
+
+// An edit whose autosave fails (a read-only scene): Quit asks first, "Try
+// saving again" keeps asking while it still fails, Stay stays, Leave leaves.
+template <class Screen>
+int check_leave_prompt(Ctx& ctx, Screen& s, const char* tag, const std::function<void()>& edit) {
+  const std::string t = tag;
+  ux::EditorUx& u = s.field_guide();
+  if (s.has_unsaved()) return fail(t + ": unsaved before any edit");
+  edit();
+  if (!s.has_unsaved()) return fail(t + ": a failed autosave isn't flagged as unsaved");
+  editor::AppState st{};
+  auto tick = [&] { ctx.frames(2, [&] { st = s.on_update(1.0f / 60.0f); }); };
+  s.leave_or_ask(true);
+  if (!u.leave_pending()) return fail(t + ": Quit with unsaved changes didn't ask");
+  tick();
+  if (st == editor::AppState::Quit) return fail(t + ": quit without waiting for the answer");
+  if (!ImGui::FindWindowByName("Unsaved changes###ts_unsaved")) return fail(t + ": no Unsaved changes prompt drawn");
+  u.resolve_leave(1);
+  if (!u.leave_pending() || u.leave_status().find("Still not saved") == std::string::npos)
+    return fail(t + ": 'Try saving again' on a read-only scene didn't keep asking");
+  u.resolve_leave(0);
+  tick();
+  if (u.leave_pending() || st == editor::AppState::Quit) return fail(t + ": Stay didn't stay");
+  s.leave_or_ask(true);
+  u.resolve_leave(2);
+  tick();
+  if (st != editor::AppState::Quit) return fail(t + ": 'Leave without saving' didn't quit");
+  return 0;
+}
+
+// ---- context menus ------------------------------------------------------------
+
+// Every right-click menu body is harvested under its scope: the expected items
+// are there, each one has a tooltip and none bypasses the registry.
+int check_contexts(Ctx& ctx, ux::EditorUx& u, const char* tag,
+                   const std::vector<std::pair<std::string, std::vector<std::string>>>& want, int* total) {
+  const std::string t = tag;
+  ctx.frames(1, [&] { u.harvest_contexts(); });
+  for (const auto& [scope, labels] : want) {
+    const auto& items = u.actions().harvested(scope);
+    dump_actions(scope.c_str(), items);
+    if (items.empty()) return fail(t + ": context menu " + scope + " registered nothing");
+    const auto& raw = u.actions().unregistered(scope);
+    if (!raw.empty()) return fail(t + ": " + scope + " widget outside the registry: '" + raw.front() + "'");
+    for (const auto& l : labels) {
+      bool found = false;
+      for (const auto& a : items)
+        found |= a.label == l || ("/" + a.path + "/").find("/" + l + "/") != std::string::npos;  // submenus
+      if (!found) return fail(t + ": " + scope + " lacks '" + l + "'");
+    }
+    for (const auto& a : items) {
+      if (!a.tip.empty()) continue;
+      if (dump()) std::cout << "  [ctx-tip-missing] " << scope << " " << a.id << "\n";
+      else return fail(t + ": " + scope + " item without a tooltip: " + a.id);
+    }
+    *total += static_cast<int>(items.size());
+  }
+  return 0;
 }
 
 // ---- registry + palette -----------------------------------------------------
@@ -298,6 +365,320 @@ int check_empty(Ctx& ctx, ux::EditorUx& u, const char* tag, const std::function<
 
 }  // namespace
 
+// Readable errors: every case the editor can hit gets a title and plain
+// what / why / what-to-do text, keeps the raw message for Copy details, and
+// the modal, Telegraph tag, Vault and Trading Post cards all use it. The
+// messages are the ones the engine really produces.
+std::string read_all(const fs::path& p) {
+  std::ifstream in(p, std::ios::binary);
+  std::stringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+int check_friendly(const ux::FriendlyError& f, const std::string& raw, const std::string& label) {
+  if (f.title.empty() || f.what.size() < 20 || f.why.size() < 20 || f.fix.size() < 20)
+    return fail(label + ": thin explanation (" + f.title + ")");
+  if (f.details.find(raw) == std::string::npos) return fail(label + ": details lose the raw message");
+  const std::string c = f.copy_text();
+  if (c.find(f.title) == std::string::npos || c.find("Details:") == std::string::npos ||
+      c.find(raw) == std::string::npos || c.find("What to do:") == std::string::npos)
+    return fail(label + ": Copy details text is incomplete");
+  return 0;
+}
+
+int check_errors(Ctx& ctx, const fs::path& root, int* cases) {
+  struct Case {
+    const char* raw;
+    ux::ErrorKind hint;
+    ux::ErrorKind want;
+  };
+  using K = ux::ErrorKind;
+  const Case cases_[] = {
+      {"No such file: levels/intro.json", K::Unknown, K::MissingFile},
+      {"Script not found -- Gate (scripts/gate.lua)", K::Unknown, K::MissingFile},
+      {"cannot open or decode assets/textures/rock.png", K::Unknown, K::MissingTexture},
+      {"could not load assets/models/wagon.glb: buffer 0 not found", K::Unknown, K::MissingModel},
+      {"Import failed: assets/broken.png: not a PNG or JPEG the importer knows", K::ImportFailed, K::ImportFailed},
+      {"scripts/gate.lua:12: 'end' expected (to close 'function' at line 3) near <eof>", K::ScriptRuntime,
+       K::ScriptCompile},
+      {"scripts/gate.lua:20: attempt to index a nil value (field 'door') -- Gate is stopped; the rest of the world "
+       "rides on",
+       K::ScriptRuntime, K::ScriptRuntime},
+      {"'ts.weather' is switched on for this project but isn't in the wagon (missing plugin library?); riding on "
+       "without it",
+       K::Unknown, K::PluginMissing},
+      {"Rider 3D needs ts.jolt 0.2.0+, which isn't installed", K::Unknown, K::PluginMissing},
+      {"ts_game runtime not found (build ts_game first)", K::Unknown, K::ExportFailed},
+      {"ISCC not found (install Inno Setup 6: tools/installer/install_inno.ps1, or set TS_ISCC)", K::Unknown,
+       K::ExportFailed},
+      {"could not connect to vault.example:7777 (connection refused)", K::VaultConnection, K::VaultConnection},
+      {"crate.blend: Blender was not found. Set Settings > Tools > Blender executable (or the TS_BLENDER "
+       "environment variable, or this asset's Blender path) to your blender.exe, install Blender (blender.org, "
+       "Steam, Microsoft Store), or export the file to glTF / FBX. Looked in: PATH",
+       K::ImportFailed, K::BlenderNotFound},
+      {"could not reach the release: timed out", K::UpdateCheck, K::UpdateCheck},
+      {"download failed: HTTP 503", K::UpdateCheck, K::UpdateCheck},
+      {"Could not write scene.json.tmp: Permission denied", K::SaveFailed, K::SaveFailed},
+      {"scene.json is a 2D scene (no \"dimension\": \"3d\"); open it in a 2D claim", K::MissingFile, K::SceneVersion},
+  };
+  std::set<K> covered;
+  for (const Case& c : cases_) {
+    const ux::FriendlyError f = ux::explain(c.raw, c.hint);
+    if (f.kind != c.want)
+      return fail(std::string("'") + c.raw + "' read as " + ux::to_string(f.kind) + ", wanted " + ux::to_string(c.want));
+    if (int r = check_friendly(f, c.raw, ux::to_string(c.want))) return r;
+    covered.insert(f.kind);
+    if (dump()) std::cout << "[error] " << ux::to_string(f.kind) << ": " << f.title << "\n";
+  }
+  // Telegraph tags problem lines, leaves info lines alone.
+  const std::string tl = ux::telegraph_label(cases_[6].raw, true, ux::telegraph_hint("script"));
+  if (tl.find("script stopped") == std::string::npos) return fail("Telegraph line has no plain-words tag: " + tl);
+  if (ux::telegraph_label("trigger: Rider rode into Gate", false, K::Unknown) != "trigger: Rider rode into Gate")
+    return fail("Telegraph tagged an info line");
+  // Panel cards.
+  if (editor::friendly_vault_error("could not connect to vault.example:7777", true).kind != K::VaultConnection ||
+      editor::friendly_vault_error("x", true).fix_label != "Vault settings")
+    return fail("Vault error card isn't the friendly one");
+  if (editor::friendly_trading_post_error("Example Spurs: download failed: could not resolve example.invalid").title !=
+      "Couldn't reach the Trading Post")
+    return fail("Trading Post error card isn't the friendly one");
+
+  // Scene version, for real: a scene.json from the future opens with the
+  // readable error and is never saved over, in both editors.
+  const std::string future2d = "{\n  \"version\": 999,\n  \"entities\": []\n}\n";
+  {
+    const fs::path dir = root / "future2d";
+    fs::create_directories(dir);
+    const fs::path sp = editor::scene_io::scene_path_for_project(dir.string());
+    std::ofstream(sp, std::ios::binary) << future2d;
+    ux::clear_errors();
+    editor::ProjectInfo info;
+    info.id = "_ux_future2d";
+    info.name = "Future 2D";
+    info.path = dir.string();
+    editor::Editor2DScreen s(info);
+    s.on_enter();
+    const ux::FriendlyError* f = ux::current_error();
+    if (!f || f->kind != K::SceneVersion) return fail("2D: newer scene.json opened without the scene-version error");
+    if (int r = check_friendly(*f, "is newer than this build reads", "2D scene version")) return r;
+    // The modal is drawn, with its buttons.
+    ux::set_audit(true);
+    ux::clear_audit();
+    const std::string title = f->title + "###ts_friendly_error";
+    ctx.frames(3, [&] { s.on_update(1.0f / 60.0f); });
+    ImGuiWindow* w = ImGui::FindWindowByName(title.c_str());
+    if (!w || !w->Active) {
+      ctx.frames(1, [&] {
+        s.on_update(1.0f / 60.0f);
+        w = ImGui::FindWindowByName(title.c_str());
+      });
+    }
+    ux::set_audit(false);
+    if (!ImGui::FindWindowByName(title.c_str())) return fail("2D: the error modal didn't open");
+    std::string err;
+    if (s.save_scene(&err)) return fail("2D: saved over a scene from a newer TombStone");
+    ux::clear_errors();
+    if (int r = check_leave_prompt(ctx, s, "2D", [&] { s.create_entity("Unsaved"); })) return r;
+    s.on_exit();
+    if (read_all(sp) != future2d) return fail("2D: the newer scene.json was changed on disk");
+    covered.insert(K::SceneVersion);
+    ux::clear_errors();
+  }
+  {
+    const fs::path dir = root / "future3d";
+    fs::create_directories(dir);
+    const std::string future3d = "{\n  \"dimension\": \"3d\",\n  \"version\": 999,\n  \"entities\": []\n}\n";
+    const fs::path sp = s3::scene_path(dir.string());
+    fs::create_directories(fs::path(sp).parent_path());
+    std::ofstream(sp, std::ios::binary) << future3d;
+    editor::ProjectInfo info;
+    info.id = "_ux_future3d";
+    info.name = "Future 3D";
+    info.kind = editor::ProjectKind::ThreeD;
+    info.path = dir.string();
+    editor::Editor3DScreen e(info);
+    e.on_enter();
+    const ux::FriendlyError* f = ux::current_error();
+    if (!f || f->kind != K::SceneVersion)
+      return fail("3D: newer scene.json opened without the scene-version error" +
+                  (f ? std::string(" (got ") + ux::to_string(f->kind) + ": " + f->details + ")" : std::string()));
+    ctx.frames(3, [&] { e.on_update(1.0f / 60.0f); });
+    std::string err;
+    if (e.save_scene(&err)) return fail("3D: saved over a scene from a newer TombStone");
+    ux::clear_errors();
+    if (int r = check_leave_prompt(ctx, e, "3D", [&] { e.create_empty({0, 0, 0}); })) return r;
+    e.on_exit();
+    if (read_all(sp) != future3d) return fail("3D: the newer scene.json was changed on disk");
+    ux::clear_errors();
+  }
+  for (K k : ux::all_error_kinds())
+    if (!covered.count(k)) return fail(std::string("no smoke case for ") + ux::to_string(k));
+  *cases = static_cast<int>(sizeof(cases_) / sizeof(cases_[0])) + 2;
+  return 0;
+}
+
+// Reads settings.json back the way the next launch would.
+ux::Prefs prefs_on_disk() {
+  const ux::Prefs live = ux::prefs();
+  ux::import_from(editor::SettingsStore::load());
+  ux::Prefs disk = ux::prefs();
+  ux::prefs() = live;
+  return disk;
+}
+
+std::string find_action(const std::vector<ux::Action>& v, const std::string& tail) {
+  for (const ux::Action& a : v)
+    if (a.id.size() >= tail.size() && a.id.compare(a.id.size() - tail.size(), tail.size(), tail) == 0) return a.id;
+  return {};
+}
+
+// First-run tour: auto start, every step points at a live panel, skip vs
+// "Don't show again", finish, Help > Walkthrough re-run, nothing on the
+// second visit. Then layouts: save / load / reset round trip.
+template <class Screen>
+int check_tour_and_layouts(Ctx& ctx, Screen& s, bool three_d, int* steps_out) {
+  const std::string t = three_d ? "3D" : "2D";
+  ux::EditorUx& u = s.field_guide();
+  ux::Walkthrough& w = u.walkthrough();
+  auto tick = [&](int n) { ctx.frames(n, [&] { s.on_update(1.0f / 60.0f); }); };
+  auto done = [&](const ux::Prefs& p) { return three_d ? p.walkthrough_3d_done : p.walkthrough_2d_done; };
+
+  tick(8);
+  if (!w.active() || !w.auto_started()) return fail(t + ": walkthrough didn't start on the first visit");
+  if (!ImGui::FindWindowByName("###ts_walkthrough")) return fail(t + ": no walkthrough card drawn");
+  const auto& steps = ux::walkthrough_steps(three_d);
+  if (w.step_count() < 5 || w.step_count() > 8) return fail(t + ": walkthrough wants 5-8 steps");
+  bool saw_gizmo = false, saw_import = false, saw_play = false, saw_post = false, saw_vault = false, saw_add = false;
+  for (int i = 0; i < w.step_count(); ++i) {
+    if (w.step() != i) return fail(t + ": walkthrough step order");
+    const ux::WalkStep& st = steps[static_cast<std::size_t>(i)];
+    tick(4);
+    if (*st.window) {
+      ImGuiWindow* win = ImGui::FindWindowByName(st.window);
+      if (!win || !win->WasActive) return fail(t + ": walkthrough step '" + st.title + "' points at a panel that isn't up: " + st.window);
+    }
+    const std::string body = std::string(st.title) + " " + st.body;
+    saw_gizmo |= body.find("G") != std::string::npos && body.find("R") != std::string::npos && body.find("S") != std::string::npos &&
+                 std::string(st.window).find("Viewport") != std::string::npos;
+    saw_add |= body.find("Add Component") != std::string::npos;
+    saw_import |= body.find("mport") != std::string::npos;
+    saw_play |= body.find("Play") != std::string::npos;
+    saw_post |= body.find("Trading Post") != std::string::npos;
+    saw_vault |= body.find("Vault") != std::string::npos;
+    if (i + 1 < w.step_count()) w.next();
+  }
+  if (!(saw_gizmo && saw_add && saw_import && saw_play && saw_post && saw_vault))
+    return fail(t + ": walkthrough misses a stop (viewport G/R/S, Add Component, import, Play, Trading Post, Vault)");
+  w.back();
+  if (w.step() != w.step_count() - 2) return fail(t + ": walkthrough Back");
+  // Skip without "Don't show again": comes back next launch.
+  w.dont_show_again = false;
+  w.stop(w.dont_show_again);
+  tick(2);
+  if (w.active() || ImGui::FindWindowByName("###ts_walkthrough")->WasActive) return fail(t + ": Skip left the card up");
+  if (done(ux::prefs()) || done(prefs_on_disk())) return fail(t + ": Skip without 'Don't show again' still marked the tour seen");
+  // Help > Walkthrough runs it again.
+  u.harvest();
+  const std::string help = find_action(u.actions().harvested("menu"), "/Walkthrough");
+  if (help.empty() || !u.run_now(help)) return fail(t + ": no Help > Walkthrough");
+  if (!w.active() || w.step() != 0) return fail(t + ": Help > Walkthrough didn't restart the tour");
+  // Skip with "Don't show again" ticked (the default): saved to settings.json.
+  if (!w.dont_show_again) return fail(t + ": 'Don't show again' should start ticked");
+  w.stop(w.dont_show_again);
+  if (!done(prefs_on_disk())) return fail(t + ": 'Don't show again' didn't reach settings.json");
+  // Finishing also counts; run it from Help and Next all the way.
+  (three_d ? ux::prefs().walkthrough_3d_done : ux::prefs().walkthrough_2d_done) = false;
+  u.run_now(help);
+  for (int i = 0; i < 20 && w.active(); ++i) w.next();
+  if (w.active() || !done(prefs_on_disk())) return fail(t + ": Finish didn't mark the tour seen");
+  *steps_out = w.step_count();
+
+  // ---- layouts ----
+  const char* panel = three_d ? "Inspector###Inspector3D" : "Inspector";
+  u.run_now("Panel/Inspector");
+  tick(4);
+  ImGuiWindow* insp = ImGui::FindWindowByName(panel);
+  if (!insp || insp->DockId == 0) return fail(t + ": Inspector isn't docked by default");
+  const ImGuiID docked = insp->DockId;
+  const std::string a = "_ux smoke docked", b = "_ux smoke floating";
+  std::string err;
+  if (!ux::save_layout(three_d, a, &err)) return fail(t + ": save layout: " + err);
+  // Float the Inspector, save that too.
+  ImGui::DockContextQueueUndockWindow(ImGui::GetCurrentContext(), insp);
+  tick(3);
+  if (insp->DockId != 0) return fail(t + ": couldn't float the Inspector for the layout test");
+  // Save through the menu + popup path (Window > Layouts > Save current...).
+  u.harvest();
+  const std::vector<ux::Action> menu = u.actions().harvested("menu");
+  const std::string save_id = find_action(menu, "Layouts/Save current...");
+  const std::string reset_id = find_action(menu, "Layouts/Reset layout");
+  const std::string def_id = find_action(menu, three_d ? "Layouts/Default 3D" : "Layouts/Default 2D");
+  if (save_id.empty() || reset_id.empty() || def_id.empty()) return fail(t + ": Window > Layouts menu incomplete");
+  if (!ux::save_layout(three_d, b, &err)) return fail(t + ": save layout: " + err);
+  const std::vector<std::string> names = ux::list_layouts(three_d);
+  if (std::find(names.begin(), names.end(), a) == names.end() || std::find(names.begin(), names.end(), b) == names.end())
+    return fail(t + ": saved layouts not listed");
+  {
+    std::ifstream in(fs::path(ux::layouts_dir(three_d)) / (a + ".ini"));
+    std::stringstream ss;
+    ss << in.rdbuf();
+    if (ss.str().find("[Docking]") == std::string::npos) return fail(t + ": saved layout has no docking section");
+  }
+  // Load the docked one from the menu: applied at the start of the next frame.
+  u.harvest();
+  const std::string load_a = find_action(u.actions().harvested("menu"), "Layouts/" + a);
+  if (load_a.empty() || !u.run_now(load_a)) return fail(t + ": saved layout not in Window > Layouts");
+  if (!ux::layout_pending()) return fail(t + ": layout load not queued");
+  tick(3);
+  insp = ImGui::FindWindowByName(panel);
+  if (!insp || insp->DockId == 0) return fail(t + ": loading the docked layout left the Inspector floating");
+  if (!ux::queue_load_layout(three_d, b, &err)) return fail(t + ": load " + b + ": " + err);
+  tick(3);
+  insp = ImGui::FindWindowByName(panel);
+  if (!insp || insp->DockId != 0) return fail(t + ": loading the floating layout didn't float the Inspector");
+  if (!u.run_now(reset_id)) return fail(t + ": Reset layout");
+  tick(3);
+  insp = ImGui::FindWindowByName(panel);
+  if (!insp || insp->DockId == 0) return fail(t + ": Reset layout left the Inspector floating");
+  (void)docked;
+  // The name popup, with a path-ish name: cleaned, stays in layouts/.
+  if (ux::clean_layout_name("../../evil\\name?") != "evilname") return fail("layout names aren't cleaned");
+  if (!u.run_now(save_id)) return fail(t + ": Save current...");
+  tick(2);
+  if (!ImGui::FindWindowByName("Save layout###ts_save_layout")) return fail(t + ": Save current... didn't ask for a name");
+  ctx.frames(1, [&] {
+    s.on_update(1.0f / 60.0f);
+    ImGui::ClosePopupToLevel(0, false);
+  });
+  tick(2);
+  for (const std::string& n : {a, b})
+    if (!ux::delete_layout(three_d, n, &err)) return fail(t + ": delete layout: " + err);
+  for (const std::string& n : ux::list_layouts(three_d))
+    if (n == a || n == b) return fail(t + ": deleted layout still listed");
+  return 0;
+}
+
+// Points the Vault's default library at an empty scratch folder for the run,
+// so the check never reads (or depends on) the user's own Vault.
+struct ScopedVaultDir {
+  std::string old;
+  bool had = false;
+  explicit ScopedVaultDir(const fs::path& dir) {
+    if (const char* v = std::getenv("TS_VAULT_DIR")) { old = v; had = true; }
+    set(dir.string());
+  }
+  ~ScopedVaultDir() { set(had ? old : std::string()); }
+  static void set(const std::string& v) {
+#if defined(_WIN32)
+    _putenv_s("TS_VAULT_DIR", v.c_str());
+#else
+    if (v.empty()) unsetenv("TS_VAULT_DIR");
+    else setenv("TS_VAULT_DIR", v.c_str(), 1);
+#endif
+  }
+};
+
 int run_ux_smoke() {
   SettingsBackup keep;
   const fs::path root = fs::absolute("./TombStoneProjects/_ux_smoke");
@@ -305,10 +686,12 @@ int run_ux_smoke() {
   fs::remove_all(root, ec);
   fs::create_directories(root / "p2d", ec);
   fs::create_directories(root / "p3d", ec);
+  fs::create_directories(root / "vault", ec);
+  ScopedVaultDir vault_dir(root / "vault");
   ux::prefs() = ux::Prefs{};
   ux::prefs().walkthrough_2d_done = ux::prefs().walkthrough_3d_done = true;  // tours tested on their own
   Ctx ctx;
-  int menu2d = 0, menu3d = 0, tips2d = 0, tips3d = 0;
+  int menu2d = 0, menu3d = 0, tips2d = 0, tips3d = 0, ctx2d = 0, ctx3d = 0;
   {
     editor::ProjectInfo info;
     info.id = "_ux_2d";
@@ -322,6 +705,17 @@ int run_ux_smoke() {
                                [&] { return s.hierarchy_shown(); }))
       return r;
     menu2d = static_cast<int>(s.field_guide().actions().harvested("menu").size());
+    if (int r = check_contexts(
+            ctx, s.field_guide(), "2D",
+            {{"ctx.viewport2d", {"Create here", "Empty entity", "Paste here", "Set 2D cursor here", "View options"}},
+             {"ctx.hierarchy2d", {"Paste"}},
+             {"ctx.entity2d", {"Duplicate", "Rename", "Delete", "Focus", "Copy components", "Paste components",
+                               "Location", "Rotation", "Size"}},
+             {"ctx.inspector2d", {"Reset to defaults", "Copy values", "Paste values", "Remove component",
+                                  "Move up", "Move down", "Open docs"}},
+             {"ctx.assets2d", {"Open", "Rename...", "Reimport", "Find references", "Delete..."}}},
+            &ctx2d))
+      return r;
 
     // Tooltips: one entity wearing every component, then each starter entity.
     for (auto& en : s.workspace().entities()) {
@@ -394,6 +788,17 @@ int run_ux_smoke() {
                                "View/Grid", [&] { return e.scene().show_grid; }))
       return r;
     menu3d = static_cast<int>(e.field_guide().actions().harvested("menu").size());
+    if (int r = check_contexts(
+            ctx, e.field_guide(), "3D",
+            {{"ctx.viewport3d", {"Create here", "Cube", "Paste here", "Place 3D cursor here", "View options"}},
+             {"ctx.hierarchy3d", {"Paste"}},
+             {"ctx.entity3d", {"Duplicate", "Delete", "Focus", "Copy components", "Paste components", "Location",
+                               "Rotation", "Scale"}},
+             {"ctx.inspector3d", {"Reset to defaults", "Copy values", "Paste values", "Remove component",
+                                  "Move up", "Move down", "Open docs"}},
+             {"ctx.assets3d", {"Open", "Rename...", "Reimport", "Find references", "Delete..."}}},
+            &ctx3d))
+      return r;
 
     // Tooltips: the crate wearing every component, then each starter entity.
     if (const s3::Entity3D* crate = e.scene().find_named("Crate")) {
@@ -453,6 +858,52 @@ int run_ux_smoke() {
       return r;
     e.on_exit();
   }
+  int error_cases = 0;
+  if (int r = check_errors(ctx, root, &error_cases)) return r;
+  // First-run tours + layouts, on fresh prefs (nothing seen yet).
+  int tour2d = 0, tour3d = 0;
+  {
+    const bool was = ux::Walkthrough::autostart();
+    ux::Walkthrough::set_autostart(true);
+    ux::prefs().walkthrough_2d_done = ux::prefs().walkthrough_3d_done = false;
+    int r = 0;
+    {
+      editor::ProjectInfo info;
+      info.id = "_ux_2d";
+      info.name = "UX 2D";
+      info.path = (root / "p2d").string();
+      editor::Editor2DScreen s(info);
+      s.on_enter();
+      r = check_tour_and_layouts(ctx, s, false, &tour2d);
+      s.on_exit();
+    }
+    if (!r) {
+      editor::ProjectInfo info;
+      info.id = "_ux_3d";
+      info.name = "UX 3D";
+      info.kind = editor::ProjectKind::ThreeD;
+      info.path = (root / "p3d").string();
+      editor::Editor3DScreen e(info);
+      e.on_enter();
+      r = check_tour_and_layouts(ctx, e, true, &tour3d);
+      e.on_exit();
+    }
+    if (!r) {
+      // Seen once: a second visit doesn't start it again.
+      editor::ProjectInfo info;
+      info.id = "_ux_2d";
+      info.name = "UX 2D";
+      info.path = (root / "p2d").string();
+      editor::Editor2DScreen s(info);
+      s.on_enter();
+      ctx.frames(8, [&] { s.on_update(1.0f / 60.0f); });
+      if (s.field_guide().walkthrough().active()) r = fail("2D: walkthrough came back after it was seen");
+      s.on_exit();
+    }
+    ux::Walkthrough::set_autostart(was);
+    if (r) return r;
+  }
+  fs::remove_all(root, ec);
   fs::remove_all(root, ec);
   // Trading Post rows explain themselves: what, where it works, what next.
   {
@@ -475,6 +926,9 @@ int run_ux_smoke() {
   std::cout << "[smoke] ux OK (registry: " << menu2d << " 2D / " << menu3d
             << " 3D menu actions, palette fuzzy find + run + Ctrl+Shift+P; tooltips on " << tips2d
             << " 2D / " << tips3d << " 3D toolbar + Inspector widgets + every menu item + Trading Post rows; "
-            << "empty states in 6 2D / 6 3D panels)\n";
+            << "empty states in 6 2D / 6 3D panels; readable errors for " << error_cases
+            << " cases incl. a newer scene.json left untouched; walkthrough " << tour2d << " 2D / " << tour3d
+            << " 3D steps, skip + don't-show-again + finish persisted; layouts save / load / reset round trip; unsaved-changes prompt on quit (2D + 3D); "
+            << ctx2d << " 2D / " << ctx3d << " 3D context-menu items registered with tips)\n";
   return 0;
 }

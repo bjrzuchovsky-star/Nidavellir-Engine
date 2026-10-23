@@ -1,4 +1,5 @@
 #include "editor/editor3d/Editor3DScreen.h"
+#include "editor/ux/FriendlyError.h"
 #include "editor/plugins/PluginNeeds.h"
 #include "terrain/TerrainView.h"
 #include "plugins/profiler/ProfilerPlugin.h"
@@ -68,6 +69,8 @@ void Editor3DScreen::on_enter() {
                   log_.push_back(std::move(e));
                 });
   std::string err;
+  scene_locked_ = false;
+  scene_locked_why_.clear();
   const std::string path = scene3d::scene_path(project_.path);
   if (!fs::exists(path)) {
     scene_ = vr_project() ? scene3d::make_vr_starter_scene() : scene3d::make_starter_scene();
@@ -83,6 +86,11 @@ void Editor3DScreen::on_enter() {
   } else if (!scene3d::load_file(path, &scene_, &err)) {
     note(err, LogLevel::Error);
     scene_ = scene3d::Scene3D{};
+    if (ux::classify(err) == ux::ErrorKind::SceneVersion) {
+      scene_locked_ = true;  // keep the newer file exactly as it is
+      scene_locked_why_ = err;
+    }
+    ux::show_error(ux::explain(err, ux::ErrorKind::MissingFile, "Opening claim " + project_.name));
   } else {
     migrate_cameras_on_open(path);  // pre-v18: the follow camera becomes an entity
   }
@@ -161,6 +169,7 @@ void Editor3DScreen::collect_problems() {
 }
 
 AppState Editor3DScreen::on_update(float delta_seconds) {
+  ux_.begin_frame();  // a layout chosen last frame lands before any panel draws
   tick_team(delta_seconds);
   if (vr_previewing()) {
     vr_preview_frame(delta_seconds);
@@ -232,9 +241,30 @@ void Editor3DScreen::push_undo(const std::string& label, const scene3d::Scene3D&
   autosave();
 }
 
+void Editor3DScreen::report_save_failure(const std::string& err) {
+  note("Save failed: " + err, LogLevel::Error);
+  ux::show_error(ux::explain(err, scene_locked_ ? ux::ErrorKind::SceneVersion : ux::ErrorKind::SaveFailed,
+                             "Saving " + scene3d::scene_path(project_.path)));
+}
+
 void Editor3DScreen::autosave() {
   std::string err;
-  if (!save_scene(&err)) note("Autosave failed: " + err, LogLevel::Error);
+  if (!save_scene(&err)) {
+    unsaved_ = true;
+    last_save_error_ = err;
+    note("Autosave failed: " + err, LogLevel::Error);
+  }
+}
+
+void Editor3DScreen::leave_or_ask(bool quit) {
+  auto go = [this, quit] { quit ? request_quit() : request_back_to_projects(); };
+  if (!has_unsaved()) return go();
+  ux::EditorUx::LeaveAsk a;
+  a.action = quit ? "Quit" : "Leave";
+  a.why = last_save_error_;
+  a.save = [this](std::string* err) { return save_scene(err); };
+  a.leave = go;
+  ux_.ask_leave(std::move(a));
 }
 
 const std::string& Editor3DScreen::undo_label() const {
@@ -273,9 +303,16 @@ bool Editor3DScreen::redo() {
 }
 
 bool Editor3DScreen::save_scene(std::string* error) {
+  if (scene_locked_) {
+    if (error) *error = "Not saved: " + scene_locked_why_ + ". The file on disk is left as it is.";
+    return false;
+  }
   refresh_prefab_overrides();
   if (!scene3d::save_file(scene3d::scene_path(project_.path), scene_, error)) return false;
-  return save_terrains(error);
+  if (!save_terrains(error)) return false;
+  unsaved_ = false;
+  last_save_error_.clear();
+  return true;
 }
 
 bool Editor3DScreen::reload_scene(std::string* error) {

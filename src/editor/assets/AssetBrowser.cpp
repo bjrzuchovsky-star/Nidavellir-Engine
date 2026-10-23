@@ -1,4 +1,9 @@
 #include "editor/assets/AssetBrowser.h"
+#include "editor/launch/OpenWithOs.h"
+
+#include <cstdio>
+#include <filesystem>
+#include "editor/ux/FriendlyError.h"
 #include "editor/ux/EmptyState.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
@@ -106,6 +111,15 @@ importsort::Result AssetBrowser::import_files(const std::vector<std::string>& al
     for (const std::string& n : r.notes) host_.note("Import: " + n);
     for (const std::string& e : r.errors) host_.note("Import failed: " + e);
   }
+  if (!r.errors.empty()) {
+    std::string all;
+    for (const std::string& e : r.errors) all += e + "\n";
+    ux::FriendlyError f = ux::explain(r.errors.front(), ux::ErrorKind::ImportFailed,
+                                      "Importing " + std::to_string(sources.size()) + " file(s); " +
+                                          std::to_string(r.errors.size()) + " failed:\n" + all);
+    if (r.errors.size() > 1) f.what += " (" + std::to_string(r.errors.size() - 1) + " more in Details.)";
+    ux::show_error(std::move(f));
+  }
   if (!r.mains.empty()) {
     selected_ = r.mains.front();
     const auto slash = selected_.find_last_of('/');
@@ -198,6 +212,7 @@ bool AssetBrowser::move(const std::string& from, const std::string& to, std::str
     if (host_.after_refs_changed) host_.after_refs_changed();
   } else {
     if (host_.note) host_.note("Move failed: " + err);
+    ux::show_error(ux::explain(err, ux::ErrorKind::SaveFailed, "Moving " + from + " -> " + to));
     if (error) *error = err;
   }
   return ok;
@@ -370,6 +385,55 @@ void AssetBrowser::draw() {
   }
 
   // Delete confirmation (asset in use).
+  // Right-click > Delete...: always ask (files on disk don't come back with Ctrl+Z).
+  if (!confirm_delete_.empty() && !ImGui::IsPopupOpen("Delete asset?###ts_asset_delete"))
+    ImGui::OpenPopup("Delete asset?###ts_asset_delete");
+  if (ImGui::BeginPopupModal("Delete asset?###ts_asset_delete", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::Text("Delete %s from the claim?", confirm_delete_.c_str());
+    ImGui::TextDisabled("The file and its .meta are removed from disk. Undo can't bring them back.");
+    if (theme::DangerButton("Delete")) {
+      std::vector<assetdb::Ref> refs;
+      if (!remove(confirm_delete_, false, &refs)) {
+        delete_pending_ = confirm_delete_;  // still used: the next popup lists where
+        delete_refs_ = refs;
+      }
+      confirm_delete_.clear();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (theme::SecondaryButton("Keep it") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+      confirm_delete_.clear();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+  // Right-click > Rename...: a new file name in the same folder.
+  if (open_rename_popup_) {
+    ImGui::OpenPopup("Rename asset###ts_asset_rename");
+    open_rename_popup_ = false;
+  }
+  if (ImGui::BeginPopupModal("Rename asset###ts_asset_rename", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::Text("Rename %s", rename_for_.c_str());
+    ImGui::TextDisabled("References in scenes and prefabs follow the file.");
+    if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+    const bool enter = ImGui::InputText("New name", rename_popup_buf_, sizeof(rename_popup_buf_),
+                                        ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+    const std::string name = rename_popup_buf_;
+    const bool bad = name.empty() || name.find_first_of("/\\:*?\"<>|") != std::string::npos;
+    if (bad && !name.empty()) ImGui::TextColored(theme::Warning(), "A file name can't contain / \\ : * ? \" < > |");
+    ImGui::BeginDisabled(bad);
+    const bool go = theme::PrimaryButton("Rename") || (enter && !bad);
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (theme::SecondaryButton("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
+    if (go) {
+      const std::string dir = std::filesystem::path(rename_for_).parent_path().generic_string();
+      const std::string to = dir.empty() ? name : dir + "/" + name;
+      if (to != rename_for_) move(rename_for_, to);  // a failure explains itself
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
   if (!delete_pending_.empty()) ImGui::OpenPopup("Delete asset in use?");
   if (ImGui::BeginPopupModal("Delete asset in use?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::TextColored(theme::Warning(), "%s is still referenced:", delete_pending_.c_str());
@@ -478,23 +542,48 @@ bool AssetBrowser::tile(const AssetDb::Entry& e, float size) {
   }
   if (ImGui::BeginPopupContextItem("##ctx")) {
     selected_ = e.rel;
-    if (ux::MenuItem("Find references")) {
-      refs_for_ = e.rel;
-      refs_shown_ = db_.find_references(e.rel);
-    }
-    if (ux::MenuItem("Reimport")) reimport(e.rel);
-    if (host_.send_to_vault && ux::MenuItem("Send to Vault...")) host_.send_to_vault(e.rel);
-    if (ux::MenuItem("Delete")) {
-      std::vector<assetdb::Ref> refs;
-      if (!remove(e.rel, false, &refs)) {
-        delete_pending_ = e.rel;
-        delete_refs_ = refs;
-      }
-    }
+    draw_asset_context_items(e);
     ImGui::EndPopup();
   }
   ImGui::PopID();
   return clicked;
+}
+
+void AssetBrowser::draw_asset_context_items(const AssetDb::Entry& e) {
+  const std::filesystem::path full(db_.abs(e.rel));
+  if (ux::MenuItem("Open")) {
+    std::string err;
+    if (!launcher::open_with_os(full.string(), &err))
+      ux::show_error(ux::explain(err.empty() ? "could not open " + full.string() : err, ux::ErrorKind::MissingFile,
+                                 "Opening " + e.rel));
+  }
+  if (ux::MenuItem("Rename...", "F2")) {
+    rename_for_ = e.rel;
+    std::snprintf(rename_popup_buf_, sizeof(rename_popup_buf_), "%s", std::filesystem::path(e.rel).filename().string().c_str());
+    open_rename_popup_ = true;
+  }
+#if defined(_WIN32)
+  const char* reveal = "Reveal in Explorer";
+#elif defined(__APPLE__)
+  const char* reveal = "Reveal in Finder";
+#else
+  const char* reveal = "Reveal in file manager";
+#endif
+  if (ux::MenuItem(reveal)) {
+    std::string err;
+    if (!launcher::open_with_os(full.parent_path().string(), &err))
+      ux::show_error(ux::explain(err.empty() ? "could not open " + full.parent_path().string() : err,
+                                 ux::ErrorKind::MissingFile, "Showing " + e.rel + " in its folder"));
+  }
+  ImGui::Separator();
+  if (ux::MenuItem("Reimport")) reimport(e.rel);
+  if (ux::MenuItem("Find references")) {
+    refs_for_ = e.rel;
+    refs_shown_ = db_.find_references(e.rel);
+  }
+  if (host_.send_to_vault && ux::MenuItem("Send to Vault...")) host_.send_to_vault(e.rel);
+  ImGui::Separator();
+  if (ux::MenuItem("Delete...", "Del")) confirm_delete_ = e.rel;
 }
 
 void AssetBrowser::draw_grid() {

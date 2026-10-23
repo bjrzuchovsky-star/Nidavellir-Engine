@@ -12,6 +12,7 @@
 
 #include "editor/assets/AssetBrowser.h"
 #include "editor/assets/AssetDb.h"
+#include "editor/ux/FriendlyError.h"
 #include "editor/vault/VaultProject.h"
 #include "gfx/TextureCache.h"
 #include "vault/VaultTypes.h"
@@ -45,6 +46,9 @@ struct VaultHost {
   std::function<std::vector<Claim>()> claims;
   std::string scratch_dir;  // Add files staging ("" = config dir/vault_add)
 };
+
+// The Vault panel's error card: what went wrong, plus a Vault settings fix.
+ux::FriendlyError friendly_vault_error(const std::string& raw, bool remote);
 
 class VaultPanel {
  public:

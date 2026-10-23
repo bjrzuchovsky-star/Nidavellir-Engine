@@ -260,6 +260,9 @@ void Editor2DScreen::draw_viewport() {
     const std::optional<std::uint64_t> hit =
         workspace_.pick(mouse_world.x, mouse_world.y);
     context_id_ = hit.value_or(0);
+    context_in_viewport_ = true;
+    context_world_x_ = mouse_world.x;
+    context_world_y_ = mouse_world.y;
     if (hit && !workspace_.is_selected(*hit)) {
       workspace_.select(*hit);
     }

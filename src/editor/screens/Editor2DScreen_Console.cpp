@@ -5,6 +5,7 @@
 
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/ux/EmptyState.h"
+#include "editor/ux/FriendlyError.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/plugins/ProfilerPanels.h"
 
@@ -124,10 +125,13 @@ void Editor2DScreen::draw_console() {
       ImGui::PushID(static_cast<int>(line.seq & 0x7fffffff));
       ImGui::PushStyleColor(ImGuiCol_Text, level_color(e.level));
       const std::string text = runtime::format_log(e, true);
-      const bool clicked = ImGui::Selectable(text.c_str(), false,
+      const bool problem = e.level != runtime::LogLevel::Info;
+      const ux::ErrorKind hint = ux::telegraph_hint(e.channel);
+      const bool clicked = ImGui::Selectable(ux::telegraph_label(text, problem, hint).c_str(), false,
                                              ImGuiSelectableFlags_None);
       ImGui::PopStyleColor();
-      if (e.entity != 0 && ImGui::IsItemHovered()) {
+      const bool helped = ux::TelegraphLineHelp(text, problem, hint, "Telegraph, 2D editor, channel '" + e.channel + "'");
+      if (!helped && e.entity != 0 && ImGui::IsItemHovered()) {
         const Entity2D* who = workspace_.find(e.entity);
         ux::SetTooltip("%s", who ? ("Click to pick out " + who->name).c_str()
                                     : "Spawned during the ride");

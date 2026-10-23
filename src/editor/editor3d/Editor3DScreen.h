@@ -68,6 +68,9 @@ namespace ts {
 namespace tombstone {
 namespace editor {
 
+// Inspector header / right-click > Paste: copy one named component across.
+bool paste_component_values_3d(scene3d::Entity3D& dst, const scene3d::Entity3D& src, const std::string& name);
+
 class Editor3DScreen final : public IScreen {
  public:
   explicit Editor3DScreen(ProjectInfo project);
@@ -82,6 +85,10 @@ class Editor3DScreen final : public IScreen {
   // Field Guide: action registry + command palette (Ctrl+Shift+P).
   ux::EditorUx& field_guide() { return ux_; }
   void request_quit() { quit_requested_ = true; }
+  // Quit / Back to Claims from the UI: asks first when the latest changes
+  // didn't reach disk (autosave failed or the scene is read-only).
+  void leave_or_ask(bool quit);
+  bool has_unsaved() const { return unsaved_; }
   const ProjectInfo& project() const { return project_; }
   EditorPlugins& plugins() { return plugins_; }
   std::map<std::string, bool>& plugin_panel_open() { return plugin_panel_open_; }
@@ -161,6 +168,8 @@ class Editor3DScreen final : public IScreen {
   std::size_t undo_depth() const { return undo_.size(); }
 
   bool save_scene(std::string* error = nullptr);
+  // Telegraph line + readable error modal for a failed save / load.
+  void report_save_failure(const std::string& err);
   bool reload_scene(std::string* error = nullptr);
 
   // ---- Viewport (pixels in a vw x vh view) ---------------------------------
@@ -517,6 +526,8 @@ class Editor3DScreen final : public IScreen {
   ProjectInfo project_;
   bool back_requested_ = false;
   bool quit_requested_ = false;
+  bool unsaved_ = false;
+  std::string last_save_error_;
   scene3d::Scene3D scene_;
   PrefabLibrary prefabs_;
   AssetBrowser asset_browser_;
@@ -607,6 +618,10 @@ class Editor3DScreen final : public IScreen {
   bool show_ui_preview_ = false;  // the project's ui/ documents over the Play view
   render3d::FrameStats last_stats_;
   bool dock_initialized_ = false;
+  bool dock_reset_requested_ = false;  // Window > Layouts > Reset layout
+  // Inspector header > Copy values (the whole entity; the name says which).
+  std::optional<scene3d::Entity3D> comp_clip_;
+  std::string comp_clip_name_;
   bool viewport_hovered_ = false;
   bool viewport_focused_ = false;
   bool show_colliders_ = true;
@@ -629,12 +644,19 @@ class Editor3DScreen final : public IScreen {
   bool surface_snap_ = false;
   bool rmb_dragged_ = false;       // RMB press orbited/flew (no menu)
   std::uint64_t context_id_ = 0;
+  // Viewport right-click on the ground: Create here / 3D cursor here.
+  bool context_has_ground_ = false;
+  render3d::Vec3 context_ground_{0, 0, 0};
+  void paste_components_3d();
   char hier_filter_[96] = {0};
   bool hier_open_context_ = false;
   std::uint64_t hier_drop_id_ = 0, hier_drop_target_ = 0;
   int hier_drop_where_ = 1;
   bool hier_drop_root_ = false;
   std::uint64_t hier_toggle_lock_ = 0, hier_toggle_hide_ = 0;
+  // scene.json on disk is from a newer TombStone: never saved over.
+  bool scene_locked_ = false;
+  std::string scene_locked_why_;
   // Last member: unhitched first.
   EditorPlugins plugins_;
   std::map<std::string, bool> plugin_panel_open_;  // plugin panels without their own flag

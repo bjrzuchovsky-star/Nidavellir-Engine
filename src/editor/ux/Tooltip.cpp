@@ -191,7 +191,9 @@ void install_hook() {
 
 void BeginAutoTips(const char* scope) {
   install_hook();
-  ImGuiWindow* w = ImGui::GetCurrentWindow();
+  // Read-only access: GetCurrentWindow() would mark the implicit "Debug"
+  // fallback window as written, making ImGui show it.
+  ImGuiWindow* w = ImGui::GetCurrentWindowRead();
   Scope sc{scope ? scope : "", "", w ? w->RootWindow : nullptr};
   // Opened between windows (the implicit "Debug" window): adopt what follows.
   sc.adopt = !w || w->IsFallbackWindow;

@@ -27,6 +27,7 @@ EmptyText empty_text(const std::string& id);
 
 struct WalkStep {
   const char* window;  // ImGui window name to point at ("" = centre)
+  const char* panel;   // EditorUx panel label to show first ("" = none)
   const char* title;
   const char* body;
 };

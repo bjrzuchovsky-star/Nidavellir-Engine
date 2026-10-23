@@ -101,56 +101,56 @@ EmptyText empty_text(const std::string& id) {
 
 const std::vector<WalkStep>& walkthrough_steps(bool three_d) {
   static const std::vector<WalkStep> k2d = {
-      {"Hierarchy", "Hierarchy",
+      {"Hierarchy", "Hierarchy", "Hierarchy",
        "Every object in the scene is listed here. Click to select, drag to re-parent, right-click "
        "for more. Start with Create Entity or Create Camera."},
-      {"Viewport2D", "Viewport",
+      {"Viewport2D", "Viewport", "Viewport",
        "This is the scene. Drag to move the selection; G, R and S move, rotate and scale with the "
        "mouse (type a number for an exact value). Right-click for the context menu, the mouse "
        "wheel zooms."},
-      {"Inspector", "Inspector",
+      {"Inspector", "Inspector", "Inspector",
        "Edit the selected object here. Hover any field for what it does and its units; Add "
        "Component gives it a sprite, collider, script and more. Right-click a component header to "
        "reset, copy or remove it."},
-      {"Asset Browser", "Asset Browser",
+      {"Asset Browser", "Asset Browser", "Asset Browser",
        "Your claim's images, sounds, models and scripts. Import (or drop files on the window) to "
        "bring new ones in; drag an image into the viewport to place it."},
-      {"", "Play",
+      {"", "", "Play",
        "Press F5 (or Ctrl+P) to ride the scene, F5 again to stop. Stopping puts everything back "
        "the way it was."},
-      {"Plugins", "Trading Post",
+      {"Plugins", "Plugins (Outfitter)", "Trading Post",
        "The Trading Post has plugins, templates and assets for your claim. Open it from the "
        "Plugins panel (View > Plugins): Visit the Trading Post..."},
-      {"Vault", "Vault",
+      {"Vault", "Vault", "Vault",
        "The Vault keeps assets you share between claims. Send an asset there from its right-click "
        "menu; pull it into another claim later."},
-      {"", "Find anything",
+      {"", "", "Find anything",
        "Press Ctrl+Shift+P for the command palette: every menu item, panel and setting by name. "
        "Window > Layouts saves panel arrangements; Help > Walkthrough shows this again."},
   };
   static const std::vector<WalkStep> k3d = {
-      {"Hierarchy###Hierarchy3D", "Hierarchy",
+      {"Hierarchy###Hierarchy3D", "Hierarchy", "Hierarchy",
        "Every object in the scene. Click to select, right-click for more. Create > Camera or "
        "Create > Cube puts the first thing in."},
-      {"Viewport###Viewport3D", "Viewport",
+      {"Viewport###Viewport3D", "Viewport", "Viewport",
        "The scene in 3D. Right-drag to look, WASD to fly. W/E/R switch the gizmo, G, R and S "
        "move, rotate and scale with the mouse. Right-click an object for its menu."},
-      {"Inspector###Inspector3D", "Inspector",
+      {"Inspector###Inspector3D", "Inspector", "Inspector",
        "Edit the selected object. Hover any field for what it does and its units; Add Component "
        "gives it a mesh, light, collider or script. Right-click a component header for reset, "
        "copy and paste."},
-      {"Asset Browser###AssetBrowser3D", "Asset Browser",
+      {"Asset Browser###AssetBrowser3D", "Asset Browser", "Asset Browser",
        "Models, textures, sounds and scripts in this claim. Import (or drop files) to bring new "
        "ones in; drag a model into the viewport to place it."},
-      {"", "Play",
+      {"", "", "Play",
        "Press F5 to play the scene, F5 again to stop; the scene goes back to how it was."},
-      {"Plugins###Plugins3D", "Trading Post",
+      {"Plugins###Plugins3D", "Plugins", "Trading Post",
        "The Trading Post has plugins, templates and assets ready to use. Open it from the Plugins "
        "panel (View > Plugins): Visit the Trading Post..."},
-      {"Vault###Vault3D", "Vault",
+      {"Vault###Vault3D", "Vault", "Vault",
        "Assets shared between all your claims. Send one there from the Asset Browser's "
        "right-click menu."},
-      {"", "Find anything",
+      {"", "", "Find anything",
        "Ctrl+Shift+P opens the command palette. Window > Layouts saves panel arrangements; Help > "
        "Walkthrough shows this tour again."},
   };

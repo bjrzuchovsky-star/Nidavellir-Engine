@@ -5,6 +5,10 @@ add_library(ts_editor
   ux/UxStrings.cpp
   ux/Tooltip.cpp
   ux/EmptyState.cpp
+  ux/FriendlyError.cpp
+  ux/ContextMenus.cpp
+  ux/Layouts.cpp
+  ux/Walkthrough.cpp
   ux/Actions.cpp
   ux/CommandPalette.cpp
   ux/EditorUx.cpp

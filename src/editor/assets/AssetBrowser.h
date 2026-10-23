@@ -81,6 +81,8 @@ class AssetBrowser {
   // Reimport and tell the host (the scene reloads the model / texture).
   void reimport(const std::string& rel);
   const std::string& selected() const { return selected_; }
+  // An asset tile's right-click menu body (also drawn for --smoke-ux).
+  void draw_asset_context_items(const assetdb::AssetDb::Entry& e);
   void select(const std::string& rel) { selected_ = rel; }
 
  private:
@@ -122,6 +124,10 @@ class AssetBrowser {
   bool grid_hovered_ = false;
   double drop_seen_ = -1.0;
   std::string delete_pending_;
+  std::string confirm_delete_;   // right-click > Delete asks first
+  std::string rename_for_;       // right-click > Rename... popup
+  char rename_popup_buf_[256] = "";
+  bool open_rename_popup_ = false;
   std::vector<assetdb::Ref> delete_refs_;
   gmaimport::Dialog gma_dialog_;
   FolderBrowser relink_picker_;

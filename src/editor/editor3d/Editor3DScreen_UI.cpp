@@ -1,8 +1,10 @@
 #include "editor/team/TeamPanel.h"
 #include "editor/tools/SpriteSlicerPanel.h"
 #include "editor/ux/EmptyState.h"
+#include "editor/ux/FriendlyError.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
+#include "editor/ux/ContextMenus.h"
 #include "editor/tools/StringsPanel.h"
 #include "editor/plugins/PluginPanelHost.h"
 #include "editor/plugins/ProfilerPanels.h"
@@ -52,6 +54,12 @@ ImU32 axis_color(int axis, float alpha = 1.0f) {
 }  // namespace
 
 void Editor3DScreen::setup_dock_layout(unsigned int dockspace_id) {
+  if (dock_reset_requested_) {
+    // Window > Layouts > Default 3D / Reset layout: rebuild from scratch.
+    dock_reset_requested_ = false;
+    dock_initialized_ = false;
+    ImGui::DockBuilderRemoveNode(dockspace_id);
+  }
   if (dock_initialized_) return;
   dock_initialized_ = true;
   if (ImGui::DockBuilderGetNode(dockspace_id) != nullptr) return;
@@ -218,11 +226,14 @@ void Editor3DScreen::draw_menus() {
     if (ux::MenuItem("Save scene", "Ctrl+S")) {
       std::string err;
       if (save_scene(&err)) note("Saved scene.json");
-      else note("Save failed: " + err, runtime::LogLevel::Error);
+      else report_save_failure(err);
     }
     if (ux::MenuItem("Reload from disk", nullptr, false, !playing())) {
       std::string err;
-      if (!reload_scene(&err)) note("Reload failed: " + err, runtime::LogLevel::Error);
+      if (!reload_scene(&err)) {
+        note("Reload failed: " + err, runtime::LogLevel::Error);
+        ux::show_error(ux::explain(err, ux::ErrorKind::MissingFile, "Reloading scene.json"));
+      }
     }
     if (ux::MenuItem("Rescan assets")) rescan_assets();
     if (ux::MenuItem("Export... (Freight Office)", nullptr, false, !playing()))
@@ -231,8 +242,8 @@ void Editor3DScreen::draw_menus() {
     if (ux::MenuItem("Strings... (localisation)")) StringsPanel::get().open(project_.path, project_.name);
     if (ux::MenuItem("Sprite Slicer...")) SpriteSlicerPanel::get().open(project_.path);
     ImGui::Separator();
-    if (ux::MenuItem("Back to Claims")) request_back_to_projects();
-    if (ux::MenuItem("Quit")) request_quit();
+    if (ux::MenuItem("Back to Claims")) leave_or_ask(false);
+    if (ux::MenuItem("Quit", "Alt+F4")) leave_or_ask(true);
     ux::EndMenu();
   }
   if (ux::BeginMenu("Edit")) {
@@ -319,12 +330,14 @@ void Editor3DScreen::draw_menus() {
     if (ux::MenuItem("Frame selection", "F")) frame_selection();
     ux::EndMenu();
   }
-  if (ImGui::BeginMenu("Team")) {
+  if (ux::BeginMenu("Team")) {
     team_ui::draw_menu(team(), &show_team_);
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
+  ux_.draw_window_menu();
   if (ux::BeginMenu("Help")) {
     if (ux::MenuItem("Command Palette...", "Ctrl+Shift+P")) ux_.palette().open();
+    ux_.draw_walkthrough_menu_item();
     ImGui::Separator();
     theme::KeyHint("RMB / Alt+LMB", "Orbit");
     theme::KeyHint("MMB", "Pan");
@@ -517,6 +530,7 @@ void Editor3DScreen::handle_shortcuts() {
     if (ImGui::IsKeyPressed(ImGuiKey_S, false)) {
       std::string err;
       if (save_scene(&err)) note("Saved scene.json");
+      else report_save_failure(err);
     }
     if (io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_Keypad0, false)) align_camera_to_view();
     return;
@@ -707,6 +721,7 @@ void Editor3DScreen::draw_viewport() {
   if (!playing() && viewport_hovered_ && ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
       !rmb_dragged_ && !gizmo_.active()) {
     context_id_ = pick(mx, my, vw, vh);
+    context_has_ground_ = ground_point(mx, my, vw, vh, &context_ground_);
     if (context_id_ && std::find(selection().begin(), selection().end(), context_id_) ==
                            selection().end()) {
       select(context_id_);
@@ -922,6 +937,7 @@ void Editor3DScreen::draw_hierarchy() {
     }
     if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
       context_id_ = 0;
+      context_has_ground_ = false;
       hier_open_context_ = true;
     }
   }
@@ -1005,6 +1021,7 @@ void Editor3DScreen::draw_hierarchy_row(const scene3d::Entity3D& e, int depth) {
   if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
     if (!sel) select(e.id);
     context_id_ = e.id;
+    context_has_ground_ = false;
     hier_open_context_ = true;
   }
   if (!playing() && ImGui::BeginDragDropSource()) {
@@ -1051,11 +1068,72 @@ void Editor3DScreen::draw_hierarchy_row(const scene3d::Entity3D& e, int depth) {
   }
 }
 
+void Editor3DScreen::paste_components_3d() {
+  if (!comp_clip_ || playing()) return;
+  const scene3d::Scene3D before = scene_;
+  static const char* kNames[] = {"Mesh", "Material", "Light", "Collider", "Rigid Body", "Joint", "Player (rider)",
+                                 "Camera", "Follow", "Animator", "VR Rig", "Grabbable", "Audio Source", "Particles"};
+  for (std::uint64_t id : selection()) {
+    scene3d::Entity3D* d = scene_.find(id);
+    if (!d || d->locked || d->id == comp_clip_->id) continue;
+    for (const char* n : kNames) paste_component_values_3d(*d, *comp_clip_, n);
+    d->agent = comp_clip_->agent;
+    d->nav_link = comp_clip_->nav_link;
+    d->script = comp_clip_->script;
+    d->extra_scripts = comp_clip_->extra_scripts;
+  }
+  if (!(scene_ == before)) push_undo("Paste components", before);
+}
+
 void Editor3DScreen::draw_context_menu(std::uint64_t clicked) {
   const scene3d::Entity3D* e = find(clicked);
   const bool has = !selection().empty();
   if (e) {
     ImGui::TextDisabled("%s", e->name.c_str());
+    ImGui::Separator();
+  } else if (context_has_ground_) {
+    // Empty ground under the click: make something right here.
+    const Vec3 at = context_ground_;
+    if (ux::BeginMenu("Create here")) {
+      static const char* kPrims[4][2] = {
+          {"Cube", "cube"}, {"Plane", "plane"}, {"Sphere", "sphere"}, {"Capsule", "capsule"}};
+      for (const auto& p : kPrims)
+        if (ux::MenuItem(p[0], nullptr, false, !playing())) create_primitive(p[1], at);
+      if (ux::MenuItem("Point light", nullptr, false, !playing())) create_light(false, {at.x, at.y + 2.5f, at.z});
+      if (ux::MenuItem("Empty", nullptr, false, !playing())) create_empty(at);
+      ux::EndMenu();
+    }
+    if (ux::MenuItem("Paste here", "Ctrl+V", false, !clipboard_text().empty() && !playing())) {
+      paste();
+      // Move what landed so its middle sits on the click.
+      Vec3 sum{0, 0, 0};
+      int count = 0;
+      for (std::uint64_t id : selection_roots())
+        if (const scene3d::Entity3D* p = find(id)) {
+          sum += p->transform.position;
+          ++count;
+        }
+      if (count > 0) {
+        const Vec3 mid = sum * (1.0f / static_cast<float>(count));
+        const Vec3 d{at.x - mid.x, at.y - mid.y, at.z - mid.z};
+        for (std::uint64_t id : selection_roots()) {
+          if (scene3d::Entity3D* p = scene_.find(id)) {
+            const render3d::Transform prev = p->transform;
+            p->transform.position += d;
+            carry_descendants(id, prev);
+          }
+        }
+      }
+    }
+    if (ux::MenuItem("Place 3D cursor here", "Shift+RMB")) set_cursor3d(at);
+    if (ux::BeginMenu("View options")) {
+      ux::MenuItem("Show grid", "'", &scene_.show_grid);
+      ux::MenuItem("Colliders + joints", nullptr, &show_colliders_);
+      bool snap = snapping();
+      if (ux::MenuItem("Snap", nullptr, &snap)) set_snapping(snap);
+      if (ux::MenuItem("Frame selection", "F", false, has)) frame_selection();
+      ux::EndMenu();
+    }
     ImGui::Separator();
   }
   if (ux::MenuItem("Duplicate", "Ctrl+D", false, has)) duplicate_selected();
@@ -1090,6 +1168,19 @@ void Editor3DScreen::draw_context_menu(std::uint64_t clicked) {
   }
   if (ux::MenuItem("Focus", "F", false, has)) frame_selection();
   if (ux::MenuItem("Drop to ground", "End", false, has)) drop_to_ground();
+  if (ux::BeginMenu("Reset transform")) {
+    if (ux::MenuItem("Location", "Alt+G", false, has)) reset_transform(XformOp::Move);
+    if (ux::MenuItem("Rotation", "Alt+R", false, has)) reset_transform(XformOp::Rotate);
+    if (ux::MenuItem("Scale", "Alt+S", false, has)) reset_transform(XformOp::Scale);
+    ux::EndMenu();
+  }
+  if (ux::MenuItem("Copy components", nullptr, false, e != nullptr)) {
+    comp_clip_ = *e;
+    comp_clip_name_.clear();
+    note("Copied " + e->name + "'s components");
+  }
+  if (ux::MenuItem("Paste components", nullptr, false, has && comp_clip_.has_value() && !playing()))
+    paste_components_3d();
   if (selection().size() >= 2 && ux::BeginMenu("Align")) {
     static const char* kAx[3] = {"X", "Y", "Z"};
     for (int a = 0; a < 3; ++a) {
@@ -1163,13 +1254,20 @@ void Editor3DScreen::draw_assets() {
 
 void Editor3DScreen::draw_telegraph() {
   if (log_.empty()) ux::EmptyState("telegraph", {{"Play (F5)", [this] { if (!playing()) play_start(); }, nullptr, !playing()}});
+  int row = 0;
   for (const runtime::LogEntry& e : log_) {
     const ImVec4 col = e.level == runtime::LogLevel::Error  ? theme::Danger()
                        : e.level == runtime::LogLevel::Warn ? theme::Warning()
                                                             : theme::TextMuted();
+    const std::string text = runtime::format_log(e);
+    const bool problem = e.level != runtime::LogLevel::Info;
+    const ux::ErrorKind hint = ux::telegraph_hint(e.channel);
+    ImGui::PushID(row++);
     ImGui::PushStyleColor(ImGuiCol_Text, col);
-    ImGui::TextWrapped("%s", runtime::format_log(e).c_str());
+    ImGui::TextWrapped("%s", ux::telegraph_label(text, problem, hint).c_str());
     ImGui::PopStyleColor();
+    ux::TelegraphLineHelp(text, problem, hint, "Telegraph, 3D editor, channel '" + e.channel + "'");
+    ImGui::PopID();
   }
   if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f) ImGui::SetScrollHereY(1.0f);
   if (plugins_.loaded("ts.profiler")) {
@@ -1183,6 +1281,7 @@ void Editor3DScreen::draw_telegraph() {
 
 void Editor3DScreen::setup_field_guide() {
   ux_.set_menu_drawer([this] { draw_menus(); });
+  ux_.set_layout_reset([this] { dock_reset_requested_ = true; });
   ux_.set_context_drawer([this] { draw_context_menus_for_audit(); });
   struct Panel {
     const char* label;
@@ -1216,7 +1315,7 @@ void Editor3DScreen::setup_field_guide() {
         return;
       }
       ux::request_open_claim(r.path);
-      request_back_to_projects();
+      leave_or_ask(false);
     } else {
       show_asset_browser_ = true;
       asset_browser_.select(r.path);
@@ -1224,7 +1323,39 @@ void Editor3DScreen::setup_field_guide() {
   });
 }
 
-void Editor3DScreen::draw_context_menus_for_audit() {}
+// --smoke-ux: every right-click menu body under its scope (harvest only).
+void Editor3DScreen::draw_context_menus_for_audit() {
+  const bool saved_ground = context_has_ground_;
+  context_has_ground_ = true;
+  ux::BeginContextScope("ctx.viewport3d");
+  draw_context_menu(0);
+  ux::EndContextScope();
+  context_has_ground_ = false;
+  ux::BeginContextScope("ctx.hierarchy3d");
+  draw_context_menu(0);
+  ux::EndContextScope();
+  if (!scene_.entities.empty()) {
+    ux::BeginContextScope("ctx.entity3d");
+    draw_context_menu(scene_.entities.front().id);
+    ux::EndContextScope();
+  }
+  context_has_ground_ = saved_ground;
+  ux::HeaderOps ops;
+  ops.reset = ops.copy = ops.paste = ops.remove = [] {};
+  ops.can_paste = true;
+  ux::BeginContextScope("ctx.inspector3d");
+  ux::ComponentHeaderItems("Collider", ops);
+  ux::EndContextScope();
+  {
+    // A claim with no assets yet still has the menu: audit it on a stand-in.
+    assetdb::AssetDb::Entry sample;
+    sample.rel = "assets/textures/sample.png";
+    const auto& all = asset_browser_.db().entries();
+    ux::BeginContextScope("ctx.assets3d");
+    asset_browser_.draw_asset_context_items(all.empty() ? sample : all.front());
+    ux::EndContextScope();
+  }
+}
 
 }  // namespace editor
 }  // namespace tombstone

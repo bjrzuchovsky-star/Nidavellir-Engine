@@ -86,6 +86,12 @@ class Editor2DScreen final : public IScreen {
 
   void request_quit();
   void request_back_to_projects();
+  // Quit / Back to Projects from the UI: asks first when the latest changes
+  // didn't reach disk (autosave failed or the scene is read-only).
+  void leave_or_ask(bool quit);
+  // Plain dirty edits are written on leave anyway (on_exit saves), so only a
+  // failed save counts.
+  bool has_unsaved() const { return dirty_ && (!last_save_error_.empty() || scene_locked_); }
   // Field Guide: action registry + command palette (Ctrl+Shift+P), panel /
   // Settings / recent entries; --smoke-ux drives it.
   ux::EditorUx& field_guide() { return ux_; }
@@ -591,6 +597,13 @@ class Editor2DScreen final : public IScreen {
   Workspace2D workspace_;
   std::string scene_path_;
   bool dirty_ = false;
+  std::string last_save_error_;
+  // scene.json on disk is from a newer TombStone: shown an error and never
+  // saved over (cleared on the next on_enter).
+  bool scene_locked_ = false;
+  std::string scene_locked_why_;
+  // Telegraph line + readable error modal for a failed save.
+  void report_save_failure(const std::string& err);
   bool quit_requested_ = false;
   bool back_requested_ = false;
 
@@ -610,6 +623,7 @@ class Editor2DScreen final : public IScreen {
   bool show_mixer_ = false;
   bool focus_console_ = false;  // bring the Telegraph forward next frame
   bool dock_layout_initialized_ = false;
+  bool dock_reset_requested_ = false;  // Window > Layouts > Reset layout
 
   // Hierarchy rename state.
   bool renaming_ = false;
@@ -664,6 +678,18 @@ class Editor2DScreen final : public IScreen {
   void gizmo_frame(float* cx, float* cy, float* axes_deg, float* scale_deg) const;
   bool rmb_dragged_ = false;         // RMB press panned (no context menu)
   std::uint64_t context_id_ = 0;     // entity the context menu opened on
+  // Where the viewport's right-click landed (Create here / cursor here).
+  bool context_in_viewport_ = false;
+  float context_world_x_ = 0.0f, context_world_y_ = 0.0f;
+  // Right-click > Copy components / Inspector header > Copy values.
+  std::optional<Entity2D> comp_clip_;
+  std::string comp_clip_name_;  // "" = every component (Copy components)
+  void paste_components_2d(const std::string& only);
+  // Inspector component headers: right-click for reset / copy / paste
+  // values / remove / docs. The _header_ form draws a CollapsingHeader too.
+  void component_header_menu_2d(std::uint64_t id, const char* name);
+  bool component_header_2d(std::uint64_t id, const char* name);
+  std::function<void()> header_op_;  // run after the Inspector draws
   char hierarchy_filter_[96]{};
   std::uint64_t hier_drag_id_ = 0;
   // Hierarchy rows in drawn (tree) order this frame: Shift+click ranges.

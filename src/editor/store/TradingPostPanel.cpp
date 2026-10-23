@@ -9,6 +9,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <functional>
@@ -144,6 +145,33 @@ void draw_sources(TradingPostUi& ui) {
 }
 
 }  // namespace
+
+ux::FriendlyError friendly_trading_post_error(const std::string& raw) {
+  ux::FriendlyError f = ux::explain(raw, ux::ErrorKind::Unknown, "Trading Post");
+  std::string l = raw;
+  for (char& c : l) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  const bool net = l.find("download failed") != std::string::npos || l.find("could not reach") != std::string::npos ||
+                   l.find("could not resolve") != std::string::npos || l.find("could not connect") != std::string::npos ||
+                   l.find("timed out") != std::string::npos || l.find("http") != std::string::npos;
+  const bool sig = l.find("signature") != std::string::npos || l.find("sha256") != std::string::npos ||
+                   l.find("checksum") != std::string::npos;
+  if (sig) {
+    f.title = "A plugin didn't pass its safety check";
+    f.what = "The download didn't match what its source promised, so nothing was installed.";
+    f.why = "The file was damaged in transit, the source changed it, or its signing key isn't trusted here.";
+    f.fix = "Refresh and try again. If it keeps failing, check the source's signing key under Sources...";
+  } else if (net || f.kind == ux::ErrorKind::Unknown || f.kind == ux::ErrorKind::UpdateCheck) {
+    if (net) {
+      f.title = "Couldn't reach the Trading Post";
+      f.what = "A plugin source didn't answer, so the list may be out of date and nothing new was installed.";
+      f.why = "Usually no internet connection, a proxy or firewall, or a source address that has moved.";
+      f.fix = "Check your connection and press Refresh. Under Sources... you can remove or fix a source that's gone.";
+    }
+  }
+  f.fix_label = "Sources...";
+  f.fix_action.clear();  // the panel opens its own Sources list
+  return f;
+}
 
 std::string trading_post_entry_tip(const store::StoreEntry& e, bool hitched) {
   std::string t = e.name + "  v" + e.version;
@@ -291,7 +319,7 @@ TradingPostResult draw_trading_post_window(TradingPostUi& ui, const TradingPostT
     ImGui::SameLine();
     theme::StatusSuccess(ui.status.c_str());
   }
-  if (!ui.error.empty()) theme::StatusError(ui.error.c_str());
+  if (!ui.error.empty() && ux::ErrorBox("tp_error", friendly_trading_post_error(ui.error))) ui.show_sources = true;
 
   if (ui.show_sources) {
     ImGui::BeginChild("tpsources", ImVec2(0, 250), ImGuiChildFlags_Borders);
@@ -418,8 +446,20 @@ TradingPostResult draw_trading_post_window(TradingPostUi& ui, const TradingPostT
         ImGui::SameLine();
       }
       if (e && e->installed && !e->installed_dir.empty()) {
-        const bool clicked = theme::DangerButton("Uninstall", ImVec2(110, 0));
-        if (ImGui::IsItemHovered()) ux::SetTooltip("Remove it from the plugin cache. Claims that use it will warn until you reinstall.");
+        if (theme::DangerButton("Uninstall", ImVec2(110, 0))) ImGui::OpenPopup("Uninstall plugin?###ts_uninstall");
+        if (ImGui::IsItemHovered()) ux::SetTooltip("Remove it from the plugin cache (asks first). Claims that use it will warn until you reinstall.");
+        bool clicked = false;
+        if (ImGui::BeginPopupModal("Uninstall plugin?###ts_uninstall", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+          ImGui::Text("Uninstall %s?", e->name.empty() ? e->id.c_str() : e->name.c_str());
+          ImGui::TextDisabled("Claims that use it will warn until you install it again.");
+          if (theme::DangerButton("Uninstall")) {
+            clicked = true;
+            ImGui::CloseCurrentPopup();
+          }
+          ImGui::SameLine();
+          if (theme::SecondaryButton("Keep it") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
+          ImGui::EndPopup();
+        }
         if (clicked) {
           std::string err;
           const std::string id = e->id;

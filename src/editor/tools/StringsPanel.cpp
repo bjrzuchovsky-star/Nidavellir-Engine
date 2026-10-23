@@ -305,10 +305,20 @@ void StringsPanel::draw() {
       }
       ImGui::PopID();
     }
-    if (ImGui::Button("Delete key")) {
-      tables_.remove_key(selected_);
-      selected_.clear();
-      dirty_ = true;
+    if (ImGui::Button("Delete key")) ImGui::OpenPopup("Delete key?###ts_strings_delete");
+    if (ImGui::IsItemHovered()) ux::SetTooltip("Remove this key and its text in every language (asks first).");
+    if (ImGui::BeginPopupModal("Delete key?###ts_strings_delete", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+      ImGui::Text("Delete \"%s\" in every language?", selected_.c_str());
+      ImGui::TextDisabled("Scripts and UI that use it will show the key instead of text.");
+      if (theme::DangerButton("Delete")) {
+        tables_.remove_key(selected_);
+        selected_.clear();
+        dirty_ = true;
+        ImGui::CloseCurrentPopup();
+      }
+      ImGui::SameLine();
+      if (theme::SecondaryButton("Keep it") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
+      ImGui::EndPopup();
     }
     ImGui::SameLine();
     ImGui::TextDisabled("Lua: tr(\"%s\")   UI: \"text_key\": \"%s\"   C++: tr(\"%s\")   C#: Tr(\"%s\")",

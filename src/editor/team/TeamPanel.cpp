@@ -1,5 +1,7 @@
 #include "editor/team/TeamPanel.h"
 
+#include "editor/ux/Actions.h"
+
 #include "editor/editor3d/Editor3DScreen.h"
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/ui/Theme.h"
@@ -84,17 +86,17 @@ unsigned int colour_u32(const std::string& hex, int alpha) {
 void draw_menu(TeamSession& t, bool* show_panel) {
   default_user(t.ui);
   const bool active = t.active();
-  if (ImGui::MenuItem("Host from my editor...", nullptr, false, !active)) {
+  if (ux::MenuItem("Host from my editor...", nullptr, false, !active)) {
     t.ui.mode = 1;
     *show_panel = true;
   }
-  if (ImGui::MenuItem("Join a posse...", nullptr, false, !active)) {
+  if (ux::MenuItem("Join a posse...", nullptr, false, !active)) {
     t.ui.mode = 0;
     *show_panel = true;
   }
-  if (ImGui::MenuItem("Users", nullptr, false, true)) *show_panel = true;
+  if (ux::MenuItem("Users", nullptr, false, true)) *show_panel = true;
   ImGui::Separator();
-  if (ImGui::MenuItem("Leave", nullptr, false, active)) t.leave();
+  if (ux::MenuItem("Leave", nullptr, false, active)) t.leave();
 }
 
 void draw_panel(TeamSession& t, bool* open, const char* window_id) {
