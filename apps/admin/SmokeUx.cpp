@@ -659,6 +659,26 @@ int check_tour_and_layouts(Ctx& ctx, Screen& s, bool three_d, int* steps_out) {
   return 0;
 }
 
+// Points the Vault's default library at an empty scratch folder for the run,
+// so the check never reads (or depends on) the user's own Vault.
+struct ScopedVaultDir {
+  std::string old;
+  bool had = false;
+  explicit ScopedVaultDir(const fs::path& dir) {
+    if (const char* v = std::getenv("TS_VAULT_DIR")) { old = v; had = true; }
+    set(dir.string());
+  }
+  ~ScopedVaultDir() { set(had ? old : std::string()); }
+  static void set(const std::string& v) {
+#if defined(_WIN32)
+    _putenv_s("TS_VAULT_DIR", v.c_str());
+#else
+    if (v.empty()) unsetenv("TS_VAULT_DIR");
+    else setenv("TS_VAULT_DIR", v.c_str(), 1);
+#endif
+  }
+};
+
 int run_ux_smoke() {
   SettingsBackup keep;
   const fs::path root = fs::absolute("./TombStoneProjects/_ux_smoke");
@@ -666,6 +686,8 @@ int run_ux_smoke() {
   fs::remove_all(root, ec);
   fs::create_directories(root / "p2d", ec);
   fs::create_directories(root / "p3d", ec);
+  fs::create_directories(root / "vault", ec);
+  ScopedVaultDir vault_dir(root / "vault");
   ux::prefs() = ux::Prefs{};
   ux::prefs().walkthrough_2d_done = ux::prefs().walkthrough_3d_done = true;  // tours tested on their own
   Ctx ctx;

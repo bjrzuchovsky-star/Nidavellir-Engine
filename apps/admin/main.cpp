@@ -2,6 +2,7 @@
 #include "plugins/split/Split.h"
 #include "core/Engine.h"
 #include "profiler/Profiler.h"
+#include "editor/ux/FriendlyError.h"
 #include "editor/ux/Walkthrough.h"
 #include "editor/audio/EditorAudio.h"
 #include "editor/tools/AutoTilePanel.h"
@@ -1901,6 +1902,116 @@ int run_camera_shot(const std::string& which, const std::string& png) {
   return 0;
 }
 
+// ts_admin --ux-shot <palette|walkthrough|error> <out.png>: the 2D editor
+// (Dusk theme) on a throwaway claim with the command palette, the first-run
+// walkthrough or a readable error card up (docs/editor-guide.md).
+int run_ux_shot(const std::string& which, const std::string& png) {
+  namespace fs = std::filesystem;
+  if (which != "palette" && which != "walkthrough" && which != "error") {
+    std::cerr << "--ux-shot wants palette, walkthrough or error\n";
+    return 1;
+  }
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+  GLFWwindow* window = glfwCreateWindow(1600, 940, "TombStone Field Guide", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(window);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO& io = ImGui::GetIO();
+  io.IniFilename = nullptr;  // never touches imgui.ini
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  static gfx::GlTextureUploader gl_uploader;
+  gfx::set_texture_uploader(&gl_uploader);
+  Settings defaults;
+  apply_theme(defaults);
+
+  const fs::path dir = fs::temp_directory_path() / "ts_ux_shot";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  editor::ProjectInfo info;
+  info.id = "ux_shot";
+  info.name = "Dry Gulch";
+  info.path = dir.string();
+  auto ed = std::make_unique<editor::Editor2DScreen>(info);
+  ed->on_enter();
+  int fw = 0, fh = 0;
+  std::vector<unsigned char> px;
+  const int frames = 30;
+  for (int frame = 0; frame < frames; ++frame) {
+    glfwPollEvents();
+    glfwGetFramebufferSize(window, &fw, &fh);
+    if (frame == 6) {
+      auto& u = ed->field_guide();
+      if (which == "palette") {
+        u.palette().open();
+        u.palette().set_query("dup");
+      } else if (which == "walkthrough") {
+        u.walkthrough().start();
+        u.walkthrough().next();  // the Viewport stop: G / R / S
+      } else {
+        editor::ux::show_error(editor::ux::explain(
+            "could not load assets/models/wagon.glb: buffer 0 not found", editor::ux::ErrorKind::Unknown,
+            "Loading the Wagon prefab"));
+      }
+    }
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    ed->on_update(1.0f / 60.0f);
+    ImGui::Render();
+    glViewport(0, 0, fw, fh);
+    const ImVec4 clear = editor::theme::Charcoal();
+    glClearColor(clear.x, clear.y, clear.z, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    if (frame == frames - 1) {
+      px.assign(static_cast<std::size_t>(fw) * fh * 4, 0);
+      glPixelStorei(GL_PACK_ALIGNMENT, 1);
+      glReadBuffer(GL_BACK);
+      glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    }
+    glfwSwapBuffers(window);
+  }
+  editor::ux::clear_errors();
+  ed->field_guide().walkthrough().stop(false);
+  ed->on_exit();
+  ed.reset();
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  gfx::set_texture_uploader(nullptr);
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  fs::remove_all(dir, ec);
+  if (px.empty()) return 1;
+  std::vector<unsigned char> flipped(px.size());
+  for (int y = 0; y < fh; ++y) {
+    std::memcpy(&flipped[static_cast<std::size_t>(y) * fw * 4],
+                &px[static_cast<std::size_t>(fh - 1 - y) * fw * 4], static_cast<std::size_t>(fw) * 4);
+  }
+  for (std::size_t i = 3; i < flipped.size(); i += 4) flipped[i] = 255;
+  if (!write_png_rgba(png, fw, fh, flipped)) {
+    std::cerr << "cannot write " << png << '\n';
+    return 1;
+  }
+  std::cout << "Field Guide screenshot (" << which << "): " << png << " (" << fw << "x" << fh << ")\n";
+  return 0;
+}
+
 // ts_admin --scripts-shot <out.png>: the 2D editor (Dusk theme) on a
 // throwaway claim, a stagecoach carrying four scripts (Lua, visual graph,
 // C++, C#) in the Inspector with the Add Component menu open
@@ -2865,6 +2976,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--camera-shot") == 0 && i + 2 < argc) {
       return run_camera_shot(argv[i + 1], argv[i + 2]);
+    }
+    if (std::strcmp(argv[i], "--ux-shot") == 0 && i + 2 < argc) {
+      return run_ux_shot(argv[i + 1], argv[i + 2]);
     }
     if (std::strcmp(argv[i], "--gizmo-shot") == 0 && i + 2 < argc) {
       return run_gizmo_shot(argv[i + 1], argv[i + 2]);
