@@ -30,12 +30,12 @@ using json::Value;
 inline constexpr int kProtocolVersion = 1;
 
 struct Op {
-  enum class Kind : std::uint8_t { Put, Del, Order, Set, Asset };
+  enum class Kind : std::uint8_t { Put, Del, Order, Set, Asset, Terrain };
   Kind kind = Kind::Put;
   std::uint64_t id = 0;              // Put / Del
   Value v;                           // Put: entity object; Set: the block
   std::vector<std::uint64_t> ids;    // Order
-  std::string key;                   // Set: block name; Asset: project path
+  std::string key;                   // Set: block name; Asset / Terrain: project path
   std::string sha256;                // Asset
   std::uint64_t size = 0;            // Asset
 
@@ -44,6 +44,10 @@ struct Op {
   static Op order(std::vector<std::uint64_t> ids);
   static Op set(std::string key, Value v);
   static Op asset(std::string path, std::string sha256, std::uint64_t size);
+  // A terrain patch (TerrainPatch below): `path` is the .tsterrain data
+  // file, `entity` the terrain entity (its lock guards the edit). A null
+  // patch drops the terrain from the doc.
+  static Op terrain(std::string path, std::uint64_t entity, Value patch);
 
   // What this op touches, as a short key ("e:7", "p:lighting", "order",
   // "a:assets/crate.png"). Used for pending-vs-remote filtering.
@@ -65,10 +69,41 @@ struct AssetRef {
   bool operator==(const AssetRef& o) const = default;
 };
 
+// A terrain's sculpted data as the team layer carries it (terrain/Terrain.h
+// TerrainData without the caches): heights as float32 little-endian, the
+// 4-layer splat bytes, foliage as [[type, x, y, z, yaw, scale], ...].
+struct TerrainState {
+  int res = 0;
+  float size = 0.0f;
+  std::string heights;  // res * res * 4 bytes
+  std::string splat;    // res * res * 4 bytes
+  Value foliage = Value::array();
+  bool valid() const {
+    const std::size_t n = static_cast<std::size_t>(res) * static_cast<std::size_t>(res) * 4;
+    return res >= 2 && heights.size() == n && splat.size() == n;
+  }
+  std::uint64_t hash() const;  // FNV-1a of everything (canonical text)
+};
+
+// Terrain patch ops: a grid rect (inclusive) of heights and / or splat,
+// and / or the whole foliage list. Full = the whole grid + foliage.
+struct TerrainRect {
+  int i0 = 0, j0 = 0, i1 = -1, j1 = -1;
+};
+Value terrain_patch(const TerrainState& t, const TerrainRect& r, bool heights, bool splat, bool foliage);
+Value terrain_full(const TerrainState& t);
+bool apply_terrain_patch(TerrainState& t, const Value& patch);
+// The rect a patch covers (for the editor applying it); false if none.
+bool terrain_patch_rect(const Value& patch, TerrainRect* r, bool* heights, bool* splat, bool* foliage);
+
+std::string base64_encode(const std::string& bytes);
+bool base64_decode(const std::string& text, std::string* out);
+
 struct SceneDoc {
   std::vector<std::pair<std::uint64_t, Value>> entities;  // in scene order
   std::map<std::string, Value> props;
   std::map<std::string, AssetRef> assets;
+  std::map<std::string, TerrainState> terrains;  // .tsterrain path -> data
 
   int index_of(std::uint64_t id) const;  // -1 when absent
   const Value* entity(std::uint64_t id) const;
@@ -98,7 +133,8 @@ Value op_to_json(const Op& op);
 bool op_from_json(const Value& v, Op* out);
 Value batch_to_json(const Batch& b);
 bool batch_from_json(const Value& v, Batch* out);
-Value doc_to_json(const SceneDoc& d);
+// hashes_only: terrains as a hash (canonical text) instead of their data.
+Value doc_to_json(const SceneDoc& d, bool hashes_only = false);
 bool doc_from_json(const Value& v, SceneDoc* out);
 Value docs_to_json(const Docs& d);
 bool docs_from_json(const Value& v, Docs* out);

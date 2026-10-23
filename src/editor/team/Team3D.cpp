@@ -3,7 +3,9 @@
 #include "editor/team/TeamApply.h"
 #include "editor/team/TeamSession.h"
 #include "render3d/Scene3D.h"
+#include "terrain/TerrainView.h"
 
+#include <cstring>
 #include <set>
 
 namespace ts {
@@ -54,6 +56,87 @@ bool props_into(const std::map<std::string, json::Value>& props, scene3d::Scene3
   return true;
 }
 
+// ---- Terrains (docs/team-claims.md, 3.6) ----
+
+team::TerrainState terrain_state(const terrain::TerrainData& d) {
+  team::TerrainState t;
+  t.res = d.res;
+  t.size = d.size;
+  t.heights.resize(d.heights.size() * 4);
+  if (!d.heights.empty()) std::memcpy(t.heights.data(), d.heights.data(), t.heights.size());
+  t.splat.assign(d.splat.begin(), d.splat.end());
+  t.foliage = json::Value::array();
+  for (const terrain::FoliageInstance& f : d.foliage) {
+    json::Value a = json::Value::array();
+    a.push(json::Value::number(f.type));
+    a.push(json::Value::number(f.x));
+    a.push(json::Value::number(f.y));
+    a.push(json::Value::number(f.z));
+    a.push(json::Value::number(f.yaw));
+    a.push(json::Value::number(f.scale));
+    t.foliage.push(std::move(a));
+  }
+  return t;
+}
+
+// Write a patch into the editor's terrain data (and tell the caches).
+bool write_terrain_patch(terrain::TerrainData& d, const json::Value& patch) {
+  team::TerrainState t = terrain_state(d);
+  const int old_res = t.res;
+  if (!team::apply_terrain_patch(t, patch) || !t.valid()) return false;
+  team::TerrainRect r;
+  bool h = false, sp = false, f = false;
+  team::terrain_patch_rect(patch, &r, &h, &sp, &f);
+  d.res = t.res;
+  d.size = t.size;
+  d.heights.resize(static_cast<std::size_t>(t.res) * t.res);
+  std::memcpy(d.heights.data(), t.heights.data(), t.heights.size());
+  d.splat.assign(t.splat.begin(), t.splat.end());
+  if (f) {
+    d.foliage.clear();
+    for (const json::Value& a : t.foliage.items()) {
+      if (a.size() < 6) continue;
+      terrain::FoliageInstance fi;
+      fi.type = static_cast<std::uint16_t>(a[std::size_t{0}].as_number(0));
+      fi.x = static_cast<float>(a[std::size_t{1}].as_number(0));
+      fi.y = static_cast<float>(a[std::size_t{2}].as_number(0));
+      fi.z = static_cast<float>(a[std::size_t{3}].as_number(0));
+      fi.yaw = static_cast<float>(a[std::size_t{4}].as_number(0));
+      fi.scale = static_cast<float>(a[std::size_t{5}].as_number(1));
+      d.foliage.push_back(fi);
+    }
+  }
+  if (old_res != t.res) {
+    d.edits.clear();
+    terrain::note_edit(d, terrain::full_rect(d), true, true, true);
+  } else {
+    terrain::Rect tr{r.i0, r.j0, r.i1, r.j1};
+    if (!(h || sp)) tr = terrain::Rect{};
+    terrain::note_edit(d, tr, h, sp, f);
+  }
+  return true;
+}
+
+// Bounding rect of the cells that differ between two same-sized grids
+// (4 bytes per cell).
+bool changed_rect(const std::string& a, const std::string& b, int res, team::TerrainRect* r) {
+  bool any = false;
+  for (int j = 0; j < res; ++j) {
+    const std::size_t row = static_cast<std::size_t>(j) * res * 4;
+    if (std::memcmp(a.data() + row, b.data() + row, static_cast<std::size_t>(res) * 4) == 0) continue;
+    for (int i = 0; i < res; ++i) {
+      if (std::memcmp(a.data() + row + i * 4, b.data() + row + i * 4, 4) == 0) continue;
+      if (!any) *r = team::TerrainRect{i, j, i, j};
+      any = true;
+      r->i0 = std::min(r->i0, i);
+      r->i1 = std::max(r->i1, i);
+      r->j0 = std::min(r->j0, j);
+      r->j1 = std::max(r->j1, j);
+    }
+  }
+  return any;
+}
+
 }  // namespace
 
 class Team3DBinding final : public TeamBinding {
@@ -71,6 +154,11 @@ class Team3DBinding final : public TeamBinding {
     team::SceneDoc d;
     for (const scene3d::Entity3D& e : s_.scene_.entities) d.entities.emplace_back(e.id, entity_json(e));
     d.props = props_of(s_.scene_);
+    for (const scene3d::Entity3D& e : s_.scene_.entities) {
+      if (!e.terrain || e.terrain->data.empty() || d.terrains.count(e.terrain->data)) continue;
+      std::shared_ptr<terrain::TerrainData> td = terrain::acquire(s_.project_.path, *e.terrain);
+      if (td && td->valid()) d.terrains[e.terrain->data] = terrain_state(*td);
+    }
     return d;
   }
 
@@ -85,6 +173,9 @@ class Team3DBinding final : public TeamBinding {
       }
     }
     props_into(doc.props, &sc);
+    tshadow_.clear();
+    trev_.clear();
+    for (const auto& [path, t] : doc.terrains) write_terrain(path, 0, team::terrain_full(t));
     sc.selection.clear();
     sc.id_lo = lo_;
     sc.id_hi = hi_;
@@ -114,6 +205,7 @@ class Team3DBinding final : public TeamBinding {
         }
       }
     }
+    take_terrain_ops(ops);
     if (!ops.empty()) {
       reshadow();
       if (label) *label = s_.undo_label();
@@ -133,6 +225,15 @@ class Team3DBinding final : public TeamBinding {
     };
     for (const team::Op& op : ops) {
       if (op.kind == team::Op::Kind::Asset) continue;  // the Vault fetch (later)
+      if (op.kind == team::Op::Kind::Terrain) {
+        if (op.v.is_null()) {
+          tshadow_.erase(op.key);
+          trev_.erase(op.key);
+        } else {
+          write_terrain(op.key, op.id, op.v);
+        }
+        continue;
+      }
       if (op.kind == team::Op::Kind::Set) {
         std::map<std::string, json::Value> props = props_of(sc);
         if (op.v.is_null()) props.erase(op.key);
@@ -178,6 +279,78 @@ class Team3DBinding final : public TeamBinding {
   }
 
  private:
+  const scene3d::Entity3D* terrain_owner(const std::string& path, std::uint64_t id) const {
+    if (const scene3d::Entity3D* e = s_.scene_.find(id); e && e->terrain && e->terrain->data == path) return e;
+    for (const scene3d::Entity3D& e : s_.scene_.entities) {
+      if (e.terrain && e.terrain->data == path) return &e;
+    }
+    return nullptr;
+  }
+
+  // A remote (or welcome) terrain patch into the shared data.
+  void write_terrain(const std::string& path, std::uint64_t id, const json::Value& patch) {
+    const scene3d::Entity3D* e = terrain_owner(path, id);
+    if (!e) {
+      // No entity for it (yet): keep it so the shadow knows the doc has it.
+      team::TerrainState t = tshadow_.count(path) ? tshadow_[path] : team::TerrainState{};
+      if (team::apply_terrain_patch(t, patch)) tshadow_[path] = std::move(t);
+      return;
+    }
+    std::shared_ptr<terrain::TerrainData> d = terrain::acquire(s_.project_.path, *e->terrain);
+    if (!d) return;
+    if (!d->valid()) terrain::reset(*d, std::max(e->terrain->resolution, 2), e->terrain->size);
+    if (!write_terrain_patch(*d, patch)) return;
+    tshadow_[path] = terrain_state(*d);
+    trev_[path] = d->revision;
+  }
+
+  // Local terrain edits since the last send: the changed rect of heights
+  // and splat, plus the foliage list when it changed.
+  void take_terrain_ops(std::vector<team::Op>& ops) {
+    std::set<std::string> seen;
+    for (const scene3d::Entity3D& e : s_.scene_.entities) {
+      if (!e.terrain || e.terrain->data.empty() || !seen.insert(e.terrain->data).second) continue;
+      const std::string& path = e.terrain->data;
+      std::shared_ptr<terrain::TerrainData> d = terrain::find_loaded(s_.project_.path, *e.terrain);
+      if (!d || !d->valid()) continue;
+      auto sh = tshadow_.find(path);
+      auto rv = trev_.find(path);
+      if (sh != tshadow_.end() && rv != trev_.end() && rv->second == d->revision) continue;
+      team::TerrainState now = terrain_state(*d);
+      trev_[path] = d->revision;
+      if (sh == tshadow_.end() || sh->second.res != now.res || sh->second.size != now.size ||
+          !sh->second.valid()) {
+        ops.push_back(team::Op::terrain(path, e.id, team::terrain_full(now)));
+        tshadow_[path] = std::move(now);
+        continue;
+      }
+      team::TerrainRect rh, rs;
+      const bool h = changed_rect(sh->second.heights, now.heights, now.res, &rh);
+      const bool sp = changed_rect(sh->second.splat, now.splat, now.res, &rs);
+      const bool f = !team::same_json(sh->second.foliage, now.foliage);
+      if (!h && !sp && !f) continue;
+      team::TerrainRect r = h ? rh : rs;
+      if (h && sp) {
+        r.i0 = std::min(rh.i0, rs.i0);
+        r.j0 = std::min(rh.j0, rs.j0);
+        r.i1 = std::max(rh.i1, rs.i1);
+        r.j1 = std::max(rh.j1, rs.j1);
+      }
+      ops.push_back(team::Op::terrain(path, e.id, team::terrain_patch(now, r, h, sp, f)));
+      sh->second = std::move(now);
+    }
+    // Terrains no entity uses any more leave the doc.
+    for (auto it = tshadow_.begin(); it != tshadow_.end();) {
+      if (!seen.count(it->first) && !terrain_owner(it->first, 0)) {
+        ops.push_back(team::Op::terrain(it->first, 0, json::Value::null()));
+        trev_.erase(it->first);
+        it = tshadow_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
   void reshadow() {
     shadow_ = s_.scene_.entities;
     shadow_env_ = s_.scene_.environment;
@@ -187,6 +360,8 @@ class Team3DBinding final : public TeamBinding {
   Editor3DScreen& s_;
   std::vector<scene3d::Entity3D> shadow_;
   std::set<std::uint64_t> previewed_;  // under someone else's drag
+  std::map<std::string, team::TerrainState> tshadow_;  // terrain data as last sent / applied
+  std::map<std::string, std::uint64_t> trev_;          // its TerrainData revision then
   render3d::Environment shadow_env_;
   scene3d::PhysicsSettings3D shadow_physics_;
   std::uint64_t lo_ = 0, hi_ = 0;

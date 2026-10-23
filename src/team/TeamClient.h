@@ -99,6 +99,7 @@ class TeamClient {
   // rolled back), in order.
   std::vector<std::pair<std::string, Op>> take_apply();
   bool idle() const { return pending_.empty(); }
+  std::uint64_t bytes_sent() const { return bytes_sent_; }  // everything we sent (encoded)
   std::size_t pending() const { return pending_.size(); }
 
   // Locks: the full set this editor wants (selection / drag / Inspector).
@@ -150,6 +151,7 @@ class TeamClient {
   std::vector<std::pair<std::string, Op>> apply_;
   std::vector<std::string> want_;
   bool want_sent_ = false;
+  std::uint64_t bytes_sent_ = 0;
   std::map<std::string, std::uint32_t> locks_;
   std::map<std::uint32_t, RemoteMember> members_;
   std::vector<std::string> notes_;

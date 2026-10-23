@@ -79,7 +79,167 @@ std::vector<std::uint64_t> ids_from(const Value& v) {
   return out;
 }
 
+const char* kB64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+Value num(double d) { return Value::number(d); }
+
 }  // namespace
+
+std::string base64_encode(const std::string& in) {
+  std::string out;
+  out.reserve((in.size() + 2) / 3 * 4);
+  std::size_t i = 0;
+  const auto* b = reinterpret_cast<const unsigned char*>(in.data());
+  for (; i + 2 < in.size(); i += 3) {
+    const std::uint32_t v = (b[i] << 16) | (b[i + 1] << 8) | b[i + 2];
+    out.push_back(kB64[(v >> 18) & 63]);
+    out.push_back(kB64[(v >> 12) & 63]);
+    out.push_back(kB64[(v >> 6) & 63]);
+    out.push_back(kB64[v & 63]);
+  }
+  if (i < in.size()) {
+    std::uint32_t v = b[i] << 16;
+    if (i + 1 < in.size()) v |= b[i + 1] << 8;
+    out.push_back(kB64[(v >> 18) & 63]);
+    out.push_back(kB64[(v >> 12) & 63]);
+    out.push_back(i + 1 < in.size() ? kB64[(v >> 6) & 63] : '=');
+    out.push_back('=');
+  }
+  return out;
+}
+
+bool base64_decode(const std::string& text, std::string* out) {
+  static int rev[256];
+  static bool init = false;
+  if (!init) {
+    for (int& r : rev) r = -1;
+    for (int k = 0; k < 64; ++k) rev[static_cast<unsigned char>(kB64[k])] = k;
+    init = true;
+  }
+  std::string o;
+  o.reserve(text.size() / 4 * 3);
+  std::uint32_t acc = 0;
+  int bits = 0;
+  for (char c : text) {
+    if (c == '=') break;
+    const int v = rev[static_cast<unsigned char>(c)];
+    if (v < 0) return false;
+    acc = (acc << 6) | static_cast<std::uint32_t>(v);
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      o.push_back(static_cast<char>((acc >> bits) & 0xFF));
+    }
+  }
+  *out = std::move(o);
+  return true;
+}
+
+std::uint64_t TerrainState::hash() const {
+  std::uint64_t h = 1469598103934665603ull;
+  auto mix = [&](const std::string& s) {
+    for (unsigned char c : s) h = (h ^ c) * 1099511628211ull;
+    h = (h ^ 0xFF) * 1099511628211ull;
+  };
+  mix(std::to_string(res));
+  mix(json_flat::format_number(size));
+  mix(heights);
+  mix(splat);
+  mix(write_compact(foliage));
+  return h;
+}
+
+namespace {
+
+// Copy a grid rect (cell = `stride` bytes) between a full grid and a packed rect.
+std::string pack_rect(const std::string& grid, int res, const TerrainRect& r, int stride) {
+  std::string out;
+  const int w = r.i1 - r.i0 + 1;
+  out.reserve(static_cast<std::size_t>(w) * (r.j1 - r.j0 + 1) * stride);
+  for (int j = r.j0; j <= r.j1; ++j) {
+    out.append(grid, (static_cast<std::size_t>(j) * res + r.i0) * stride, static_cast<std::size_t>(w) * stride);
+  }
+  return out;
+}
+
+bool unpack_rect(std::string& grid, int res, const TerrainRect& r, int stride, const std::string& packed) {
+  const int w = r.i1 - r.i0 + 1;
+  const std::size_t row = static_cast<std::size_t>(w) * stride;
+  if (packed.size() != row * (r.j1 - r.j0 + 1)) return false;
+  for (int j = r.j0; j <= r.j1; ++j) {
+    grid.replace((static_cast<std::size_t>(j) * res + r.i0) * stride, row, packed, (j - r.j0) * row, row);
+  }
+  return true;
+}
+
+}  // namespace
+
+Value terrain_patch(const TerrainState& t, const TerrainRect& r, bool heights, bool splat, bool foliage) {
+  Value o = Value::object();
+  o.set("res", num(t.res));
+  o.set("size", num(t.size));
+  TerrainRect c = r;
+  c.i0 = std::max(c.i0, 0);
+  c.j0 = std::max(c.j0, 0);
+  c.i1 = std::min(c.i1, t.res - 1);
+  c.j1 = std::min(c.j1, t.res - 1);
+  if ((heights || splat) && c.i0 <= c.i1 && c.j0 <= c.j1 && t.valid()) {
+    Value rect = Value::array();
+    rect.push(num(c.i0));
+    rect.push(num(c.j0));
+    rect.push(num(c.i1));
+    rect.push(num(c.j1));
+    o.set("r", std::move(rect));
+    if (heights) o.set("h", Value::string(base64_encode(pack_rect(t.heights, t.res, c, 4))));
+    if (splat) o.set("s", Value::string(base64_encode(pack_rect(t.splat, t.res, c, 4))));
+  }
+  if (foliage) o.set("f", t.foliage);
+  return o;
+}
+
+Value terrain_full(const TerrainState& t) {
+  return terrain_patch(t, TerrainRect{0, 0, t.res - 1, t.res - 1}, true, true, true);
+}
+
+bool terrain_patch_rect(const Value& p, TerrainRect* r, bool* heights, bool* splat, bool* foliage) {
+  *heights = p.has("h");
+  *splat = p.has("s");
+  *foliage = p.has("f");
+  const Value& rect = p["r"];
+  if (rect.size() == 4) {
+    r->i0 = static_cast<int>(rect[std::size_t{0}].as_number(0));
+    r->j0 = static_cast<int>(rect[std::size_t{1}].as_number(0));
+    r->i1 = static_cast<int>(rect[std::size_t{2}].as_number(-1));
+    r->j1 = static_cast<int>(rect[std::size_t{3}].as_number(-1));
+  } else {
+    *heights = *splat = false;
+  }
+  return *heights || *splat || *foliage;
+}
+
+bool apply_terrain_patch(TerrainState& t, const Value& p) {
+  const int res = static_cast<int>(p.num("res", 0));
+  const float size = static_cast<float>(p.num("size", 0));
+  if (res < 2 || res > 4097) return false;
+  if (res != t.res) {
+    t.res = res;
+    const std::size_t n = static_cast<std::size_t>(res) * res * 4;
+    t.heights.assign(n, '\0');
+    t.splat.assign(n, '\0');
+  }
+  t.size = size;
+  TerrainRect r;
+  bool h = false, s = false, f = false;
+  terrain_patch_rect(p, &r, &h, &s, &f);
+  if (h || s) {
+    if (r.i0 < 0 || r.j0 < 0 || r.i1 >= res || r.j1 >= res || r.i0 > r.i1 || r.j0 > r.j1) return false;
+    std::string bytes;
+    if (h && (!base64_decode(p.str("h"), &bytes) || !unpack_rect(t.heights, res, r, 4, bytes))) return false;
+    if (s && (!base64_decode(p.str("s"), &bytes) || !unpack_rect(t.splat, res, r, 4, bytes))) return false;
+  }
+  if (f) t.foliage = p["f"];
+  return true;
+}
 
 std::string write_compact(const Value& v) {
   std::string o;
@@ -88,6 +248,15 @@ std::string write_compact(const Value& v) {
 }
 
 bool same_json(const Value& a, const Value& b) { return write_compact(a) == write_compact(b); }
+
+Op Op::terrain(std::string path, std::uint64_t entity, Value patch) {
+  Op op;
+  op.kind = Kind::Terrain;
+  op.key = std::move(path);
+  op.id = entity;
+  op.v = std::move(patch);
+  return op;
+}
 
 Op Op::put(std::uint64_t id, Value e) {
   Op op;
@@ -131,6 +300,7 @@ std::string Op::touch_key() const {
     case Kind::Order: return "order";
     case Kind::Set: return "p:" + key;
     case Kind::Asset: return "a:" + key;
+    case Kind::Terrain: return "t:" + key;
   }
   return {};
 }
@@ -202,10 +372,18 @@ void SceneDoc::apply(const Op& op) {
       if (op.sha256.empty()) assets.erase(op.key);
       else assets[op.key] = AssetRef{op.sha256, op.size};
       break;
+    case Op::Kind::Terrain:
+      if (op.v.is_null()) {
+        terrains.erase(op.key);
+      } else {
+        TerrainState t = terrains.count(op.key) ? terrains[op.key] : TerrainState{};
+        if (apply_terrain_patch(t, op.v)) terrains[op.key] = std::move(t);
+      }
+      break;
   }
 }
 
-std::string SceneDoc::canonical() const { return write_compact(doc_to_json(*this)); }
+std::string SceneDoc::canonical() const { return write_compact(doc_to_json(*this, true)); }
 
 std::vector<Op> diff(const SceneDoc& from, const SceneDoc& to) {
   std::vector<Op> ops;
@@ -237,6 +415,22 @@ std::vector<Op> diff(const SceneDoc& from, const SceneDoc& to) {
     auto it = from.assets.find(k);
     if (it == from.assets.end() || !(it->second == a)) ops.push_back(Op::asset(k, a.sha256, a.size));
   }
+  // Terrains: whole, keyed to the entity that owns the data file.
+  auto owner = [&](const std::string& path) -> std::uint64_t {
+    for (const auto& [id, e] : to.entities) {
+      if (e["terrain"].str("data") == path) return id;
+    }
+    return 0;
+  };
+  for (const auto& [k, t] : from.terrains) {
+    if (!to.terrains.count(k)) ops.push_back(Op::terrain(k, 0, Value::null()));
+  }
+  for (const auto& [k, t] : to.terrains) {
+    auto it = from.terrains.find(k);
+    if (it == from.terrains.end() || it->second.hash() != t.hash()) {
+      ops.push_back(Op::terrain(k, owner(k), terrain_full(t)));
+    }
+  }
   return ops;
 }
 
@@ -267,6 +461,12 @@ Value op_to_json(const Op& op) {
       o.set("sha256", Value::string(op.sha256));
       o.set("size", Value::number(static_cast<double>(op.size)));
       break;
+    case Op::Kind::Terrain:
+      o.set("k", Value::string("terrain"));
+      o.set("path", Value::string(op.key));
+      if (op.id) o.set("id", id_value(op.id));
+      o.set("v", op.v);
+      break;
   }
   return o;
 }
@@ -293,6 +493,10 @@ bool op_from_json(const Value& v, Op* out) {
   if (k == "asset") {
     *out = Op::asset(v.str("path"), v.str("sha256"),
                      static_cast<std::uint64_t>(v.num("size", 0.0)));
+    return !out->key.empty();
+  }
+  if (k == "terrain") {
+    *out = Op::terrain(v.str("path"), id_of(v["id"]), v["v"]);
     return !out->key.empty();
   }
   return false;
@@ -328,7 +532,7 @@ bool batch_from_json(const Value& v, Batch* out) {
   return true;
 }
 
-Value doc_to_json(const SceneDoc& d) {
+Value doc_to_json(const SceneDoc& d, bool hashes_only) {
   Value o = Value::object();
   Value ents = Value::array();
   for (const auto& [id, v] : d.entities) {
@@ -349,6 +553,19 @@ Value doc_to_json(const SceneDoc& d) {
     assets.set(k, std::move(e));
   }
   o.set("assets", std::move(assets));
+  if (!d.terrains.empty()) {
+    Value ts = Value::object();
+    for (const auto& [k, t] : d.terrains) {
+      if (hashes_only) {
+        char buf[24];
+        std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(t.hash()));
+        ts.set(k, Value::string(buf));
+      } else {
+        ts.set(k, terrain_full(t));
+      }
+    }
+    o.set("terrains", std::move(ts));
+  }
   return o;
 }
 
@@ -363,6 +580,11 @@ bool doc_from_json(const Value& v, SceneDoc* out) {
   for (const auto& [k, p] : v["props"].members()) d.props[k] = p;
   for (const auto& [k, a] : v["assets"].members()) {
     d.assets[k] = AssetRef{a.str("sha256"), static_cast<std::uint64_t>(a.num("size", 0.0))};
+  }
+  for (const auto& [k, p] : v["terrains"].members()) {
+    TerrainState t;
+    if (!apply_terrain_patch(t, p)) return false;
+    d.terrains[k] = std::move(t);
   }
   *out = std::move(d);
   return true;

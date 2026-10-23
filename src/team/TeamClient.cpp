@@ -56,8 +56,9 @@ bool TeamClient::join(const JoinOptions& opt, std::string* error) {
 
 void TeamClient::send(const Value& msg, bool reliable) {
   if (!transport_ || server_ == net::kNoPeer) return;
-  transport_->send(server_, reliable ? net::Delivery::Reliable : net::Delivery::Unreliable,
-                   encode(msg));
+  auto bytes = encode(msg);
+  bytes_sent_ += bytes.size();
+  transport_->send(server_, reliable ? net::Delivery::Reliable : net::Delivery::Unreliable, std::move(bytes));
 }
 
 void TeamClient::leave() {
@@ -360,6 +361,13 @@ void TeamClient::on_reject(std::uint64_t cid, const std::string& reason) {
         apply_.emplace_back(gone.scene, ait == view.assets.end()
                                             ? Op::asset(op.key, "", 0)
                                             : Op::asset(op.key, ait->second.sha256, ait->second.size));
+        break;
+      }
+      case Op::Kind::Terrain: {
+        auto tit = view.terrains.find(op.key);
+        apply_.emplace_back(gone.scene, Op::terrain(op.key, op.id,
+                                                    tit == view.terrains.end() ? Value::null()
+                                                                               : terrain_full(tit->second)));
         break;
       }
     }

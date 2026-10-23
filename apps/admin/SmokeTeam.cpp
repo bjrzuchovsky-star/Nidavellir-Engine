@@ -7,6 +7,7 @@
 #include "net/Net.h"
 #include "net/SimTransport.h"
 #include "render3d/Scene3D.h"
+#include "terrain/TerrainView.h"
 #include "scene/SceneJson.h"
 #include "team/TeamClient.h"
 #include "team/TeamServer.h"
@@ -678,6 +679,64 @@ int check_3d() {
   }
   if (a.team().server()->sessions().at(0).locks.count(tc::entity_lock("scene.json", cb))) {
     return fail("server dropped the deleted entity's lock");
+  }
+  // Terrain: sculpt / paint strokes travel as patches of the touched rect.
+  {
+    namespace terr = ts::tombstone::terrain;
+    auto data_of = [](ed::Editor3DScreen& s, std::uint64_t id) -> std::shared_ptr<terr::TerrainData> {
+      const auto* e = s.find(id);
+      if (!e || !e->terrain) return nullptr;
+      return terr::acquire(s.project().path, *e->terrain);
+    };
+    auto same_ground = [&](std::uint64_t id) {
+      auto da = data_of(a, id), db = data_of(b, id);
+      return da && db && da->heights == db->heights && da->splat == db->splat && da->foliage == db->foliage;
+    };
+    auto stroke = [&](ed::Editor3DScreen& s, std::uint64_t id, float x, float z) {
+      if (!s.terrain_stroke_begin(id)) return false;
+      for (int k = 0; k < 8; ++k) s.terrain_stroke({x + 0.2f * k, 0.0f, z}, 0.05f);
+      s.terrain_stroke_end();
+      return true;
+    };
+    const std::uint64_t tid = a.create_terrain(65, 64.0f, true, "meadow");
+    if (!tid) return fail("3D terrain created");
+    if (!pump(ticks, [&] { return converged() && b.find(tid) && same_ground(tid); }, 8)) {
+      return fail("new terrain (hills) reached B");
+    }
+    const float h0 = data_of(b, tid)->h(32 + 3, 32 - 2);
+    a.terrain_tool().mode = 0;
+    a.terrain_tool().op = terr::BrushOp::Raise;
+    a.terrain_tool().radius = 4.0f;
+    a.terrain_tool().strength = 8.0f;
+    const std::uint64_t sent0 = a.team().client().bytes_sent();
+    if (!stroke(a, tid, 3.0f, -2.0f)) return fail("A sculpt stroke");
+    if (!pump(ticks, [&] { return converged() && same_ground(tid); }, 8)) return fail("A's sculpt reached B");
+    if (!(data_of(b, tid)->h(32 + 3, 32 - 2) > h0)) return fail("B's ground rose");
+    const std::uint64_t sculpt_bytes = a.team().client().bytes_sent() - sent0;
+    a.terrain_tool().mode = 1;
+    a.terrain_tool().layer = 2;
+    if (!stroke(a, tid, -10.0f, 10.0f)) return fail("A paint stroke");
+    if (!pump(ticks, [&] { return converged() && same_ground(tid); }, 8)) return fail("A's paint reached B");
+    // A holds the terrain (create selected it): B's stroke is turned back.
+    b.terrain_tool().mode = 0;
+    b.terrain_tool().op = terr::BrushOp::Lower;
+    if (!stroke(b, tid, -12.0f, -12.0f)) return fail("B sculpt stroke");
+    if (same_ground(tid)) return fail("B's stroke applied optimistically");
+    if (!pump(ticks, [&] { return converged() && same_ground(tid); }, 8)) {
+      return fail("B's stroke on A's terrain rolled back");
+    }
+    // Once A lets go B may sculpt, and A sees it.
+    a.clear_selection();
+    b.select(tid);
+    if (!pump(ticks, [&] { return a.team().lock_holder(tid) == b.team().client().me(); }, 5)) {
+      return fail("B holds the terrain");
+    }
+    const float ha = data_of(a, tid)->h(32 - 12, 32 - 12);
+    if (!stroke(b, tid, -12.0f, -12.0f)) return fail("B sculpt stroke 2");
+    if (!pump(ticks, [&] { return converged() && same_ground(tid); }, 8)) return fail("B's sculpt reached A");
+    if (!(data_of(a, tid)->h(32 - 12, 32 - 12) < ha)) return fail("A's ground sank");
+    b.clear_selection();
+    std::cout << "[smoke] team terrain: OK (sculpt patch " << sculpt_bytes << " bytes)\n";
   }
   // Host leaves: the session ends for B.
   a.team().leave();

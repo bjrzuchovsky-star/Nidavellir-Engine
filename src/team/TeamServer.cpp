@@ -318,6 +318,7 @@ void TeamServer::on_op(Member& m, const Value& msg) {
   for (const Op& op : b.ops) {
     std::string key;
     if (op.kind == Op::Kind::Put || op.kind == Op::Kind::Del) key = entity_lock(b.scene, op.id);
+    else if (op.kind == Op::Kind::Terrain && op.id) key = entity_lock(b.scene, op.id);
     else if (op.kind == Op::Kind::Asset) key = asset_lock(op.key);
     if (key.empty()) continue;
     auto it = s.locks.find(key);
@@ -330,7 +331,7 @@ void TeamServer::on_op(Member& m, const Value& msg) {
     }
   }
   for (const Op& op : b.ops) {
-    if (op.kind != Op::Kind::Put && op.kind != Op::Kind::Del) continue;
+    if (op.kind != Op::Kind::Put && op.kind != Op::Kind::Del && op.kind != Op::Kind::Terrain) continue;
     const std::string key = entity_lock(b.scene, op.id);
     auto it = s.locks.find(key);
     if (it != s.locks.end() && it->second == m.id) touch_lock(s, key);
