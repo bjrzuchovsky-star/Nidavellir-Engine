@@ -34,6 +34,9 @@ struct ServerOptions {
   std::function<bool(const std::string& key, std::string* name, bool* can_write)> check_key;
   std::string engine = "0.0.0";    // this build's version (informational)
   double lock_timeout_s = 15.0;    // silent members lose their locks
+  // A lock nobody has used (edited, dragged) for this long may be taken
+  // over by another member ("take"); 0 = never.
+  double lock_idle_s = 15.0;
   double member_timeout_s = 30.0;  // and are dropped after this
   std::size_t compact_every = 256; // commits kept after the snapshot
   std::uint64_t id_block = 1ull << 20;
@@ -111,6 +114,7 @@ class TeamServer {
     std::vector<Batch> tail;  // commits after snap_seq
     std::uint64_t seq = 0;
     std::map<std::string, std::uint32_t> locks;  // key -> member id
+    std::map<std::string, double> lock_used;     // key -> last grant / edit / drag
     std::uint64_t next_grant = 0;
     int colour_next = 0;
   };
@@ -124,7 +128,10 @@ class TeamServer {
   void on_hello(Member& m, const Value& msg);
   void on_op(Member& m, const Value& msg);
   void on_lock(Member& m, const Value& msg);
+  void on_take(Member& m, const Value& msg);
+  void touch_lock(Session& s, const std::string& key) { s.lock_used[key] = now(); }
   void on_presence(Member& m, const Value& msg);
+  void on_preview(Member& m, const Value& msg, bool end);
   void on_gone(net::PeerId peer);
   void release_locks(Session& s, std::uint32_t member, bool notify);
   void send_locks(const Session& s);

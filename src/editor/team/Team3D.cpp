@@ -4,6 +4,8 @@
 #include "editor/team/TeamSession.h"
 #include "render3d/Scene3D.h"
 
+#include <set>
+
 namespace ts {
 namespace tombstone {
 namespace editor {
@@ -97,6 +99,7 @@ class Team3DBinding final : public TeamBinding {
     sc.id_lo = lo_;  // undo can bring back a scene from before the grant
     sc.id_hi = hi_;
     std::vector<team::Op> ops = team_apply::diff_entities(shadow_, sc.entities, entity_json);
+    team_apply::drop_previewed(ops, previewed_);
     if (!(sc.environment == shadow_env_) || !(sc.physics == shadow_physics_)) {
       scene3d::Scene3D old;
       old.environment = shadow_env_;
@@ -143,6 +146,7 @@ class Team3DBinding final : public TeamBinding {
         }
         continue;
       }
+      if (op.kind == team::Op::Kind::Put || op.kind == team::Op::Kind::Del) previewed_.erase(op.id);
       each_state([&](scene3d::Scene3D& st) {
         team_apply::apply_entity_op(st.entities, op, entity_from);
       });
@@ -163,6 +167,16 @@ class Team3DBinding final : public TeamBinding {
 
   std::vector<std::uint64_t> selection() const override { return s_.scene_.selection; }
 
+  std::vector<team::Op> preview_ops() const override {
+    return team_apply::preview_puts(shadow_, s_.scene_.entities, entity_json, previewed_);
+  }
+  void apply_preview(const std::vector<team::Op>& puts) override {
+    team_apply::apply_preview(s_.scene_.entities, puts, entity_from, previewed_);
+  }
+  void end_preview(const std::vector<std::uint64_t>& ids) override {
+    team_apply::end_preview(s_.scene_.entities, shadow_, ids, previewed_);
+  }
+
  private:
   void reshadow() {
     shadow_ = s_.scene_.entities;
@@ -172,6 +186,7 @@ class Team3DBinding final : public TeamBinding {
 
   Editor3DScreen& s_;
   std::vector<scene3d::Entity3D> shadow_;
+  std::set<std::uint64_t> previewed_;  // under someone else's drag
   render3d::Environment shadow_env_;
   scene3d::PhysicsSettings3D shadow_physics_;
   std::uint64_t lo_ = 0, hi_ = 0;

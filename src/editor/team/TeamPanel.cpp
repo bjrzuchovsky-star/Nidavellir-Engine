@@ -178,6 +178,18 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
     for (const auto& [k, who] : c.locks()) mine += who == c.me();
     ImGui::SameLine();
     ImGui::TextDisabled("%zu lock(s)%s", mine, c.can_write() ? "" : ", viewer");
+    if (c.can_write()) {
+      const std::vector<std::uint64_t> held = t.selection_held_by_others();
+      if (!held.empty()) {
+        char label[64];
+        std::snprintf(label, sizeof label, "Take over (%zu)", held.size());
+        if (ImGui::SmallButton(label)) t.take_over(held);
+        if (ImGui::IsItemHovered()) {
+          ImGui::SetTooltip("Someone else holds what you have selected. You can take it over once they've\n"
+                            "left it alone for 15 seconds (no edits, no dragging).");
+        }
+      }
+    }
     for (const auto& [id, m] : c.members()) {
       swatch(m.colour);
       ImGui::TextColored(colour_vec(m.colour), "%s", m.name.c_str());

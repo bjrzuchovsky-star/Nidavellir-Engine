@@ -92,6 +92,7 @@ int check_2d() {
   so.lock_timeout_s = 1.5;  // a crashed editor's locks go quickly in the smoke
   so.member_timeout_s = 3.0;
   so.compact_every = 4;     // late joiners need snapshot + tail
+  so.lock_idle_s = 1.0;     // take-over after 1 s idle (15 s by default)
   so.engine = "0.2.0-smoke";
   so.check_key = [](const std::string& key, std::string* name, bool* can_write) {
     if (key == "tsv_annie") *name = "Annie", *can_write = true;
@@ -222,6 +223,77 @@ int check_2d() {
   if (!pump(ticks, converged, 5)) return fail("delete");
   if (a.workspace().find(doomed)) return fail("delete reached A");
   if (b.workspace().find(ea)->name != "Annie's Big Crate") return fail("inspector edit reached B");
+
+  // Mid-drag preview: B sees A's crate move while A drags; nothing is
+  // committed until A lets go. (Y only: later checks use the crate's x.)
+  {
+    auto truth = [&] { return server.docs("_team_claim")->at("scene.json").canonical(); };
+    if (!pump(ticks, [&] { return b.team().lock_holder(ea) == a.team().client().me(); }, 5)) {
+      return fail("A still holds the crate");
+    }
+    const float y0 = a.workspace().find(ea)->y;
+    const std::string before = truth();
+    const std::uint64_t commits0 = server.commits();
+    a.begin_drag_move();
+    a.workspace().update_move(0.0f, 25.0f);
+    if (!pump(ticks, [&] { return b.workspace().find(ea)->y == y0 + 25.0f; }, 5)) {
+      return fail("B sees A's drag mid-way");
+    }
+    if (!b.team().previewing(ea)) return fail("B marks the crate as previewed");
+    a.workspace().update_move(0.0f, 60.0f);
+    if (!pump(ticks, [&] { return b.workspace().find(ea)->y == y0 + 60.0f; }, 5)) {
+      return fail("B follows the drag");
+    }
+    settle(ticks, 0.2);
+    if (server.commits() != commits0 || truth() != before) return fail("a preview commits nothing");
+    a.end_drag_move();
+    if (!pump(ticks, [&] { return converged() && !b.team().previewing(ea); }, 5)) {
+      return fail("drag released -> committed once");
+    }
+    if (b.workspace().find(ea)->y != y0 + 60.0f) return fail("B has the released position");
+    if (server.commits() != commits0 + 1) return fail("one commit for the whole drag");
+    // A cancelled drag (Esc) puts B's copy back.
+    a.begin_drag_move();
+    a.workspace().update_move(0.0f, -45.0f);
+    if (!pump(ticks, [&] { return b.workspace().find(ea)->y == y0 + 15.0f; }, 5)) {
+      return fail("B sees the second drag");
+    }
+    a.cancel_drag_move();
+    if (!pump(ticks, [&] { return !b.team().previewing(ea) && b.workspace().find(ea)->y == y0 + 60.0f; }, 5)) {
+      return fail("cancelled drag restored on B");
+    }
+    if (!pump(ticks, converged, 5)) return fail("converge after the cancelled drag");
+    std::cout << "[smoke] team: mid-drag preview OK (" << a.team().previews_sent() << " sent, "
+              << b.team().previews_shown() << " shown)\n";
+
+    // Take-over: while A is busy with the crate B can't take it; once A
+    // has left it alone for lock_idle_s, B can.
+    b.workspace().clear_selection();
+    b.workspace().select(ea);
+    b.team().take_over({ea});
+    settle(ticks, 0.3);
+    if (b.team().lock_holder(ea) != a.team().client().me()) return fail("busy lock not taken over");
+    bool told = false;
+    for (const std::string& n : b.team().recent_notes()) told |= n.find("still working") != std::string::npos;
+    if (!told) return fail("refused take-over says why");
+    settle(ticks, 1.0);
+    b.team().take_over({ea});
+    if (!pump(ticks, [&] { return a.team().lock_holder(ea) == b.team().client().me() && b.team().lock_holder(ea) == 0; }, 5)) {
+      return fail("idle lock taken over");
+    }
+    b.begin_drag_move();
+    b.workspace().update_move(0.0f, -60.0f);
+    b.end_drag_move();
+    if (!pump(ticks, converged, 5)) return fail("B edits the taken-over crate");
+    if (a.workspace().find(ea)->y != y0) return fail("B's edit after take-over reached A");
+    told = false;
+    for (const std::string& n : a.team().recent_notes()) told |= n.find("took over") != std::string::npos;
+    if (!told) return fail("A is told about the take-over");
+    a.workspace().clear_selection();
+    b.workspace().clear_selection();
+    a.workspace().select(ea);  // back to A for the rest
+    std::cout << "[smoke] team: lock take-over OK\n";
+  }
 
   // Presence: cursors and selection travel.
   a.team().set_cursor(64.0f, 32.0f, 0.0f, true);

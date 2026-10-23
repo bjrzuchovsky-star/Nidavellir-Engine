@@ -205,9 +205,37 @@ void TeamClient::on_message(const Value& msg) {
     for (const auto& [k, v] : msg["locks"].members()) {
       locks_[k] = static_cast<std::uint32_t>(v.as_number());
     }
+    // Something we have selected came free (its holder let go or rode
+    // off): ask again so the selection gets its lock back.
+    if (can_write_) {
+      for (const std::string& k : want_) {
+        if (!locks_.count(k)) {
+          want_sent_ = false;
+          want_locks(want_);
+          break;
+        }
+      }
+    }
     return;
   }
-  if (t == "lock_denied") return;  // the lock table already shows it
+  if (t == "lock_denied") {
+    // Plain requests: the lock table already shows it. Take-overs say why.
+    const std::string why = msg.str("reason");
+    if (!why.empty()) notes_.push_back("Can't take it over: " + why);
+    return;
+  }
+  if (t == "taken") {
+    const auto by = static_cast<std::uint32_t>(msg.num("by", 0));
+    const auto from = static_cast<std::uint32_t>(msg.num("from", 0));
+    auto name = [&](std::uint32_t id) {
+      if (id == me_) return std::string("you");
+      const RemoteMember* rm = member(id);
+      return rm ? rm->name : std::string("a rider");
+    };
+    if (from == me_) notes_.push_back(name(by) + " took over something you had idle (" + msg.str("key") + ").");
+    else if (by == me_) notes_.push_back("You took it over from " + name(from) + ".");
+    return;
+  }
   if (t == "member") {
     RemoteMember m = member_from(msg["m"]);
     if (m.id == me_ || !m.id) return;
@@ -230,6 +258,24 @@ void TeamClient::on_message(const Value& msg) {
       notes_.push_back(it->second.name + " rode off.");
       members_.erase(it);
     }
+    return;
+  }
+  if (t == "prev" || t == "prev_end") {
+    PreviewEvent e;
+    e.member = static_cast<std::uint32_t>(msg.num("member", 0));
+    e.scene = msg.str("scene");
+    e.n = static_cast<std::uint64_t>(msg.num("n", 0));
+    e.end = t == "prev_end";
+    if (e.member == me_ || !e.member) return;
+    if (e.end) {
+      for (const Value& v : msg["ids"].items()) e.ids.push_back(id_of(v));
+    } else {
+      for (const Value& ov : msg["ops"].items()) {
+        Op op;
+        if (op_from_json(ov, &op) && op.kind == Op::Kind::Put) e.ops.push_back(std::move(op));
+      }
+    }
+    previews_.push_back(std::move(e));
     return;
   }
   if (t == "pres") {
@@ -365,6 +411,16 @@ void TeamClient::want_locks(std::vector<std::string> keys) {
   want_sent_ = true;
 }
 
+void TeamClient::take_locks(const std::vector<std::string>& keys) {
+  if (state_ != State::Joined || keys.empty()) return;
+  Value l = Value::object();
+  l.set("t", str("take"));
+  Value arr = Value::array();
+  for (const std::string& k : keys) arr.push(str(k));
+  l.set("keys", std::move(arr));
+  send(l);
+}
+
 std::uint32_t TeamClient::lock_owner(const std::string& key) const {
   auto it = locks_.find(key);
   return it == locks_.end() ? 0 : it->second;
@@ -374,6 +430,39 @@ void TeamClient::send_presence(Value presence) {
   if (state_ != State::Joined) return;
   presence.set("t", str("pres"));
   send(presence, false);
+}
+
+std::uint64_t TeamClient::send_preview(const std::string& scene, const std::vector<Op>& puts) {
+  if (state_ != State::Joined || !can_write_ || puts.empty()) return 0;
+  Value m = Value::object();
+  m.set("t", str("prev"));
+  m.set("scene", str(scene));
+  m.set("n", num(static_cast<double>(++preview_n_)));
+  Value ops = Value::array();
+  for (const Op& op : puts) {
+    if (op.kind == Op::Kind::Put) ops.push(op_to_json(op));
+  }
+  m.set("ops", std::move(ops));
+  send(m, false);
+  return preview_n_;
+}
+
+void TeamClient::end_preview(const std::string& scene, const std::vector<std::uint64_t>& ids) {
+  if (state_ != State::Joined || ids.empty()) return;
+  Value m = Value::object();
+  m.set("t", str("prev_end"));
+  m.set("scene", str(scene));
+  m.set("n", num(static_cast<double>(preview_n_)));
+  Value arr = Value::array();
+  for (std::uint64_t id : ids) arr.push(id_value(id));
+  m.set("ids", std::move(arr));
+  send(m);
+}
+
+std::vector<PreviewEvent> TeamClient::take_previews() {
+  std::vector<PreviewEvent> out;
+  out.swap(previews_);
+  return out;
 }
 
 const RemoteMember* TeamClient::member(std::uint32_t id) const {

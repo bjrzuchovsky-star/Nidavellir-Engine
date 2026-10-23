@@ -49,6 +49,17 @@ struct RemoteMember {
   bool has_presence = false;
 };
 
+// Mid-drag preview from another member (docs/team-claims.md, 3.7):
+// transient entity puts while they drag, then an end when they let go.
+struct PreviewEvent {
+  std::uint32_t member = 0;
+  std::string scene;
+  std::uint64_t n = 0;               // the sender's preview counter
+  bool end = false;                  // drag over: drop the preview
+  std::vector<Op> ops;               // puts (preview)
+  std::vector<std::uint64_t> ids;    // entities (end)
+};
+
 class TeamClient {
  public:
   enum class State { Idle, Connecting, Joined, Refused, Closed };
@@ -93,9 +104,18 @@ class TeamClient {
   // Locks: the full set this editor wants (selection / drag / Inspector).
   void want_locks(std::vector<std::string> keys);
   std::uint32_t lock_owner(const std::string& key) const;
+  // Take over locks someone else has left idle (15 s by default). The
+  // server says no (a note) while the holder is still using them.
+  void take_locks(const std::vector<std::string>& keys);
   const std::map<std::string, std::uint32_t>& locks() const { return locks_; }
   // Unreliable presence ({"scene", "space", "cursor", "sel"}).
   void send_presence(Value presence);
+  // Mid-drag preview: puts of entities this editor holds while a drag or
+  // Inspector edit is open (unreliable, ~20 Hz), then the end (reliable).
+  // Returns the preview number used.
+  std::uint64_t send_preview(const std::string& scene, const std::vector<Op>& puts);
+  void end_preview(const std::string& scene, const std::vector<std::uint64_t>& ids);
+  std::vector<PreviewEvent> take_previews();
 
   const std::map<std::uint32_t, RemoteMember>& members() const { return members_; }
   const RemoteMember* member(std::uint32_t id) const;
@@ -133,6 +153,8 @@ class TeamClient {
   std::map<std::string, std::uint32_t> locks_;
   std::map<std::uint32_t, RemoteMember> members_;
   std::vector<std::string> notes_;
+  std::vector<PreviewEvent> previews_;
+  std::uint64_t preview_n_ = 0;
   std::uint64_t commits_seen_ = 0, rejected_ = 0;
   double connect_started_ = 0.0;
   std::chrono::steady_clock::time_point t0_;

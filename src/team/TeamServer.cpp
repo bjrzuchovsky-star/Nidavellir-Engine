@@ -149,7 +149,10 @@ void TeamServer::on_message(Member& m, const Value& msg, bool reliable) {
   if (!m.joined) return;
   if (t == "op") return on_op(m, msg);
   if (t == "lock") return on_lock(m, msg);
+  if (t == "take") return on_take(m, msg);
   if (t == "pres") return on_presence(m, msg);
+  if (t == "prev") return on_preview(m, msg, false);
+  if (t == "prev_end") return on_preview(m, msg, true);
   if (t == "bye") {
     transport_->disconnect(m.peer, 0);
     on_gone(m.peer);
@@ -326,6 +329,12 @@ void TeamServer::on_op(Member& m, const Value& msg) {
       return reject("Locked by " + who, it->second);
     }
   }
+  for (const Op& op : b.ops) {
+    if (op.kind != Op::Kind::Put && op.kind != Op::Kind::Del) continue;
+    const std::string key = entity_lock(b.scene, op.id);
+    auto it = s.locks.find(key);
+    if (it != s.locks.end() && it->second == m.id) touch_lock(s, key);
+  }
   b.seq = ++s.seq;
   b.from = m.id;
   s.docs[b.scene].apply(b);
@@ -381,6 +390,7 @@ void TeamServer::on_lock(Member& m, const Value& msg) {
     if (it == s.locks.end()) {
       if (!m.can_write) continue;  // viewers never hold locks
       s.locks[k] = m.id;
+      touch_lock(s, k);
       changed = true;
     } else if (it->second != m.id) {
       denied.push(str(k));
@@ -393,6 +403,67 @@ void TeamServer::on_lock(Member& m, const Value& msg) {
     d.set("t", str("lock_denied"));
     d.set("keys", std::move(denied));
     d.set("by", num(by));
+    send(m.peer, d);
+  }
+}
+
+void TeamServer::on_take(Member& m, const Value& msg) {
+  Session& s = sessions_[m.claim];
+  auto name_of = [&](std::uint32_t id) {
+    for (const auto& [p, o] : members_) {
+      if (o.id == id) return o.name;
+    }
+    return std::string("another rider");
+  };
+  bool changed = false;
+  Value denied = Value::array();
+  std::string reason;
+  std::uint32_t by = 0;
+  const double t = now();
+  for (const Value& kv : msg["keys"].items()) {
+    if (!kv.is_string() || kv.as_string().empty()) continue;
+    const std::string k = kv.as_string();
+    if (!m.can_write) {
+      reason = "Viewers can't take locks.";
+      denied.push(str(k));
+      continue;
+    }
+    auto it = s.locks.find(k);
+    if (it == s.locks.end()) {
+      s.locks[k] = m.id;
+      touch_lock(s, k);
+      changed = true;
+      continue;
+    }
+    if (it->second == m.id) continue;
+    const double used = s.lock_used.count(k) ? s.lock_used[k] : 0.0;
+    const double idle = t - used;
+    if (opt_.lock_idle_s <= 0.0 || idle < opt_.lock_idle_s) {
+      by = it->second;
+      reason = name_of(by) + " is still working on it (busy " + std::to_string(static_cast<int>(idle)) +
+               " s ago; take-over after " + std::to_string(static_cast<int>(opt_.lock_idle_s)) + " s idle).";
+      denied.push(str(k));
+      continue;
+    }
+    const std::uint32_t old = it->second;
+    it->second = m.id;
+    touch_lock(s, k);
+    changed = true;
+    Value n = Value::object();
+    n.set("t", str("taken"));
+    n.set("key", str(k));
+    n.set("by", num(m.id));
+    n.set("from", num(old));
+    broadcast(s, n);
+    log(m.name + " took over " + k + " from " + name_of(old));
+  }
+  if (changed) send_locks(s);
+  if (denied.size()) {
+    Value d = Value::object();
+    d.set("t", str("lock_denied"));
+    d.set("keys", std::move(denied));
+    d.set("by", num(by));
+    d.set("reason", str(reason));
     send(m.peer, d);
   }
 }
@@ -412,6 +483,37 @@ void TeamServer::on_presence(Member& m, const Value& msg) {
     j.set("m", member_json(m));
     broadcast(s, j);
   }
+}
+
+void TeamServer::on_preview(Member& m, const Value& msg, bool end) {
+  Session& s = sessions_[m.claim];
+  if (!m.can_write) return;  // viewers watch, they don't drag
+  const std::string scene = msg.str("scene", m.scene);
+  Value out = Value::object();
+  out.set("t", str(end ? "prev_end" : "prev"));
+  out.set("member", num(m.id));
+  out.set("scene", str(scene));
+  out.set("n", num(msg.num("n", 0)));
+  if (end) {
+    out.set("ids", msg["ids"]);
+    broadcast(s, out, m.id);
+    return;
+  }
+  // Only entities this member holds: others see the drag of a locked
+  // entity, never a preview of something they could be editing.
+  Value ops = Value::array();
+  for (const Value& ov : msg["ops"].items()) {
+    Op op;
+    if (!op_from_json(ov, &op) || op.kind != Op::Kind::Put) continue;
+    const std::string key = entity_lock(scene, op.id);
+    auto it = s.locks.find(key);
+    if (it == s.locks.end() || it->second != m.id) continue;
+    touch_lock(s, key);
+    ops.push(ov);
+  }
+  if (!ops.size()) return;
+  out.set("ops", std::move(ops));
+  broadcast(s, out, m.id, false);
 }
 
 void TeamServer::release_locks(Session& s, std::uint32_t member, bool notify) {

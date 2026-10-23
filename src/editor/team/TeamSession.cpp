@@ -96,12 +96,21 @@ void TeamSession::leave() {
     server_->stop();
     server_.reset();
   }
+  if (!remote_preview_.empty()) {
+    std::vector<std::uint64_t> ids;
+    for (const auto& [id, p] : remote_preview_) ids.push_back(id);
+    binding_->end_preview(ids);
+  }
   binding_->set_id_range(0, 0);
   held_.clear();
   loaded_ = false;
   files_.clear();
   synced_.clear();
   asset_sent_.clear();
+  my_preview_ids_.clear();
+  remote_preview_.clear();
+  preview_closed_.clear();
+  last_preview_.clear();
 }
 
 void TeamSession::drop_now() {
@@ -139,6 +148,10 @@ std::vector<std::string> TeamSession::take_notes() {
   std::vector<std::string> out = client_.take_notes();
   out.insert(out.end(), notes_.begin(), notes_.end());
   notes_.clear();
+  for (const std::string& n : out) {
+    recent_notes_.push_back(n);
+    if (recent_notes_.size() > 32) recent_notes_.pop_front();
+  }
   return out;
 }
 
@@ -230,13 +243,16 @@ void TeamSession::tick(double dt) {
     }
     held_.clear();
     if (!ops.empty()) {
+      forget_previews(ops);
       binding_->apply(ops);
       ++remote_applied_;
     }
   }
+  // 2b. Mid-drag previews, both ways.
+  tick_previews(dt, busy);
   // 3. Safety net: idle and nothing pending -> must match the server.
   resync_clock_ += dt;
-  if (!busy && client_.idle() && held_.empty() && resync_clock_ >= 1.0) {
+  if (!busy && client_.idle() && held_.empty() && remote_preview_.empty() && resync_clock_ >= 1.0) {
     resync_clock_ = 0.0;
     const team::SceneDoc live = binding_->capture();
     auto it = client_.confirmed().find(scene);
@@ -275,6 +291,108 @@ void TeamSession::tick(double dt) {
     if (beat) heartbeat_clock_ = 0.0;
     send_presence(beat);
   }
+}
+
+void TeamSession::forget_previews(const std::vector<team::Op>& ops) {
+  for (const team::Op& op : ops) {
+    if (op.kind == team::Op::Kind::Put || op.kind == team::Op::Kind::Del) remote_preview_.erase(op.id);
+  }
+}
+
+void TeamSession::tick_previews(double dt, bool busy) {
+  const std::string scene = binding_->scene_key();
+  // Ours: while a drag / Inspector edit is open, what it does so far.
+  if (busy && client_.can_write()) {
+    preview_clock_ += dt;
+    if (preview_clock_ >= 0.05) {  // ~20 Hz
+      preview_clock_ = 0.0;
+      std::vector<team::Op> puts;
+      for (team::Op& op : binding_->preview_ops()) {
+        if (client_.lock_owner(team::entity_lock(scene, op.id)) == client_.me()) puts.push_back(std::move(op));
+      }
+      if (!puts.empty()) {
+        team::Value arr = team::Value::array();
+        for (const team::Op& op : puts) arr.push(team::op_to_json(op));
+        const std::string text = team::write_compact(arr);
+        if (text != last_preview_) {
+          last_preview_ = text;
+          client_.send_preview(scene, puts);
+          ++previews_sent_;
+          for (const team::Op& op : puts) {
+            if (std::find(my_preview_ids_.begin(), my_preview_ids_.end(), op.id) == my_preview_ids_.end()) {
+              my_preview_ids_.push_back(op.id);
+            }
+          }
+        }
+      }
+    }
+  } else if (!busy && !my_preview_ids_.empty()) {
+    // Let go: the commit (if anything changed) went out above, on the
+    // same ordered channel, so this end lands after it.
+    client_.end_preview(scene, my_preview_ids_);
+    my_preview_ids_.clear();
+    last_preview_.clear();
+    preview_clock_ = 0.0;
+  }
+
+  // Theirs.
+  for (team::PreviewEvent& e : client_.take_previews()) {
+    if (e.scene != scene) continue;
+    if (e.end) {
+      std::uint64_t& closed = preview_closed_[e.member];
+      closed = std::max(closed, e.n);
+      std::vector<std::uint64_t> ids;
+      for (std::uint64_t id : e.ids) {
+        auto it = remote_preview_.find(id);
+        if (it == remote_preview_.end() || it->second.member != e.member) continue;
+        bool landing = false;  // a held commit will set it anyway
+        for (const auto& [sc, op] : held_) landing |= sc == scene && op.id == id;
+        remote_preview_.erase(it);
+        if (!landing) ids.push_back(id);
+      }
+      if (!ids.empty()) binding_->end_preview(ids);
+      continue;
+    }
+    auto closed = preview_closed_.find(e.member);
+    if (closed != preview_closed_.end() && e.n <= closed->second) continue;  // late packet
+    std::vector<team::Op> puts;
+    for (team::Op& op : e.ops) {
+      if (client_.lock_owner(team::entity_lock(scene, op.id)) == client_.me()) continue;
+      remote_preview_[op.id] = RemotePreview{e.member, 0.0};
+      puts.push_back(std::move(op));
+    }
+    if (!puts.empty()) {
+      binding_->apply_preview(puts);
+      ++previews_shown_;
+    }
+  }
+  // A preview whose sender went quiet (or rode off) is put back.
+  std::vector<std::uint64_t> stale;
+  for (auto it = remote_preview_.begin(); it != remote_preview_.end();) {
+    it->second.age += dt;
+    if (it->second.age > 3.0 || !client_.member(it->second.member)) {
+      stale.push_back(it->first);
+      it = remote_preview_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  if (!stale.empty()) binding_->end_preview(stale);
+}
+
+void TeamSession::take_over(const std::vector<std::uint64_t>& ids) {
+  std::vector<std::string> keys;
+  for (std::uint64_t id : ids) keys.push_back(team::entity_lock(binding_->scene_key(), id));
+  client_.take_locks(keys);
+}
+
+std::vector<std::uint64_t> TeamSession::selection_held_by_others() const {
+  std::vector<std::uint64_t> out;
+  if (!binding_ || !client_.joined()) return out;
+  for (std::uint64_t id : binding_->selection()) {
+    if (holder_member(id)) out.push_back(id);
+  }
+  return out;
 }
 
 bool TeamSession::sync_assets() {

@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <deque>
 #include <map>
 #include <memory>
 #include <string>
@@ -52,6 +53,16 @@ class TeamBinding {
   virtual void set_id_range(std::uint64_t lo, std::uint64_t hi) = 0;
   virtual std::vector<std::uint64_t> selection() const = 0;
   virtual const char* space() const = 0;  // "2d" / "3d"
+
+  // Mid-drag preview (docs/team-claims.md, 3.7). preview_ops: puts for
+  // existing entities that differ from the shadow right now (mid-drag),
+  // without taking them. apply_preview: show another member's transient
+  // puts in the live scene only (not the shadow, not the history).
+  // end_preview: put those entities back to the shadow. Entities under a
+  // remote preview are left out of take_local_ops.
+  virtual std::vector<team::Op> preview_ops() const { return {}; }
+  virtual void apply_preview(const std::vector<team::Op>& puts) { (void)puts; }
+  virtual void end_preview(const std::vector<std::uint64_t>& ids) { (void)ids; }
 };
 
 std::unique_ptr<TeamBinding> make_team_binding(Editor2DScreen& screen);
@@ -140,8 +151,18 @@ class TeamSession {
   std::uint64_t assets_removed() const { return assets_removed_; }
 
   std::vector<std::string> take_notes();
+  // The last few notes handed out (the panel log; smokes check them).
+  const std::deque<std::string>& recent_notes() const { return recent_notes_; }
   std::string status_line() const;
   std::uint64_t resyncs() const { return resyncs_; }
+  // Mid-drag previews: sent by this editor / shown from others.
+  std::uint64_t previews_sent() const { return previews_sent_; }
+  std::uint64_t previews_shown() const { return previews_shown_; }
+  bool previewing(std::uint64_t id) const { return remote_preview_.count(id) != 0; }
+  // Take over the entities in `ids` that someone else has left idle.
+  void take_over(const std::vector<std::uint64_t>& ids);
+  // Selected entities someone else holds (for the Take over button).
+  std::vector<std::uint64_t> selection_held_by_others() const;
   std::uint64_t remote_applied() const { return remote_applied_; }
   std::uint64_t batches_sent() const { return sent_; }
 
@@ -164,7 +185,10 @@ class TeamSession {
   double presence_clock_ = 0.0, heartbeat_clock_ = 0.0, resync_clock_ = 0.0;
   std::uint64_t resyncs_ = 0, remote_applied_ = 0, sent_ = 0;
   std::vector<std::string> notes_;
+  std::deque<std::string> recent_notes_;
   void finish_asset_pass();
+  void tick_previews(double dt, bool busy);
+  void forget_previews(const std::vector<team::Op>& ops);
   std::shared_ptr<vault::Backend> assets_;
   std::map<std::string, TeamLocalFile> files_;  // project-relative path -> last scan
   std::map<std::string, std::string> synced_;   // path -> sha the session confirmed here
@@ -172,6 +196,17 @@ class TeamSession {
   double asset_clock_ = 0.0;
   bool first_asset_pass_ = true;  // joining: the session's files win
   std::uint64_t assets_up_ = 0, assets_down_ = 0, assets_removed_ = 0;
+  // Mid-drag previews.
+  double preview_clock_ = 0.0;
+  std::string last_preview_;
+  std::vector<std::uint64_t> my_preview_ids_;
+  struct RemotePreview {
+    std::uint32_t member = 0;
+    double age = 0.0;
+  };
+  std::map<std::uint64_t, RemotePreview> remote_preview_;
+  std::map<std::uint32_t, std::uint64_t> preview_closed_;  // member -> last ended preview n
+  std::uint64_t previews_sent_ = 0, previews_shown_ = 0;
   TeamAssetSync asset_sync_;  // last member: joined before the rest go
 };
 

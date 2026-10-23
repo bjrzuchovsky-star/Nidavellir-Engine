@@ -5,6 +5,7 @@
 #include "scene/SceneJson.h"
 
 #include <algorithm>
+#include <set>
 
 namespace ts {
 namespace tombstone {
@@ -103,6 +104,7 @@ class Team2DBinding final : public TeamBinding {
   std::vector<team::Op> take_local_ops(std::string* label) override {
     const Workspace2D& w = s_.workspace();
     std::vector<team::Op> ops = team_apply::diff_entities(shadow_, w.entities(), entity_json);
+    team_apply::drop_previewed(ops, previewed_);
     if (!(w.tile_solidity() == shadow_solid_) || !(w.lighting() == shadow_light_)) {
       const auto before = props_of(shadow_solid_, shadow_light_);
       const auto now = props_of(w.tile_solidity(), w.lighting());
@@ -133,6 +135,7 @@ class Team2DBinding final : public TeamBinding {
         continue;
       }
       if (op.kind == team::Op::Kind::Asset) continue;  // the Vault fetch (later)
+      if (op.kind == team::Op::Kind::Put || op.kind == team::Op::Kind::Del) previewed_.erase(op.id);
       team_apply::apply_entity_op(w.entities(), op, entity_from);
       w.for_each_history_state([&](std::vector<Entity2D>& ents, TileSolidity&) {
         team_apply::apply_entity_op(ents, op, entity_from);
@@ -168,6 +171,16 @@ class Team2DBinding final : public TeamBinding {
 
   std::vector<std::uint64_t> selection() const override { return s_.workspace().selection(); }
 
+  std::vector<team::Op> preview_ops() const override {
+    return team_apply::preview_puts(shadow_, s_.workspace().entities(), entity_json, previewed_);
+  }
+  void apply_preview(const std::vector<team::Op>& puts) override {
+    team_apply::apply_preview(s_.workspace().entities(), puts, entity_from, previewed_);
+  }
+  void end_preview(const std::vector<std::uint64_t>& ids) override {
+    team_apply::end_preview(s_.workspace().entities(), shadow_, ids, previewed_);
+  }
+
  private:
   void reshadow() {
     const Workspace2D& w = s_.workspace();
@@ -178,6 +191,7 @@ class Team2DBinding final : public TeamBinding {
 
   Editor2DScreen& s_;
   std::vector<Entity2D> shadow_;
+  std::set<std::uint64_t> previewed_;  // under someone else's drag
   TileSolidity shadow_solid_;
   fx::Lighting2D shadow_light_;
 };
