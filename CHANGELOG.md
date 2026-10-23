@@ -2,9 +2,9 @@
 
 All notable changes to TombStone Engine. The version number lives in the `VERSION` file at the repo root.
 
-## Unreleased (0.2.0)
+## 0.2.0 — 2026-10-23
 
-Work in progress for 0.2.0. Optional features ship as Trading Post plugins rather than in every game, starting with physics and player movement.
+A big ride: ride a claim together live with your posse (team claims), physics and player movement as Trading Post plugins, Garry's Mod / Source formats, Blender-style gizmos and G / R / S, Unity-style script components, cameras as scene objects with attach and follow tools, and the Field Guide (tooltips, command palette, walkthroughs, readable errors). `TombStone-0.2.0-update.exe` upgrades a 0.1.x install in place and keeps your claims, settings and the Vault. Older claims migrate on first open, with backups in `.tombstone/backup/`.
 
 ### Team claims: ride a claim together, live (2D and 3D)
 - **Team > Host from my editor...** (LAN, UDP 24650, optional passcode) or **Team > Join a posse...** (a host's address, or `ts_vault --team` on UDP 8741 with your Vault key). Every edit lands on every screen within a few hundred milliseconds; late joiners get a snapshot and catch up.
@@ -96,7 +96,7 @@ Work in progress for 0.2.0. Optional features ship as Trading Post plugins rathe
 - Templates list the plugins they need, and a new claim also gets whatever its scenes use. Adding a Player, Rigid Body, Joint, Grabbable or VR Rig in the editor switches on its plugin the next time you press Play, and the Telegraph says so. A plugin you switch off stays off.
 - **Older claims migrate on first open.** The editor adds the plugins the claim's scenes use and backs up `project.json` to `.tombstone/backup/project.json.pre-0.2.0` first. It also writes `.tombstone/plugin_split.json` and logs what it did to `.tombstone/migrations.log` and the Telegraph. A claim that uses no physics or Player is only marked. Until a claim is opened, `ts_game`, the servers and export add the plugins in memory, so nothing breaks.
 - **Exports ship only the plugins the claim uses.** The list goes into the cooked `project.json` and into `game.json` under `"plugins"`, and the export report has a `plugins:` line. `ts_game` prints what it rides with.
-- The scene formats are unchanged (Scene3D v16, 2D v11), and so are the Player and collider inspector settings.
+- The plugin split leaves the scene formats (and the Player and collider inspector settings) unchanged; the script components, cameras and attach tools below move them on to Scene3D v18 and 2D v13.
 - `ts_admin --smoke-plugin-split` (also in `--smoke`) checks four things. Templates add their plugins automatically. An old claim migrates (backup, marker, log, a second open changes nothing, a plugin switched off stays off). 2D and 3D Play work with and without the plugins. Four exported games ship only their plugins, and each one runs.
 
 ## 0.1.2 — 2026-10-23
