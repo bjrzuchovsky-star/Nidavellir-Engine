@@ -13,6 +13,7 @@
 //   - once a second an idle editor checks itself against the server state.
 
 #include "editor/ProjectInfo.h"
+#include "editor/team/TeamAssets.h"
 #include "team/TeamClient.h"
 #include "team/TeamServer.h"
 #include "vault/VaultBackend.h"
@@ -125,13 +126,18 @@ class TeamSession {
   const team::RemoteMember* holder_member(std::uint64_t id) const;
 
   // Assets (docs/team-claims.md, 4): project files under assets/ go up to
-  // the Vault by SHA-256 and come down where they differ. Scanned every 2 s
-  // while joined; sync_assets() runs one pass now.
+  // the Vault by SHA-256, come down where they differ, and deletes travel
+  // both ways. A pass every 2 s while joined, on a worker thread: the
+  // frame never waits for the Vault. sync_assets() starts a pass now
+  // (false if one is still running).
   void set_asset_backend(std::shared_ptr<vault::Backend> backend) { assets_ = std::move(backend); }
   bool has_asset_backend() const { return assets_ != nullptr; }
-  void sync_assets();
+  bool sync_assets();
+  bool assets_busy() const { return asset_sync_.running(); }
+  TeamAssetProgress asset_progress() const { return asset_sync_.progress(); }
   std::uint64_t assets_sent() const { return assets_up_; }
   std::uint64_t assets_fetched() const { return assets_down_; }
+  std::uint64_t assets_removed() const { return assets_removed_; }
 
   std::vector<std::string> take_notes();
   std::string status_line() const;
@@ -158,17 +164,15 @@ class TeamSession {
   double presence_clock_ = 0.0, heartbeat_clock_ = 0.0, resync_clock_ = 0.0;
   std::uint64_t resyncs_ = 0, remote_applied_ = 0, sent_ = 0;
   std::vector<std::string> notes_;
-  struct LocalFile {
-    long long mtime = 0;
-    std::uint64_t size = 0;
-    std::string sha;
-  };
+  void finish_asset_pass();
   std::shared_ptr<vault::Backend> assets_;
-  std::map<std::string, LocalFile> files_;     // project-relative path -> last scan
-  std::map<std::string, std::string> synced_;  // path -> sha known to match the session
+  std::map<std::string, TeamLocalFile> files_;  // project-relative path -> last scan
+  std::map<std::string, std::string> synced_;   // path -> sha the session confirmed here
+  std::map<std::string, std::string> asset_sent_;    // path -> sha sent, not confirmed yet
   double asset_clock_ = 0.0;
   bool first_asset_pass_ = true;  // joining: the session's files win
-  std::uint64_t assets_up_ = 0, assets_down_ = 0;
+  std::uint64_t assets_up_ = 0, assets_down_ = 0, assets_removed_ = 0;
+  TeamAssetSync asset_sync_;  // last member: joined before the rest go
 };
 
 }  // namespace editor

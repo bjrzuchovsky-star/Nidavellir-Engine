@@ -2,9 +2,6 @@
 
 #include "render3d/Scene3D.h"
 #include "scene/SceneJson.h"
-#include "vault/Sha256.h"
-
-#include <filesystem>
 
 #include <algorithm>
 #include <cstdio>
@@ -91,6 +88,7 @@ bool TeamSession::join(const TeamJoinSettings& s, std::string* error) {
 }
 
 void TeamSession::leave() {
+  asset_sync_.cancel_and_wait();
   client_.leave();
   if (server_) {
     // Let the others hear the host is gone.
@@ -103,9 +101,11 @@ void TeamSession::leave() {
   loaded_ = false;
   files_.clear();
   synced_.clear();
+  asset_sent_.clear();
 }
 
 void TeamSession::drop_now() {
+  asset_sync_.cancel_and_wait();
   client_.drop_now();
   binding_->set_id_range(0, 0);
   held_.clear();
@@ -255,9 +255,10 @@ void TeamSession::tick(double dt) {
       ++resyncs_;
     }
   }
-  // 3b. Project files through the Vault.
+  // 3b. Project files through the Vault (a worker does the hauling).
+  finish_asset_pass();
   asset_clock_ += dt;
-  if (assets_ && !busy && asset_clock_ >= 2.0) {
+  if (assets_ && !busy && asset_clock_ >= 2.0 && !asset_sync_.running()) {
     asset_clock_ = 0.0;
     sync_assets();
   }
@@ -276,99 +277,44 @@ void TeamSession::tick(double dt) {
   }
 }
 
-void TeamSession::sync_assets() {
-  namespace fs = std::filesystem;
-  if (!assets_ || !client_.joined() || !loaded_) return;
+bool TeamSession::sync_assets() {
+  if (!assets_ || !client_.joined() || !loaded_) return false;
+  finish_asset_pass();
+  if (asset_sync_.running()) return false;
   const std::string scene = binding_->scene_key();
-  const fs::path root(project_.path);
-  std::error_code ec;
-  // Scan assets/ (mtime + size decide whether to re-hash).
-  std::map<std::string, LocalFile> now;
-  const fs::path dir = root / "assets";
-  if (fs::is_directory(dir, ec)) {
-    for (fs::recursive_directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
-      if (!it->is_regular_file(ec)) continue;
-      const std::string rel = fs::relative(it->path(), root, ec).generic_string();
-      if (rel.empty() || rel.find(".team-part") != std::string::npos) continue;
-      LocalFile f;
-      f.size = static_cast<std::uint64_t>(it->file_size(ec));
-      f.mtime = static_cast<long long>(it->last_write_time(ec).time_since_epoch().count());
-      auto old = files_.find(rel);
-      if (old != files_.end() && old->second.mtime == f.mtime && old->second.size == f.size) {
-        f.sha = old->second.sha;
-      } else {
-        f.sha = vault::sha256_file(it->path().string());
-      }
-      if (!f.sha.empty()) now[rel] = std::move(f);
-    }
-  }
-  files_ = now;
+  TeamAssetPass p;
+  p.root = project_.path;
   auto cit = client_.confirmed().find(scene);
-  const std::map<std::string, team::AssetRef> none;
-  const std::map<std::string, team::AssetRef>& session =
-      cit == client_.confirmed().end() ? none : cit->second.assets;
-
-  auto fetch = [&](const std::string& rel, const team::AssetRef& a) {
-    const fs::path dest = root / fs::u8path(rel);
-    fs::create_directories(dest.parent_path(), ec);
-    const fs::path part = dest.string() + ".team-part";
-    std::string err;
-    if (!assets_->download(a.sha256, part.string(), &err)) {
-      notes_.push_back("Could not fetch " + rel + " from the Vault: " + err);
-      return;
-    }
-    fs::rename(part, dest, ec);
-    if (ec) {
-      fs::remove(dest, ec);
-      fs::rename(part, dest, ec);
-    }
-    LocalFile f;
-    f.size = a.size;
-    f.sha = a.sha256;
-    f.mtime = static_cast<long long>(fs::last_write_time(dest, ec).time_since_epoch().count());
-    files_[rel] = f;
-    synced_[rel] = a.sha256;
-    ++assets_down_;
-    notes_.push_back("Fetched " + rel + " from the Vault.");
-  };
-
-  std::vector<team::Op> ups;
-  for (const auto& [rel, f] : files_) {
-    auto s = session.find(rel);
-    if (s != session.end() && s->second.sha256 == f.sha) {
-      synced_[rel] = f.sha;
-      continue;
-    }
-    auto known = synced_.find(rel);
-    if (s != session.end() && (first_asset_pass_ || (known != synced_.end() && known->second == f.sha))) {
-      fetch(rel, s->second);  // unchanged here since the last sync: theirs is newer
-      continue;
-    }
-    if (!client_.can_write()) continue;
-    // Changed (or new) here: up to the Vault, then announce the hash.
-    std::string err;
-    std::vector<std::string> missing;
-    const std::string path = (root / fs::u8path(rel)).string();
-    if (!assets_->missing({f.sha}, &missing, &err)) {
-      notes_.push_back("Vault: " + err);
-      return;
-    }
-    if (!missing.empty() && !assets_->upload(path, f.sha, f.size, &err)) {
-      notes_.push_back("Could not send " + rel + " to the Vault: " + err);
-      continue;
-    }
-    ups.push_back(team::Op::asset(rel, f.sha, f.size));
-    synced_[rel] = f.sha;
-    ++assets_up_;
-  }
-  for (const auto& [rel, a] : session) {
-    if (!files_.count(rel) && !a.sha256.empty()) fetch(rel, a);
-  }
+  if (cit != client_.confirmed().end()) p.session = cit->second.assets;
+  p.files = files_;
+  p.synced = synced_;
+  p.sent = asset_sent_;
+  // Nothing in the saddlebag: a send the session never confirmed was
+  // lost or turned back, so it may go again.
+  if (client_.idle()) p.sent.clear();
+  p.first = first_asset_pass_;
+  p.can_write = client_.can_write();
+  if (!asset_sync_.start(std::move(p), assets_)) return false;
   first_asset_pass_ = false;
-  if (!ups.empty()) {
-    client_.submit(scene, ups.size() == 1 ? "Asset " + ups.front().key
-                                          : "Assets (" + std::to_string(ups.size()) + ")",
-                   std::move(ups));
+  return true;
+}
+
+void TeamSession::finish_asset_pass() {
+  TeamAssetPass r;
+  if (!asset_sync_.take(&r)) return;
+  files_ = std::move(r.files);
+  synced_ = std::move(r.synced);
+  asset_sent_ = std::move(r.sent);
+  assets_up_ += r.up;
+  assets_down_ += r.down;
+  assets_removed_ += r.removed;
+  notes_.insert(notes_.end(), r.notes.begin(), r.notes.end());
+  if (!r.ops.empty() && client_.joined()) {
+    std::size_t dels = 0;
+    for (const team::Op& op : r.ops) dels += op.sha256.empty();
+    std::string label = r.ops.size() == 1 ? (dels ? "Delete " : "Asset ") + r.ops.front().key
+                                          : "Assets (" + std::to_string(r.ops.size()) + ")";
+    client_.submit(binding_->scene_key(), label, std::move(r.ops));
   }
 }
 

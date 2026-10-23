@@ -11,12 +11,14 @@
 #include "team/TeamClient.h"
 #include "team/TeamServer.h"
 #include "vault/Sha256.h"
+#include "vault/VaultBackend.h"
 #include "vault/VaultServer.h"
 #include "vault/VaultStore.h"
 
 #include <fstream>
 #include <sstream>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <functional>
@@ -356,6 +358,49 @@ std::string slurp(const fs::path& p) {
   return ss.str();
 }
 
+// A Vault on a slow trail: every transfer takes a while (non-blocking test).
+class SlowBackend : public ts::tombstone::vault::Backend {
+ public:
+  SlowBackend(std::shared_ptr<ts::tombstone::vault::Backend> inner, int ms) : in_(std::move(inner)), ms_(ms) {}
+  std::string id() const override { return in_->id(); }
+  std::string label() const override { return in_->label(); }
+  bool remote() const override { return in_->remote(); }
+  bool ping(std::string* i, std::string* e) override { return in_->ping(i, e); }
+  bool list(const ts::tombstone::vault::Query& q, std::vector<ts::tombstone::vault::Item>* o,
+            std::string* e) override {
+    return in_->list(q, o, e);
+  }
+  bool get(const std::string& id, ts::tombstone::vault::Item* o, std::string* e) override {
+    return in_->get(id, o, e);
+  }
+  bool missing(const std::vector<std::string>& s, std::vector<std::string>* o, std::string* e) override {
+    return in_->missing(s, o, e);
+  }
+  bool upload(const std::string& p, const std::string& sha, std::uint64_t n, std::string* e) override {
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms_));
+    return in_->upload(p, sha, n, e);
+  }
+  bool download(const std::string& sha, const std::string& d, std::string* e) override {
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms_));
+    return in_->download(sha, d, e);
+  }
+  bool publish(const ts::tombstone::vault::Item& m, const ts::tombstone::vault::Version& v,
+               ts::tombstone::vault::PublishResult* o, std::string* e) override {
+    return in_->publish(m, v, o, e);
+  }
+  bool update_item(const ts::tombstone::vault::Item& m, ts::tombstone::vault::Item* o, std::string* e) override {
+    return in_->update_item(m, o, e);
+  }
+  bool remove_item(const std::string& id, std::string* e) override { return in_->remove_item(id, e); }
+  bool remove_version(const std::string& id, int v, std::string* e) override {
+    return in_->remove_version(id, v, e);
+  }
+
+ private:
+  std::shared_ptr<ts::tombstone::vault::Backend> in_;
+  int ms_;
+};
+
 int check_assets() {
   namespace tv = ts::tombstone::vault;
   const fs::path vroot = fs::temp_directory_path() / "ts_team_smoke_vault";
@@ -416,9 +461,65 @@ int check_assets() {
         rc = fail("changed asset reached A");
       }
     }
+    // Non-blocking: a slow Vault and a 3 MB file; the editors' frames
+    // stay short while it travels and the progress is there to show.
+    double worst_ms = 0.0;
+    bool saw_progress = false;
+    if (!rc) {
+      a.team().set_asset_backend(std::make_shared<SlowBackend>(
+          std::make_shared<tv::RemoteBackend>(url, key), 700));
+      b.team().set_asset_backend(std::make_shared<SlowBackend>(
+          std::make_shared<tv::RemoteBackend>(url, key), 700));
+      {
+        std::ofstream big(pa / "assets" / "canyon.bin", std::ios::binary);
+        std::string chunk(1 << 16, 'x');
+        for (int i = 0; i < 48; ++i) {
+          chunk[0] = static_cast<char>(i);
+          big << chunk;
+        }
+      }
+      std::vector<Tick> timed = {[&](float) { server.poll(); },
+                                 [&](float dt) {
+                                   const auto t0 = std::chrono::steady_clock::now();
+                                   a.tick_team(dt);
+                                   b.tick_team(dt);
+                                   const double ms = std::chrono::duration<double, std::milli>(
+                                                         std::chrono::steady_clock::now() - t0).count();
+                                   worst_ms = std::max(worst_ms, ms);
+                                   const ed::TeamAssetProgress pa_ = a.team().asset_progress();
+                                   const ed::TeamAssetProgress pb_ = b.team().asset_progress();
+                                   if ((pa_.running && pa_.files_total > 0 && pa_.bytes_total >= (3u << 20)) ||
+                                       (pb_.running && pb_.files_total > 0 && pb_.bytes_total >= (3u << 20))) {
+                                     saw_progress = true;
+                                   }
+                                 }};
+      const fs::path big_b = pb / "assets" / "canyon.bin";
+      if (!pump(timed, [&] { return fs::exists(big_b) && fs::file_size(big_b) == (3u << 20); }, 20)) {
+        rc = fail("3 MB file reached B through the slow Vault");
+      } else if (!saw_progress) {
+        rc = fail("transfer progress shown (files / bytes)");
+      } else if (worst_ms > 150.0) {
+        rc = fail("editor frame waited for the Vault (" + std::to_string(worst_ms) + " ms)");
+      }
+    }
+    // Deletes: A removes the wanted poster; B's copy goes (kept in the trash).
+    if (!rc) {
+      settle(ticks, 2.5);  // both sides agree the file is in step
+      fs::remove(pa / "assets" / "wanted.txt", ec);
+      if (!pump(ticks, [&] { return !fs::exists(got); }, 15)) {
+        rc = fail("asset delete reached B");
+      } else if (!fs::exists(pb / ".tombstone" / "team" / "trash" / "assets" / "wanted.txt")) {
+        rc = fail("deleted asset kept in B's team trash");
+      } else {
+        const tc::Docs* d = server.docs("_team_assets");
+        if (!d || d->at("scene.json").assets.count("assets/wanted.txt")) rc = fail("delete reached the session");
+      }
+    }
     if (!rc) {
       std::cout << "[smoke] team assets: OK (A sent " << a.team().assets_sent() << ", B fetched "
-                << b.team().assets_fetched() << ", A fetched " << a.team().assets_fetched() << ")\n";
+                << b.team().assets_fetched() << ", A fetched " << a.team().assets_fetched()
+                << ", B removed " << b.team().assets_removed() << "; slow Vault, worst frame "
+                << static_cast<int>(worst_ms) << " ms)\n";
     }
     b.team().leave();
     a.team().leave();

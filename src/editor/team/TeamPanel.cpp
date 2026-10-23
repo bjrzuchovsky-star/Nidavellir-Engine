@@ -149,9 +149,25 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
     ImGui::Text("Edits: %llu sent, seq %llu", static_cast<unsigned long long>(t.batches_sent()),
                 static_cast<unsigned long long>(c.seq()));
     if (t.has_asset_backend()) {
-      ImGui::Text("Files via the Vault: %llu sent, %llu fetched",
+      ImGui::Text("Files via the Vault: %llu sent, %llu fetched, %llu removed",
                   static_cast<unsigned long long>(t.assets_sent()),
-                  static_cast<unsigned long long>(t.assets_fetched()));
+                  static_cast<unsigned long long>(t.assets_fetched()),
+                  static_cast<unsigned long long>(t.assets_removed()));
+      const TeamAssetProgress p = t.asset_progress();
+      if (p.running && p.files_total > 0) {
+        // Freight on the trail: the editor keeps working while it moves.
+        const float frac = p.bytes_total ? static_cast<float>(static_cast<double>(p.bytes_done) /
+                                                              static_cast<double>(p.bytes_total))
+                                         : static_cast<float>(p.files_done) / static_cast<float>(p.files_total);
+        char over[96];
+        std::snprintf(over, sizeof(over), "%d / %d files, %.1f / %.1f MB", p.files_done, p.files_total,
+                      static_cast<double>(p.bytes_done) / 1048576.0,
+                      static_cast<double>(p.bytes_total) / 1048576.0);
+        ImGui::ProgressBar(frac, ImVec2(-1, 0), over);
+        ImGui::TextDisabled("%s %s", p.stage.c_str(), p.current.c_str());
+      } else if (p.running) {
+        ImGui::TextDisabled("Checking the freight%s%s", p.current.empty() ? "" : ": ", p.current.c_str());
+      }
     }
     ImGui::Spacing();
     theme::SectionHeader("Posse");
@@ -239,6 +255,12 @@ void draw_status_chip(TeamSession* t) {
   ImGui::SameLine();
   ImGui::TextColored(colour_vec(t->client().my_colour()), "Posse of %zu",
                      t->client().members().size() + 1);
+  const TeamAssetProgress p = t->asset_progress();
+  if (p.running && p.files_total > 0) {
+    ImGui::SameLine();
+    ImGui::TextDisabled("| freight %d/%d", p.files_done, p.files_total);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s %s", p.stage.c_str(), p.current.c_str());
+  }
 }
 
 }  // namespace team_ui
