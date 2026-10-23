@@ -745,6 +745,106 @@ int check_3d() {
   return 0;
 }
 
+// ---- Persistent sessions: server restart, riding back in, editor restart ----
+
+int check_persist() {
+  const fs::path state = fs::absolute(fs::path("TombStoneProjects") / "_team_state");
+  std::error_code ec;
+  fs::remove_all(state, ec);
+  tc::TeamServer server;
+  tc::ServerOptions so;
+  so.port = 0;
+  so.state_dir = state.string();
+  so.save_delay_s = 0.2;
+  so.check_key = [](const std::string& key, std::string* name, bool* can_write) {
+    if (key == "tsv_annie") *name = "Annie";
+    else if (key == "tsv_wyatt") *name = "Wyatt";
+    else return false;
+    *can_write = true;
+    return true;
+  };
+  std::string err;
+  if (!server.start(so, &err)) return fail("persist server start: " + err);
+  so.port = server.port();  // the restart comes back on the same port
+
+  ed::Editor2DScreen a(fresh("_team_persist_a", ed::ProjectKind::TwoD));
+  ed::Editor2DScreen b(fresh("_team_persist_b", ed::ProjectKind::TwoD));
+  a.on_enter();
+  b.on_enter();
+  std::vector<Tick> ticks = {[&](float) { server.poll(); }, [&](float dt) { a.tick_team(dt); },
+                             [&](float dt) { b.tick_team(dt); }};
+  ed::TeamJoinSettings j;
+  j.port = so.port;
+  j.key = "tsv_annie";
+  j.claim = "_team_persist_claim";
+  if (!a.team().join(j, &err) || !pump(ticks, [&] { return a.team().joined(); }, 5)) return fail("persist A join");
+  j.key = "tsv_wyatt";
+  if (!b.team().join(j, &err) || !pump(ticks, [&] { return b.team().joined(); }, 5)) return fail("persist B join");
+  auto converged = [&] {
+    const tc::Docs* d = server.docs("_team_persist_claim");
+    if (!d || !d->count("scene.json")) return false;
+    const std::string truth = d->at("scene.json").canonical();
+    return a.team().joined() && b.team().joined() && a.team().client().idle() && b.team().client().idle() &&
+           doc_of(a.team()) == truth && doc_of(b.team()) == truth;
+  };
+  const std::uint64_t wagon = a.create_entity("Wagon");
+  if (!pump(ticks, converged, 5)) return fail("persist: first edit");
+  if (!pump(ticks, [&] { return server.saves() > 0 && fs::exists(state / "_team_persist_claim.team.json"); }, 3)) {
+    return fail("session saved to the state dir");
+  }
+  const std::uint32_t a_id = a.team().client().me(), b_id = b.team().client().me();
+
+  // The server goes down. Both editors keep working.
+  server.stop();
+  if (!pump(ticks, [&] { return a.team().reconnecting() && b.team().reconnecting(); }, 5)) {
+    return fail("editors notice the lost server and ride back in");
+  }
+  a.workspace().find(wagon)->x += 50.0f;  // offline edit (no undo step needed)
+  const float wagon_x = a.workspace().find(wagon)->x;
+  const std::uint64_t fire = b.create_entity("Campfire");
+  settle(ticks, 0.5);
+
+  // Back up from its state dir: same claim, same seq, riders come back.
+  if (!server.start(so, &err)) return fail("persist server restart: " + err);
+  if (server.sessions().empty() || server.sessions().at(0).seq == 0) return fail("session loaded from disk");
+  if (!pump(ticks, [&] { return converged() && a.team().rejoins() == 1 && b.team().rejoins() == 1; }, 25)) {
+    return fail("both rode back in and converged");
+  }
+  if (a.team().client().me() != a_id || b.team().client().me() != b_id) return fail("same riders after the restart");
+  if (!a.team().client().rode_back() || !b.team().client().rode_back()) return fail("server knew the rejoin tokens");
+  if (!a.workspace().find(fire) || !b.workspace().find(wagon) || b.workspace().find(wagon)->x != wagon_x) {
+    return fail("offline edits from both sides survived");
+  }
+  std::cout << "[smoke] team: server restart + ride back in OK (tries A " << a.team().reconnect_tries() << ", B "
+            << b.team().reconnect_tries() << ")\n";
+
+  // Editor restart: A leaves, a fresh editor on the same project rides
+  // back in from .tombstone/team/last.json as the same rider.
+  const ed::ProjectInfo pa = a.team().project();
+  a.team().leave();
+  if (!pump(ticks, [&] { return !b.team().client().member(a_id); }, 5)) return fail("A rode off");
+  ticks[1] = [](float) {};
+  ed::Editor2DScreen a2(pa);
+  a2.on_enter();
+  ticks.push_back([&](float dt) { a2.tick_team(dt); });
+  if (!a2.team().has_last_ride() || a2.team().last_ride_hosted()) return fail("last ride remembered");
+  ed::TeamJoinSettings j2;
+  j2.host = a2.team().ui.host_addr;
+  j2.port = static_cast<std::uint16_t>(a2.team().ui.join_port);
+  j2.user = a2.team().ui.user;
+  j2.key = "tsv_annie";  // never saved: typed again
+  j2.claim = "_team_persist_claim";
+  if (!a2.team().join(j2, &err) || !pump(ticks, [&] { return a2.team().joined(); }, 5)) {
+    return fail("restarted editor rides back in");
+  }
+  if (a2.team().client().me() != a_id || !a2.team().client().rode_back()) return fail("same rider after an editor restart");
+  b.team().leave();
+  a2.team().leave();
+  server.stop();
+  std::cout << "[smoke] team: editor restart rides back in as member " << a_id << " OK\n";
+  return 0;
+}
+
 }  // namespace
 
 namespace ts {
@@ -755,6 +855,7 @@ int run_team_smoke() {
   int rc = check_2d();
   if (rc == 0) rc = check_assets();
   if (rc == 0) rc = check_3d();
+  if (rc == 0) rc = check_persist();
   net::net_shutdown();
   if (rc == 0) std::cout << "[smoke] team (Live Team Claims): OK\n";
   return rc;

@@ -278,6 +278,8 @@ int main(int argc, char** argv) {
     to.check_key = key_check(store);
     to.engine = TS_ENGINE_VERSION;
     to.log = log_line;
+    // Sessions survive a restart: kept in the Vault beside the items.
+    to.state_dir = (fs::absolute(root) / "team").string();
     if (!team_server.start(to, &err)) {
       std::cerr << "ts_vault: team sessions: " << err << '\n';
       return 1;

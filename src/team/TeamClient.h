@@ -36,6 +36,7 @@ struct JoinOptions {
   std::string dim;         // "2d" / "3d" / "vr"
   std::string scene;       // the scene this editor has open
   Docs seed;               // used only if the session is new
+  std::string rejoin;      // token from an earlier welcome: ride back in as yourself
   std::function<std::unique_ptr<net::Transport>(std::unique_ptr<net::Transport>)> wrap_transport;
 };
 
@@ -86,6 +87,9 @@ class TeamClient {
   std::uint64_t id_hi() const { return id_hi_; }
   const JoinOptions& options() const { return opt_; }
   const Value& session() const { return session_; }
+  // From the welcome: hand back as JoinOptions::rejoin next time.
+  const std::string& rejoin_token() const { return rejoin_token_; }
+  bool rode_back() const { return rode_back_; }  // the server knew our token
 
   // Server state up to seq() (what everyone converges to).
   const Docs& confirmed() const { return confirmed_; }
@@ -143,6 +147,8 @@ class TeamClient {
   bool can_write_ = true;
   std::uint64_t id_lo_ = 0, id_hi_ = 0;
   Value session_;
+  std::string rejoin_token_;
+  bool rode_back_ = false;
   Docs confirmed_;
   std::uint64_t seq_ = 0;
   bool welcome_pending_ = false;

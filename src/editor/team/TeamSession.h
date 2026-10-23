@@ -163,6 +163,16 @@ class TeamSession {
   void take_over(const std::vector<std::uint64_t>& ids);
   // Selected entities someone else holds (for the Take over button).
   std::vector<std::uint64_t> selection_held_by_others() const;
+  // Riding back in (docs/team-claims.md, 3.8): a lost connection retries
+  // with backoff (1, 2, 4 .. 15 s) as the same rider; edits made while away
+  // go up once the session answers. Leave() stops it.
+  bool reconnecting() const { return reconnecting_; }
+  int reconnect_tries() const { return reconnect_tries_; }
+  std::uint64_t rejoins() const { return rejoins_; }
+  // The last ride on this project (.tombstone/team/last.json, no keys or
+  // passcodes): prefilled into the panel for "Ride back in".
+  bool has_last_ride() const { return has_last_ride_; }
+  bool last_ride_hosted() const { return last_ride_host_; }
   std::uint64_t remote_applied() const { return remote_applied_; }
   std::uint64_t batches_sent() const { return sent_; }
 
@@ -171,6 +181,12 @@ class TeamSession {
  private:
   team::JoinOptions base_join() const;
   void send_presence(bool force);
+  void start_reconnect();
+  void tick_reconnect(double dt);
+  void rode_back_in(const team::Docs& docs);
+  void save_last_ride() const;
+  void load_last_ride();
+  std::string team_dir() const;
 
   std::unique_ptr<TeamBinding> binding_;
   ProjectInfo project_;
@@ -207,6 +223,18 @@ class TeamSession {
   std::map<std::uint64_t, RemotePreview> remote_preview_;
   std::map<std::uint32_t, std::uint64_t> preview_closed_;  // member -> last ended preview n
   std::uint64_t previews_sent_ = 0, previews_shown_ = 0;
+  // Riding back in.
+  team::JoinOptions last_join_;
+  bool last_join_host_ = false;
+  bool was_joined_ = false;
+  bool reconnecting_ = false;
+  bool rejoin_pending_ = false;  // the next welcome is a ride back in
+  team::SceneDoc rejoin_base_;   // the session as we last knew it
+  double reconnect_clock_ = 0.0, reconnect_wait_ = 1.0;
+  int reconnect_tries_ = 0;
+  std::uint64_t rejoins_ = 0;
+  std::string saved_rejoin_;     // token from last.json (editor restart)
+  bool has_last_ride_ = false, last_ride_host_ = false;
   TeamAssetSync asset_sync_;  // last member: joined before the rest go
 };
 

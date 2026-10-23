@@ -35,6 +35,14 @@ double TeamClient::now() const {
 
 bool TeamClient::join(const JoinOptions& opt, std::string* error) {
   leave();
+  // A fresh ride: nothing from an earlier (lost) connection carries over.
+  pending_.clear();
+  apply_.clear();
+  previews_.clear();
+  members_.clear();
+  locks_.clear();
+  welcome_pending_ = false;
+  rode_back_ = false;
   opt_ = opt;
   error_.clear();
   warn_.clear();
@@ -110,6 +118,7 @@ void TeamClient::poll() {
         h.set("user", str(opt_.user));
         if (!opt_.key.empty()) h.set("key", str(opt_.key));
         if (!opt_.pass.empty()) h.set("pass", str(opt_.pass));
+        if (!opt_.rejoin.empty()) h.set("rejoin", str(opt_.rejoin));
         h.set("engine", str(opt_.engine));
         Value f = Value::object();
         f.set("scene2d", num(opt_.scene2d));
@@ -165,6 +174,8 @@ void TeamClient::on_message(const Value& msg) {
     id_lo_ = id_of(msg["ids"]["lo"]);
     id_hi_ = id_of(msg["ids"]["hi"]);
     session_ = msg["session"];
+    rejoin_token_ = msg.str("rejoin");
+    rode_back_ = msg.flag("back", false);
     warn_ = msg.str("warn");
     docs_from_json(msg["docs"], &confirmed_);
     seq_ = static_cast<std::uint64_t>(msg.num("snap_seq", 0));

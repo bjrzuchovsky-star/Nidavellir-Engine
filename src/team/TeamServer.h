@@ -41,6 +41,13 @@ struct ServerOptions {
   std::size_t compact_every = 256; // commits kept after the snapshot
   std::uint64_t id_block = 1ull << 20;
   std::function<void(const std::string&)> log;
+  // Persistent sessions: each claim's session (docs, seq, id grants,
+  // riders' rejoin tokens) is written to <state_dir>/<claim>.team.json a
+  // moment after it changes and on stop(), and loaded again by start().
+  // "" = memory only. ts_vault: <vault root>/team; editor host:
+  // <project>/.tombstone/team/host.
+  std::string state_dir;
+  double save_delay_s = 1.0;
   // Tests: wrap the transport (net::SimTransport for latency).
   std::function<std::unique_ptr<net::Transport>(std::unique_ptr<net::Transport>)> wrap_transport;
 };
@@ -87,6 +94,9 @@ class TeamServer {
   // JSON for GET /api/v1/team (no docs, no keys).
   Value info_json() const;
   std::uint64_t commits() const { return total_commits_; }
+  std::uint64_t saves() const { return total_saves_; }
+  // Write every changed session now (stop() does this too).
+  void save_all();
   std::uint64_t rejects() const { return total_rejects_; }
 
   // Palette the members are coloured from (Dusk).
@@ -117,7 +127,20 @@ class TeamServer {
     std::map<std::string, double> lock_used;     // key -> last grant / edit / drag
     std::uint64_t next_grant = 0;
     int colour_next = 0;
+    // Riders who may come back as themselves: token -> who they were.
+    struct Rider {
+      std::uint32_t id = 0;
+      std::string name, colour;
+      double last = 0.0;  // ordering only (most recent kept)
+    };
+    std::map<std::string, Rider> riders;
+    bool dirty = false;
+    double dirty_at = 0.0;
   };
+  void mark_dirty(Session& s);
+  void save_session(Session& s);
+  void load_sessions();
+  std::string new_token();
 
   double now() const;
   void log(const std::string& s) const;
@@ -146,6 +169,8 @@ class TeamServer {
   std::uint32_t next_member_ = 1;
   std::uint64_t total_commits_ = 0;
   std::uint64_t total_rejects_ = 0;
+  std::uint64_t total_saves_ = 0;
+  std::uint64_t token_salt_ = 0;
   std::chrono::steady_clock::time_point t0_;
 };
 

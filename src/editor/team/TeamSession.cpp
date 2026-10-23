@@ -6,6 +6,9 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 
 #ifndef TS_ENGINE_VERSION
 #define TS_ENGINE_VERSION "0.0.0"
@@ -25,7 +28,56 @@ const char* dim_of(const ProjectInfo& p) {
 }  // namespace
 
 TeamSession::TeamSession(std::unique_ptr<TeamBinding> binding, ProjectInfo project)
-    : binding_(std::move(binding)), project_(std::move(project)) {}
+    : binding_(std::move(binding)), project_(std::move(project)) {
+  load_last_ride();
+}
+
+std::string TeamSession::team_dir() const {
+  if (project_.path.empty()) return {};
+  return (std::filesystem::u8path(project_.path) / ".tombstone" / "team").string();
+}
+
+void TeamSession::save_last_ride() const {
+  const std::string dir = team_dir();
+  if (dir.empty()) return;
+  std::error_code ec;
+  std::filesystem::create_directories(std::filesystem::u8path(dir), ec);
+  team::Value o = team::Value::object();
+  o.set("mode", team::Value::string(last_join_host_ ? "host" : "join"));
+  o.set("host", team::Value::string(last_join_.host));
+  o.set("port", team::Value::number(last_join_host_ && server_ ? server_->port() : last_join_.port));
+  o.set("user", team::Value::string(last_join_.user));
+  o.set("claim", team::Value::string(client_.session().str("claim", last_join_.claim)));
+  o.set("vault_url", team::Value::string(ui.vault_url));
+  o.set("rejoin", team::Value::string(client_.rejoin_token()));
+  std::ofstream f(std::filesystem::u8path(dir) / "last.json", std::ios::binary | std::ios::trunc);
+  f << team::write_compact(o);
+}
+
+void TeamSession::load_last_ride() {
+  const std::string dir = team_dir();
+  if (dir.empty()) return;
+  std::ifstream f(std::filesystem::u8path(dir) / "last.json", std::ios::binary);
+  if (!f) return;
+  std::stringstream ss;
+  ss << f.rdbuf();
+  team::Value o;
+  std::string err;
+  if (!json::parse(ss.str(), &o, &err) || !o.is_object()) return;
+  has_last_ride_ = true;
+  last_ride_host_ = o.str("mode") == "host";
+  saved_rejoin_ = o.str("rejoin");
+  auto copy = [](char* dst, std::size_t n, const std::string& v) {
+    std::snprintf(dst, n, "%s", v.c_str());
+  };
+  ui.mode = last_ride_host_ ? 1 : 0;
+  const int port = static_cast<int>(o.num("port", kDefaultPort));
+  if (last_ride_host_) ui.host_port = port;
+  else ui.join_port = port;
+  if (!last_ride_host_) copy(ui.host_addr, sizeof(ui.host_addr), o.str("host", "127.0.0.1"));
+  copy(ui.user, sizeof(ui.user), o.str("user"));
+  copy(ui.vault_url, sizeof(ui.vault_url), o.str("vault_url"));
+}
 
 TeamSession::~TeamSession() { leave(); }
 
@@ -49,6 +101,8 @@ bool TeamSession::host(const TeamHostSettings& s, std::string* error) {
   so.only_claim = project_.id;
   so.passcode = s.pass;
   so.engine = TS_ENGINE_VERSION;
+  // The claim's session outlives the editor: it is kept beside the project.
+  if (!team_dir().empty()) so.state_dir = (std::filesystem::u8path(team_dir()) / "host").string();
   if (!server_->start(so, error)) {
     server_.reset();
     return false;
@@ -59,10 +113,13 @@ bool TeamSession::host(const TeamHostSettings& s, std::string* error) {
   o.user = s.user;
   o.pass = s.pass;
   o.seed[binding_->scene_key()] = binding_->capture();
+  o.rejoin = saved_rejoin_;
   loaded_ = false;
   if (!s.vault_url.empty()) {
     assets_ = std::make_shared<vault::RemoteBackend>(s.vault_url, s.vault_key);
   }
+  last_join_ = o;
+  last_join_host_ = true;
   if (!client_.join(o, error)) {
     server_.reset();
     return false;
@@ -83,11 +140,17 @@ bool TeamSession::join(const TeamJoinSettings& s, std::string* error) {
   if (!s.vault_url.empty()) assets_ = std::make_shared<vault::RemoteBackend>(s.vault_url, s.key);
   // Seeds a session only if nobody is riding this claim yet (ts_vault).
   if (o.claim != "*") o.seed[binding_->scene_key()] = binding_->capture();
+  o.rejoin = saved_rejoin_;
   loaded_ = false;
+  last_join_ = o;
+  last_join_host_ = false;
   return client_.join(o, error);
 }
 
 void TeamSession::leave() {
+  was_joined_ = false;
+  reconnecting_ = false;
+  rejoin_pending_ = false;
   asset_sync_.cancel_and_wait();
   client_.leave();
   if (server_) {
@@ -114,6 +177,9 @@ void TeamSession::leave() {
 }
 
 void TeamSession::drop_now() {
+  was_joined_ = false;
+  reconnecting_ = false;
+  rejoin_pending_ = false;
   asset_sync_.cancel_and_wait();
   client_.drop_now();
   binding_->set_id_range(0, 0);
@@ -122,7 +188,89 @@ void TeamSession::drop_now() {
 }
 
 bool TeamSession::active() const {
-  return client_.state() == team::TeamClient::State::Connecting || client_.joined();
+  return client_.state() == team::TeamClient::State::Connecting || client_.joined() || reconnecting_;
+}
+
+void TeamSession::start_reconnect() {
+  reconnecting_ = true;
+  rejoin_pending_ = true;
+  reconnect_clock_ = 0.0;
+  reconnect_wait_ = 1.0;
+  reconnect_tries_ = 0;
+  auto it = client_.confirmed().find(binding_->scene_key());
+  rejoin_base_ = it == client_.confirmed().end() ? team::SceneDoc{} : it->second;
+  // Ride back in to the claim we were on, as ourselves.
+  last_join_.claim = client_.session().str("claim", last_join_.claim);
+  last_join_.rejoin = client_.rejoin_token();
+  asset_sync_.cancel_and_wait();
+  if (!remote_preview_.empty()) {
+    std::vector<std::uint64_t> ids;
+    for (const auto& [id, p] : remote_preview_) ids.push_back(id);
+    binding_->end_preview(ids);
+  }
+  remote_preview_.clear();
+  preview_closed_.clear();
+  my_preview_ids_.clear();
+  last_preview_.clear();
+  held_.clear();
+  loaded_ = false;
+  notes_.push_back("Lost the trail to the posse. Riding back in; keep working, your edits will follow.");
+}
+
+void TeamSession::tick_reconnect(double dt) {
+  using S = team::TeamClient::State;
+  if (client_.state() == S::Refused) {
+    reconnecting_ = false;
+    rejoin_pending_ = false;
+    notes_.push_back("Couldn't ride back in: " + client_.error());
+    return;
+  }
+  if (client_.state() == S::Connecting) return;
+  reconnect_clock_ += dt;
+  if (reconnect_clock_ < reconnect_wait_) return;
+  reconnect_clock_ = 0.0;
+  reconnect_wait_ = std::min(reconnect_wait_ * 2.0, 15.0);
+  ++reconnect_tries_;
+  team::JoinOptions o = last_join_;
+  o.seed.clear();
+  // If the host lost the claim (restarted without its state), ours seeds it.
+  o.seed[binding_->scene_key()] = binding_->capture();
+  std::string err;
+  client_.join(o, &err);
+}
+
+void TeamSession::rode_back_in(const team::Docs& docs) {
+  const std::string scene = binding_->scene_key();
+  auto strip = [](team::SceneDoc d) {
+    d.assets.clear();  // files sync on their own
+    return d;
+  };
+  const team::SceneDoc base = strip(rejoin_base_);
+  auto it = docs.find(scene);
+  const team::SceneDoc server = strip(it == docs.end() ? team::SceneDoc{} : it->second);
+  const team::SceneDoc live = strip(binding_->capture());
+  // Ours: everything not confirmed when the line went dead (sent but
+  // unanswered, and edits made while away). Theirs: what the posse did.
+  const std::vector<team::Op> mine = team::diff(base, live);
+  const std::vector<team::Op> theirs = team::diff(base, server);
+  std::string label;
+  binding_->take_local_ops(&label);  // the shadow is the live scene now
+  if (!theirs.empty()) {
+    binding_->apply(theirs);
+    if (!mine.empty()) binding_->apply(mine);  // ours land on top, as they will on the server
+  }
+  if (!mine.empty()) {
+    if (client_.can_write()) {
+      client_.submit(scene, "Edits while away", mine);
+      ++sent_;
+    } else {
+      resync_clock_ = 1e9;
+    }
+  }
+  ++rejoins_;
+  notes_.push_back(std::string(client_.rode_back() ? "Rode back in as " : "Rode back in (as a new rider) as ") +
+                   client_.my_name() + ": " + std::to_string(mine.size()) + " change(s) from while you were away, " +
+                   std::to_string(theirs.size()) + " from the posse.");
 }
 
 void TeamSession::set_cursor(float x, float y, float z, bool valid) {
@@ -157,6 +305,10 @@ std::vector<std::string> TeamSession::take_notes() {
 
 std::string TeamSession::status_line() const {
   using S = team::TeamClient::State;
+  if (reconnecting_) {
+    return "Lost the trail: riding back in" +
+           (reconnect_tries_ ? " (try " + std::to_string(reconnect_tries_) + ")" : std::string()) + "...";
+  }
   switch (client_.state()) {
     case S::Idle: return "Riding solo";
     case S::Connecting: return "Riding out to " + client_.options().host + "...";
@@ -188,19 +340,35 @@ void TeamSession::tick(double dt) {
   if (server_) server_->poll();
   client_.poll();
   if (!client_.joined()) {
+    // Lost (not left, not refused): ride back in. The host's own editor
+    // never loses its in-process server, so only joiners retry.
+    if (was_joined_ && !server_ && client_.state() == team::TeamClient::State::Closed) start_reconnect();
+    was_joined_ = false;
+    if (reconnecting_) tick_reconnect(dt);
     if (server_ && !active()) {
       server_->stop();
       server_.reset();
     }
     return;
   }
+  was_joined_ = true;
   const std::string scene = binding_->scene_key();
 
   team::Docs docs;
   if (client_.take_welcome(&docs)) {
     binding_->set_id_range(client_.id_lo(), client_.id_hi());
     auto it = docs.find(scene);
-    if (it != docs.end()) {
+    if (rejoin_pending_) {
+      rejoin_pending_ = false;
+      reconnecting_ = false;
+      rode_back_in(docs);
+      loaded_ = true;
+      held_.clear();
+      first_asset_pass_ = false;  // ours changed while away: compare, don't overwrite
+      asset_clock_ = 2.0;
+      save_last_ride();
+      send_presence(true);
+    } else if (it != docs.end()) {
       binding_->load(it->second);
     } else {
       // Session without this scene yet: ours becomes it.
@@ -209,13 +377,18 @@ void TeamSession::tick(double dt) {
       const team::SceneDoc mine = binding_->capture();
       client_.submit(scene, "Seed " + scene, team::diff(team::SceneDoc{}, mine));
     }
-    loaded_ = true;
-    held_.clear();
-    first_asset_pass_ = true;
-    asset_clock_ = 2.0;  // first file pass on the next tick
-    notes_.push_back(client_.session().str("claim_name", "the claim") + ": you ride as " +
-                     client_.my_name() + ".");
-    send_presence(true);
+    if (loaded_) {
+      // (rode back in above)
+    } else {
+      loaded_ = true;
+      held_.clear();
+      first_asset_pass_ = true;
+      asset_clock_ = 2.0;  // first file pass on the next tick
+      notes_.push_back(client_.session().str("claim_name", "the claim") + ": you ride as " +
+                       client_.my_name() + (client_.rode_back() ? " (welcome back)." : "."));
+      save_last_ride();
+      send_presence(true);
+    }
   }
   if (!loaded_) return;
 

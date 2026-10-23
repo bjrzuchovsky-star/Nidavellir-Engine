@@ -128,7 +128,9 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
       ImGui::TextDisabled("ts_vault --team: use your Vault key. LAN host: the passcode, if any.");
       ImGui::TextDisabled("With a Vault URL, files under assets/ travel by SHA-256.");
       ImGui::TextDisabled("Joining swaps this claim's scene for the posse's.");
-      if (ImGui::Button("Ride out (Join)")) join_now(t);
+      const bool back = t.has_last_ride() && !t.last_ride_hosted();
+      if (back) ImGui::TextDisabled("Filled in from your last ride (keys and passcodes are never saved).");
+      if (ImGui::Button(back ? "Ride back in (Join)" : "Ride out (Join)")) join_now(t);
     } else {
       ImGui::InputInt("Port (UDP)", &t.ui.host_port);
       ImGui::InputText("Passcode (optional)", t.ui.pass, sizeof(t.ui.pass),
@@ -136,7 +138,9 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
       ImGui::InputText("Vault URL (files)", t.ui.vault_url, sizeof(t.ui.vault_url));
       ImGui::InputText("Vault API key", t.ui.key, sizeof(t.ui.key), ImGuiInputTextFlags_Password);
       ImGui::TextDisabled("Others join with this PC's address and the port.");
-      if (ImGui::Button("Open the claim (Host)")) host_now(t);
+      ImGui::TextDisabled("The session is kept in .tombstone/team/host: hosting again picks it up.");
+      const bool back = t.has_last_ride() && t.last_ride_hosted();
+      if (ImGui::Button(back ? "Open the claim again (Host)" : "Open the claim (Host)")) host_now(t);
     }
     ImGui::End();
     return;

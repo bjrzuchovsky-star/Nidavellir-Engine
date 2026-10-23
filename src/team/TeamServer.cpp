@@ -1,7 +1,11 @@
 #include "team/TeamServer.h"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <random>
 #include <set>
+#include <sstream>
 
 namespace ts {
 namespace tombstone {
@@ -15,6 +19,18 @@ const std::vector<std::string> kPalette = {"#e8833a", "#8fb573", "#6f93c4", "#d4
 
 Value str(const std::string& s) { return Value::string(s); }
 Value num(double d) { return Value::number(d); }
+
+// A claim id as a file name (ids are GUID-ish; anything odd becomes _).
+std::string file_of(const std::string& claim) {
+  std::string out;
+  for (char c : claim) {
+    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' ||
+                    c == '_' || c == '.';
+    out.push_back(ok ? c : '_');
+  }
+  if (out.empty() || out[0] == '.') out = "_" + out;
+  return out + ".team.json";
+}
 
 }  // namespace
 
@@ -49,11 +65,134 @@ bool TeamServer::start(const ServerOptions& opt, std::string* error) {
   if (!t->listen(opt_.port, opt_.max_peers, error)) return false;
   transport_ = std::move(t);
   log("listening on UDP " + std::to_string(transport_->port()));
+  load_sessions();
   return true;
+}
+
+// ---- Persistence ----
+
+std::string TeamServer::new_token() {
+  std::random_device rd;
+  std::mt19937_64 rng((static_cast<std::uint64_t>(rd()) << 32) ^ rd() ^ ++token_salt_ ^
+                      static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count()));
+  char buf[40];
+  std::snprintf(buf, sizeof(buf), "%016llx%016llx", static_cast<unsigned long long>(rng()),
+                static_cast<unsigned long long>(rng()));
+  return buf;
+}
+
+void TeamServer::mark_dirty(Session& s) {
+  if (opt_.state_dir.empty()) return;
+  if (!s.dirty) s.dirty_at = now();
+  s.dirty = true;
+}
+
+void TeamServer::save_session(Session& s) {
+  s.dirty = false;
+  if (opt_.state_dir.empty()) return;
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  fs::create_directories(fs::u8path(opt_.state_dir), ec);
+  Value o = Value::object();
+  o.set("format", num(1));
+  o.set("proto", num(kProtocolVersion));
+  o.set("claim", str(s.claim));
+  o.set("claim_name", str(s.claim_name));
+  o.set("engine", str(s.engine));
+  o.set("dim", str(s.dim));
+  Value formats = Value::object();
+  formats.set("scene2d", num(s.scene2d));
+  formats.set("scene3d", num(s.scene3d));
+  o.set("formats", std::move(formats));
+  o.set("seq", num(static_cast<double>(s.seq)));
+  o.set("next_grant", id_value(s.next_grant));
+  o.set("colour_next", num(s.colour_next));
+  Value riders = Value::object();
+  for (const auto& [tok, r] : s.riders) {
+    Value rv = Value::object();
+    rv.set("id", num(r.id));
+    rv.set("name", str(r.name));
+    rv.set("colour", str(r.colour));
+    riders.set(tok, std::move(rv));
+  }
+  o.set("riders", std::move(riders));
+  o.set("docs", docs_to_json(s.docs));
+  const fs::path dest = fs::u8path(opt_.state_dir) / file_of(s.claim);
+  const fs::path tmp = dest.string() + ".tmp";
+  {
+    std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+    if (!f) {
+      log("could not save session '" + s.claim + "' to " + dest.string());
+      return;
+    }
+    f << write_compact(o);
+  }
+  fs::rename(tmp, dest, ec);
+  if (ec) {
+    fs::remove(dest, ec);
+    fs::rename(tmp, dest, ec);
+  }
+  ++total_saves_;
+}
+
+void TeamServer::save_all() {
+  for (auto& [claim, s] : sessions_) {
+    if (s.dirty) save_session(s);
+  }
+}
+
+void TeamServer::load_sessions() {
+  if (opt_.state_dir.empty()) return;
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  if (!fs::is_directory(fs::u8path(opt_.state_dir), ec)) return;
+  for (const auto& entry : fs::directory_iterator(fs::u8path(opt_.state_dir), ec)) {
+    const std::string name = entry.path().filename().string();
+    if (name.size() < 10 || name.substr(name.size() - 10) != ".team.json") continue;
+    std::ifstream f(entry.path(), std::ios::binary);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    Value o;
+    std::string err;
+    if (!json::parse(ss.str(), &o, &err) || !o.is_object()) {
+      log("skipping unreadable session file " + name + ": " + err);
+      continue;
+    }
+    Session s;
+    s.claim = o.str("claim");
+    if (s.claim.empty()) continue;
+    if (!opt_.only_claim.empty() && s.claim != opt_.only_claim) continue;
+    s.claim_name = o.str("claim_name", s.claim);
+    s.engine = o.str("engine");
+    s.dim = o.str("dim");
+    s.scene2d = static_cast<int>(o["formats"].num("scene2d", 0));
+    s.scene3d = static_cast<int>(o["formats"].num("scene3d", 0));
+    if (!docs_from_json(o["docs"], &s.docs)) {
+      log("skipping session file " + name + ": bad docs");
+      continue;
+    }
+    s.snap_docs = s.docs;
+    s.seq = static_cast<std::uint64_t>(o.num("seq", 0));
+    s.snap_seq = s.seq;
+    s.next_grant = id_of(o["next_grant"]);
+    s.colour_next = static_cast<int>(o.num("colour_next", 0));
+    for (const auto& [tok, rv] : o["riders"].members()) {
+      Session::Rider r;
+      r.id = static_cast<std::uint32_t>(rv.num("id", 0));
+      r.name = rv.str("name");
+      r.colour = rv.str("colour");
+      if (!r.id) continue;
+      next_member_ = std::max(next_member_, r.id + 1);
+      s.riders[tok] = std::move(r);
+    }
+    log("session for claim '" + s.claim + "' loaded (seq " + std::to_string(s.seq) + ")");
+    sessions_[s.claim] = std::move(s);
+  }
 }
 
 void TeamServer::stop() {
   if (!transport_) return;
+  save_all();
   for (auto& [peer, m] : members_) transport_->disconnect(peer, 0);
   transport_->flush();
   transport_->close();
@@ -139,6 +278,9 @@ void TeamServer::poll() {
   for (net::PeerId p : drop) {
     transport_->disconnect(p, 0);
     on_gone(p);
+  }
+  for (auto& [claim, s] : sessions_) {
+    if (s.dirty && t - s.dirty_at >= opt_.save_delay_s) save_session(s);
   }
   transport_->flush();
 }
@@ -241,10 +383,43 @@ void TeamServer::on_hello(Member& m, const Value& msg) {
     }
   }
   Session& s = it->second;
-  m.id = next_member_++;
+  // Riding back in (lost connection, editor or server restart): same
+  // member id and colour when the token is known and nobody has the id.
+  std::string token = msg.str("rejoin");
+  const Session::Rider* back = nullptr;
+  if (!token.empty()) {
+    auto rit = s.riders.find(token);
+    if (rit != s.riders.end()) {
+      bool taken = false;
+      for (const auto& [p, o] : members_) taken |= o.joined && o.id == rit->second.id;
+      if (!taken) back = &rit->second;
+    }
+  }
+  if (back) {
+    m.id = back->id;
+    m.colour = back->colour;
+  } else {
+    token = new_token();
+    m.id = next_member_++;
+    m.colour = kPalette[static_cast<std::size_t>(s.colour_next++) % kPalette.size()];
+  }
   m.claim = claim;
-  m.name = name.empty() ? "Rider " + std::to_string(m.id) : name;
-  m.colour = kPalette[static_cast<std::size_t>(s.colour_next++) % kPalette.size()];
+  m.name = name.empty() ? (back && !back->name.empty() ? back->name : "Rider " + std::to_string(m.id)) : name;
+  {
+    Session::Rider& r = s.riders[token];
+    r.id = m.id;
+    r.name = m.name;
+    r.colour = m.colour;
+    r.last = now();
+    // Keep the 64 most recent riders.
+    while (s.riders.size() > 64) {
+      auto oldest = s.riders.begin();
+      for (auto i = s.riders.begin(); i != s.riders.end(); ++i) {
+        if (i->second.last < oldest->second.last) oldest = i;
+      }
+      s.riders.erase(oldest);
+    }
+  }
   m.can_write = can_write;
   m.scene = msg.str("scene");
   m.joined = true;
@@ -256,10 +431,13 @@ void TeamServer::on_hello(Member& m, const Value& msg) {
   std::uint64_t lo = (max_id / block + 1) * block;
   lo = std::max(lo, s.next_grant);
   s.next_grant = lo + block;
+  mark_dirty(s);
 
   Value w = Value::object();
   w.set("t", str("welcome"));
   w.set("member", num(m.id));
+  w.set("rejoin", str(token));
+  if (back) w.set("back", Value::boolean(true));
   w.set("name", str(m.name));
   w.set("colour", str(m.colour));
   w.set("can_write", Value::boolean(m.can_write));
@@ -298,7 +476,7 @@ void TeamServer::on_hello(Member& m, const Value& msg) {
   j.set("t", str("member"));
   j.set("m", member_json(m));
   broadcast(s, j, m.id);
-  log(m.name + " rode in to '" + claim + "' (member " + std::to_string(m.id) + ")");
+  log(m.name + (back ? " rode back in to '" : " rode in to '") + claim + "' (member " + std::to_string(m.id) + ")");
 }
 
 void TeamServer::on_op(Member& m, const Value& msg) {
@@ -340,6 +518,7 @@ void TeamServer::on_op(Member& m, const Value& msg) {
   b.from = m.id;
   s.docs[b.scene].apply(b);
   s.tail.push_back(b);
+  mark_dirty(s);
   ++total_commits_;
   Value c = batch_to_json(b);
   c.set("t", str("commit"));
