@@ -78,3 +78,7 @@ An installed engine finds everything next to its executables:
 - plugins in `plugins\`.
 
 The Freight Office exports games from the installed `ts_game.exe` and its DLLs.
+
+## Version info and icons
+
+Every shipped exe gets a Windows version resource (Company **TombStone Team**, Product **TombStone Engine**, per-app description, version from `VERSION`), an application manifest (asInvoker, per-monitor DPI aware, Windows 10 / 11) and, except `ts_game`, the Dusk tombstone icon. All of this comes from `cmake/WinResources.cmake` and `resources/windows/`. `ts_game` has no icon because the exporter stamps each game's own. Run `python3 resources/windows/make_icons.py` (Pillow) to redraw the icons. Both installers use the same icon and version info. The builds aren't code-signed; see [security.md](security.md).
