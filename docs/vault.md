@@ -206,3 +206,7 @@ Use `--host 127.0.0.1` (and no firewall rule) to keep it on this PC only. For ac
 `ts_admin --smoke-vault-pm` (also part of `--smoke`) checks the Vault manager against a local library and an in-process `ts_vault`: loose files (a glTF model naming a texture one folder up, a sound, a text file) are added without a claim (model + `.bin` + `.meta`, the texture as a dependency, the text file skipped, no scratch claim left behind); details are edited and found by the new tag, an empty name is refused, and a read-only key can't edit or delete; deleting the texture the model needs is refused; v2 of the sound is deleted and the next upload becomes v3, and the only version can't be deleted; a pull into a sorted claim lands in `assets/Models/` with the GUID kept in `.tombstone/meta` and a lock file; deleting items leaves claims' copies alone. It also drives the panel in manager mode (no claim) through **Pull into claim...**. `ts_admin --vault-pm-shot out.png` renders the Project Manager's Vault screen over a demo library.
 
 `ts_vault --smoke` starts the server on a free port and checks `health`, key auth and a blob round trip. `ts_admin --vault-shot out.png` renders the panel over a demo library.
+
+## Team sessions (Live Team Claims, 0.2.0)
+
+`ts_vault --team` also hosts live team editing sessions on UDP (default: the HTTP port + 1) with the same API keys, so one self-hosted server does the asset library and the posse. See [team-claims.md](team-claims.md).

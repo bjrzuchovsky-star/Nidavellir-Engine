@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/team/TeamPanel.h"
 #include "editor/ux/EmptyState.h"
 #include "editor/ux/Tooltip.h"
 
@@ -252,6 +253,8 @@ void Editor2DScreen::draw_hierarchy_row(const Entity2D& e, int depth) {
     ImGui::GetWindowDrawList()->AddRectFilled(mn, ImVec2(mn.x + 3.0f, mx.y),
                                               theme::U32(theme::Accent()));
   }
+  team_ui::draw_lock_badge_in(team_.get(), e.id, mn, mx,
+                              tag.empty() ? 0.0f : ImGui::CalcTextSize(tag.c_str()).x + 8.0f);
 
   // Drag source / target: top quarter = before, bottom quarter = after,
   // middle = make it a child.

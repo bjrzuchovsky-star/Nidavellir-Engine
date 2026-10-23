@@ -441,6 +441,10 @@ struct Scene3D {
   bool snap = true;
   std::vector<std::uint64_t> selection;
   PhysicsSettings3D physics;  // v14
+  // Live Team Claims (never saved): while a team session has granted this
+  // editor an id range, next_id() hands out ids from [id_lo, id_hi).
+  std::uint64_t id_lo = 0;
+  std::uint64_t id_hi = 0;
   // Read from a file older than v18: Play keeps the old camera rules (the
   // rider's follow camera, camera entities only without a rider) until the
   // editor migrates the scene (docs/camera.md). Not written.

@@ -17,6 +17,7 @@
 #include "editor/editor3d/Editor3DScreen.h"
 #include "render3d/Attach3D.h"
 #include "editor/screens/Editor2DScreen.h"
+#include "net/Net.h"
 #include "editor/settings/Settings.h"
 #include "editor/workspace/SceneIO.h"
 #include "editor/ui/Brand.h"
@@ -70,6 +71,7 @@
 #include "SmokeTerrain.h"
 #include "VaultCli.h"
 #include "SmokeUpdate.h"
+#include "SmokeTeam.h"
 #include "SmokeMouseLook.h"
 #include "SmokePluginSplit.h"
 #include "SmokeUx.h"
@@ -1363,6 +1365,9 @@ int run_console_smoke() {
   if (ts::tombstone::run_update_smoke() != 0) {
     return 1;
   }
+  if (ts::tombstone::run_team_smoke() != 0) {
+    return 1;
+  }
   // Particles + 2D lighting (see SmokeFx.cpp).
   if (run_fx_smoke() != 0) {
     return 1;
@@ -2298,6 +2303,155 @@ int run_freight_shot(std::string project, const std::string& png) {
 
 // ts_admin --vault-shot <out.png>: the Vault panel over a demo library
 // (docs screenshot): a claim with a pulled crate that has an update waiting.
+// ts_admin --team-shot <out.png>: Live Team Claims. Two 2D editors in one
+// process (Annie hosts, Wyatt joins over loopback); each renders with the
+// Team panel open, the other's cursor and selection outline in the viewport
+// and a lock badge in the Hierarchy. Writes <out>.a.png / <out>.b.png and
+// the two side by side in <out.png>.
+int run_team_shot(const std::string& png) {
+  namespace fs = std::filesystem;
+  if (!ts::tombstone::net::net_startup()) return 1;
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+  const int W = 1280, H = 800;
+  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Team Claims", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(window);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGui::GetIO().IniFilename = nullptr;  // never touches imgui.ini
+  ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  static gfx::GlTextureUploader gl_uploader;
+  gfx::set_texture_uploader(&gl_uploader);
+  Settings defaults;
+  apply_theme(defaults);
+  auto project = [](const std::string& id, const std::string& name) {
+    const fs::path dir = fs::temp_directory_path() / "ts_team_shot" / id;
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+    editor::ProjectInfo p;
+    p.id = id;
+    p.name = name;
+    p.kind = editor::ProjectKind::TwoD;
+    p.path = dir.string();
+    return p;
+  };
+  int rc = 1;
+  {
+    editor::Editor2DScreen a(project("dusty-gulch", "Dusty Gulch"));
+    editor::Editor2DScreen b(project("dusty-gulch-wyatt", "Dusty Gulch"));
+    a.on_enter();
+    b.on_enter();
+    a.set_team_panel_open(true);
+    b.set_team_panel_open(true);
+    std::string err;
+    editor::TeamHostSettings hs;
+    hs.port = 0;
+    hs.user = "Annie";
+    if (!a.team().host(hs, &err)) {
+      std::cerr << "host: " << err << '\n';
+      return 1;
+    }
+    const auto pump_both = [&](int n) {
+      for (int i = 0; i < n; ++i) {
+        a.tick_team(0.016f);
+        b.tick_team(0.016f);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      }
+    };
+    pump_both(20);
+    editor::TeamJoinSettings js;
+    js.port = a.team().server()->port();
+    js.user = "Wyatt";
+    b.team().join(js, &err);
+    pump_both(60);
+    // Annie works on the player, Wyatt on the tilemap / a sign post.
+    std::uint64_t player = 0, other = 0;
+    for (const auto& e : a.workspace().entities()) {
+      if (e.player && !player) player = e.id;
+      else if (!e.camera && !other && !e.tilemap) other = e.id;
+    }
+    const std::uint64_t sign = b.create_entity("Sign Post");
+    if (auto* e = b.workspace().find(sign)) {
+      e->x = 260.0f;
+      e->y = 60.0f;
+      e->w = 48.0f;
+      e->h = 64.0f;
+    }
+    pump_both(40);
+    if (player) a.workspace().select(player);
+    b.workspace().select(sign);
+    const auto* pa = a.workspace().find(player);
+    a.team().pin_cursor(pa ? pa->x + pa->w + 20.0f : 40.0f, pa ? pa->y + 10.0f : 40.0f, 0.0f);
+    b.team().pin_cursor(300.0f, 150.0f, 0.0f);
+    pump_both(60);
+    auto shoot = [&](editor::Editor2DScreen& s, editor::Editor2DScreen& other_side,
+                     const std::string& out) {
+      int fw = 0, fh = 0;
+      std::vector<unsigned char> px;
+      for (int frame = 0; frame < 30; ++frame) {
+        glfwPollEvents();
+        glfwGetFramebufferSize(window, &fw, &fh);
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::GetIO().AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+        ImGui::NewFrame();
+        s.on_update(1.0f / 60.0f);
+        other_side.tick_team(1.0f / 60.0f);
+        ImGui::Render();
+        glViewport(0, 0, fw, fh);
+        const ImVec4 clear = editor::theme::Charcoal();
+        glClearColor(clear.x, clear.y, clear.z, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        if (frame == 29) {
+          px.assign(static_cast<std::size_t>(fw) * fh * 4, 0);
+          glPixelStorei(GL_PACK_ALIGNMENT, 1);
+          glReadBuffer(GL_BACK);
+          glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+        }
+        glfwSwapBuffers(window);
+        std::this_thread::sleep_for(std::chrono::milliseconds(8));
+      }
+      std::vector<unsigned char> flipped(px.size());
+      for (int y = 0; y < fh; ++y) {
+        std::memcpy(&flipped[static_cast<std::size_t>(y) * fw * 4],
+                    &px[static_cast<std::size_t>(fh - 1 - y) * fw * 4], static_cast<std::size_t>(fw) * 4);
+      }
+      for (std::size_t i = 3; i < flipped.size(); i += 4) flipped[i] = 255;
+      return !px.empty() && write_png_rgba(out, fw, fh, flipped);
+    };
+    const std::string pa_png = png + ".a.png", pb_png = png + ".b.png";
+    const bool ok = shoot(a, b, pa_png) && shoot(b, a, pb_png);
+    std::cout << "Team shot: " << pa_png << " + " << pb_png << " (posse "
+              << a.team().client().members().size() + 1 << ")\n";
+    b.team().leave();
+    a.team().leave();
+    rc = ok ? 0 : 1;
+  }
+  gfx::set_texture_uploader(nullptr);
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  ts::tombstone::net::net_shutdown();
+  return rc;
+}
+
 int run_vault_shot(const char* png) {
   namespace fs = std::filesystem;
   const fs::path root = fs::temp_directory_path() / "ts_vault_shot";
@@ -2933,6 +3087,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-vault") == 0) {
       return ts::tombstone::run_vault_smoke();
     }
+    if (std::strcmp(argv[i], "--smoke-team") == 0) {
+      // Live Team Claims: server + headless editors, convergence, locks.
+      return ts::tombstone::run_team_smoke();
+    }
     if (std::strcmp(argv[i], "--smoke-plugin-split") == 0) {
       return ts::tombstone::run_plugin_split_smoke();
     }
@@ -2943,6 +3101,9 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-update-check") == 0) {
       // Update notifier: version compare, asset choice, verified download (no internet).
       return ts::tombstone::run_update_smoke();
+    }
+    if (std::strcmp(argv[i], "--team-shot") == 0 && i + 1 < argc) {
+      return run_team_shot(argv[i + 1]);
     }
     if (std::strcmp(argv[i], "--assets-shot") == 0 && i + 1 < argc) {
       return run_assets_shot(argv[i + 1]);

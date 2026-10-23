@@ -95,9 +95,13 @@ endif()
 
 # Networking (ts_net: Transport interface + ENet backend). ENet is fetched by
 # hash, only for the apps that talk over the wire.
-if(TS_BUILD_ADMIN OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
+if(TS_BUILD_ADMIN OR TS_BUILD_CLIENT OR TS_BUILD_SERVER OR TS_BUILD_VAULT)
   include(FetchENet)
   add_subdirectory(src/net)
+  # Live Team Claims (ts_team): shared scene ops, session server + client.
+  add_subdirectory(src/team)
+endif()
+if(TS_BUILD_ADMIN OR TS_BUILD_CLIENT OR TS_BUILD_SERVER)
   # Multiplayer game layer (protocol, GameServer, GameClient, LocalPosse).
   add_subdirectory(src/mp)
   # MMO backbone (ts_mmo): persistent world server, accounts (Monocypher

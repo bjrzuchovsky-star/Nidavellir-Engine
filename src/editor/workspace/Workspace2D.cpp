@@ -197,7 +197,22 @@ void Workspace2D::replace_entities(std::vector<Entity2D> entities) {
   sync_next_id_from_entities();
 }
 
+void Workspace2D::set_id_range(std::uint64_t lo, std::uint64_t hi) {
+  id_lo_ = lo;
+  id_hi_ = hi > lo ? hi : lo;
+  range_next_ = lo;
+}
+
+std::uint64_t Workspace2D::range_peek() const {
+  std::uint64_t m = std::max(id_lo_, range_next_);
+  for (const Entity2D& e : entities_) {
+    if (e.id >= id_lo_ && e.id < id_hi_) m = std::max(m, e.id + 1);
+  }
+  return m;
+}
+
 std::uint64_t Workspace2D::peek_next_id() const {
+  if (id_hi_ > id_lo_) return range_peek();
   std::uint64_t m = next_id_;
   for (const Entity2D& e : entities_) m = std::max(m, e.id + 1);
   return m;
@@ -744,6 +759,11 @@ std::vector<std::size_t> Workspace2D::sorted_draw_order() const {
 }
 
 std::uint64_t Workspace2D::alloc_id() {
+  if (id_hi_ > id_lo_) {
+    const std::uint64_t id = range_peek();
+    range_next_ = id + 1;
+    return id;
+  }
   return next_id_++;
 }
 

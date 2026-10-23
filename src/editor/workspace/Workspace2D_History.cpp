@@ -106,6 +106,13 @@ void Workspace2D::cancel_edit() {
   pending_label_.clear();
 }
 
+void Workspace2D::for_each_history_state(
+    const std::function<void(std::vector<Entity2D>&, TileSolidity&)>& fn) {
+  for (HistoryStep& h : undo_) fn(h.state.entities, h.state.tile_solidity);
+  for (HistoryStep& h : redo_) fn(h.state.entities, h.state.tile_solidity);
+  if (pending_) fn(pending_->entities, pending_->tile_solidity);
+}
+
 const std::string& Workspace2D::undo_label() const {
   return undo_.empty() ? kEmptyLabel : undo_.back().label;
 }

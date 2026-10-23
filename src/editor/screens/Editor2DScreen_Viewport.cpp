@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/team/TeamPanel.h"
 #include "editor/ux/Tooltip.h"
 
 #include "editor/assets/AssetLibrary.h"
@@ -929,6 +930,23 @@ void Editor2DScreen::draw_viewport() {
                                                    : he->sprite->path.c_str());
       }
     }
+  }
+  // Live Team Claims: our cursor out, the posse's cursors + selections in.
+  if (team_ && team_->joined()) {
+    team_->set_cursor(mouse_world.x, mouse_world.y, 0.0f, hovered);
+    team_ui::draw_presence(
+        *team_, draw,
+        [&](const float* p, ImVec2* o) {
+          *o = view.to_screen(p[0], p[1]);
+          return true;
+        },
+        [&](std::uint64_t id, ImVec2* mn, ImVec2* mx) {
+          const Entity2D* te = workspace_.find(id);
+          if (!te) return false;
+          *mn = view.to_screen(te->x, te->y);
+          *mx = view.to_screen(te->x + te->w, te->y + te->h);
+          return true;
+        });
   }
   draw->PopClipRect();
 

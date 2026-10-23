@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -65,6 +66,10 @@ class Workspace2D {
   // counter caught up. Not an undo step by itself.
   void replace_entities(std::vector<Entity2D> entities);
   std::uint64_t peek_next_id() const;
+  // Live Team Claims: new ids come from [lo, hi) while a team session has
+  // granted this editor a range (0, 0 = off: one past the highest id).
+  void set_id_range(std::uint64_t lo, std::uint64_t hi);
+  std::uint64_t id_range_lo() const { return id_lo_; }
   Entity2D* find(std::uint64_t id);
   const Entity2D* find(std::uint64_t id) const;
   Entity2D* selected();
@@ -358,6 +363,11 @@ class Workspace2D {
   bool undo(std::string* label_out = nullptr);
   bool redo(std::string* label_out = nullptr);
   void clear_history();
+  // Live Team Claims: run fn on every stored state (undo, redo and an open
+  // edit's before-state) so a remote edit lands in history too and Undo
+  // only reverts this editor's own steps.
+  void for_each_history_state(
+      const std::function<void(std::vector<Entity2D>&, TileSolidity&)>& fn);
 
  private:
   std::uint64_t alloc_id();
@@ -399,6 +409,8 @@ class Workspace2D {
   bool move_changed_ = false;
   bool snap_enabled_ = false;
   std::uint64_t next_id_ = 1;
+  std::uint64_t id_lo_ = 0, id_hi_ = 0, range_next_ = 0;  // team id range
+  std::uint64_t range_peek() const;
   float pan_x_ = 0.0f;
   float pan_y_ = 0.0f;
   float zoom_ = 1.0f;

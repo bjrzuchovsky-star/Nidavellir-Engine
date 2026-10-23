@@ -1,3 +1,4 @@
+#include "editor/team/TeamPanel.h"
 #include "editor/tools/SpriteSlicerPanel.h"
 #include "editor/ux/EmptyState.h"
 #include "editor/ux/FriendlyError.h"
@@ -127,6 +128,7 @@ void Editor3DScreen::draw_ui() {
     }
     ImGui::End();
   }
+  if (show_team_) draw_team_panel();
   if (show_vault_) {
     if (ImGui::Begin("Vault###Vault3D", &show_vault_)) {
       ImGui::BeginDisabled(locked);
@@ -326,6 +328,10 @@ void Editor3DScreen::draw_menus() {
       ImGui::Separator();
     }
     if (ux::MenuItem("Frame selection", "F")) frame_selection();
+    ux::EndMenu();
+  }
+  if (ux::BeginMenu("Team")) {
+    team_ui::draw_menu(team(), &show_team_);
     ux::EndMenu();
   }
   ux_.draw_window_menu();
@@ -792,6 +798,43 @@ void Editor3DScreen::draw_viewport() {
     }
   }
 
+  // Live Team Claims: our ground cursor out, the posse's cursors + selections in.
+  if (team_ && team_->joined() && !playing()) {
+    Vec3 at{0, 0, 0};
+    const bool on = viewport_hovered_ && ground_point(mx, my, vw, vh, &at);
+    team_->set_cursor(at.x, at.y, at.z, on);
+    const render3d::Camera3D tcam = editor_camera();
+    team_ui::draw_presence(
+        *team_, ImGui::GetWindowDrawList(),
+        [&](const float* p, ImVec2* o) {
+          float sx = 0, sy = 0;
+          if (!tcam.project(Vec3{p[0], p[1], p[2]}, vw, vh, &sx, &sy)) return false;
+          *o = ImVec2(origin.x + sx, origin.y + sy);
+          return true;
+        },
+        [&](std::uint64_t id, ImVec2* omn, ImVec2* omx) {
+          const scene3d::Entity3D* te = scene_.find(id);
+          if (!te) return false;
+          const Vec3 c = te->transform.position;
+          const Vec3 h = te->transform.scale * 0.5f;
+          bool any = false;
+          for (int k = 0; k < 8; ++k) {
+            const Vec3 q{c.x + ((k & 1) ? h.x : -h.x), c.y + ((k & 2) ? h.y : -h.y),
+                         c.z + ((k & 4) ? h.z : -h.z)};
+            float sx = 0, sy = 0;
+            if (!tcam.project(q, vw, vh, &sx, &sy)) continue;
+            const ImVec2 sp(origin.x + sx, origin.y + sy);
+            if (!any) *omn = *omx = sp;
+            omn->x = std::min(omn->x, sp.x);
+            omn->y = std::min(omn->y, sp.y);
+            omx->x = std::max(omx->x, sp.x);
+            omx->y = std::max(omx->y, sp.y);
+            any = true;
+          }
+          return any;
+        });
+  }
+
   // In-game UI (ui/*.ui.json, Lua ui.*) over the Play view.
   ImDrawList* dl = ImGui::GetWindowDrawList();
   if (playing() && !vr_previewing()) {
@@ -966,6 +1009,7 @@ void Editor3DScreen::draw_hierarchy_row(const scene3d::Entity3D& e, int depth) {
   if (dim) ImGui::PopStyleColor();
   const ImVec2 mn = ImGui::GetItemRectMin();
   const ImVec2 mxr = ImGui::GetItemRectMax();
+  team_ui::draw_lock_badge_in(team_.get(), e.id, mn, mxr, 0.0f);
   if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
     if (target_picking()) finish_target_pick(e.id);
     else select(e.id, ImGui::GetIO().KeyCtrl);

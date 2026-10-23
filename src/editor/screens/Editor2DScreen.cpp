@@ -567,8 +567,9 @@ void Editor2DScreen::cancel_rename() {
   renaming_ = false;
 }
 
-AppState Editor2DScreen::on_update(float /*delta_seconds*/) {
+AppState Editor2DScreen::on_update(float delta_seconds) {
   ux_.begin_frame();  // a layout chosen last frame lands before any panel draws
+  tick_team(delta_seconds);
   if (ImGui::GetCurrentContext() != nullptr) {
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
       std::string err;

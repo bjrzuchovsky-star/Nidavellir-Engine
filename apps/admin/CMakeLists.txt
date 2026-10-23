@@ -51,6 +51,7 @@ add_executable(ts_admin
   SmokeVault.cpp
   SmokeUx.cpp
   SmokeUpdate.cpp
+  SmokeTeam.cpp
   SmokeMouseLook.cpp
   SmokePluginSplit.cpp
   VaultCli.cpp
@@ -88,6 +89,7 @@ target_link_libraries(ts_admin
     ts_audio3d
     ts_ui
     ts_vault_lib
+    ts_team
     ts_fx
     ts_export
     ts_vfs
