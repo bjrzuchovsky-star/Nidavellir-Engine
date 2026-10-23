@@ -5,7 +5,7 @@
   "vr": false,
   "group": "empty",
   "description": "A player with gravity and jump, solid ground tiles and a follow camera, plus a starter script.",
-  "plugins": [],
+  "plugins": ["ts.move.platformer"],
   "tags": ["empty", "platformer", "player"],
   "order": 2,
   "thumbnail": "thumbnail.png",

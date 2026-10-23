@@ -40,6 +40,8 @@ using BuildResult = ScriptBuildResult;
 BuildResult build(const std::string& project_dir, bool force = false);
 // cmake found (TS_CMAKE_COMMAND, else on PATH)?
 bool toolchain_available(std::string* why);
+// The script SDK include folder (has tombstone/script_sdk.h), "" when missing.
+std::string sdk_include_dir();
 // Default false: the editor / ts_game build modules on a worker thread and
 // swap them in when ready (the tick never waits). Smokes, servers and
 // exports can ask for the old synchronous builds.

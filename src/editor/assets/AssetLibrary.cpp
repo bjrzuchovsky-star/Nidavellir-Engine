@@ -1,5 +1,7 @@
 #include "editor/assets/AssetLibrary.h"
 
+#include "editor/assets/ImportSort.h"
+
 #include "audio/Audio.h"
 
 #include <algorithm>
@@ -111,7 +113,11 @@ bool import_image(const std::string& project_dir, const std::string& source,
   if (!ensure_assets_dir(project_dir, error_out)) {
     return false;
   }
-  const fs::path dir = fs::path(project_dir) / kAssetsFolder;
+  // Sorted imports (ImportSort.h): images land in assets/Textures/.
+  const bool sorted = importsort::load_settings(project_dir).sort_imports;
+  const std::string folder = sorted ? std::string(kAssetsFolder) + "/Textures" : std::string(kAssetsFolder);
+  const fs::path dir = fs::path(project_dir) / fs::u8path(folder);
+  fs::create_directories(dir, ec);
   const std::string stem = src.stem().string();
   const std::string ext = src.extension().string();
   fs::path dest = dir / src.filename();
@@ -119,7 +125,7 @@ bool import_image(const std::string& project_dir, const std::string& source,
   std::error_code eq_ec;
   if (fs::exists(dest, ec) && fs::equivalent(src, dest, eq_ec)) {
     if (rel_out) {
-      *rel_out = std::string(kAssetsFolder) + "/" + dest.filename().string();
+      *rel_out = folder + "/" + dest.filename().string();
     }
     return true;
   }
@@ -134,7 +140,7 @@ bool import_image(const std::string& project_dir, const std::string& source,
     return false;
   }
   if (rel_out) {
-    *rel_out = std::string(kAssetsFolder) + "/" + dest.filename().string();
+    *rel_out = folder + "/" + dest.filename().string();
   }
   return true;
 }

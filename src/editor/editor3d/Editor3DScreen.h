@@ -8,7 +8,9 @@
 //   Viewport3D  GL 3.3 render of the scene (offscreen target shown as an
 //               image): orbit (RMB / Alt+LMB), pan (MMB), zoom (wheel), fly
 //               (hold RMB + WASD/QE), F frames the selection, click picks,
-//               W / E / R translate / rotate / scale gizmo with snap.
+//               Blender-style gizmos (Q / W / E / T / Y) and modal
+//               G / R / S transforms with pivots, orientation and snap
+//               (Editor3DScreen_Transform.cpp, docs/transforms.md).
 //   Hierarchy   entities; click / Ctrl+click selection, create menu.
 //   Inspector   transform (position, rotation in degrees, scale) and the
 //               components: mesh, material, light, collider, player, script.
@@ -36,11 +38,14 @@
 #include "editor/ProjectInfo.h"
 #include "editor/team/TeamSession.h"
 #include "editor/editor3d/Gizmo3D.h"
+#include "editor/transform/ModalTransform.h"
 #include "editor/plugins/EditorPlugins.h"
 #include "editor/plugins/PluginsPanel.h"
+#include "editor/scripting/ScriptComponents.h"
 #include "editor/screens/IScreen.h"
 #include "editor/ui/PlayUi.h"
 #include "render3d/Renderer3D.h"
+#include "render3d/Attach3D.h"
 #include "render3d/Scene3D.h"
 #include "render3d/SceneView.h"
 #include "terrain/Terrain.h"
@@ -49,6 +54,7 @@
 #include "world3d/World3D.h"
 #include "xr/VrPresenter.h"
 #include "xr/XrSession.h"
+#include "editor/ux/EditorUx.h"
 
 #include <cstdint>
 #include <deque>
@@ -73,6 +79,8 @@ class Editor3DScreen final : public IScreen {
   AppState on_update(float delta_seconds) override;
 
   void request_back_to_projects() { back_requested_ = true; }
+  // Field Guide: action registry + command palette (Ctrl+Shift+P).
+  ux::EditorUx& field_guide() { return ux_; }
   void request_quit() { quit_requested_ = true; }
   const ProjectInfo& project() const { return project_; }
   EditorPlugins& plugins() { return plugins_; }
@@ -157,6 +165,13 @@ class Editor3DScreen final : public IScreen {
 
   // ---- Viewport (pixels in a vw x vh view) ---------------------------------
   render3d::Camera3D editor_camera() const;
+  // Screen position and size of the view drawn last frame.
+  void viewport_screen_rect(float* x, float* y, float* w, float* h) const {
+    *x = viewport_x_;
+    *y = viewport_y_;
+    *w = viewport_w_;
+    *h = viewport_h_;
+  }
   void orbit(float dyaw_deg, float dpitch_deg);
   void dolly(float factor);
   void pan(float dx_px, float dy_px, float vh);
@@ -170,13 +185,52 @@ class Editor3DScreen final : public IScreen {
   GizmoSnap snap_steps() const;
   bool snapping() const { return scene_.snap; }
   void set_snapping(bool on);
-  // Gizmo drag on the primary selection: begin (false on a miss), move,
-  // end (one undo step). Same code the mouse drives.
+  // Gizmo drag on the selection: begin (false on a miss), move, end (one
+  // undo step). Same code the mouse drives; a drag runs as a modal
+  // transform with the handle's constraint (Editor3DScreen_Transform.cpp).
   bool gizmo_begin(float px, float py, float vw, float vh);
   bool gizmo_begin_axis(int axis, float px, float py, float vw, float vh);
   void gizmo_move(float px, float py, float vw, float vh);
   void gizmo_end();
   void gizmo_cancel();
+  // Handle under the mouse for the current selection (part None = miss).
+  GizmoHandle gizmo_pick(float px, float py, float vw, float vh) const;
+
+  // ---- Modal transforms (Editor3DScreen_Transform.cpp) ----------------------
+  // G / R / S: move / rotate / scale the selection roots (children ride
+  // along) from the mouse at (px, py). modal_mouse each frame (ctrl flips
+  // snapping, shift = precision); axis keys, typed numbers; confirm = one
+  // undo step, cancel restores. See docs/transforms.md.
+  bool modal_begin(XformOp op, float px, float py, float vw, float vh);
+  bool modal_begin_handle(const GizmoHandle& h, float px, float py, float vw, float vh);
+  void modal_mouse(float px, float py, bool ctrl = false, bool shift = false);
+  void modal_axis(int axis, bool shift = false);
+  bool modal_type(const std::string& chars);  // "2", "-90", "0.5"
+  void modal_backspace();
+  void modal_next_component();
+  void modal_trackball();
+  void modal_switch(XformOp op);
+  bool modal_confirm();
+  void modal_cancel();
+  bool modal_active() const { return modal_.m.active(); }
+  const ModalTransform& modal() const { return modal_.m; }
+  // Header line while a transform runs ("Move  Dx 2.000 ...").
+  std::string modal_header() const;
+  // Alt+G / Alt+R / Alt+S: clear location / rotation / scale of the
+  // selection roots (world values; one undo step).
+  bool reset_transform(XformOp what);
+  PivotMode pivot_mode() const { return pivot_mode_; }
+  void set_pivot_mode(PivotMode p) { pivot_mode_ = p; }
+  XformSpace orientation() const { return orientation_; }
+  void set_orientation(XformSpace s) { orientation_ = s; }
+  const render3d::Vec3& cursor3d() const { return cursor3d_; }
+  void set_cursor3d(const render3d::Vec3& p) { cursor3d_ = p; }
+  // Where rotate / scale turn about for the current selection.
+  render3d::Vec3 pivot_point() const;
+  GizmoFrame gizmo_frame() const;
+  // Snap targets for moves: grid increments or the surface under the mouse.
+  bool snap_to_surface() const { return snap_surface_; }
+  void set_snap_to_surface(bool on) { snap_surface_ = on; }
 
   // One frame of the scene (editor or play view) through the renderer
   // (GL offscreen when a context exists, else the null backend).
@@ -244,8 +298,77 @@ class Editor3DScreen final : public IScreen {
   // Alt+drag on the gizmo: copy the selection, then drag the copies (one
   // "Duplicate" undo step; Esc removes the copies).
   bool gizmo_begin_duplicate(float px, float py, float vw, float vh);
-  // Translate drags stick to surfaces under the mouse while on (Ctrl).
+  // Moves stick to surfaces under the mouse while on (also: Snap target
+  // Surface with snapping on).
   void set_surface_snap(bool on) { surface_snap_ = on; }
+
+  // ---- Scripts (Editor3DScreen_Scripts.cpp) ---------------------------------
+  // The entity's script stack (Unity-style components: several per entity,
+  // run top to bottom). Each edit is one undo step; all refuse while playing.
+  bool set_scripts(std::uint64_t id, std::vector<ScriptData> stack,
+                   const std::string& label = "Edit Scripts");
+  // Append `rel` (refuses duplicates and the 16-script cap).
+  bool attach_script(std::uint64_t id, const std::string& rel);
+  // Write scripts/<name>.<ext> from a template; attach it when id != 0.
+  bool new_script(std::uint64_t id, const std::string& name, ScriptLang lang,
+                  const std::string& template_id, std::string* rel_out = nullptr);
+  const std::vector<std::string>& scripts() const { return scripts_; }
+  void open_add_component_menu() { add_component_open_ = true; }
+
+  // ---- Cameras (Editor3DScreen_Camera.cpp, docs/camera.md) ------------------
+  // Create > Camera: a Fixed camera where the editor view is, looking the
+  // same way. One undo step; selected.
+  std::uint64_t create_camera();
+  // Replace an entity's camera settings (one undo step).
+  bool set_camera(std::uint64_t id, const scene3d::PlayCamera3D& c,
+                  const std::string& label = "Edit Camera");
+  // "Make active camera": on, priority above every other camera.
+  bool make_active_camera(std::uint64_t id);
+  // The camera Play would start with (highest-priority active; 0 = none).
+  std::uint64_t play_camera_id() const;
+  // Ctrl+Alt+Numpad0: move the camera (selected, else the play camera) to
+  // the editor view. One undo step.
+  bool align_camera_to_view(std::uint64_t id = 0);
+  // Numpad0: look through a camera (0 = selected / play camera); again (or
+  // orbiting / panning / zooming) goes back to the editor view.
+  bool look_through_camera(std::uint64_t id = 0);
+  void stop_looking_through() { look_through_ = 0; }
+  std::uint64_t looking_through() const { return look_through_; }
+  // The view a camera entity gives (projection, clip planes, transform).
+  render3d::Camera3D camera_view(const scene3d::Entity3D& e) const;
+  // Render the selected camera's view into its preview texture (GL: the
+  // overlay shows it; null backend: stats only). False = no camera.
+  bool render_camera_preview(int width, int height);
+  std::uint64_t camera_preview_texture() const;
+  // v18 migration report of the last open ("" = nothing migrated).
+  const std::string& camera_migration_backup() const { return camera_backup_; }
+
+  // ---- Attach tools (Editor3DScreen_Attach.cpp, docs/transforms.md) -------
+  // Every call works on the selection roots (minus the target), is one undo
+  // step and refuses while playing.
+  bool attach_selected(std::uint64_t target, scene3d::AttachMode mode);
+  bool detach_selected();  // world transforms kept
+  // Follow constraint on the selection (offsets keep them where they are).
+  bool follow_selected(std::uint64_t target, bool position, bool rotation);
+  bool remove_follow_selected();
+  // Bones of `target`'s skinned model ("" list = none).
+  std::vector<std::string> bone_names(std::uint64_t target);
+  bool attach_selected_to_bone(std::uint64_t target, const std::string& bone,
+                               scene3d::AttachMode mode);
+  // Snap the selection onto `target`'s position (rotation / scale kept).
+  bool snap_selected_to(std::uint64_t target);
+  // Copy target's position / rotation / scale onto the selection.
+  bool copy_transform_to_selected(std::uint64_t from, bool position, bool rotation, bool scale);
+  // Drop each root onto the surface below it and turn its up (+Y) to the
+  // surface normal.
+  bool align_selected_to_surface();
+  // Eyedropper: the next viewport (or hierarchy) click picks the target of
+  // `action` ("attach_keep", "attach_snap", "follow_pos", "follow_rot",
+  // "follow_both", "snap", "copy", "bone_keep", "bone_snap"); Esc cancels.
+  void begin_target_pick(const std::string& action);
+  bool target_picking() const { return !pick_action_.empty(); }
+  bool finish_target_pick(std::uint64_t target);  // runs the action
+  void cancel_target_pick() { pick_action_.clear(); }
 
   // ---- Assets ---------------------------------------------------------------
   struct AssetEntry {
@@ -298,6 +421,7 @@ class Editor3DScreen final : public IScreen {
   VaultPanel& vault_panel() { return vault_panel_; }
 
   const std::deque<runtime::LogEntry>& log() const { return log_; }
+  void clear_log() { log_.clear(); }
   void note(const std::string& text, runtime::LogLevel level = runtime::LogLevel::Info);
 
  private:
@@ -346,6 +470,11 @@ class Editor3DScreen final : public IScreen {
   void draw_ui();
   void setup_dock_layout(unsigned int dockspace_id);
   void draw_menu_bar();
+  void draw_menus();  // menu bar contents (also harvested for the palette)
+  void setup_field_guide();
+  void draw_context_menus_for_audit();
+  ux::EditorUx ux_{true};
+  bool settings_requested_ = false;
   void draw_toolbar();
   void draw_status_bar();
   void draw_viewport();
@@ -363,6 +492,22 @@ class Editor3DScreen final : public IScreen {
  private:
   void draw_vr_mirror();
   void draw_context_menu(std::uint64_t clicked);
+  // Cameras + attach UI.
+  void migrate_cameras_on_open(const std::string& path);
+  void draw_camera_lines();  // frustums (edit view, after view_->begin)
+  void draw_camera_overlay(float x0, float y0, float vw, float vh);
+  void draw_camera_inspector(const scene3d::Entity3D& e);
+  void draw_attach_menu(std::uint64_t clicked);
+  void draw_object_menu();
+  bool attach_target_list(const char* id, std::uint64_t* out);
+  bool ray_surface(const render3d::Ray& ray, const std::vector<std::uint64_t>& skip, float max_t,
+                   float* t);
+  std::uint64_t look_through_ = 0;
+  std::string camera_backup_;
+  std::string pick_action_;
+  bool copy_pos_ = true, copy_rot_ = true, copy_scale_ = false;
+  std::unique_ptr<render3d::Renderer3D> preview_renderer_;
+  std::unique_ptr<render3d::SceneView> preview_view_;
   void draw_hierarchy_row(const scene3d::Entity3D& e, int depth);
   std::size_t duplicate_roots(bool offset);
   // Move one entity by the delta prev -> its current transform's children.
@@ -392,7 +537,31 @@ class Editor3DScreen final : public IScreen {
   std::unique_ptr<render3d::SceneView> view_;
   bool gl_ = false;
   Gizmo3D gizmo_;
-  std::optional<scene3d::Scene3D> gizmo_before_;
+  // The running modal transform (G / R / S or a gizmo drag).
+  struct ModalState {
+    ModalTransform m;
+    std::optional<scene3d::Scene3D> before;
+    std::vector<std::uint64_t> roots;
+    std::vector<render3d::Transform> start;  // per root
+    std::vector<std::pair<std::uint64_t, render3d::Transform>> all;  // roots + subtrees
+    std::size_t active = 0;  // index into roots
+    render3d::Vec3 pivot{0, 0, 0};
+    float vw = 1, vh = 1, mx = 0, my = 0;
+    bool snap = false;
+    bool from_gizmo = false;
+    // Values shown in the header (degrees / factors / world delta).
+    render3d::Vec3 shown{0, 0, 0};
+    std::string shown_label;  // undo label ("Move Crate")
+  } modal_;
+  void modal_apply();
+  void draw_transform_header(float x0, float y0, float vw);
+  void draw_cursor3d(float x0, float y0, float vw, float vh);
+  void handle_modal_keys();
+  PivotMode pivot_mode_ = PivotMode::Median;
+  XformSpace orientation_ = XformSpace::Global;
+  render3d::Vec3 cursor3d_{0, 0, 0};
+  bool snap_surface_ = false;
+  GizmoHandle gizmo_hover_;
   std::optional<scene3d::Scene3D> inspector_before_;
   std::string inspector_label_;
   world3d::World3D world_;
@@ -407,6 +576,18 @@ class Editor3DScreen final : public IScreen {
   void update_mouse_look(world3d::Input3D* in);
   std::vector<AssetEntry> assets_;
   std::vector<std::string> scripts_;
+  ScriptInfoCache script_infos_;
+  AddScriptMenu add_script_menu_;
+  bool add_component_open_ = false;
+  std::uint64_t script_drop_id_ = 0;
+  std::string script_drop_rel_;
+  char new_script_name_[64]{};
+  int new_script_lang_ = 0;
+  int new_script_template_ = 0;
+  std::string scripts_selected_;
+  ScriptStackHost script_host();
+  void draw_scripts_panel();
+  void draw_add_component(std::uint64_t id, std::string* attach_rel);
   std::vector<std::string> sounds_;  // project sounds (Audio Source picker)
   bool show_mixer_ = false;
   AnimPreview anim_preview_;
@@ -433,6 +614,9 @@ class Editor3DScreen final : public IScreen {
   bool show_physics_ = false;  // Physics Settings window
   void draw_physics_settings();
   float viewport_w_ = 1280.0f, viewport_h_ = 720.0f;
+  float viewport_x_ = 0.0f, viewport_y_ = 0.0f;  // screen position of the view
+  bool open_pivot_menu_ = false;                 // '.' pressed
+  bool swallow_lmb_ = false;                     // the click that confirmed
   char rename_buf_[128] = {0};
   PluginsPanelState plugins_panel_;
   std::unique_ptr<xr::XrSession> vr_session_;

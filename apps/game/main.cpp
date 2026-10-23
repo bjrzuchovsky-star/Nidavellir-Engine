@@ -27,6 +27,8 @@
 #include "runtime/Log.h"
 #include "plugins/Builtins.h"
 #include "plugins/RuntimePlugins.h"
+#include "plugins/rider3d/Rider3D.h"
+#include "plugins/split/Split.h"
 #include "runtime/PlaySession.h"
 #include "runtime/World.h"
 #include "scene/SampleScripts.h"
@@ -282,6 +284,7 @@ void open_plugins(plugins::RuntimePlugins& rp, const std::string& dir) {
               << (d.plugin.empty() ? "" : d.plugin + ": ") << d.text << '\n';
   });
   std::cout << "[ts_game] " << n << " plugin(s) riding\n";
+  std::cout << "[ts_game] physics / movement: " << plugins::provider_summary() << '\n';
 }
 
 // --smoke, part two: when the project still has the seeded corral gate and
@@ -808,6 +811,21 @@ int main(int argc, char** argv) {
     return 2;
   }
   std::cout << "TombStone Game\n";
+  // Physics and rider movement are Trading Post plugins (0.2.0): offer the
+  // 3D halves; the 2D path switches them on through its PluginManager, the
+  // 3D / VR path (no manager) holds the claim's list here.
+  plugins::offer_3d_providers();
+  plugins::ProviderHold hold3d;
+  if (game::is_vr_project(opt.project) || game::is_3d_project(opt.project)) {
+    const plugins::ProjectPluginList list = plugins::read_project_plugins(opt.project);
+    std::vector<std::string> added;
+    hold3d.hold(plugins::effective_plugins(opt.project, list.ids, list.listed, {}, &added));
+    for (const std::string& id : added) {
+      std::cout << "[ts_game] pre-0.2.0 claim: riding with " << id
+                << " (open it in the editor to save this)\n";
+    }
+    std::cout << "[ts_game] physics / movement: " << plugins::provider_summary() << '\n';
+  }
   // VR is a switch on 3D projects: with a headset (or --sim) ride in VR,
   // otherwise (or with --desktop) the same scene rides flat on the desktop.
   if (game::is_vr_project(opt.project) && !opt.desktop) {

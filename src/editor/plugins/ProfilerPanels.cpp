@@ -1,4 +1,5 @@
 #include "editor/plugins/ProfilerPanels.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/ui/Theme.h"
 #include "plugins/profiler/ProfilerPlugin.h"
@@ -121,7 +122,7 @@ void frame_bars(AssayPanelState& s) {
     const int i = n - 1 - static_cast<int>((p0.x + w - mx) / bw);
     if (i >= 0 && i < n) {
       const FrameRecord& f = fr[static_cast<std::size_t>(i)];
-      ImGui::SetTooltip("Frame %llu\n%.2f ms CPU, %zu zones", static_cast<unsigned long long>(f.index),
+      ux::SetTooltip("Frame %llu\n%.2f ms CPU, %zu zones", static_cast<unsigned long long>(f.index),
                         f.cpu_ms, f.zones.size());
       if (ImGui::IsMouseClicked(0)) {
         s.selected = i;
@@ -173,7 +174,7 @@ void timeline(AssayPanelState& s) {
       dl->PopClipRect();
     }
     if (ImGui::IsItemHovered() && mouse.x >= a.x && mouse.x < b.x && mouse.y >= a.y && mouse.y < b.y) {
-      ImGui::SetTooltip("%s\n%.3f ms (starts at %.3f ms)", z.name.c_str(), z.dur_ms, z.start_ms);
+      ux::SetTooltip("%s\n%.3f ms (starts at %.3f ms)", z.name.c_str(), z.dur_ms, z.start_ms);
       if (ImGui::IsMouseClicked(0)) {
         s.zoom = timeline_zoom_for(span, z.dur_ms);
         s.scroll_to_ms = z.start_ms;

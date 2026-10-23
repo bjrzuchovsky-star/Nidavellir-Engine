@@ -2,5 +2,5 @@
   "name": "Empty 3D Third-person",
   "dimension": "3d",
   "vr": false,
-  "plugins": ""
+  "plugins": "ts.physics.jolt,ts.move.rider3d"
 }

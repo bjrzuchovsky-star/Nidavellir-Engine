@@ -12,9 +12,13 @@
 #include "editor/console/TelegraphLog.h"
 #include "editor/plugins/EditorPlugins.h"
 #include "editor/plugins/PluginsPanel.h"
+#include "editor/scripting/ScriptComponents.h"
+#include "editor/transform/Gizmo2D.h"
+#include "editor/transform/ModalTransform.h"
 #include "editor/screens/IScreen.h"
 #include "editor/ui/FolderBrowser.h"
 #include "editor/ui/PlayUi.h"
+#include "editor/ux/EditorUx.h"
 #include "editor/workspace/Workspace2D.h"
 #include "mp/LocalPosse.h"
 #include "net/SimTransport.h"
@@ -65,13 +69,6 @@ struct EntityImage {
   bool animated = false;  // the frame comes from an animation set
 };
 
-// What a script file declares, for the Inspector and the Scripts panel.
-struct ScriptInfo {
-  bool ok = false;
-  std::string error;                // file:line when it does not run
-  std::vector<ScriptProp> defaults;  // `props = {...}`, sorted by name
-  std::uint64_t version = 0;        // ScriptLibrary version it was read at
-};
 
 // 2D editor workspace: Hierarchy list, Viewport2D canvas, Inspector
 // properties, Tile Palette, Supply Wagon (assets), Scripts and Telegraph
@@ -89,6 +86,10 @@ class Editor2DScreen final : public IScreen {
 
   void request_quit();
   void request_back_to_projects();
+  // Field Guide: action registry + command palette (Ctrl+Shift+P), panel /
+  // Settings / recent entries; --smoke-ux drives it.
+  ux::EditorUx& field_guide() { return ux_; }
+  bool hierarchy_shown() const { return show_hierarchy_; }
 
   const ProjectInfo& project() const { return project_; }
   Workspace2D& workspace() { return workspace_; }
@@ -178,6 +179,65 @@ class Editor2DScreen final : public IScreen {
   // Alt+drag: copies of the selection on the spot, then a normal drag
   // moves the copies. One "Duplicate N" step; Esc takes the copies back.
   bool begin_duplicate_drag();
+  // --- Cameras + attach tools (Editor2DScreen_Attach.cpp) -------------------
+  // docs/camera.md, docs/transforms.md. Each edit is one undo step on the
+  // selection roots (minus the target) and refuses while playing.
+  std::uint64_t create_camera_2d();  // at the view centre, follows the rider
+  bool make_active_camera_2d(std::uint64_t id);
+  std::uint64_t play_camera_2d() const;  // highest-priority active (0 = none)
+  bool attach_selected_2d(std::uint64_t target, bool snap);
+  bool detach_selected_2d();
+  bool follow_selected_2d(std::uint64_t target, bool position, bool rotation);
+  bool remove_follow_selected_2d();
+  bool snap_selected_to_2d(std::uint64_t target);
+  bool copy_transform_to_selected_2d(std::uint64_t from, bool position, bool rotation, bool scale);
+  bool align_selected_to_surface_2d();
+  // Eyedropper (same actions as 3D: attach_keep, attach_snap, follow_pos,
+  // follow_rot, follow_both, snap, copy).
+  void begin_target_pick_2d(const std::string& action);
+  bool target_picking_2d() const { return !pick_action2d_.empty(); }
+  bool finish_target_pick_2d(std::uint64_t target);
+  void cancel_target_pick_2d() { pick_action2d_.clear(); }
+  // Path of the v13 camera-migration backup made on open ("" = none).
+  const std::string& camera_migration_backup_2d() const { return camera_backup2d_; }
+
+  // --- Modal transforms + gizmo (Editor2DScreen_Transform.cpp) ---------------
+  // G / R / S with the mouse over the viewport (Select tool), or a gizmo
+  // drag; docs/transforms.md. px / py are canvas pixels (0, 0 = the
+  // viewport's top-left). One undo step per confirm; cancel restores.
+  bool modal_begin(XformOp op, float px, float py);
+  bool modal_begin_handle(const GizmoHandle& h, float px, float py);
+  void modal_mouse(float px, float py, bool ctrl = false, bool shift = false);
+  void modal_axis(int axis, bool shift = false);
+  bool modal_type(const std::string& chars);
+  void modal_backspace();
+  void modal_next_component();
+  void modal_switch(XformOp op);
+  bool modal_confirm();
+  void modal_cancel();
+  bool modal_active() const { return modal_.m.active(); }
+  const ModalTransform& modal() const { return modal_.m; }
+  std::string modal_header() const;
+  // Alt+G / Alt+R / Alt+S on the selection.
+  bool reset_transform(XformOp what);
+  PivotMode pivot_mode() const { return pivot_mode_; }
+  void set_pivot_mode(PivotMode p) { pivot_mode_ = p; }
+  XformSpace orientation() const { return orientation_; }
+  void set_orientation(XformSpace s) { orientation_ = s; }
+  GizmoMode gizmo_mode() const { return gizmo_.mode; }
+  void set_gizmo_mode(GizmoMode m) { gizmo_.mode = m; }
+  // 2D cursor (Shift+RMB click; Shift+C back to 0, 0), world units.
+  float cursor2d_x() const { return cursor2d_x_; }
+  float cursor2d_y() const { return cursor2d_y_; }
+  void set_cursor2d(float x, float y) { cursor2d_x_ = x; cursor2d_y_ = y; }
+  // Where rotate / scale turn about for the current pivot mode (world).
+  void pivot_point(float* wx, float* wy) const;
+  // Gizmo handle under canvas pixel (px, py) (part None = nothing).
+  GizmoHandle gizmo_pick(float px, float py) const;
+  // Canvas pixels <-> world with the current camera and canvas size.
+  void canvas_to_world(float px, float py, float* wx, float* wy) const;
+  void world_to_canvas(float wx, float wy, float* px, float* py) const;
+
   // Scene Hierarchy filter (case-insensitive substring of the name).
   void set_hierarchy_filter(const std::string& text);
   bool hierarchy_row_visible(const Entity2D& e) const;
@@ -366,6 +426,19 @@ class Editor2DScreen final : public IScreen {
   // step + autosave.
   bool set_script_prop(std::uint64_t id, const std::string& name,
                        std::optional<ScriptValue> value);
+  // The whole script stack (Inspector order = run order): one undo step.
+  bool set_scripts(std::uint64_t id, std::vector<ScriptData> stack,
+                   const std::string& label = "Edit Scripts");
+  // Adds rel at the bottom of the stack (Add Component, drag and drop
+  // onto the viewport / Hierarchy / Inspector). False when playing, the
+  // entity is a tile map, it already runs that file, or the stack is full.
+  bool attach_script(std::uint64_t id, const std::string& rel);
+  // New Script: scripts/<stem><ext> from a template, then attached to id
+  // (0 = just write the file). rel_out gets the new file.
+  bool new_script(std::uint64_t id, const std::string& name, ScriptLang lang,
+                  const std::string& template_id, std::string* rel_out = nullptr);
+  // Opens the Inspector's Add Component menu next frame (docs screenshot).
+  void open_add_component_menu() { add_component_open_ = true; }
   // <project>/scripts/**.lua, project-relative and sorted.
   void refresh_scripts();
   const std::vector<std::string>& script_list() const { return scripts_; }
@@ -393,9 +466,22 @@ class Editor2DScreen final : public IScreen {
   bool focus_log_entry(const runtime::LogEntry& entry);
 
  private:
+  void draw_attach_menu_2d();
+  void draw_inspector_follow_2d(std::uint64_t id);
+  void draw_object_menu_2d();
+  bool attach_target_list_2d(const char* id, std::uint64_t* out);
+  void migrate_cameras_on_open_2d(const std::vector<std::string>& lines);
+  std::string pick_action2d_;
+  std::string camera_backup2d_;
+  bool copy_pos2d_ = true, copy_rot2d_ = true, copy_scale2d_ = false;
   friend class PossePlugin;  // registers the posse UI as plugin contributions
   void draw_ui();
   void draw_menu_bar();
+  void draw_menus();  // menu bar contents (also harvested for the palette)
+  void setup_field_guide();
+  void draw_context_menus_for_audit();
+  ux::EditorUx ux_{false};
+  bool settings_requested_ = false;
   void draw_toolbar();
   void draw_status_bar();
   void draw_hierarchy();
@@ -414,6 +500,8 @@ class Editor2DScreen final : public IScreen {
   // Script section of the Inspector; Scripts panel; Telegraph panel and its
   // status-bar badge.
   void draw_inspector_script(std::uint64_t id);
+  // "Add Component" at the foot of the Inspector (components + scripts).
+  void draw_inspector_add_component(std::uint64_t id);
   void draw_inspector_audio(std::uint64_t id);
   void draw_inspector_fx(std::uint64_t id);
   void draw_lighting_panel();
@@ -545,6 +633,35 @@ class Editor2DScreen final : public IScreen {
   bool handle_active_ = false;
   float handle_start_wx_ = 0.0f, handle_start_wy_ = 0.0f;
   float viewport_w_ = 800.0f, viewport_h_ = 600.0f;  // last canvas size
+  // Modal transforms + gizmo (Editor2DScreen_Transform.cpp).
+  struct ModalState {
+    ModalTransform m;
+    std::size_t active = 0;        // index into the workspace's root starts
+    float pivot_x = 0, pivot_y = 0;  // world
+    float mx = 0, my = 0;          // last mouse (canvas px)
+    bool snap = false;
+    bool from_gizmo = false;
+    float shown[2] = {0, 0};       // header values
+    Workspace2D::Snapshot before;  // the undo step's before-state
+  };
+  ModalState modal_;
+  Gizmo2D gizmo_;
+  PivotMode pivot_mode_ = PivotMode::Median;
+  XformSpace orientation_ = XformSpace::Global;
+  float cursor2d_x_ = 0.0f, cursor2d_y_ = 0.0f;
+  GizmoHandle gizmo_hover_;
+  bool viewport_hovered_ = false;
+  float viewport_x_ = 0.0f, viewport_y_ = 0.0f;  // canvas corner on screen
+  bool open_pivot_menu_ = false;
+  bool swallow_rmb_ = false;  // the RMB that cancelled: no context menu
+  void modal_apply();
+  void handle_modal_keys();
+  // Header widgets (gizmo, orientation, pivot) or the modal line.
+  void draw_transform_header();
+  // Cursor, gizmo / modal guides; x0 / y0 = canvas corner on screen.
+  void draw_gizmo_overlay(ImDrawList* draw, float x0, float y0);
+  // Gizmo centre (canvas px) and its move / scale axes (degrees).
+  void gizmo_frame(float* cx, float* cy, float* axes_deg, float* scale_deg) const;
   bool rmb_dragged_ = false;         // RMB press panned (no context menu)
   std::uint64_t context_id_ = 0;     // entity the context menu opened on
   char hierarchy_filter_[96]{};
@@ -653,6 +770,11 @@ class Editor2DScreen final : public IScreen {
   std::string scripts_selected_;  // highlighted file in the Scripts panel
   char new_script_name_[64]{};
   int new_script_template_ = 0;
+  int new_script_lang_ = 0;
+  AddScriptMenu add_script_menu_;
+  bool add_component_open_ = false;
+  std::uint64_t script_drop_id_ = 0;  // hierarchy row a script was dropped on
+  std::string script_drop_rel_;
   double play_scripts_poll_ = 0.0;  // last hot-reload check while playing
 
   // Telegraph console.

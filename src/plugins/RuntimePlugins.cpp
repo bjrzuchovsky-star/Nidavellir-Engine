@@ -2,6 +2,7 @@
 
 #include "core/JsonMini.h"
 #include "plugins/Builtins.h"
+#include "plugins/split/Split.h"
 #include "runtime/World.h"
 
 #include <filesystem>
@@ -60,8 +61,18 @@ std::size_t RuntimePlugins::open(const std::string& project_dir,
     if (sink) sink({runtime::LogLevel::Error, "", "plugin wagon: " + e});
   }
   const ProjectPluginList list = read_project_plugins(project_dir);
+  // A claim from before the 0.2.0 plugin split rides with the physics /
+  // movement plugins its scenes use (in memory; the editor migrates the file).
+  std::vector<std::string> added;
   std::vector<std::string> ids =
-      list.listed ? list.ids : plugin::PluginManager::defaults(*catalog_, list.type);
+      effective_plugins(project_dir, list.ids, list.listed,
+                        plugin::PluginManager::defaults(*catalog_, list.type), &added);
+  if (!added.empty() && sink) {
+    std::string a;
+    for (const std::string& id : added) a += (a.empty() ? "" : ", ") + id;
+    sink({runtime::LogLevel::Info, "",
+          "pre-0.2.0 claim: riding with " + a + " (open it in the editor to save this)"});
+  }
   std::vector<std::string> keep;
   for (const std::string& id : ids) {
     if (editor_only(id)) {

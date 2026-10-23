@@ -1,5 +1,7 @@
 #include "editor/templates/EmptyTemplates.h"
 
+#include "editor/plugins/PluginNeeds.h"
+
 #include "render3d/Gltf.h"
 #include "render3d/Scene3D.h"
 #include "scene/SceneData.h"
@@ -26,24 +28,37 @@ bool write_text(const fs::path& p, const std::string& text, std::string* error) 
   return store::write_text_file(p.string(), text, error);
 }
 
-// project.json: name, dimension, VR flag and an explicitly empty plugin
-// list (optional plugins come from the Trading Post). No timestamps:
+// project.json: name, dimension, VR flag and the plugin list -- only the
+// physics / movement plugins the scene's rider needs (0.2.0 split);
+// optional plugins come from the Trading Post. No timestamps:
 // create_project stamps its own.
+std::string join_ids(const std::vector<std::string>& ids) {
+  std::string out;
+  for (const std::string& id : ids) out += (out.empty() ? "" : ",") + id;
+  return out;
+}
+
 bool write_project(const fs::path& dir, const std::string& name, bool three_d, bool vr,
-                   std::string* error) {
+                   std::string* error, const std::vector<std::string>& plugins = {}) {
   store::Json j = store::Json::object();
   j.set("name", name);
   j.set("dimension", three_d ? "3d" : "2d");
   if (three_d) j.set("vr", vr);
-  j.set("plugins", "");
+  j.set("plugins", join_ids(plugins));
   return write_text(dir / "project.json", j.dump(), error);
 }
 
 std::string readme(const std::string& title, const std::string& what, const std::string& play,
-                   const std::string& next) {
+                   const std::string& next, const std::vector<std::string>& plugins = {}) {
+  const std::string plugin_line =
+      plugins.empty()
+          ? "- No optional plugins are on. Turn them on from the Trading Post (or the Outfitter's "
+            "Wagon) when you need them.\n"
+          : "- On: " + join_ids(plugins) + " (physics and movement for the rider, 0.2.0 Trading "
+            "Post plugins). Turn more on from the Trading Post (or the Outfitter's Wagon) when you "
+            "need them.\n";
   return "# " + title + "\n\n" + what + "\n\n## Play\n\n" + play + "\n\n## Next steps\n\n" + next +
-         "\n- No optional plugins are on. Turn them on from the Trading Post (or the Outfitter's "
-         "Wagon) when you need them.\n"
+         "\n" + plugin_line +
          "- Everything in this claim was made by the engine (CC0). Replace it freely.\n";
 }
 
@@ -230,14 +245,14 @@ bool write_2d(const std::string& id, const fs::path& dir, const std::string& nam
            "- Give the Player a sprite and an animator.\n"
            "- Write your rules in scripts/player.lua.";
   }
-  if (!write_project(dir, name, false, false, error)) return false;
+  if (!write_project(dir, name, false, false, error, plugin_needs(doc.entities))) return false;
   if (!save_2d(dir, doc, error)) return false;
   bool has_player = false;
   for (const Entity2D& e : doc.entities) has_player = has_player || e.player.has_value();
   if (has_player && !write_text(dir / "scripts" / "player.lua", kPlayer2DLua, error)) return false;
   std::error_code ec;
   fs::create_directories(dir / "assets", ec);
-  return write_text(dir / "README.md", readme(title, what, play, next), error);
+  return write_text(dir / "README.md", readme(title, what, play, next, plugin_needs(doc.entities)), error);
 }
 
 // --- 3D -----------------------------------------------------------------------
@@ -426,7 +441,7 @@ bool write_3d(const std::string& id, const fs::path& dir, const std::string& nam
       return false;
     }
   }
-  if (!write_project(dir, name, true, vr, error)) return false;
+  if (!write_project(dir, name, true, vr, error, plugin_needs(s))) return false;
   std::string err;
   if (!scene3d::save_file(scene3d::scene_path(dir.string()), s, &err)) {
     if (error) *error = "scene.json: " + err;
@@ -435,7 +450,7 @@ bool write_3d(const std::string& id, const fs::path& dir, const std::string& nam
   if (script && !write_text(dir / "scripts" / "player.lua", script, error)) return false;
   std::error_code ec;
   fs::create_directories(dir / "assets", ec);
-  return write_text(dir / "README.md", readme(title, what, play, next), error);
+  return write_text(dir / "README.md", readme(title, what, play, next, plugin_needs(s)), error);
 }
 
 bool write_truly_blank(bool three_d, const fs::path& dir, const std::string& name,

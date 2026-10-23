@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/plugins/PluginNeeds.h"
 
 #include "editor/assets/AssetLibrary.h"
 #include "editor/workspace/SceneIO.h"
@@ -39,6 +40,8 @@ void Editor2DScreen::on_enter() {
   play_focus_viewport_ = false;
   quit_requested_ = false;
   back_requested_ = false;
+  settings_requested_ = false;
+  setup_field_guide();
   renaming_ = false;
   panning_ = false;
   drag_mode_ = DragMode::None;
@@ -64,9 +67,16 @@ void Editor2DScreen::on_enter() {
   telegraph_seen_total_ = 0;
 
   std::string err;
-  if (!project_.path.empty() && scene_io::load(workspace_, scene_path_, &err)) {
+  bool seeded = false;
+  std::vector<std::string> camera_log;
+  pick_action2d_.clear();
+  camera_backup2d_.clear();
+  if (!project_.path.empty() && scene_io::load(workspace_, scene_path_, &err, &camera_log)) {
     std::cout << "[Editor2D] loaded scene.json (" << workspace_.entities().size()
               << " entities) from " << scene_path_ << '\n';
+    // Pre-0.2.0 scenes: the implicit rider camera becomes a Camera entity
+    // (backup + claim log first; docs/camera.md "Migration").
+    migrate_cameras_on_open_2d(camera_log);
   } else {
     if (!err.empty()) {
       std::cout << "[Editor2D] no scene.json yet (" << err << ") -- seeding defaults\n";
@@ -74,6 +84,7 @@ void Editor2DScreen::on_enter() {
       std::cout << "[Editor2D] seeding default entities\n";
     }
     workspace_.reset_defaults();
+    seeded = true;
     if (!project_.path.empty()) {
       // The seeded Player rides the sample cowboy sheet.
       std::string rider_err;
@@ -115,6 +126,15 @@ void Editor2DScreen::on_enter() {
   refresh_assets();
   refresh_scripts();
   open_plugins();
+  // 0.2.0 split: a freshly seeded scene switches on what its rider needs;
+  // a loaded one is the baseline (Play switches on what gets added later).
+  if (seeded && plugins_.is_open()) {
+    if (!plugins_.follow_needs(plugin_needs(workspace_.entities())).empty()) {
+      apply_plugin_changes_if_idle();
+    }
+  } else {
+    plugins_.set_needs_baseline(plugin_needs(workspace_.entities()));
+  }
   telegraph_.add(runtime::LogLevel::Info, "editor",
                  "Telegraph open for " + project_.name + " (" +
                      std::to_string(scripts_.size()) + " scripts on file)");
@@ -548,6 +568,10 @@ AppState Editor2DScreen::on_update(float delta_seconds) {
   }
   if (back_requested_) {
     return AppState::ProjectManager;
+  }
+  if (settings_requested_) {
+    settings_requested_ = false;
+    return AppState::Settings;  // AppFlow comes back to this claim afterwards
   }
   return AppState::Editor2D;
 }

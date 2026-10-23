@@ -1,4 +1,5 @@
 #include "editor/tools/AutoTilePanel.h"
+#include "editor/ux/Tooltip.h"
 
 #include "core/PngWrite.h"
 #include "editor/ui/Theme.h"
@@ -185,7 +186,7 @@ void AutoTilePanel::draw_slots(const AutoTileSet& s) {
                                       ((i & 8) ? kNbW : 0));
       }
       if (s.mode == AutoTileMode::Rules) what = "  pattern " + s.rules[static_cast<std::size_t>(i)].pattern;
-      ImGui::SetTooltip("slot %d -> tile #%d%s%s", i, tile,
+      ux::SetTooltip("slot %d -> tile #%d%s%s", i, tile,
                         s.mode == AutoTileMode::Rules ? "" : ("  mask " + std::to_string(m)).c_str(), what.c_str());
     }
   }

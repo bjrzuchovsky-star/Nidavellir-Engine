@@ -5,7 +5,7 @@
   "vr": false,
   "group": "empty",
   "description": "An FPS character controller with its eye camera, a ground plane and a starter script.",
-  "plugins": [],
+  "plugins": ["ts.physics.jolt", "ts.move.rider3d"],
   "tags": ["empty", "fps", "first-person", "player"],
   "order": 4,
   "thumbnail": "thumbnail.png",

@@ -1,5 +1,7 @@
 #include "editor/screens/ProjectManagerScreen.h"
+#include "editor/ux/Tooltip.h"
 
+#include "editor/assets/ImportSort.h"
 #include "editor/projects/ProjectStore.h"
 #include "editor/ui/Theme.h"
 
@@ -160,7 +162,7 @@ void ProjectManagerScreen::draw_update_banner() {
   ImGui::PopStyleColor();
   ImGui::SameLine();
   ImGui::TextDisabled("You're riding v%s.  Fresh supplies are in from the trail.", b.current.c_str());
-  if (b.fake && ImGui::IsItemHovered()) ImGui::SetTooltip("Test notice (TS_FAKE_UPDATE); nothing to download.");
+  if (b.fake && ImGui::IsItemHovered()) ux::SetTooltip("Test notice (TS_FAKE_UPDATE); nothing to download.");
 
   if (b.busy) {
     const float frac = b.progress >= 0.0 ? static_cast<float>(b.progress) : 0.0f;
@@ -171,7 +173,7 @@ void ProjectManagerScreen::draw_update_banner() {
   } else {
     if (theme::PrimaryButton("Update", ImVec2(96, 0))) update_action_ = UpdateAction::Update;
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("Downloads the installer, checks it against SHA256SUMS.txt, runs it and closes the editor.\n"
+      ux::SetTooltip("Downloads the installer, checks it against SHA256SUMS.txt, runs it and closes the editor.\n"
                         "Your claims, settings and Vault stay put.");
     }
     ImGui::SameLine();
@@ -190,8 +192,41 @@ void ProjectManagerScreen::draw_update_banner() {
   ImGui::PopID();
 }
 
+void ProjectManagerScreen::open_vault() {
+  if (!vault_) {
+    vault_ = std::make_unique<VaultPanel>();
+    VaultHost host;
+    host.manager = true;
+    host.dimension = "";
+    host.claims = [this] {
+      std::vector<VaultHost::Claim> out;
+      for (const ProjectInfo& p : projects_) out.push_back({p.name, p.path, kind_label(p)});
+      return out;
+    };
+    vault_->open("", std::move(host));
+  }
+  vault_open_ = true;
+}
+
+void ProjectManagerScreen::draw_vault_screen() {
+  theme::TitleStrip("The Vault", "Your library, no claim needed");
+  if (theme::SecondaryButton("< Back to Claims", ImVec2(150, 0))) vault_open_ = false;
+  ImGui::SameLine();
+  ImGui::TextDisabled("Browse, edit and tidy the library, add files from this PC, pull into any claim. Drop files here to add them.");
+  // Files dropped from Explorer go to the Vault while this screen is up.
+  if (importsort::os_drop_pending()) vault_->add_files(importsort::take_os_drop());
+  ImGui::Spacing();
+  if (ImGui::BeginChild("##vaultmanager", ImVec2(0, 0), ImGuiChildFlags_None)) vault_->draw();
+  ImGui::EndChild();
+}
+
 void ProjectManagerScreen::draw_ui() {
   theme::BeginRoot("##ProjectManagerRoot");
+  if (vault_open_ && vault_) {
+    draw_vault_screen();
+    theme::EndRoot();
+    return;
+  }
 
   theme::TitleStrip("Project Manager", "Your claims on the frontier");
   draw_update_banner();
@@ -279,6 +314,11 @@ void ProjectManagerScreen::draw_ui() {
   if (theme::CopperButton("Trading Post", ImVec2(120, 0))) {
     open_trading_post();
   }
+  ImGui::SameLine();
+  if (theme::CopperButton("Vault", ImVec2(80, 0))) {
+    open_vault();
+  }
+  if (ImGui::IsItemHovered()) ux::SetTooltip("The Vault: browse, edit and add to your asset library without opening a claim");
   ImGui::SameLine(0.0f, 24.0f);
   if (theme::SecondaryButton("Settings", ImVec2(90, 0))) {
     request_settings();
@@ -329,6 +369,7 @@ void ProjectManagerScreen::draw_ui() {
 }
 
 AppState ProjectManagerScreen::on_update(float /*delta_seconds*/) {
+  if (vault_) vault_->update();
   if (ImGui::GetCurrentContext() != nullptr) {
     draw_ui();
   }
@@ -469,7 +510,7 @@ void ProjectManagerScreen::draw_kind_picker() {
     dl->AddText(ImVec2(p0.x + 64.0f, p0.y + 31.0f),
                 theme::U32(theme::Success()), c.line2);
     if (hovered) {
-      ImGui::SetTooltip("%s", c.kind == ProjectKind::TwoD
+      ux::SetTooltip("%s", c.kind == ProjectKind::TwoD
                                   ? "The full 2D editor: tiles, sprites, Play, posse."
                               : c.kind == ProjectKind::ThreeD
                                   ? "The 3D editor: glTF, PBR, Lua, Play."

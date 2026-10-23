@@ -1,4 +1,5 @@
 #include "editor/plugins/FrontierPanels.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/ui/Theme.h"
 #include "plugins/survival/SurvivalPlugin.h"
@@ -76,7 +77,7 @@ void draw_saddlebags(SurvivalPlugin& p) {
       ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(a.x + 8, a.y + 6), ImVec2(a.x + cell - 8, a.y + 26),
                                                 col(it->color), 2.0f);
       if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s (%s)%s", it->name.c_str(), survival::item_kind_name(it->kind),
+        ux::SetTooltip("%s (%s)%s", it->name.c_str(), survival::item_kind_name(it->kind),
                           i < survival::Inventory::kHotbar ? "\nClick to sling it" : "");
       }
     }
@@ -219,7 +220,7 @@ void draw_prospector(SurvivalPlugin& p) {
   if (theme::PrimaryButton("Burn the claim / regenerate")) ImGui::OpenPopup("Burn the claim?");
   ImGui::EndDisabled();
   if (riding && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip("Stop the ride first.");
+    ux::SetTooltip("Stop the ride first.");
   }
   if (ImGui::BeginPopupModal("Burn the claim?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::Text("Stake seed %" PRIu64 " and burn saves/%s/ (every dug tile, saddlebag and settler)?",

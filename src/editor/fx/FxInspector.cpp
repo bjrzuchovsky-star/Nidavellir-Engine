@@ -1,4 +1,5 @@
 #include "editor/fx/FxInspector.h"
+#include "editor/ux/Tooltip.h"
 
 #include <imgui.h>
 
@@ -80,7 +81,7 @@ void draw_preview(const fx::EmitterDesc& d, fx::Space space) {
   dl->PopClipRect();
   ImGui::InvisibleButton("##fxpreview", ImVec2(W, H));
   if (ImGui::IsItemClicked()) p.em.restart();
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Live preview: click to restart");
+  if (ImGui::IsItemHovered()) ux::SetTooltip("Live preview: click to restart");
   ImGui::TextDisabled("%d alive", p.em.alive());
 }
 
@@ -158,7 +159,7 @@ FxEdit draw_particle_fields(fx::EmitterDesc& d, fx::Space space) {
     std::snprintf(tex, sizeof(tex), "%s", d.texture.c_str());
     if (ImGui::InputText("Texture", tex, sizeof(tex))) d.texture = tex;
     if (ImGui::IsItemDeactivatedAfterEdit()) t.r = FxEdit::Commit;
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Project image (empty = built-in soft dot)");
+    if (ImGui::IsItemHovered()) ux::SetTooltip("Project image (empty = built-in soft dot)");
     t.item(ImGui::DragInt("Frames x", &d.frames_x, 0.1f, 1, 64));
     t.item(ImGui::DragInt("Frames y", &d.frames_y, 0.1f, 1, 64));
     t.item(ImGui::DragFloat("Frame fps", &d.frame_fps, 0.1f, 0.0f, 120.0f, "%.1f (0 = over life)"));
@@ -195,7 +196,7 @@ FxEdit draw_lighting_fields(fx::Lighting2D& l) {
   Tracker t;
   t.discrete(ImGui::Checkbox("Lighting enabled", &l.enabled));
   if (ImGui::IsItemHovered())
-    ImGui::SetTooltip("Darken the scene by an ambient tint and light it with Light components.");
+    ux::SetTooltip("Darken the scene by an ambient tint and light it with Light components.");
   t.item(ImGui::ColorEdit3(l.day_night ? "Day ambient" : "Ambient", l.ambient));
   t.discrete(ImGui::Checkbox("Day / night cycle", &l.day_night));
   if (l.day_night) {

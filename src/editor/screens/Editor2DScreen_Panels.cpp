@@ -1,5 +1,7 @@
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/team/TeamPanel.h"
+#include "editor/ux/EmptyState.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/ui/Theme.h"
 
@@ -42,7 +44,7 @@ void Editor2DScreen::draw_hierarchy() {
     duplicate_selected();
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip("Duplicate selection (Ctrl+D)");
+    ux::SetTooltip("Duplicate selection (Ctrl+D)");
   }
   ImGui::SameLine();
   if (theme::SecondaryButton("Rename", ImVec2(bw, 0))) {
@@ -55,7 +57,7 @@ void Editor2DScreen::draw_hierarchy() {
     delete_selected();
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip("Delete selection (Del)");
+    ux::SetTooltip("Delete selection (Del)");
   }
   ImGui::EndDisabled();
 
@@ -87,17 +89,32 @@ void Editor2DScreen::draw_hierarchy() {
       }
       ImGui::EndDragDropTarget();
     }
+    std::size_t rows = 0;
     for (const Entity2D& e : workspace_.entities()) {
       if (filtering) {
-        if (hierarchy_row_visible(e)) draw_hierarchy_row(e, 0);
+        if (hierarchy_row_visible(e)) draw_hierarchy_row(e, 0), ++rows;
       } else if (e.parent == 0) {
         draw_hierarchy_row(e, 0);
+        ++rows;
       }
     }
     ImGui::TreePop();
+    if (rows == 0 && filtering) {
+      const std::string body = std::string("Nothing in the scene matches \"") + hierarchy_filter_ + "\" (name, id or component).";
+      ux::EmptyState("search", {{"Clear search", [this] { hierarchy_filter_[0] = '\0'; }}}, body.c_str());
+    } else if (rows == 0) {
+      ux::EmptyState("hierarchy2d", {{"Create Entity", [this] { create_entity("Entity"); }},
+                                     {"Create Camera", [this] { create_camera_2d(); }},
+                                     {"Create TileMap", [this] { create_tilemap(); }}});
+    }
   }
 
   // Queued row actions (safe now that iteration is over).
+  if (script_drop_id_ != 0) {
+    attach_script(script_drop_id_, script_drop_rel_);
+    script_drop_id_ = 0;
+    script_drop_rel_.clear();
+  }
   if (hier_toggle_lock_ != 0) {
     if (const Entity2D* e = workspace_.find(hier_toggle_lock_)) {
       set_entity_locked(e->id, !e->locked);
@@ -112,7 +129,13 @@ void Editor2DScreen::draw_hierarchy() {
     if (hier_drop_root_) {
       reparent(hier_drop_id_, 0);
     } else {
-      hierarchy_drop(hier_drop_id_, hier_drop_target_, hier_drop_where_);
+      if (hier_drop_where_ == Workspace2D::HierDrop::Inside && ImGui::GetIO().KeyAlt) {
+        // Alt+drag onto a row: attach and snap onto it.
+        if (!workspace_.is_selected(hier_drop_id_)) workspace_.select(hier_drop_id_);
+        attach_selected_2d(hier_drop_target_, true);
+      } else {
+        hierarchy_drop(hier_drop_id_, hier_drop_target_, hier_drop_where_);
+      }
     }
   }
   if (hier_open_context_) {
@@ -187,13 +210,13 @@ void Editor2DScreen::draw_hierarchy_row(const Entity2D& e, int depth) {
   ImGui::PushStyleColor(ImGuiCol_Text, e.hidden ? theme::TextMuted() : theme::Sand());
   if (ImGui::SmallButton(e.hidden ? "-##eye" : "o##eye")) hier_toggle_hide_ = e.id;
   ImGui::PopStyleColor();
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(e.hidden ? "Show (H)" : "Hide (H)");
+  if (ImGui::IsItemHovered()) ux::SetTooltip(e.hidden ? "Show (H)" : "Hide (H)");
   ImGui::SameLine(0.0f, 2.0f);
   ImGui::PushStyleColor(ImGuiCol_Text, e.locked ? theme::Warning() : theme::TextMuted());
   if (ImGui::SmallButton(e.locked ? "L##lock" : ".##lock")) hier_toggle_lock_ = e.id;
   ImGui::PopStyleColor(2);
   ImGui::PopStyleVar();
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(e.locked ? "Unlock (Ctrl+Shift+L)" : "Lock (Ctrl+L)");
+  if (ImGui::IsItemHovered()) ux::SetTooltip(e.locked ? "Unlock (Ctrl+Shift+L)" : "Lock (Ctrl+L)");
   ImGui::PopID();
   ImGui::SameLine(0.0f, 4.0f);
 
@@ -239,7 +262,14 @@ void Editor2DScreen::draw_hierarchy_row(const Entity2D& e, int depth) {
     ImGui::Text("%s", e.name.c_str());
     ImGui::EndDragDropSource();
   }
-  if (ImGui::BeginDragDropTarget()) {
+  if (dragging_script() && !e.tilemap && ImGui::BeginDragDropTarget()) {
+    // A script from the Scripts panel / Asset Browser: attach it to this row.
+    if (std::string rel = accept_script_payload(); !rel.empty()) {
+      script_drop_id_ = e.id;
+      script_drop_rel_ = std::move(rel);
+    }
+    ImGui::EndDragDropTarget();
+  } else if (ImGui::BeginDragDropTarget()) {
     const float h = mx.y - mn.y;
     const float my = io.MousePos.y - mn.y;
     Workspace2D::HierDrop where = Workspace2D::HierDrop::Inside;
@@ -266,7 +296,9 @@ void Editor2DScreen::draw_hierarchy_row(const Entity2D& e, int depth) {
     ImGui::EndDragDropTarget();
   }
 
-  if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
+  if (target_picking_2d() && ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
+    finish_target_pick_2d(e.id);
+  } else if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) {
     const bool ctrl = io.KeyCtrl || io.KeySuper;
     if (io.KeyShift && has_range_anchor_ && range_anchor_ < hier_rows_prev_.size() &&
         row < hier_rows_prev_.size()) {
@@ -365,9 +397,9 @@ void Editor2DScreen::draw_inspector() {
   if (!e) {
     theme::SectionHeader("Inspector", "nothing selected");
     ImGui::Spacing();
-    theme::StatusInfo(
-        "Nothing in the crosshairs. Click an entity in the viewport or the "
-        "Scene list. Ctrl+click or drag a box to round up several.");
+    const bool any = !workspace_.entities().empty();
+    ux::EmptyState("inspector2d", {{"Select all", [this] { workspace_.select_all(); }, nullptr, any},
+                                   {"Create Entity", [this] { create_entity("Entity"); }}});
   } else {
     char sel_caption[48];
     std::snprintf(sel_caption, sizeof(sel_caption), "%zu selected", count);
@@ -422,7 +454,7 @@ void Editor2DScreen::draw_inspector() {
       ImGui::InputFloat2("W / H", wh, "%.0f");
       ImGui::EndDisabled();
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("Follows Cols x Tile px and Rows x Tile px.");
+        ux::SetTooltip("Follows Cols x Tile px and Rows x Tile px.");
       }
     } else {
       transform_field("W", &e->w, 2, 1.0f, 4096.0f, true);
@@ -482,6 +514,9 @@ void Editor2DScreen::draw_inspector() {
     // Player / Camera2D / Spawn Point (same re-fetch rule).
     if (workspace_.find(eid)) {
       draw_inspector_gameplay(eid);
+    }
+    if (workspace_.find(eid)) {
+      draw_inspector_follow_2d(eid);
     }
     // Animator (idle / walk clips from a .anim.json).
     if (workspace_.find(eid)) {

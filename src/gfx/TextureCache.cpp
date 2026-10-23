@@ -23,6 +23,12 @@ TextureUploader* texture_uploader() { return g_uploader; }
 
 TextureCache::~TextureCache() { clear(); }
 
+namespace {
+ExtraImageDecoder g_extra_decoder = nullptr;
+}  // namespace
+
+void set_extra_image_decoder(ExtraImageDecoder decoder) { g_extra_decoder = decoder; }
+
 bool TextureCache::decode_file(const std::string& path,
                                std::vector<unsigned char>* rgba, int* width,
                                int* height, std::string* error) {
@@ -39,6 +45,7 @@ bool TextureCache::decode_file(const std::string& path,
     if (error) *error = "empty or oversized file";
     return false;
   }
+  if (g_extra_decoder && g_extra_decoder(bytes.data(), bytes.size(), rgba, width, height)) return true;
   int w = 0;
   int h = 0;
   int comp = 0;

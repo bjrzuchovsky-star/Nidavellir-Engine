@@ -166,7 +166,9 @@ struct SourceSet {
   std::vector<unsigned char> mdl, vvd, vtx, phy;
 };
 
-SourceSet build_source(int version, bool wide_strips, float box_scale) {
+SourceSet build_source(int version, bool wide_strips, float box_scale,
+                       const std::vector<std::string>& cd_paths = {"models\\ts_test\\"},
+                       const char* const* tex_names = nullptr) {
   std::vector<TBodyPart> parts(2);
   parts[0].name = "body";
   parts[0].models.push_back({"box", {make_box(box_scale)}});
@@ -280,12 +282,13 @@ SourceSet build_source(int version, bool wide_strips, float box_scale) {
   h.str_rel(sd, sd + 4, "idle");
   h.str_rel(sd, sd + 8, "ACT_IDLE");
   // Textures + cd path + skins.
-  const char* tex[2] = {"crate", "missing_tex"};
+  const char* default_tex[2] = {"crate", "missing_tex"};
+  const char* const* tex = tex_names ? tex_names : default_tex;
   const std::size_t tex_at = h.alloc(2 * 64);
   h.i32(204, 2);
   h.i32(208, static_cast<std::int32_t>(tex_at));
-  const std::size_t cd_at = h.alloc(4);
-  h.i32(212, 1);
+  const std::size_t cd_at = h.alloc(4 * cd_paths.size());
+  h.i32(212, static_cast<std::int32_t>(cd_paths.size()));
   h.i32(216, static_cast<std::int32_t>(cd_at));
   const std::size_t skin_at = h.alloc(8);
   h.i32(220, 2);
@@ -341,7 +344,9 @@ SourceSet build_source(int version, bool wide_strips, float box_scale) {
     }
   }
   for (const Pending& p : strings) h.str_rel(p.base, p.field, p.s);
-  h.i32(cd_at, static_cast<std::int32_t>(h.str("models\\ts_test\\")));
+  for (std::size_t c = 0; c < cd_paths.size(); ++c) {
+    h.i32(cd_at + 4 * c, static_cast<std::int32_t>(h.str(cd_paths[c])));
+  }
   h.i32(76, static_cast<std::int32_t>(h.size()));
   out.mdl = h.d;
 
@@ -1197,3 +1202,13 @@ int run_models_smoke() {
             << "; unit scale + up axis shared by every format; hot reload)\n";
   return 0;
 }
+
+// Fixture access for other smokes (SmokeGmod.cpp): our own synthetic model.
+SmokeSourceModel smoke_source_model(const std::vector<std::string>& cd_paths, const std::string& tex0,
+                                    const std::string& tex1) {
+  const char* names[2] = {tex0.c_str(), tex1.c_str()};
+  const SourceSet s = build_source(48, false, 1.0f, cd_paths, names);
+  return {s.mdl, s.vvd, s.vtx, s.phy};
+}
+std::vector<unsigned char> smoke_vtf_dxt1_8x8_green() { return vtf_dxt1(); }
+std::vector<unsigned char> smoke_vtf_bgra_2x2() { return vtf_bgra(); }

@@ -1,6 +1,7 @@
 #include "core/Localization.h"
 #include "profiler/Profiler.h"
 #include "world3d/World3D.h"
+#include "world3d/RiderController3D.h"
 
 #include <algorithm>
 #include <cmath>
@@ -133,6 +134,12 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
          "No rider in this scene (give an entity a Player component); the camera stays put");
   }
   if (const Entity3D* p = find(player_)) spawn_ = p->transform.position;
+  rider_ctrl_ = RiderControllers3D::instance().get(kRider3DPluginId);
+  if (!vr_ && player_ != 0 && !rider_ctrl_) {
+    post(LogLevel::Warn, "play",
+         "No movement plugin is on: the rider stands still. Switch on Rider 3D "
+         "(ts.move.rider3d) in the Trading Post to walk and look.");
+  }
   rebuild_statics();
   phys_build();
   // Camera starts behind the rider, looking the way the editor camera did.
@@ -140,33 +147,47 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
   cam_pitch_ = want_pitch_ = 0.0f;
   cam_dist_ = 6.0f;
   if (const Entity3D* p = find(player_); p && p->player) cam_dist_ = p->player->camera_distance;
+  camera_ = render3d::Camera3D{};
   camera_.position = {0, 3, 8};
   camera_.target = {0, 1, 0};
   camera_.fov_y_degrees = 60.0f;
-  follow_camera(true);
-  const Entity3D* play_cam = nullptr;
-  for (const Entity3D& e : ents_) {
-    if (e.camera && (!player_ || e.parent != player_)) {
-      play_cam = &e;
-      break;
-    }
-  }
+  legacy_cams_ = scene.legacy_cameras;
+  forced_cam_ = 0;
+  active_cam_ = 0;
+  view_ = {};
+  boom_hits_ = 0;
+  has_attach_ = std::any_of(ents_.begin(), ents_.end(), [](const Entity3D& e) {
+    return e.follow.has_value() || !e.parent_bone.empty();
+  });
+  const std::uint64_t first_cam = legacy_cams_ ? 0 : pick_camera();
   if (vr_) {
     vr_update_poses();
-  } else if (!player_ && play_cam) {
-    // No rider: look through the scene's camera entity.
-    camera_.position = play_cam->transform.position;
-    camera_.target = play_cam->transform.position +
-                     play_cam->transform.rotation.rotate(Vec3{0.0f, 0.0f, -1.0f});
-    camera_.fov_y_degrees = play_cam->camera->fov;
-  } else if (!player_) {
-    const float yaw = render3d::radians(scene.editor_camera.yaw);
-    const float pitch = render3d::radians(scene.editor_camera.pitch);
-    const float d = scene.editor_camera.distance;
-    camera_.target = scene.editor_camera.target;
-    camera_.position = camera_.target + Vec3{std::sin(yaw) * std::cos(pitch) * d,
-                                             std::sin(pitch) * d,
-                                             std::cos(yaw) * std::cos(pitch) * d};
+  } else if (first_cam != 0) {
+    update_camera(true);
+  } else {
+    follow_camera(true);
+    const Entity3D* play_cam = nullptr;
+    for (const Entity3D& e : ents_) {
+      if (e.camera && (!player_ || e.parent != player_)) {
+        play_cam = &e;
+        break;
+      }
+    }
+    if (!player_ && play_cam) {
+      // No rider: look through the scene's camera entity.
+      camera_.position = play_cam->transform.position;
+      camera_.target = play_cam->transform.position +
+                       play_cam->transform.rotation.rotate(Vec3{0.0f, 0.0f, -1.0f});
+      camera_.fov_y_degrees = play_cam->camera->fov;
+    } else if (!player_) {
+      const float yaw = render3d::radians(scene.editor_camera.yaw);
+      const float pitch = render3d::radians(scene.editor_camera.pitch);
+      const float d = scene.editor_camera.distance;
+      camera_.target = scene.editor_camera.target;
+      camera_.position = camera_.target + Vec3{std::sin(yaw) * std::cos(pitch) * d,
+                                               std::sin(pitch) * d,
+                                               std::cos(yaw) * std::cos(pitch) * d};
+    }
   }
   running_ = true;
   for (const auto& x : exts_) x->on_start(*this);
@@ -208,6 +229,7 @@ void World3D::stop() {
   sounds_.clear();
   ui_commands_.clear();
   phys_.reset();
+  rider_ctrl_.reset();
   body_ids_.clear();
   body_owner_.clear();
   synced_.clear();
@@ -331,9 +353,9 @@ void World3D::follow_camera(bool snap) {
 }
 
 bool World3D::mouse_look() const {
-  if (vr_ || !running_) return false;
+  if (vr_ || !running_ || !rider_ctrl_) return false;
   const Entity3D* p = find(player_);
-  return p && p->player && p->player->look == scene3d::Player3D::Look::Mouse;
+  return p && p->player && rider_ctrl_->mouse_look(*p->player);
 }
 
 bool World3D::wants_cursor_capture() const {
@@ -342,40 +364,11 @@ bool World3D::wants_cursor_capture() const {
 
 void World3D::apply_mouse_look(float dx, float dy) {
   if (!mouse_look() || (dx == 0.0f && dy == 0.0f)) return;
-  const scene3d::Player3D& cfg = *find(player_)->player;
-  const float sens = std::clamp(cfg.mouse_sensitivity, scene3d::Player3D::kMinSensitivity,
-                                scene3d::Player3D::kMaxSensitivity);
-  want_yaw_ -= dx * sens;                            // right turns right
-  want_pitch_ += (cfg.invert_y ? dy : -dy) * sens;   // up looks up
-  clamp_look(cfg);
-}
-
-void World3D::clamp_look(const scene3d::Player3D& cfg) {
-  if (cfg.view == scene3d::Player3D::View::FirstPerson) {
-    want_pitch_ = std::clamp(want_pitch_, -kFirstPersonPitchLimit, kFirstPersonPitchLimit);
-  } else {
-    want_pitch_ = std::clamp(want_pitch_, kThirdPersonPitchMin, kThirdPersonPitchMax);
-  }
-  // Keep yaw small without a visible jump (both move together).
-  if (std::fabs(want_yaw_) > 720.0f) {
-    const float wrap = 360.0f * std::trunc(want_yaw_ / 360.0f);
-    want_yaw_ -= wrap;
-    cam_yaw_ -= wrap;
-  }
-}
-
-void World3D::ease_look(const scene3d::Player3D& cfg) {
-  const float smooth = std::clamp(cfg.smoothing, 0.0f, scene3d::Player3D::kMaxSmoothing);
-  if (smooth <= 0.0f) {
-    cam_yaw_ = want_yaw_;
-    cam_pitch_ = want_pitch_;
-    return;
-  }
-  const float k = 1.0f - smooth;
-  cam_yaw_ += (want_yaw_ - cam_yaw_) * k;
-  cam_pitch_ += (want_pitch_ - cam_pitch_) * k;
-  if (std::fabs(want_yaw_ - cam_yaw_) < 1e-3f) cam_yaw_ = want_yaw_;
-  if (std::fabs(want_pitch_ - cam_pitch_) < 1e-3f) cam_pitch_ = want_pitch_;
+  Entity3D* p = live(player_);
+  if (!p) return;
+  const scene3d::Player3D cfg = *p->player;
+  RiderMotion m{*p, cfg, vel_, grounded_, cam_yaw_, cam_pitch_, want_yaw_, want_pitch_};
+  rider_ctrl_->look_mouse(m, dx, dy);
 }
 
 void World3D::move_player(const Input3D& in) {
@@ -383,35 +376,15 @@ void World3D::move_player(const Input3D& in) {
   Entity3D* p = live(player_);
   if (!p) return;
   const scene3d::Player3D cfg = p->player ? *p->player : scene3d::Player3D{};
-  const bool first_person = cfg.view == scene3d::Player3D::View::FirstPerson;
-  // Look: keys (Q / Z, Page Up / Down), the right stick, then the mouse
-  // (already in want_*) all steer the target; smoothing eases toward it.
-  want_yaw_ += in.turn;
-  want_pitch_ += in.look;
-  const float stick_step = kStickLookSpeed * static_cast<float>(kTickSeconds);
-  want_yaw_ -= std::clamp(in.stick_x, -1.0f, 1.0f) * stick_step;
-  want_pitch_ += std::clamp(cfg.invert_y ? in.stick_y : -in.stick_y, -1.0f, 1.0f) * stick_step;
-  clamp_look(cfg);
-  ease_look(cfg);
-  const float yaw = render3d::radians(cam_yaw_);
-  const Vec3 fwd{-std::sin(yaw), 0.0f, -std::cos(yaw)};
-  const Vec3 right{std::cos(yaw), 0.0f, -std::sin(yaw)};
-  Vec3 wish = fwd * std::clamp(in.move_forward, -1.0f, 1.0f) +
-              right * std::clamp(in.move_right, -1.0f, 1.0f);
-  if (render3d::length(wish) > 1.0f) wish = render3d::normalize(wish);
   const float dt = static_cast<float>(kTickSeconds);
-  // Ground control snaps, air control eases.
-  const float accel = grounded_ ? 1.0f : 0.15f;
-  vel_.x += (wish.x * cfg.speed - vel_.x) * accel;
-  vel_.z += (wish.z * cfg.speed - vel_.z) * accel;
-  if (first_person) {
-    p->transform.rotation = Quat::axis_angle({0, 1, 0}, yaw);  // faces the view
-  } else if (render3d::length(wish) > 0.05f) {
-    p->transform.rotation = Quat::axis_angle({0, 1, 0}, std::atan2(-wish.x, -wish.z));
-  }
-  if (in.jump && grounded_) {
-    vel_.y = cfg.jump_speed;
-    grounded_ = false;
+  if (rider_ctrl_) {
+    // Look, walk, facing and jump: the movement plugin (RiderController3D).
+    RiderMotion m{*p, cfg, vel_, grounded_, cam_yaw_, cam_pitch_, want_yaw_, want_pitch_};
+    rider_ctrl_->steer(m, in, dt);
+  } else {
+    // No movement plugin: the rider stands (still falls and lands).
+    vel_.x = 0.0f;
+    vel_.z = 0.0f;
   }
   vel_.y -= kGravity * dt;
   p->transform.position += vel_ * dt;
@@ -605,6 +578,7 @@ void World3D::step(const Input3D& input0) {
   ++tick_;
   in_step_ = false;
   if (has_parents_) follow_parents(before);
+  apply_attachments();
   {
     TS_PROFILE_SCOPE("world3d.fx");
     step_fx();
@@ -617,7 +591,7 @@ void World3D::step(const Input3D& input0) {
     if (host_) prof.counter("mem.lua_kb", static_cast<double>(host_->memory_used()) / 1024.0);
     prof.add("world.ticks", 1);
   }
-  if (!vr_) follow_camera(false);
+  if (!vr_) update_camera(false);
 }
 
 void World3D::apply_zoom(float steps) {
@@ -682,7 +656,10 @@ const Entity2D* World3D::script_entity(std::uint64_t id) const {
   p.y = e->transform.position.z;
   p.w = e->transform.scale.x;
   p.h = e->transform.scale.z;
-  if (e->script) p.script = e->script;
+  if (e->script) {
+    p.script = e->script;
+    p.extra_scripts = e->extra_scripts;  // the rest of its script stack
+  }
   if (e->player) {
     PlayerControllerData pc;
     p.player = pc;

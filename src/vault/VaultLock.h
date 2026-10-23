@@ -65,8 +65,10 @@ class ProjectLock {
 // item counts as used when a scene, prefab, script, UI or other content
 // file that is not itself an unused pulled file names one of its files
 // (project-relative path); the items it depends on then count as used too.
-// `content` is the export's candidate file list (project-relative); the
-// result holds the pulled files to leave out (their .meta files included).
+// `content` is the export's candidate file list (project-relative; a
+// .meta by its logical "<asset>.meta" name, read from the claim's
+// .tombstone/meta folder); the result holds the pulled files to leave out
+// (their .meta files included).
 std::set<std::string> unused_pulled_files(const std::string& project_dir,
                                           const std::vector<std::string>& content);
 

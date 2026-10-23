@@ -21,7 +21,7 @@
 #endif
 
 #define AppName "TombStone Engine"
-#define AppPublisher "TombStone Engine contributors"
+#define AppPublisher "TombStone Team"
 #define AppUrl "https://github.com/bjrzuchovsky-star/TombStone_Engine"
 
 [Setup]
@@ -98,6 +98,15 @@ Name: "{autodesktop}\TombStone Editor"; Filename: "{app}\ts_admin.exe"; WorkingD
 
 [Run]
 Filename: "{app}\ts_admin.exe"; WorkingDir: "{userdocs}\TombStone"; Description: "{cm:LaunchProgram,TombStone Editor}"; Flags: nowait postinstall skipifsilent
+
+[InstallDelete]
+; Templates retired since an earlier version. [Files] only adds and replaces,
+; so an upgrade in place would keep them in the New Claim dialog.
+; 0.1.1: Blank 2D / Blank 3D became the Empty group (Truly Blank).
+Type: filesandordirs; Name: "{app}\templates\blank-2d"
+Type: filesandordirs; Name: "{app}\templates\blank-3d"
+Type: filesandordirs; Name: "{app}\samples\blank-2d"
+Type: filesandordirs; Name: "{app}\samples\blank-3d"
 
 [UninstallDelete]
 ; Files the apps write next to themselves (logs); user data lives elsewhere.

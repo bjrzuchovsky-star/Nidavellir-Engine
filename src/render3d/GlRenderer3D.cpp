@@ -71,6 +71,8 @@ uniform sampler2D u_mr_tex;
 uniform sampler2DShadow u_shadow;
 uniform int u_has_normal;
 uniform int u_unlit;
+uniform int u_alpha_mode;    // 0 opaque, 1 mask (cutoff), 2 blend
+uniform float u_alpha_cutoff;
 uniform int u_shadows;
 uniform float u_shadow_texel;
 uniform vec3 u_cam;
@@ -118,6 +120,7 @@ vec3 brdf(vec3 n, vec3 v, vec3 l, vec3 radiance, vec3 albedo, float metal, float
 
 void main() {
   vec4 base = ts_surface_albedo(u_albedo, v_uv, v_world);
+  if (u_alpha_mode == 1 && base.a < u_alpha_cutoff) discard;
   if (u_unlit != 0) {
     o_color = base;
     return;
@@ -856,40 +859,55 @@ class GlRenderer3D final : public Renderer3D {
     glBindTexture(GL_TEXTURE_2D, shadow_tex_);
     const GLint u_model = U("u_model"), u_alb = U("u_albedo"), u_met = U("u_metallic"),
                 u_rgh = U("u_roughness"), u_emi = U("u_emissive"), u_hn = U("u_has_normal"),
-                u_unl = U("u_unlit"), u_skn = U("u_skinned");
+                u_unl = U("u_unlit"), u_skn = U("u_skinned"), u_amode = U("u_alpha_mode"),
+                u_acut = U("u_alpha_cutoff");
     const MaterialDesc fallback;
-    for (const DrawItem& d : draws_) {
-      const GpuMesh& m = meshes_[d.mesh];
-      auto mit = materials_.find(d.material);
-      const GpuMaterial* mat = mit == materials_.end() ? nullptr : &mit->second;
-      const MaterialDesc& md = mat ? mat->desc : fallback;
-      if (md.double_sided) glDisable(GL_CULL_FACE);
-      else {
-        glEnable(GL_CULL_FACE);
-        glCullFace(GL_BACK);
+    // Opaque + alpha-tested first, then alpha-blended materials (no depth
+    // writes, drawn in submission order).
+    for (int pass = 0; pass < 2; ++pass) {
+      if (pass == 1) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE);
       }
-      g.UniformMatrix4fv(u_model, 1, GL_FALSE, d.model.m);
-      const bool skinned = bind_bones(d);
-      g.Uniform1i(u_skn, skinned ? 1 : 0);
-      if (skinned) ++stats_.skinned;
-      g.Uniform4f(u_alb, md.base_color[0], md.base_color[1], md.base_color[2], md.base_color[3]);
-      g.Uniform1f(u_met, md.metallic);
-      g.Uniform1f(u_rgh, md.roughness);
-      g.Uniform3f(u_emi, md.emissive[0], md.emissive[1], md.emissive[2]);
-      g.Uniform1i(u_hn, mat && mat->normal ? 1 : 0);
-      g.Uniform1i(u_unl, md.unlit ? 1 : 0);
-      gl_terrain::bind_material(p, md, mat ? &mat->terrain : nullptr, white_tex_);
-      g.ActiveTexture(GL_TEXTURE0);
-      glBindTexture(GL_TEXTURE_2D, mat && mat->albedo ? mat->albedo : white_tex_);
-      g.ActiveTexture(GL_TEXTURE0 + 1);
-      glBindTexture(GL_TEXTURE_2D, mat && mat->normal ? mat->normal : flat_tex_);
-      g.ActiveTexture(GL_TEXTURE0 + 2);
-      glBindTexture(GL_TEXTURE_2D, mat && mat->mr ? mat->mr : white_tex_);
-      g.BindVertexArray(m.vao);
-      glDrawElements(GL_TRIANGLES, m.count, GL_UNSIGNED_INT, nullptr);
-      ++stats_.draws;
-      stats_.triangles += static_cast<std::size_t>(m.count) / 3;
+      for (const DrawItem& d : draws_) {
+        const GpuMesh& m = meshes_[d.mesh];
+        auto mit = materials_.find(d.material);
+        const GpuMaterial* mat = mit == materials_.end() ? nullptr : &mit->second;
+        const MaterialDesc& md = mat ? mat->desc : fallback;
+        if ((md.alpha_mode == MaterialDesc::kAlphaBlend) != (pass == 1)) continue;
+        g.Uniform1i(u_amode, md.alpha_mode);
+        g.Uniform1f(u_acut, md.alpha_cutoff);
+        if (md.double_sided) glDisable(GL_CULL_FACE);
+        else {
+          glEnable(GL_CULL_FACE);
+          glCullFace(GL_BACK);
+        }
+        g.UniformMatrix4fv(u_model, 1, GL_FALSE, d.model.m);
+        const bool skinned = bind_bones(d);
+        g.Uniform1i(u_skn, skinned ? 1 : 0);
+        if (skinned) ++stats_.skinned;
+        g.Uniform4f(u_alb, md.base_color[0], md.base_color[1], md.base_color[2], md.base_color[3]);
+        g.Uniform1f(u_met, md.metallic);
+        g.Uniform1f(u_rgh, md.roughness);
+        g.Uniform3f(u_emi, md.emissive[0], md.emissive[1], md.emissive[2]);
+        g.Uniform1i(u_hn, mat && mat->normal ? 1 : 0);
+        g.Uniform1i(u_unl, md.unlit ? 1 : 0);
+        gl_terrain::bind_material(p, md, mat ? &mat->terrain : nullptr, white_tex_);
+        g.ActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, mat && mat->albedo ? mat->albedo : white_tex_);
+        g.ActiveTexture(GL_TEXTURE0 + 1);
+        glBindTexture(GL_TEXTURE_2D, mat && mat->normal ? mat->normal : flat_tex_);
+        g.ActiveTexture(GL_TEXTURE0 + 2);
+        glBindTexture(GL_TEXTURE_2D, mat && mat->mr ? mat->mr : white_tex_);
+        g.BindVertexArray(m.vao);
+        glDrawElements(GL_TRIANGLES, m.count, GL_UNSIGNED_INT, nullptr);
+        ++stats_.draws;
+        stats_.triangles += static_cast<std::size_t>(m.count) / 3;
+      }
     }
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
 
     // Foliage (instanced, after the opaque meshes). TS_TERRAIN
     if (foliage_ok_ && !foliage_.empty()) {

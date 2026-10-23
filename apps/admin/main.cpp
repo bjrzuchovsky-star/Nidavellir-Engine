@@ -1,3 +1,5 @@
+#include "plugins/rider3d/Rider3D.h"
+#include "plugins/split/Split.h"
 #include "core/Engine.h"
 #include "profiler/Profiler.h"
 #include "editor/audio/EditorAudio.h"
@@ -6,8 +8,12 @@
 #include "editor/tools/StringsPanel.h"
 #include "editor/AppFlow.h"
 #include "editor/AppState.h"
+#include "editor/assets/AssetBrowser.h"
 #include "editor/assets/AssetLibrary.h"
+#include "editor/assets/ImportSort.h"
 #include "editor/assets/TextureCache.h"
+#include "editor/editor3d/Editor3DScreen.h"
+#include "render3d/Attach3D.h"
 #include "editor/screens/Editor2DScreen.h"
 #include "net/Net.h"
 #include "editor/settings/Settings.h"
@@ -21,19 +27,25 @@
 #include "Smoke3D.h"
 #include "SmokeAssets.h"
 #include "SmokeBounds.h"
+#include "SmokeMeta.h"
 #include "SmokeModels.h"
+#include "SmokeGmod.h"
+#include "GmodCli.h"
 
 #ifndef TS_ENGINE_VERSION
 #define TS_ENGINE_VERSION "0.0.0"
 #endif
 #include "SmokePrefab.h"
 #include "SmokeTools.h"
+#include "SmokeTransform.h"
+#include "SmokeCamera.h"
 #include "SmokeVR.h"
 #include "SmokePlugins.h"
 #include "SmokeAudio.h"
 #include "ExportCli.h"
 #include "SmokeGraph.h"
 #include "SmokeCSharp.h"
+#include "SmokeScriptsMulti.h"
 #include "SmokePhysics.h"
 #include "editor/scripting/BrandBook.h"
 #include "editor/export/FreightOffice.h"
@@ -51,6 +63,7 @@
 #include "SmokeAnim3D.h"
 #include "SmokeTemplates.h"
 #include "editor/screens/ProjectManagerScreen.h"
+#include "editor/projects/ProjectStore.h"
 #include "editor/templates/TemplateStore.h"
 #include "SmokeTradingPost.h"
 #include "SmokeTerrain.h"
@@ -58,6 +71,8 @@
 #include "SmokeUpdate.h"
 #include "SmokeTeam.h"
 #include "SmokeMouseLook.h"
+#include "SmokePluginSplit.h"
+#include "SmokeUx.h"
 #include "editor/vault/VaultPanel.h"
 int run_terrain_shot(const std::string& png);
 #include "store/TradingPost.h"
@@ -1021,7 +1036,7 @@ int run_console_smoke() {
       return fail("missing tileset falls back to the built-in palette");
     }
 
-    // Import copies into assets/ and never overwrites.
+    // Import copies into assets/Textures/ (sorted imports) and never overwrites.
     const fs::path outside = smoke_root / "outside_art.tga";
     write_test_tga(outside, 4, 4, [](int, int) -> std::uint32_t {
       return 0xDEA034FFu;
@@ -1030,8 +1045,8 @@ int run_console_smoke() {
     std::string rel2;
     if (!scr->import_asset(outside.string(), &rel1) ||
         !scr->import_asset(outside.string(), &rel2) ||
-        rel1 != "assets/outside_art.tga" || rel2 != "assets/outside_art_2.tga" ||
-        !fs::exists(assets_dir / "outside_art_2.tga")) {
+        rel1 != "assets/Textures/outside_art.tga" || rel2 != "assets/Textures/outside_art_2.tga" ||
+        !fs::exists(assets_dir / "Textures" / "outside_art_2.tga")) {
       return fail("import (" + rel1 + ", " + rel2 + ")");
     }
     if (scr->import_asset((smoke_root / "nope.png").string())) {
@@ -1274,6 +1289,10 @@ int run_console_smoke() {
   if (run_physics_smoke() != 0) {
     return 1;
   }
+  // Physics / movement as Trading Post plugins, 0.2.0 (SmokePluginSplit.cpp).
+  if (ts::tombstone::run_plugin_split_smoke() != 0) {
+    return 1;
+  }
   // Frontier Survival plugin (see SmokeSurvival.cpp).
   if (run_survival_smoke() != 0) {
     return 1;
@@ -1281,12 +1300,31 @@ int run_console_smoke() {
   if (run_tools_smoke() != 0) {
     return 1;
   }
+  // Modal G / R / S, pivots, gizmos (see SmokeTransform.cpp).
+  if (run_transform_smoke() != 0) {
+    return 1;
+  }
+  // Scene cameras + attach tools (see SmokeCamera.cpp / SmokeAttach.cpp).
+  if (run_camera_smoke() != 0) {
+    return 1;
+  }
+  if (run_attach_smoke() != 0) {
+    return 1;
+  }
   // Asset database, importers, Asset Browser (see SmokeAssets.cpp).
   if (run_assets_smoke() != 0) {
     return 1;
   }
+  // Metadata folder, migration, relinks, sorted imports (see SmokeMeta.cpp).
+  if (run_meta_smoke() != 0) {
+    return 1;
+  }
   // Model import: Source .mdl + Assimp formats + .blend (see SmokeModels.cpp).
   if (run_models_smoke() != 0) {
+    return 1;
+  }
+  // Source engine formats: .gma / .vtf / .vmt, search order, rights (see SmokeGmod.cpp).
+  if (ts::tombstone::run_gmod_smoke() != 0) {
     return 1;
   }
   // Prefabs in the 2D and 3D editors (see SmokePrefab.cpp).
@@ -1317,6 +1355,10 @@ int run_console_smoke() {
   if (ts::tombstone::run_vault_smoke() != 0) {
     return 1;
   }
+  // The Vault manager in the Project Manager (see SmokeVault.cpp).
+  if (ts::tombstone::run_vault_pm_smoke() != 0) {
+    return 1;
+  }
   // Update notifier: canned GitHub JSON + loopback (see SmokeUpdate.cpp).
   if (ts::tombstone::run_update_smoke() != 0) {
     return 1;
@@ -1338,6 +1380,16 @@ int run_console_smoke() {
   }
   // C# scripts (see SmokeCSharp.cpp; graceful-disable check without the SDK).
   if (run_csharp_smoke() != 0) {
+    return 1;
+  }
+  // Several scripts per object, New Script, drag-attach, IDE launch plans
+  // (see SmokeScriptsMulti.cpp).
+  if (run_scripts_multi_smoke() != 0) {
+    return 1;
+  }
+  // Field Guide: palette, tooltips, walkthrough, layouts, errors, context
+  // menus (see SmokeUx.cpp).
+  if (run_ux_smoke() != 0) {
     return 1;
   }
 
@@ -1568,6 +1620,401 @@ int run_tiles_shot(std::string project, const std::string& png) {
     return 1;
   }
   std::cout << "Tiles screenshot: " << png << " (" << fw << "x" << fh << ")\n";
+  return 0;
+}
+
+// ts_admin --gizmo-shot <3d | 2d> <out.png>: the 3D or 2D editor (Dusk
+// theme) on a throwaway claim with the Blender-style Transform gizmo on
+// the selection (docs/transforms.md screenshot). Never touches imgui.ini.
+int run_gizmo_shot(const std::string& which, const std::string& png) {
+  namespace fs = std::filesystem;
+  const bool three = which == "3d";
+  if (!three && which != "2d") {
+    std::cerr << "--gizmo-shot wants 3d or 2d\n";
+    return 1;
+  }
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+  GLFWwindow* window = glfwCreateWindow(1600, 940, "TombStone Gizmos", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(window);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO& io = ImGui::GetIO();
+  io.IniFilename = nullptr;
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  static gfx::GlTextureUploader gl_uploader;
+  gfx::set_texture_uploader(&gl_uploader);
+  Settings defaults;
+  apply_theme(defaults);
+
+  const fs::path dir = fs::temp_directory_path() / (three ? "ts_gizmo_shot_3d" : "ts_gizmo_shot_2d");
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  editor::ProjectInfo info;
+  info.id = three ? "gizmo_shot_3d" : "gizmo_shot_2d";
+  info.name = three ? "Gizmo Gulch (3D)" : "Gizmo Gulch (2D)";
+  info.kind = three ? editor::ProjectKind::ThreeD : editor::ProjectKind::TwoD;
+  info.path = dir.string();
+  std::unique_ptr<editor::IScreen> screen;
+  std::uint64_t wagon2d = 0;
+  editor::Editor3DScreen* e3 = nullptr;
+  editor::Editor2DScreen* e2 = nullptr;
+  if (three) {
+    auto e = std::make_unique<editor::Editor3DScreen>(info);
+    e3 = e.get();
+    screen = std::move(e);
+  } else {
+    auto e = std::make_unique<editor::Editor2DScreen>(info);
+    e2 = e.get();
+    screen = std::move(e);
+  }
+  screen->on_enter();
+  if (e3) {
+    if (const auto* crate = e3->scene().find_named("Crate")) {
+      render3d::Transform t = crate->transform;
+      t.rotation = render3d::Quat::axis_angle({0, 1, 0}, 0.45f);
+      e3->set_transform(crate->id, t, "Turn");
+      e3->select(crate->id);
+    }
+    e3->gizmo().mode = editor::GizmoMode::Transform;
+    e3->set_orientation(editor::XformSpace::Local);
+  } else {
+    auto box = [&](const char* name, float x, float y, float w, float h, float rot, const float c[3]) {
+      const std::uint64_t id = e2->create_entity(name);
+      if (Entity2D* en = e2->workspace().find(id)) {
+        en->x = x;
+        en->y = y;
+        en->w = w;
+        en->h = h;
+        en->rotation = rot;
+        en->color[0] = c[0];
+        en->color[1] = c[1];
+        en->color[2] = c[2];
+      }
+      return id;
+    };
+    const float sand[3] = {0.80f, 0.62f, 0.38f}, rust[3] = {0.62f, 0.30f, 0.20f},
+                sage[3] = {0.46f, 0.56f, 0.40f};
+    const std::uint64_t saloon = box("Saloon", -300, -60, 180, 120, 0, sand);
+    const std::uint64_t tower = box("Water Tower", 220, -140, 90, 150, 0, sage);
+    wagon2d = box("Wagon", -40, 40, 140, 70, 20, rust);
+    // Frame all three first (frame 4), then select just the wagon.
+    e2->workspace().select(saloon);
+    e2->workspace().add_to_selection(tower);
+    e2->workspace().add_to_selection(wagon2d);
+    e2->set_gizmo_mode(editor::GizmoMode::Transform);
+    e2->set_orientation(editor::XformSpace::Local);
+    e2->set_cursor2d(-200, 160);
+  }
+  int fw = 0, fh = 0;
+  std::vector<unsigned char> px;
+  for (int frame = 0; frame < 24; ++frame) {
+    glfwPollEvents();
+    glfwGetFramebufferSize(window, &fw, &fh);
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    screen->on_update(1.0f / 60.0f);
+    if (e2 && frame == 4) e2->frame_selected();
+    if (e2 && frame == 6) e2->workspace().select(wagon2d);
+    ImGui::Render();
+    glViewport(0, 0, fw, fh);
+    const ImVec4 clear = editor::theme::Charcoal();
+    glClearColor(clear.x, clear.y, clear.z, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    if (frame == 23) {
+      px.assign(static_cast<std::size_t>(fw) * fh * 4, 0);
+      glPixelStorei(GL_PACK_ALIGNMENT, 1);
+      glReadBuffer(GL_BACK);
+      glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    }
+    glfwSwapBuffers(window);
+  }
+  screen->on_exit();
+  screen.reset();
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  gfx::set_texture_uploader(nullptr);
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  fs::remove_all(dir, ec);
+  if (px.empty()) return 1;
+  std::vector<unsigned char> flipped(px.size());
+  for (int y = 0; y < fh; ++y) {
+    std::memcpy(&flipped[static_cast<std::size_t>(y) * fw * 4],
+                &px[static_cast<std::size_t>(fh - 1 - y) * fw * 4], static_cast<std::size_t>(fw) * 4);
+  }
+  for (std::size_t i = 3; i < flipped.size(); i += 4) flipped[i] = 255;
+  if (!write_png_rgba(png, fw, fh, flipped)) {
+    std::cerr << "cannot write " << png << '\n';
+    return 1;
+  }
+  std::cout << "Gizmo screenshot (" << which << "): " << png << " (" << fw << "x" << fh << ")\n";
+  return 0;
+}
+
+// ts_admin --camera-shot <camera | attach> <out.png>: the 3D editor (Dusk
+// theme) on a throwaway claim. "camera": a scene Camera selected, frustum
+// and preview inset showing. "attach": the viewport context menu on the
+// Crate with Attach to... open. Never touches imgui.ini.
+int run_camera_shot(const std::string& which, const std::string& png) {
+  namespace fs = std::filesystem;
+  const bool attach = which == "attach";
+  if (!attach && which != "camera") {
+    std::cerr << "--camera-shot wants camera or attach\n";
+    return 1;
+  }
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+  GLFWwindow* window = glfwCreateWindow(1600, 940, "TombStone Cameras", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(window);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO& io = ImGui::GetIO();
+  io.IniFilename = nullptr;
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  static gfx::GlTextureUploader gl_uploader;
+  gfx::set_texture_uploader(&gl_uploader);
+  Settings defaults;
+  apply_theme(defaults);
+
+  const fs::path dir = fs::temp_directory_path() / (attach ? "ts_attach_shot" : "ts_camera_shot");
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  editor::ProjectInfo info;
+  info.id = attach ? "attach_shot" : "camera_shot";
+  info.name = attach ? "Hitching Post (3D)" : "Lookout Ridge (3D)";
+  info.kind = editor::ProjectKind::ThreeD;
+  info.path = dir.string();
+  auto ed = std::make_unique<editor::Editor3DScreen>(info);
+  ed->on_enter();
+  std::uint64_t crate = 0;
+  if (const auto* c = ed->scene().find_named("Crate")) crate = c->id;
+  const float menu_dx = std::getenv("TS_SHOT_DX") ? std::stof(std::getenv("TS_SHOT_DX")) : 60.0f;
+  const float menu_dy = std::getenv("TS_SHOT_DY") ? std::stof(std::getenv("TS_SHOT_DY")) : 228.0f;
+  if (!attach) {
+    const std::uint64_t cam = ed->create_camera();
+    if (const auto* e = ed->scene().find(cam); e && crate) {
+      const render3d::Vec3 at = ed->scene().find(crate)->transform.position;
+      render3d::Transform t = e->transform;
+      t.position = at + render3d::Vec3{5.5f, 2.6f, 4.5f};
+      t.rotation = scene3d::look_rotation(at - t.position);
+      ed->set_transform(cam, t, "Place camera");
+    }
+    ed->orbit(-35.0f, 8.0f);
+    ed->dolly(1.6f);
+    ed->select(cam);
+  } else if (crate) {
+    ed->select(crate);
+  }
+  float cx = 0, cy = 0;  // where the context menu opened
+  int fw = 0, fh = 0;
+  std::vector<unsigned char> px;
+  const int frames = 40;
+  for (int frame = 0; frame < frames; ++frame) {
+    glfwPollEvents();
+    glfwGetFramebufferSize(window, &fw, &fh);
+    if (attach && crate) {
+      if (frame == 8) {
+        float vx, vy, vw, vh;
+        ed->viewport_screen_rect(&vx, &vy, &vw, &vh);
+        const render3d::Camera3D cam = ed->editor_camera();
+        const render3d::Vec3 ndc = (cam.projection(vw / vh) * cam.view()).transform_point(ed->scene().find(crate)->transform.position);
+        cx = vx + (ndc.x * 0.5f + 0.5f) * vw;
+        cy = vy + (0.5f - ndc.y * 0.5f) * vh;
+        io.AddFocusEvent(true);
+        io.AddMousePosEvent(cx, cy);
+      }
+      if (frame == 10) io.AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+      if (frame == 11) io.AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+      // Slide down onto Attach to... (a moving mouse opens the submenu).
+      if (frame >= 16 && frame <= 28) {
+        const float k = static_cast<float>(frame - 16) / 12.0f;
+        io.AddMousePosEvent(cx + menu_dx, cy + 12.0f + (menu_dy - 12.0f) * k);
+      }
+    }
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    ed->on_update(1.0f / 60.0f);
+    ImGui::Render();
+    glViewport(0, 0, fw, fh);
+    const ImVec4 clear = editor::theme::Charcoal();
+    glClearColor(clear.x, clear.y, clear.z, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    if (frame == frames - 1) {
+      px.assign(static_cast<std::size_t>(fw) * fh * 4, 0);
+      glPixelStorei(GL_PACK_ALIGNMENT, 1);
+      glReadBuffer(GL_BACK);
+      glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    }
+    glfwSwapBuffers(window);
+  }
+  ed->on_exit();
+  ed.reset();
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  gfx::set_texture_uploader(nullptr);
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  fs::remove_all(dir, ec);
+  if (px.empty()) return 1;
+  std::vector<unsigned char> flipped(px.size());
+  for (int y = 0; y < fh; ++y) {
+    std::memcpy(&flipped[static_cast<std::size_t>(y) * fw * 4],
+                &px[static_cast<std::size_t>(fh - 1 - y) * fw * 4], static_cast<std::size_t>(fw) * 4);
+  }
+  for (std::size_t i = 3; i < flipped.size(); i += 4) flipped[i] = 255;
+  if (!write_png_rgba(png, fw, fh, flipped)) {
+    std::cerr << "cannot write " << png << '\n';
+    return 1;
+  }
+  std::cout << "Camera screenshot (" << which << "): " << png << " (" << fw << "x" << fh << ")\n";
+  return 0;
+}
+
+// ts_admin --scripts-shot <out.png>: the 2D editor (Dusk theme) on a
+// throwaway claim, a stagecoach carrying four scripts (Lua, visual graph,
+// C++, C#) in the Inspector with the Add Component menu open
+// (docs/scripting.md screenshot). Never touches imgui.ini.
+int run_scripts_shot(const std::string& png) {
+  namespace fs = std::filesystem;
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+  GLFWwindow* window = glfwCreateWindow(1600, 1000, "TombStone Scripts", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(window);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO& io = ImGui::GetIO();
+  io.IniFilename = nullptr;
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  static gfx::GlTextureUploader gl_uploader;
+  gfx::set_texture_uploader(&gl_uploader);
+  Settings defaults;
+  apply_theme(defaults);
+
+  const fs::path dir = fs::temp_directory_path() / "ts_scripts_shot";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  editor::ProjectInfo info;
+  info.id = "scripts_shot";
+  info.name = "Dusty Gulch";
+  info.kind = editor::ProjectKind::TwoD;
+  info.path = dir.string();
+  auto e2 = std::make_unique<editor::Editor2DScreen>(info);
+  e2->on_enter();
+  const std::uint64_t coach = e2->create_entity("Stagecoach");
+  if (Entity2D* en = e2->workspace().find(coach)) {
+    en->x = -60;
+    en->y = 0;
+    en->w = 160;
+    en->h = 80;
+    en->color[0] = 0.62f;
+    en->color[1] = 0.30f;
+    en->color[2] = 0.20f;
+  }
+  e2->new_script(coach, "Coach Gate", editor::ScriptLang::Lua, "gate");
+  e2->new_script(coach, "Coach Sign", editor::ScriptLang::Graph, "sign");
+  e2->new_script(coach, "Coach Ticker", editor::ScriptLang::Cpp, "ticker");
+  e2->new_script(coach, "Coach Pickup", editor::ScriptLang::CSharp, "pickup");
+  if (const Entity2D* en = e2->workspace().find(coach)) {
+    std::vector<ScriptData> stack = script_stack(*en);
+    if (stack.size() > 2) stack[2].enabled = false;  // show a disabled one
+    e2->set_scripts(coach, stack, "Disable Script");
+  }
+  e2->workspace().select(coach);
+  int fw = 0, fh = 0;
+  std::vector<unsigned char> px;
+  for (int frame = 0; frame < 30; ++frame) {
+    glfwPollEvents();
+    glfwGetFramebufferSize(window, &fw, &fh);
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    if (frame == 10) e2->open_add_component_menu();
+    e2->on_update(1.0f / 60.0f);
+    if (frame == 4) e2->frame_selected();
+    ImGui::Render();
+    glViewport(0, 0, fw, fh);
+    const ImVec4 clear = editor::theme::Charcoal();
+    glClearColor(clear.x, clear.y, clear.z, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    if (frame == 29) {
+      px.assign(static_cast<std::size_t>(fw) * fh * 4, 0);
+      glPixelStorei(GL_PACK_ALIGNMENT, 1);
+      glReadBuffer(GL_BACK);
+      glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    }
+    glfwSwapBuffers(window);
+  }
+  e2->on_exit();
+  e2.reset();
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  gfx::set_texture_uploader(nullptr);
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  fs::remove_all(dir, ec);
+  if (px.empty()) return 1;
+  std::vector<unsigned char> flipped(px.size());
+  for (int y = 0; y < fh; ++y) {
+    std::memcpy(&flipped[static_cast<std::size_t>(y) * fw * 4],
+                &px[static_cast<std::size_t>(fh - 1 - y) * fw * 4], static_cast<std::size_t>(fw) * 4);
+  }
+  for (std::size_t i = 3; i < flipped.size(); i += 4) flipped[i] = 255;
+  if (!write_png_rgba(png, fw, fh, flipped)) {
+    std::cerr << "cannot write " << png << '\n';
+    return 1;
+  }
+  std::cout << "Scripts screenshot: " << png << " (" << fw << "x" << fh << ")\n";
   return 0;
 }
 
@@ -1993,6 +2440,315 @@ int run_vault_shot(const char* png) {
   return 0;
 }
 
+// ts_admin --vault-pm-shot <out.png>: the Project Manager's Vault screen
+// (no claim open) over the demo library, an item selected (docs screenshot).
+int run_vault_pm_shot(const char* png) {
+  namespace fs = std::filesystem;
+  const fs::path root = fs::temp_directory_path() / "ts_vault_pm_shot";
+  std::string project, library, model_item, err;
+  if (!vault_demo(root.string(), &project, &library, &model_item, &err)) {
+    std::cerr << "vault demo: " << err << '\n';
+    return 1;
+  }
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+  const int W = 1280, H = 760;
+  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Vault", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(window);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGui::GetIO().IniFilename = nullptr;  // never touches imgui.ini
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  static gfx::GlTextureUploader gl_uploader;
+  gfx::set_texture_uploader(&gl_uploader);
+  Settings defaults;
+  apply_theme(defaults);
+  std::vector<editor::ProjectInfo> claims;
+  {
+    editor::ProjectInfo a;
+    a.id = "dusty-gulch";
+    a.name = "Dusty Gulch";
+    a.kind = editor::ProjectKind::ThreeD;
+    a.path = project;
+    claims.push_back(a);
+    editor::ProjectInfo b;
+    b.id = "red-rock-ranch";
+    b.name = "Red Rock Ranch";
+    b.kind = editor::ProjectKind::TwoD;
+    b.path = (root / "red-rock-ranch").string();
+    claims.push_back(b);
+  }
+  int fw = 0, fh = 0;
+  std::vector<unsigned char> px;
+  {
+    auto pm = std::make_unique<editor::ProjectManagerScreen>(claims, (root / "claims").string());
+    pm->on_enter();
+    pm->open_vault();
+    editor::VaultPanel* panel = pm->vault_panel();
+    panel->use_library("local", library, "", "");
+    panel->refresh();
+    bool selected = false;
+    int settled = 0;
+    for (int frame = 0; frame < 600 && !glfwWindowShouldClose(window); ++frame) {
+      glfwPollEvents();
+      if (!panel->busy() && !selected && frame > 2) {
+        panel->select_item(model_item);
+        selected = true;
+      }
+      if (selected && !panel->busy()) ++settled;
+      glfwGetFramebufferSize(window, &fw, &fh);
+      ImGui_ImplOpenGL3_NewFrame();
+      ImGui_ImplGlfw_NewFrame();
+      ImGui::GetIO().AddMousePosEvent(-FLT_MAX, -FLT_MAX);  // no hover tooltips
+      ImGui::NewFrame();
+      pm->on_update(1.0f / 60.0f);
+      ImGui::Render();
+      glViewport(0, 0, fw, fh);
+      const ImVec4 clear = editor::theme::Charcoal();
+      glClearColor(clear.x, clear.y, clear.z, 1.0f);
+      glClear(GL_COLOR_BUFFER_BIT);
+      ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+      const bool last = settled >= 12;
+      if (last) {
+        px.assign(static_cast<std::size_t>(fw) * fh * 4, 0);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadBuffer(GL_BACK);
+        glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+      }
+      glfwSwapBuffers(window);
+      if (last) break;
+      if (panel->busy()) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    pm->on_exit();
+  }
+  gfx::set_texture_uploader(nullptr);
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  if (px.empty()) return 1;
+  std::vector<unsigned char> flipped(px.size());
+  for (int y = 0; y < fh; ++y) {
+    std::memcpy(&flipped[static_cast<std::size_t>(y) * fw * 4],
+                &px[static_cast<std::size_t>(fh - 1 - y) * fw * 4], static_cast<std::size_t>(fw) * 4);
+  }
+  for (std::size_t i = 3; i < flipped.size(); i += 4) flipped[i] = 255;
+  if (!write_png_rgba(png, fw, fh, flipped)) {
+    std::cerr << "cannot write " << png << '\n';
+    return 1;
+  }
+  std::cout << "Vault manager screenshot: " << png << " (" << fw << "x" << fh << ")\n";
+  return 0;
+}
+
+// ts_admin --trading-post-shot <out.png>: the Project Manager's Trading
+// Post, Engine category, over a fresh Empty 3D First-person claim (Jolt +
+// Rider 3D on), Jolt selected (docs screenshot of the 0.2.0 plugins).
+int run_trading_post_shot(const char* png) {
+  namespace fs = std::filesystem;
+  const fs::path root = fs::temp_directory_path() / "ts_trading_post_shot";
+  std::error_code ec;
+  fs::remove_all(root, ec);
+  fs::create_directories(root / "claims", ec);
+  editor::TemplateStore templates;
+  templates.refresh_dirs(editor::TemplateStore::engine_template_dirs(),
+                         editor::TemplateStore::user_template_dir((root / "claims").string()));
+  const editor::ProjectTemplate* fps = templates.find("empty-3d-fps");
+  editor::ProjectStore store((root / "claims").string());
+  editor::ProjectInfo claim;
+  std::string err;
+  if (!fps || !editor::TemplateStore::create_project(store, *fps, "High Noon Range", &claim, &err)) {
+    std::cerr << "claim: " << err << '\n';
+    return 1;
+  }
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+  const int W = 1280, H = 760;
+  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Trading Post", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(window);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGui::GetIO().IniFilename = nullptr;  // never touches imgui.ini
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  static gfx::GlTextureUploader gl_uploader;
+  gfx::set_texture_uploader(&gl_uploader);
+  Settings defaults;
+  apply_theme(defaults);
+  int fw = 0, fh = 0;
+  std::vector<unsigned char> px;
+  {
+    auto pm = std::make_unique<editor::ProjectManagerScreen>(std::vector<editor::ProjectInfo>{claim},
+                                                             (root / "claims").string());
+    pm->on_enter();
+    pm->open_trading_post();
+    for (int frame = 0; frame < 30 && !glfwWindowShouldClose(window); ++frame) {
+      glfwPollEvents();
+      editor::TradingPostUi& tp = pm->trading_post();
+      if (frame == 3) {
+        tp.category = "Engine";
+        tp.selected = "ts.physics.jolt";
+      }
+      glfwGetFramebufferSize(window, &fw, &fh);
+      ImGui_ImplOpenGL3_NewFrame();
+      ImGui_ImplGlfw_NewFrame();
+      ImGui::GetIO().AddMousePosEvent(-FLT_MAX, -FLT_MAX);  // no hover tooltips
+      ImGui::NewFrame();
+      pm->on_update(1.0f / 60.0f);
+      ImGui::Render();
+      glViewport(0, 0, fw, fh);
+      const ImVec4 clear = editor::theme::Charcoal();
+      glClearColor(clear.x, clear.y, clear.z, 1.0f);
+      glClear(GL_COLOR_BUFFER_BIT);
+      ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+      const bool last = frame == 29;
+      if (last) {
+        px.assign(static_cast<std::size_t>(fw) * fh * 4, 0);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadBuffer(GL_BACK);
+        glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+      }
+      glfwSwapBuffers(window);
+    }
+    pm->on_exit();
+  }
+  gfx::set_texture_uploader(nullptr);
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  fs::remove_all(root, ec);
+  if (px.empty()) return 1;
+  std::vector<unsigned char> flipped(px.size());
+  for (int y = 0; y < fh; ++y) {
+    std::memcpy(&flipped[static_cast<std::size_t>(y) * fw * 4],
+                &px[static_cast<std::size_t>(fh - 1 - y) * fw * 4], static_cast<std::size_t>(fw) * 4);
+  }
+  for (std::size_t i = 3; i < flipped.size(); i += 4) flipped[i] = 255;
+  if (!write_png_rgba(png, fw, fh, flipped)) {
+    std::cerr << "cannot write " << png << '\n';
+    return 1;
+  }
+  std::cout << "Trading Post screenshot: " << png << " (" << fw << "x" << fh << ")\n";
+  return 0;
+}
+
+// ts_admin --assets-shot <out.png>: the Asset Browser over a demo claim
+// whose imports were sorted into type folders (metadata in .tombstone/meta).
+int run_assets_shot(const char* png) {
+  namespace fs = std::filesystem;
+  const std::string project = make_sorted_demo_claim((fs::temp_directory_path() / "ts_assets_shot").string());
+  if (!glfwInit()) {
+    std::cerr << "glfwInit failed\n";
+    return 1;
+  }
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+  const int W = 1280, H = 720;
+  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Asset Browser", nullptr, nullptr);
+  if (!window) {
+    std::cerr << "glfwCreateWindow failed\n";
+    glfwTerminate();
+    return 1;
+  }
+  glfwMakeContextCurrent(window);
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGui::GetIO().IniFilename = nullptr;
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init("#version 330");
+  static gfx::GlTextureUploader gl_uploader;
+  gfx::set_texture_uploader(&gl_uploader);
+  Settings defaults;
+  apply_theme(defaults);
+  int fw = 0, fh = 0;
+  std::vector<unsigned char> px;
+  std::vector<std::string> notes;
+  {
+    editor::AssetBrowser browser;
+    editor::AssetBrowserHost host;
+    host.note = [&](const std::string& n) { notes.push_back(n); };
+    browser.open(project, host);
+    browser.select("assets/Models/lantern/lantern.gltf");
+    for (int frame = 0; frame < 30 && !glfwWindowShouldClose(window); ++frame) {
+      glfwPollEvents();
+      glfwGetFramebufferSize(window, &fw, &fh);
+      ImGui_ImplOpenGL3_NewFrame();
+      ImGui_ImplGlfw_NewFrame();
+      ImGui::NewFrame();
+      ImGui::SetNextWindowPos(ImVec2(0, 0));
+      ImGui::SetNextWindowSize(ImVec2(static_cast<float>(fw), static_cast<float>(fh) - 70));
+      ImGui::Begin("Asset Browser", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+      browser.draw();
+      ImGui::End();
+      ImGui::SetNextWindowPos(ImVec2(0, static_cast<float>(fh) - 70));
+      ImGui::SetNextWindowSize(ImVec2(static_cast<float>(fw), 70));
+      ImGui::Begin("Telegraph", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+      for (std::size_t k = notes.size() > 2 ? notes.size() - 2 : 0; k < notes.size(); ++k) ImGui::TextUnformatted(notes[k].c_str());
+      ImGui::End();
+      ImGui::Render();
+      glViewport(0, 0, fw, fh);
+      const ImVec4 clear = editor::theme::Charcoal();
+      glClearColor(clear.x, clear.y, clear.z, 1.0f);
+      glClear(GL_COLOR_BUFFER_BIT);
+      ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+      if (frame == 29) {
+        px.assign(static_cast<std::size_t>(fw) * fh * 4, 0);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadBuffer(GL_BACK);
+        glReadPixels(0, 0, fw, fh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+      }
+      glfwSwapBuffers(window);
+    }
+  }
+  gfx::set_texture_uploader(nullptr);
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+  glfwDestroyWindow(window);
+  glfwTerminate();
+  if (px.empty()) return 1;
+  std::vector<unsigned char> flipped(px.size());
+  for (int y = 0; y < fh; ++y) {
+    std::memcpy(&flipped[static_cast<std::size_t>(y) * fw * 4],
+                &px[static_cast<std::size_t>(fh - 1 - y) * fw * 4], static_cast<std::size_t>(fw) * 4);
+  }
+  for (std::size_t k = 3; k < flipped.size(); k += 4) flipped[k] = 255;
+  if (!write_png_rgba(png, fw, fh, flipped)) {
+    std::cerr << "cannot write " << png << '\n';
+    return 1;
+  }
+  std::cout << "Asset Browser screenshot: " << png << " (" << fw << "x" << fh << ")\n";
+  return 0;
+}
+
 int run_imgui_app() {
   if (!glfwInit()) {
     std::cerr << "glfwInit failed\n";
@@ -2027,6 +2783,13 @@ int run_imgui_app() {
 
   ImGui_ImplGlfw_InitForOpenGL(window, true);
   ImGui_ImplOpenGL3_Init("#version 330");
+  // Files dropped from Explorer / Finder: the Asset Browser imports them
+  // (sorted into type folders, or into the folder under the mouse).
+  glfwSetDropCallback(window, [](GLFWwindow*, int count, const char** paths) {
+    std::vector<std::string> v;
+    for (int i = 0; i < count; ++i) v.emplace_back(paths[i]);
+    editor::importsort::push_os_drop(v);
+  });
   // Sprites / tilesets upload through this while the GL context lives.
   static gfx::GlTextureUploader gl_uploader;
   gfx::set_texture_uploader(&gl_uploader);
@@ -2124,8 +2887,27 @@ int run_imgui_app() {
 
 }  // namespace
 
+// Smoke runs: every physics / movement provider on for the whole run, so
+// the older smokes keep riding with Jolt, Box2D and the riders without
+// switching plugins on claim by claim. --smoke-plugin-split drops this hold
+// to test the plugin-off paths (smoke_provider_hold()).
+ts::tombstone::plugins::ProviderHold& smoke_provider_hold() {
+  static ts::tombstone::plugins::ProviderHold hold;
+  return hold;
+}
+
 int main(int argc, char** argv) {
   bool smoke = false;
+  // The 3D halves of the physics / movement plugins (2D ones come with the
+  // built-in catalog). Offered only; claims switch them on.
+  ts::tombstone::plugins::offer_3d_providers();
+  ts::tombstone::plugins::offer_builtin_providers();
+  for (int i = 1; i < argc; ++i) {
+    if (std::strncmp(argv[i], "--smoke", 7) == 0 || std::strcmp(argv[i], "--templates-shot") == 0) {
+      smoke_provider_hold().hold(ts::tombstone::plugins::split_plugin_ids());
+      break;
+    }
+  }
   // The Trading Post's plugin cache: installed plugins are found by this
   // process and by the ts_game / ts_client it launches.
   if (!std::getenv("TS_PLUGIN_CACHE")) {
@@ -2169,12 +2951,24 @@ int main(int argc, char** argv) {
       // ts_admin --vault push|pull|list|status|update [...] (docs/vault.md)
       return ts::tombstone::run_vault_cli(argc, argv);
     }
+    if (std::strcmp(argv[i], "--smoke-vault-pm") == 0) {
+      return ts::tombstone::run_vault_pm_smoke();
+    }
+    if (std::strcmp(argv[i], "--trading-post-shot") == 0 && i + 1 < argc) {
+      return run_trading_post_shot(argv[i + 1]);
+    }
+    if (std::strcmp(argv[i], "--vault-pm-shot") == 0 && i + 1 < argc) {
+      return run_vault_pm_shot(argv[i + 1]);
+    }
     if (std::strcmp(argv[i], "--smoke-vault") == 0) {
       return ts::tombstone::run_vault_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-team") == 0) {
       // Live Team Claims: server + headless editors, convergence, locks.
       return ts::tombstone::run_team_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-plugin-split") == 0) {
+      return ts::tombstone::run_plugin_split_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-mouselook") == 0) {
       // Mouse look: synthetic deltas through the 3D rider and 2D face-mouse.
@@ -2186,6 +2980,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--team-shot") == 0 && i + 1 < argc) {
       return run_team_shot(argv[i + 1]);
+    }
+    if (std::strcmp(argv[i], "--assets-shot") == 0 && i + 1 < argc) {
+      return run_assets_shot(argv[i + 1]);
     }
     if (std::strcmp(argv[i], "--vault-shot") == 0 && i + 1 < argc) {
       return run_vault_shot(argv[i + 1]);
@@ -2207,6 +3004,18 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-tiles") == 0) {
       return run_tiles_smoke();
+    }
+    if (std::strcmp(argv[i], "--scripts-shot") == 0 && i + 1 < argc) {
+      return run_scripts_shot(argv[i + 1]);
+    }
+    if (std::strcmp(argv[i], "--smoke-scripts-multi") == 0) {
+      return run_scripts_multi_smoke();
+    }
+    if (std::strcmp(argv[i], "--camera-shot") == 0 && i + 2 < argc) {
+      return run_camera_shot(argv[i + 1], argv[i + 2]);
+    }
+    if (std::strcmp(argv[i], "--gizmo-shot") == 0 && i + 2 < argc) {
+      return run_gizmo_shot(argv[i + 1], argv[i + 2]);
     }
     if (std::strcmp(argv[i], "--tiles-shot") == 0 && i + 2 < argc) {
       return run_tiles_shot(argv[i + 1], argv[i + 2]);
@@ -2244,6 +3053,18 @@ int main(int argc, char** argv) {
       // Just the Source engine model import (synthetic .mdl set).
       return run_mdl_smoke();
     }
+    if (std::strcmp(argv[i], "--smoke-gmod") == 0) {
+      // Source engine formats: .gma addons, VTF / VMT, material search order.
+      return ts::tombstone::run_gmod_smoke();
+    }
+    if (std::strcmp(argv[i], "--import-gma") == 0) {
+      // ts_admin --import-gma <file> --claim <dir> [--dest rel] [--only ...] [--list]
+      return ts::tombstone::run_import_gma_cli(argc, argv);
+    }
+    if (std::strcmp(argv[i], "--ack-rights") == 0) {
+      // ts_admin --ack-rights <claim> [<asset>] [--revoke] (Ship It rights check)
+      return ts::tombstone::run_ack_rights_cli(argc, argv);
+    }
     if (std::strcmp(argv[i], "--smoke-bounds") == 0) {
       // Model bounds / hit boxes / fitted colliders (see SmokeBounds.cpp).
       return run_bounds_smoke();
@@ -2256,9 +3077,25 @@ int main(int argc, char** argv) {
       // Just the asset pipeline checks (database, importers, browser ops).
       return run_assets_smoke();
     }
+    if (std::strcmp(argv[i], "--smoke-meta") == 0) {
+      // Just the metadata folder / migration / sorted import checks.
+      return run_meta_smoke();
+    }
     if (std::strcmp(argv[i], "--smoke-prefab") == 0) {
       // Just the prefab checks (2D + 3D).
       return run_prefab_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-camera") == 0) {
+      // Just the scene camera checks (2D + 3D, migration).
+      return run_camera_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-attach") == 0) {
+      // Just the attach / follow / snap / align checks (2D + 3D).
+      return run_attach_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-transform") == 0) {
+      // Just the modal transform / gizmo checks (2D + 3D).
+      return run_transform_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-tools") == 0) {
       // Just the editor tools checks (2D + 3D).
@@ -2296,6 +3133,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-survival") == 0) {
       // Just the Frontier Survival checks.
       return run_survival_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-ux") == 0) {
+      // Just the Field Guide checks.
+      return run_ux_smoke();
     }
     if (std::strcmp(argv[i], "--smoke") == 0) {
       smoke = true;

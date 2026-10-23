@@ -123,6 +123,7 @@ class AppFlow {
   std::unique_ptr<IScreen> make_screen(AppState state);
   bool reload_projects();
   void persist_settings();
+  void open_requested_claim();
   void handle_pending_screen_actions();
   // Returns false if apply failed (caller must stay on Settings).
   bool try_apply_settings_from_screen();

@@ -34,6 +34,8 @@ struct DotnetInfo {
 const DotnetInfo& dotnet_info();
 // C# scripts can be built here (SDK >= 8 and a runtime to host)?
 bool sdk_available(std::string* why);
+// The TombStone.Scripting binding sources (sdk/dotnet/TombStone.Scripting), "" when missing.
+std::string binding_sources_dir();
 // "C# scripts disabled: ..." text (empty when available).
 std::string disabled_reason(bool prebuilt);
 

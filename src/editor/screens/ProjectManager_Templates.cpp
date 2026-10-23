@@ -2,6 +2,7 @@
 // and Claim Settings (the VR switch on 3D claims).
 
 #include "editor/screens/ProjectManagerScreen.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/projects/ProjectStore.h"
 #include "editor/templates/TemplateStore.h"
@@ -289,7 +290,7 @@ void ProjectManagerScreen::draw_template_card(const ProjectTemplate& t, float w,
     cx += ts.x + 16.0f;
   }
   if (hovered) {
-    ImGui::SetTooltip("%s\n\n%s%s", t.name.c_str(), t.description.c_str(),
+    ux::SetTooltip("%s\n\n%s%s", t.name.c_str(), t.description.c_str(),
                       t.user ? "\n\n(your template)" : "");
   }
   ImGui::PopID();
@@ -437,7 +438,7 @@ void ProjectManagerScreen::draw_template_picker() {
   if (ImGui::Checkbox("VR (headset rig, grab, teleport)", &vr)) picker_vr_ = vr;
   ImGui::EndDisabled();
   if (!three_d && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip("VR is a switch on 3D claims.");
+    ux::SetTooltip("VR is a switch on 3D claims.");
   }
   ImGui::SameLine();
   ImGui::BeginDisabled(!picked);

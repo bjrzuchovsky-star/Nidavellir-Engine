@@ -7,6 +7,7 @@ add_executable(ts_admin
   SmokeScripting.cpp
   SmokeScriptRuntime.cpp
   SmokeScriptEditor.cpp
+  SmokeScriptsMulti.cpp
   SmokeNetwork.cpp
   SmokePlugins.cpp
   SmokeSurvival.cpp
@@ -23,9 +24,15 @@ add_executable(ts_admin
   SmokeStory.cpp
   SmokeVR.cpp
   SmokeTools.cpp
+  SmokeTransform.cpp
+  SmokeCamera.cpp
+  SmokeAttach.cpp
   SmokePrefab.cpp
   SmokeAssets.cpp
+  SmokeMeta.cpp
   SmokeModels.cpp
+  SmokeGmod.cpp
+  GmodCli.cpp
   SmokeBounds.cpp
   SmokeUi.cpp
   SmokeFx.cpp
@@ -42,9 +49,11 @@ add_executable(ts_admin
   SmokeLocTiles.cpp
   SmokeTerrain.cpp
   SmokeVault.cpp
+  SmokeUx.cpp
   SmokeUpdate.cpp
   SmokeTeam.cpp
   SmokeMouseLook.cpp
+  SmokePluginSplit.cpp
   VaultCli.cpp
   TerrainShot.cpp
 )
@@ -73,6 +82,7 @@ target_link_libraries(ts_admin
     ts_render3d
     ts_world3d
     ts_physics3d
+    ts_plugins_3d
     ts_xr
     ts_imgui
     ts_audio

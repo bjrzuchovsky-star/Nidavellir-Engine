@@ -2,13 +2,31 @@
 
 // Project asset database: every importable file (images, 3D models of any
 // supported format - glTF, Source .mdl, FBX / OBJ / DAE... see
-// render3d/ModelImport.h - sounds, fonts) gets a sidecar "<file>.meta" holding a stable GUID, its
-// import settings and what the importer found. The GUID is the asset's
-// identity: when a file is renamed or moved (in the Asset Browser, in
-// Explorer together with its .meta, or even without the .meta - matched by
-// content hash) the database notices on the next scan and rewrites every
-// reference to the old path in the project's scenes, prefabs and other
-// JSON / Lua files, so nothing breaks. No UI (AssetBrowser draws it).
+// render3d/ModelImport.h - sounds, fonts) gets a .meta holding a stable
+// GUID, its import settings and what the importer found. The .meta files
+// live in the claim's hidden metadata folder, mirroring the asset paths
+// (core/AssetMeta.h):
+//
+//   assets/Textures/crate.png  ->  .tombstone/meta/assets/Textures/crate.png.meta
+//
+// so asset folders hold only real assets. The GUID is the asset's
+// identity: when a file is renamed or moved in the Asset Browser its .meta
+// moves with it; when it is moved outside the editor (Explorer, git mv)
+// the next scan finds the left-behind .meta by content hash (or, for an
+// edited file, by a unique file name + type) and relinks it, logging the
+// relink to .tombstone/meta.log. Either way every reference to the old
+// path in the project's scenes, prefabs and other JSON / Lua files is
+// rewritten, so nothing breaks. A .meta whose file is gone for good is an
+// orphan: reported, and moved to .tombstone/meta_orphans/ (or deleted) by
+// clean_orphans() once the user confirms. No UI (AssetBrowser draws it).
+//
+// Claims from before the folder kept a sidecar "<file>.meta" next to each
+// asset: migrate() (run by open()) moves them into the folder with their
+// GUIDs untouched, backs them up to .tombstone/meta_backup/<time>/, logs
+// to .tombstone/meta.log and stamps .tombstone/meta.json
+// {"meta_layout": 2}. It is idempotent, and a sidecar that shows up later
+// (a file copied in from an old claim with its .meta) is adopted the same
+// way by scan().
 //
 // .meta format (JSON):
 //   {"meta": 1, "guid": "9f2c...32 hex", "kind": "texture",
@@ -35,8 +53,9 @@ enum class Kind { Texture, Model, Audio, Font, Unknown };
 
 inline constexpr const char* kMetaExt = ".meta";
 // Model importer revision stored in .meta info ("importer_version"); a
-// lower one is reimported on the next scan (2 = bounds fix).
-inline constexpr int kModelImporterVersion = 2;
+// lower one is reimported on the next scan (2 = bounds fix, 3 = Source
+// materials through the content search folders).
+inline constexpr int kModelImporterVersion = 3;
 
 Kind kind_for(const std::string& path);   // by extension
 const char* kind_name(Kind k);            // "texture" / "model" / ...
@@ -90,15 +109,41 @@ class AssetDb {
     std::vector<std::string> removed;    // known before, gone now
     std::vector<std::pair<std::string, std::string>> moved;  // old -> new
     std::vector<std::string> duplicated; // copies given a new GUID
-    std::vector<std::string> orphan_metas;  // .meta without its file
+    // Moves found through a left-behind .meta (file moved outside the
+    // editor): old -> new, with how ("hash" or "name"). Also in `moved`.
+    struct Relink {
+      std::string from, to, how;
+    };
+    std::vector<Relink> relinked;
+    std::vector<std::string> orphan_metas;  // assets whose .meta has no file (asset rel paths)
+    std::vector<std::string> adopted;       // legacy sidecars moved into the metadata folder
     bool any() const {
       return !created.empty() || !changed.empty() || !removed.empty() || !moved.empty() ||
              !duplicated.empty();
     }
   };
 
+  struct MigrationReport {
+    int moved = 0;        // sidecars moved into the metadata folder
+    int duplicates = 0;   // sidecars the folder already held (same GUID): removed
+    int conflicts = 0;    // folder held another GUID: kept the folder's, sidecar backed up
+    std::string backup_dir;  // project-relative, "" when nothing was backed up
+    std::vector<std::string> assets;  // asset rel paths whose sidecar was handled
+    bool any() const { return moved + duplicates + conflicts > 0; }
+  };
+
   void set_importer(Importer importer) { importer_ = std::move(importer); }
+  // Opens the claim and runs migrate() (legacy sidecars -> metadata folder).
   void open(const std::string& project_dir);
+  // Moves sidecar .meta files next to assets into .tombstone/meta (GUIDs
+  // kept), with a backup and a log. Safe to call again (no-op).
+  MigrationReport migrate();
+  const MigrationReport& last_migration() const { return migration_; }
+  // The .meta file of an asset (in the metadata folder, existing or not).
+  std::string meta_abs(const std::string& rel) const;
+  // Orphans from scan(): move them to .tombstone/meta_orphans/ (keep =
+  // true) or delete them. Returns how many were handled.
+  int clean_orphans(const std::vector<std::string>& asset_rels, bool keep);
   const std::string& project_dir() const { return dir_; }
   std::string abs(const std::string& rel) const;
 
@@ -126,7 +171,7 @@ class AssetDb {
   std::vector<Ref> find_references(const std::string& rel) const;
   std::size_t rewrite_references(const std::string& old_rel, const std::string& new_rel) const;
 
-  // Rename / move a file with its .meta (GUID kept) and rewrite references.
+  // Rename / move a file and its .meta (GUID kept) and rewrite references.
   // A Source .mdl takes its .vvd / .vtx / .phy along (same base name).
   bool move(const std::string& old_rel, const std::string& new_rel, std::string* error = nullptr,
             std::size_t* refs_rewritten = nullptr);
@@ -142,11 +187,15 @@ class AssetDb {
  private:
   void import_entry(Entry* e);
   void sort_entries();
+  void adopt_sidecars(const std::vector<std::string>& sidecar_rels, MigrationReport* rep);
+  void log(const std::string& line) const;
+  void prune_meta_dirs(const std::string& asset_rel) const;
 
   std::string dir_;
   std::vector<Entry> entries_;
   std::vector<std::string> extra_folders_;
   Importer importer_;
+  MigrationReport migration_;
 };
 
 }  // namespace assetdb

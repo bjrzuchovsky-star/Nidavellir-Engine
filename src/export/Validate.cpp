@@ -1,11 +1,13 @@
 #include "export/Exporter.h"
 #include "export/Plugins.h"
+#include "export/Provenance.h"
 
 #include "core/JsonMini.h"
 #include "plugin/Catalog.h"
 #include "plugin/PluginManager.h"
 #include "plugins/Builtins.h"
 #include "plugins/RuntimePlugins.h"
+#include "plugins/split/Split.h"
 #include "runtime/GraphScript.h"
 
 #include "lauxlib.h"
@@ -107,8 +109,10 @@ std::vector<PluginNeed> project_plugins(const std::string& project_dir,
   plugins::fill_catalog(catalog, project_dir, &errs);
   for (const std::string& d : extra_dirs) catalog.scan_folder(d, &errs);
   const plugins::ProjectPluginList list = plugins::read_project_plugins(project_dir);
-  const std::vector<std::string> ids =
-      list.listed ? list.ids : plugin::PluginManager::defaults(catalog, list.type);
+  // Effective list: a claim not migrated past the 0.2.0 split yet ships
+  // the physics / movement plugins its scenes use.
+  const std::vector<std::string> ids = plugins::effective_plugins(
+      project_dir, list.ids, list.listed, plugin::PluginManager::defaults(catalog, list.type));
   std::vector<PluginNeed> out;
   for (const std::string& id : ids) {
     PluginNeed n;
@@ -211,6 +215,28 @@ ValidationReport validate_project(const std::string& project_dir, const std::str
       (strict ? rep.errors : rep.warnings).push_back("plugin " + p.id + " not found (no built-in, no DLL)");
     } else {
       rep.notes.push_back("plugin " + p.id + (p.dynamic ? " (dynamic: " + p.library + ")" : " (built-in)"));
+    }
+  }
+  // Third-party content (export/Provenance.h): a reminder, never a block.
+  {
+    const std::vector<provenance::Shipped> tp = provenance::shipped_third_party(project_dir, content_files(project_dir));
+    std::vector<const provenance::Shipped*> open;
+    for (const provenance::Shipped& s : tp) {
+      if (!s.acknowledged) open.push_back(&s);
+    }
+    if (!open.empty()) {
+      std::string list;
+      for (std::size_t i = 0; i < open.size() && i < 12; ++i) {
+        list += (i ? ", " : "") + open[i]->path + " (" + open[i]->origin +
+                (open[i]->author.empty() ? "" : ", by " + open[i]->author) + ")";
+      }
+      if (open.size() > 12) list += ", +" + std::to_string(open.size() - 12) + " more";
+      rep.warnings.push_back("Rights check: " + std::to_string(open.size()) +
+                             " imported third-party file(s) (Source engine formats / .gma addons) will ship - "
+                             "you need the rights to ship these: " + list +
+                             ". Acknowledge in Ship It > Rights, or ts_admin --ack-rights <claim>.");
+    } else if (!tp.empty()) {
+      rep.notes.push_back("rights acknowledged for " + std::to_string(tp.size()) + " third-party file(s)");
     }
   }
   return rep;

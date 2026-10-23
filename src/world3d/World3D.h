@@ -6,7 +6,11 @@
 //     scene is never touched).
 //   * One rider (the entity with a `player` component): a capsule moved
 //     with WASD / stick relative to the camera yaw, gravity, jump, slides
-//     along static colliders (boxes and capsules, as world AABBs).
+//     along static colliders (boxes and capsules, as world AABBs). Walking,
+//     jumping and looking come from the Rider 3D Trading Post plugin
+//     (ts.move.rider3d, RiderController3D.h); bodies, the character sweep
+//     and grabbing from the physics plugin (ts.physics.jolt). Either off:
+//     the core keeps the rider standing / the AABB collision (no-op physics).
 //   * Follow camera behind the rider (yaw from input, smoothed). Mouse
 //     look (Player look = Mouse, the default): first person turns the body
 //     (yaw) and tilts the eyes (pitch, +-89 deg); third person orbits the
@@ -58,6 +62,7 @@ using scene3d::Entity3D;
 using render3d::Transform;
 
 class World3D;
+class RiderController3D;
 
 // Optional systems a host attaches to a World3D before start() (ts.ai's
 // navmesh agents). on_start runs after the statics are built and before
@@ -200,6 +205,29 @@ class World3D final : public runtime::ScriptWorld {
   bool grounded() const { return grounded_; }
   Vec3 player_velocity() const { return vel_; }
   const render3d::Camera3D& camera() const { return camera_; }
+  // Scene cameras (World3D_Camera.cpp, docs/camera.md).
+  struct CameraView {
+    bool use_clear = false;
+    float clear[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    float viewport[4] = {0.0f, 0.0f, 1.0f, 1.0f};  // x, y, w, h (0..1, top-left origin)
+  };
+  // The camera entity Play looks through (0 = none: the built-in rider
+  // follow view, or the editor framing without a rider).
+  std::uint64_t active_camera() const { return active_cam_; }
+  // Look through `id` now (scripts' camera.set_active); 0 = back to the
+  // highest-priority active camera.
+  bool set_active_camera(std::uint64_t id);
+  bool set_camera_priority(std::uint64_t id, int priority);
+  bool set_camera_fov(std::uint64_t id, float fov);
+  std::size_t camera_count() const;
+  // Clear colour / viewport rect of the active camera.
+  const CameraView& camera_view() const { return view_; }
+  // environment() with the active camera's clear colour as the sky.
+  render3d::Environment view_environment() const;
+  // Scene from before v18: old camera rules (docs/camera.md).
+  bool legacy_cameras() const { return legacy_cams_; }
+  // Orbit boom sphere-cast hits so far (physics plugin on; smokes).
+  std::size_t boom_hits() const { return boom_hits_; }
   float camera_yaw() const { return cam_yaw_; }
   float camera_pitch() const { return cam_pitch_; }
   // Mouse look: the rider looks with the mouse (Player look = Mouse, not
@@ -245,6 +273,7 @@ class World3D final : public runtime::ScriptWorld {
   void script_log(runtime::LogEntry entry) override;
   void script_open_extensions(lua_State* L, int sandbox) override;
   void open_physics_lua(lua_State* L, int sandbox);  // World3D_PhysicsLua.cpp
+  void open_camera_lua(lua_State* L, int sandbox);   // World3D_Camera.cpp
   void script_sound(runtime::SoundEvent event) override;
   void script_ui(runtime::UiCommand command) override;
   void script_fx(runtime::FxEvent event) override;
@@ -398,6 +427,16 @@ class World3D final : public runtime::ScriptWorld {
   void update_triggers();
   void interact();
   void follow_camera(bool snap);
+  void update_camera(bool snap);
+  std::uint64_t pick_camera() const;
+  Vec3 boom_collide(const Vec3& from, Vec3 want, float radius, std::uint64_t ignore) const;
+  void apply_attachments();
+  bool legacy_cams_ = false;
+  bool has_attach_ = false;
+  std::uint64_t active_cam_ = 0;
+  std::uint64_t forced_cam_ = 0;
+  CameraView view_;
+  mutable std::size_t boom_hits_ = 0;
   std::uint64_t spawn_copy(const Entity3D& src, float x, float z, bool keep_y, float y);
   // VR (World3D_VR.cpp).
   void vr_start();
@@ -472,9 +511,9 @@ class World3D final : public runtime::ScriptWorld {
   float want_yaw_ = 0.0f;   // look targets: input lands here, smoothing eases
   float want_pitch_ = 0.0f; // cam_yaw_ / cam_pitch_ toward them each tick
   float cam_dist_ = 6.0f;   // third person, after zoom
-  void clamp_look(const scene3d::Player3D& cfg);
   void apply_zoom(float steps);
-  void ease_look(const scene3d::Player3D& cfg);
+  // The movement plugin's controller (RiderController3D.h), picked at start.
+  std::shared_ptr<RiderController3D> rider_ctrl_;
   std::size_t contacts_ = 0;
   std::uint64_t trigger_events_ = 0;
   std::uint64_t tick_ = 0;

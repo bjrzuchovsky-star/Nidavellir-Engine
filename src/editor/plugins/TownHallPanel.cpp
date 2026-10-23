@@ -1,4 +1,5 @@
 #include "editor/plugins/TownHallPanel.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/launch/GameLauncher.h"
 #include "editor/ui/Theme.h"
@@ -156,7 +157,7 @@ void draw_map(TownHallState& s, const Snapshot& snap) {
   }
   dl->PopClipRect();
   if (hovered && nearest) {
-    ImGui::SetTooltip("%s (%s)\n%.0f, %.0f  sees %d  rtt %u ms%s", nearest->name.c_str(), nearest->account.c_str(),
+    ux::SetTooltip("%s (%s)\n%.0f, %.0f  sees %d  rtt %u ms%s", nearest->name.c_str(), nearest->account.c_str(),
                       nearest->x, nearest->y, nearest->visible, nearest->rtt_ms,
                       nearest->online ? "" : "\nlink-dead");
     if (ImGui::IsMouseClicked(0)) s.selected = nearest->name;

@@ -1,6 +1,9 @@
 #include "editor/vault/VaultPanel.h"
+#include "editor/ux/EmptyState.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/settings/Settings.h"
+#include "editor/vault/FilePick.h"
 #include "editor/ui/Theme.h"
 #include "vault/VaultBackend.h"
 #include "vault/VaultLock.h"
@@ -311,6 +314,7 @@ void VaultPanel::draw() {
   }
   draw_settings_popup();
   draw_upload_modal();
+  draw_delete_modal();
 }
 
 void VaultPanel::draw_toolbar() {
@@ -339,7 +343,21 @@ void VaultPanel::draw_toolbar() {
   ImGui::BeginDisabled(job_.valid());
   if (theme::SecondaryButton("Refresh")) refresh();
   ImGui::SameLine();
-  if (theme::PrimaryButton("Send to Vault...")) send_to_vault(host_.selected_asset ? host_.selected_asset() : "");
+  if (host_.manager) {
+    if (theme::PrimaryButton("Add files...")) {
+      // Native picker where there is one; else the dialog takes pasted paths / drops.
+      std::vector<std::string> picked;
+      if (filepick::available()) {
+        picked = filepick::open_files("Add files to the Vault");
+        if (!picked.empty()) add_files(picked);
+      } else {
+        add_files({});
+      }
+    }
+    if (ImGui::IsItemHovered()) ux::SetTooltip("Send loose files straight to the Vault (or drop them on this window)");
+  } else if (theme::PrimaryButton("Send to Vault...")) {
+    send_to_vault(host_.selected_asset ? host_.selected_asset() : "");
+  }
   std::size_t updates = 0;
   for (const auto& s : status_) updates += s.update_available && !s.pinned && s.origin == "pulled";
   if (updates) {
@@ -434,7 +452,7 @@ bool VaultPanel::tile(const vault::Item& it, float size) {
     ImGui::EndDragDropSource();
   }
   if (hovered) {
-    ImGui::SetTooltip("%s (%s)\n%s%s%s\nv%d  %s", it.name.c_str(), it.kind.c_str(),
+    ux::SetTooltip("%s (%s)\n%s%s%s\nv%d  %s", it.name.c_str(), it.kind.c_str(),
                       it.author.empty() ? "" : ("by " + it.author + "  ").c_str(),
                       it.licence.c_str(), it.tags.empty() ? "" : ("\n#" + vault::join(it.tags, " #")).c_str(),
                       it.latest, it.id.c_str());
@@ -464,8 +482,27 @@ void VaultPanel::draw_grid() {
   }
   if (shown == 0) {
     if (!loaded_) theme::StatusInfo("Opening the library...");
-    else if (items_.empty()) theme::StatusInfo("The Vault is empty. Right-click an asset in the Asset Browser > Send to Vault.");
-    else theme::StatusInfo("Nothing matches.");
+    else if (items_.empty() && host_.manager)
+      ux::EmptyState("vault", {{"Add files...", [this] {
+                                  if (filepick::available()) {
+                                    const std::vector<std::string> picked = filepick::open_files("Add files to the Vault");
+                                    if (!picked.empty()) add_files(picked);
+                                  } else {
+                                    add_files({});
+                                  }
+                                }},
+                               {"Vault settings", [this] { open_settings_ = true; }, "Pick a local folder or a shared Vault server"}},
+                     "The Vault keeps assets you share between claims. Add files here, or drop them on this window.");
+    else if (items_.empty())
+      ux::EmptyState("vault", {{"Send selected asset", [this] { send_to_vault(host_.selected_asset ? host_.selected_asset() : ""); },
+                                "Send the asset selected in the Asset Browser"},
+                               {"Vault settings", [this] { open_settings_ = true; }, "Pick a local folder or a shared Vault server"}});
+    else
+      ux::EmptyState("vault_search", {{"Clear filters", [this] {
+                                         search_[0] = '\0';
+                                         tag_[0] = '\0';
+                                         kind_filter_ = dim_filter_ = 0;
+                                       }}});
   }
 }
 
@@ -528,6 +565,10 @@ void VaultPanel::draw_details() {
       ImGui::PopTextWrapPos();
     }
   }
+  if (host_.manager) {
+    draw_manager_actions(it);
+    return;
+  }
   ImGui::BeginDisabled(job_.valid() || project_dir_.empty());
   const int target = pull_version_ ? pull_version_ : it.latest;
   std::string label;
@@ -548,7 +589,7 @@ void VaultPanel::draw_details() {
         error_ = err;
       }
     }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Pinned items keep their version when you Update all");
+    if (ImGui::IsItemHovered()) ux::SetTooltip("Pinned items keep their version when you Update all");
   }
   ImGui::EndDisabled();
   ImGui::TextDisabled("Or drag the tile into the Asset Browser / scene.");
@@ -609,9 +650,12 @@ void VaultPanel::draw_upload_modal() {
   }
   ImGui::SetNextWindowSize(ImVec2(560, 0), ImGuiCond_Appearing);
   if (!ImGui::BeginPopupModal("Send to Vault", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
-  theme::SectionHeader("Send to Vault", backend_ == "remote" ? url_ : "local library");
-  const std::vector<std::string> prefabs = host_.prefabs ? host_.prefabs() : std::vector<std::string>{};
+  theme::SectionHeader(up_files_mode_ ? "Add files to the Vault" : "Send to Vault", backend_ == "remote" ? url_ : "local library");
+  if (up_files_mode_) draw_add_files_body();
+  const std::vector<std::string> prefabs =
+      !up_files_mode_ && host_.prefabs ? host_.prefabs() : std::vector<std::string>{};
   bool replan = false;
+  if (!up_files_mode_) {
   replan |= ImGui::RadioButton(("Asset: " + (up_rel_.empty() ? std::string("(select one in the Asset Browser)") : up_rel_)).c_str(), &up_source_, 0);
   if (!prefabs.empty()) {
     replan |= ImGui::RadioButton("Prefab", &up_source_, 1);
@@ -628,9 +672,16 @@ void VaultPanel::draw_upload_modal() {
       ImGui::EndCombo();
     }
   }
+  }
   if (replan) replan_upload();
+  std::string name_hint = up_plan_.empty() ? "" : fs::path(up_plan_.back().main).stem().string();
+  if (up_files_mode_) {
+    name_hint = up_files_.size() == 1 ? fs::u8path(up_files_[0]).stem().string() : "file names (one item per asset)";
+  }
   ImGui::SetNextItemWidth(320);
-  ImGui::InputTextWithHint("Name", up_plan_.empty() ? "" : fs::path(up_plan_.back().main).stem().string().c_str(), up_name_, sizeof(up_name_));
+  ImGui::BeginDisabled(up_files_mode_ && up_files_.size() > 1);
+  ImGui::InputTextWithHint("Name", name_hint.c_str(), up_name_, sizeof(up_name_));
+  ImGui::EndDisabled();
   ImGui::SetNextItemWidth(320);
   ImGui::InputText("Author", up_author_, sizeof(up_author_));
   ImGui::SetNextItemWidth(220);
@@ -653,7 +704,10 @@ void VaultPanel::draw_upload_modal() {
   ImGui::SetNextItemWidth(320);
   ImGui::InputTextWithHint("Thumbnail", "optional .png/.jpg (else made from the asset)", up_thumb_, sizeof(up_thumb_));
   theme::Divider();
-  if (!up_plan_error_.empty()) {
+  if (up_files_mode_) {
+    if (up_files_.empty()) theme::StatusInfo("Add a file above, or drop files from Explorer on this window.");
+    else ImGui::TextColored(theme::Accent(), "%zu file(s); a model brings its textures along as dependencies", up_files_.size());
+  } else if (!up_plan_error_.empty()) {
     theme::StatusWarn(up_plan_error_.c_str());
   } else if (!up_plan_.empty()) {
     std::uint64_t bytes = 0;
@@ -672,7 +726,7 @@ void VaultPanel::draw_upload_modal() {
   ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 520);
   ImGui::TextColored(theme::Warning(), "%s", vault::kVaultRightsNote);
   ImGui::PopTextWrapPos();
-  ImGui::BeginDisabled(up_plan_.empty() || job_.valid());
+  ImGui::BeginDisabled((up_files_mode_ ? up_files_.empty() : up_plan_.empty()) || job_.valid());
   if (theme::PrimaryButton("Send")) {
     vaultp::PushOptions opt;
     opt.name = up_name_;
@@ -685,6 +739,15 @@ void VaultPanel::draw_upload_modal() {
     if (up_dims_[1]) opt.dims.push_back("3d");
     if (up_dims_[2]) opt.dims.push_back("vr");
     opt.thumbnail_png = up_thumb_;
+    if (up_files_mode_) {
+      start_add_files(opt);
+      ImGui::CloseCurrentPopup();
+      ImGui::EndDisabled();
+      ImGui::SameLine();
+      ImGui::Button("Cancel");
+      ImGui::EndPopup();
+      return;
+    }
     const std::string rel = up_plan_.back().main;
     auto backend = std::shared_ptr<vault::Backend>(make_backend());
     const std::string project = project_dir_;
@@ -704,6 +767,288 @@ void VaultPanel::draw_upload_modal() {
   ImGui::EndDisabled();
   ImGui::SameLine();
   if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+  ImGui::EndPopup();
+}
+
+// ---- Vault manager (Project Manager) ------------------------------------------------
+
+void VaultPanel::add_files(const std::vector<std::string>& paths) {
+  if (!up_files_mode_ || !ImGui::IsPopupOpen("Send to Vault")) {
+    up_files_mode_ = true;
+    up_files_.clear();
+    up_plan_.clear();
+    up_plan_error_.clear();
+    up_name_[0] = 0;
+    if (!up_author_[0]) copy_to(up_author_, sizeof(up_author_), username_);
+    up_note_[0] = 0;
+    up_desc_[0] = 0;
+    up_thumb_[0] = 0;
+    up_path_[0] = 0;
+    up_dims_[0] = host_.dimension == "2d";
+    up_dims_[1] = host_.dimension == "3d";
+    up_dims_[2] = false;
+  }
+  for (const std::string& p : paths) {
+    if (!p.empty() && std::find(up_files_.begin(), up_files_.end(), p) == up_files_.end()) up_files_.push_back(p);
+  }
+  open_upload_ = true;
+}
+
+void VaultPanel::draw_add_files_body() {
+  ImGui::TextColored(theme::TextMuted(), "Files from anywhere on this PC; no claim needed.");
+  if (ImGui::BeginChild("##upfiles", ImVec2(520, 92), ImGuiChildFlags_Borders)) {
+    int remove = -1;
+    for (int i = 0; i < static_cast<int>(up_files_.size()); ++i) {
+      ImGui::PushID(i);
+      if (ImGui::SmallButton("x")) remove = i;
+      ImGui::SameLine();
+      const std::string kind = vaultp::vault_kind(fs::u8path(up_files_[i]).filename().string());
+      ImGui::TextColored(kind.empty() ? theme::TextMuted() : theme::Text(), "%s%s", up_files_[i].c_str(),
+                         kind.empty() ? "  (not a Vault asset, or a model's companion file)" : "");
+      ImGui::PopID();
+    }
+    if (remove >= 0) up_files_.erase(up_files_.begin() + remove);
+    if (up_files_.empty()) ImGui::TextDisabled("Drop files from Explorer here, or add a path below.");
+  }
+  ImGui::EndChild();
+  ImGui::SetNextItemWidth(380);
+  const bool enter = ImGui::InputTextWithHint("##uppath", "C:\\path\\to\\file.png", up_path_, sizeof(up_path_),
+                                              ImGuiInputTextFlags_EnterReturnsTrue);
+  ImGui::SameLine();
+  if (theme::SecondaryButton("Add path") || enter) {
+    std::string p = up_path_;
+    while (!p.empty() && (p.back() == '"' || p.back() == ' ')) p.pop_back();
+    while (!p.empty() && (p.front() == '"' || p.front() == ' ')) p.erase(p.begin());
+    std::error_code ec;
+    if (!p.empty() && fs::exists(fs::u8path(p), ec)) {
+      if (std::find(up_files_.begin(), up_files_.end(), p) == up_files_.end()) up_files_.push_back(p);
+      up_path_[0] = 0;
+    } else if (!p.empty()) {
+      up_plan_error_ = "No such file: " + p;
+    }
+  }
+  if (filepick::available()) {
+    ImGui::SameLine();
+    if (theme::SecondaryButton("Browse...")) {
+      for (const std::string& p : filepick::open_files("Add files to the Vault")) {
+        if (std::find(up_files_.begin(), up_files_.end(), p) == up_files_.end()) up_files_.push_back(p);
+      }
+    }
+  }
+  if (!up_plan_error_.empty()) theme::StatusWarn(up_plan_error_.c_str());
+  theme::Divider();
+}
+
+void VaultPanel::start_add_files(const vaultp::PushOptions& opt) {
+  auto backend = std::shared_ptr<vault::Backend>(make_backend());
+  const std::vector<std::string> files = up_files_;
+  std::string scratch = host_.scratch_dir;
+  if (scratch.empty()) scratch = (fs::path(SettingsStore::default_config_dir()) / "vault_add").string();
+  const std::string thumbs = thumb_dir_;
+  start("Adding to the Vault", [backend, files, opt, scratch, thumbs] {
+    JobResult r;
+    vaultp::AddFilesResult ar;
+    r.ok = vaultp::add_files(files, *backend, opt, scratch, &ar, &r.error);
+    if (r.ok) {
+      r.message = "added " + vault::join(ar.pushed) + " (" + human_size(ar.bytes) + " uploaded)";
+      if (!ar.skipped.empty()) r.message += "; skipped " + vault::join(ar.skipped);
+    }
+    std::string err;
+    r.listed = backend->list({}, &r.items, &err);
+    for (const vault::Item& it : r.items) {
+      if (it.thumbnail.empty()) continue;
+      const std::string p = vaultp::cached_thumbnail(*backend, it.thumbnail, thumbs);
+      if (!p.empty()) r.thumbs[it.thumbnail] = p;
+    }
+    if (r.ok && !ar.items.empty()) r.has_detail = backend->get(ar.items.front(), &r.detail, &err);
+    return r;
+  }, [this](const JobResult& r) {
+    if (r.ok && r.has_detail) {
+      selected_ = r.detail.id;
+      pull_version_ = 0;
+      editing_ = false;
+    }
+    if (r.ok) up_files_.clear();
+  });
+}
+
+void VaultPanel::pull_into(const std::string& claim_dir, const std::string& item, int version) {
+  auto backend = std::shared_ptr<vault::Backend>(make_backend());
+  std::string claim_name = fs::u8path(claim_dir).filename().string();
+  if (host_.claims) {
+    for (const auto& c : host_.claims()) {
+      if (c.path == claim_dir) claim_name = c.name;
+    }
+  }
+  start("Pulling into " + claim_name, [backend, claim_dir, claim_name, item, version] {
+    JobResult r;
+    vaultp::PullOptions opt;
+    opt.version = version;
+    r.ok = vaultp::pull_item(claim_dir, nullptr, *backend, item, opt, &r.pull, &r.error);
+    r.pulled = r.ok;
+    if (r.ok) {
+      r.message = "pulled " + vault::join(r.pull.items) + " into " + claim_name + " (" +
+                  std::to_string(r.pull.written.size()) + " file(s) written, " + r.pull.main + ")";
+    }
+    return r;
+  });
+}
+
+void VaultPanel::begin_edit() {
+  const vault::Item& it = detail_;
+  if (it.id.empty()) return;
+  editing_ = true;
+  copy_to(ed_name_, sizeof(ed_name_), it.name);
+  copy_to(ed_author_, sizeof(ed_author_), it.author);
+  copy_to(ed_tags_, sizeof(ed_tags_), vault::join(it.tags));
+  copy_to(ed_desc_, sizeof(ed_desc_), it.description);
+  ed_licence_ = kLicenceCount - 1;
+  ed_licence_custom_[0] = 0;
+  for (int i = 0; i < kLicenceCount - 1; ++i) {
+    if (it.licence == kLicences[i]) ed_licence_ = i;
+  }
+  if (ed_licence_ == kLicenceCount - 1) copy_to(ed_licence_custom_, sizeof(ed_licence_custom_), it.licence);
+  for (int i = 0; i < 3; ++i) {
+    ed_dims_[i] = std::find(it.dims.begin(), it.dims.end(), kDimNames[i + 1]) != it.dims.end();
+  }
+}
+
+void VaultPanel::draw_edit_form(const vault::Item& it) {
+  theme::SectionHeader("Edit details", "name, tags, description, licence");
+  ImGui::SetNextItemWidth(-1);
+  ImGui::InputTextWithHint("##edname", "Name", ed_name_, sizeof(ed_name_));
+  ImGui::SetNextItemWidth(-1);
+  ImGui::InputTextWithHint("##edauthor", "Author", ed_author_, sizeof(ed_author_));
+  ImGui::SetNextItemWidth(170);
+  ImGui::Combo("##edlic", &ed_licence_, kLicences, kLicenceCount);
+  if (ed_licence_ == kLicenceCount - 1) {
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##edlicc", "licence", ed_licence_custom_, sizeof(ed_licence_custom_));
+  }
+  ImGui::SetNextItemWidth(-1);
+  ImGui::InputTextWithHint("##edtags", "tags, comma separated", ed_tags_, sizeof(ed_tags_));
+  ImGui::Checkbox("2D", &ed_dims_[0]);
+  ImGui::SameLine();
+  ImGui::Checkbox("3D", &ed_dims_[1]);
+  ImGui::SameLine();
+  ImGui::Checkbox("VR", &ed_dims_[2]);
+  ImGui::InputTextMultiline("##eddesc", ed_desc_, sizeof(ed_desc_), ImVec2(-1, 60));
+  ImGui::BeginDisabled(job_.valid() || !ed_name_[0]);
+  if (theme::PrimaryButton("Save details")) {
+    vault::Item meta = it;
+    meta.versions.clear();
+    meta.name = ed_name_;
+    meta.author = ed_author_;
+    meta.licence = ed_licence_ == kLicenceCount - 1 ? std::string(ed_licence_custom_) : std::string(kLicences[ed_licence_]);
+    meta.description = ed_desc_;
+    meta.tags = vault::split_tags(ed_tags_);
+    meta.dims.clear();
+    for (int i = 0; i < 3; ++i) {
+      if (ed_dims_[i]) meta.dims.push_back(kDimNames[i + 1]);
+    }
+    auto backend = std::shared_ptr<vault::Backend>(make_backend());
+    start("Saving details", [backend, meta] {
+      JobResult r;
+      r.ok = backend->update_item(meta, &r.detail, &r.error);
+      r.has_detail = r.ok;
+      if (r.ok) r.message = "saved " + r.detail.name;
+      std::string err;
+      r.listed = backend->list({}, &r.items, &err);
+      return r;
+    }, [this](const JobResult& r) {
+      if (r.ok) editing_ = false;
+    });
+  }
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  if (theme::SecondaryButton("Cancel")) editing_ = false;
+}
+
+void VaultPanel::draw_manager_actions(const vault::Item& it) {
+  if (editing_) {
+    draw_edit_form(it);
+    return;
+  }
+  ImGui::BeginDisabled(job_.valid());
+  // Pull into a claim.
+  std::vector<VaultHost::Claim> claims = host_.claims ? host_.claims() : std::vector<VaultHost::Claim>{};
+  if (claim_pick_ >= static_cast<int>(claims.size())) claim_pick_ = -1;
+  const int target = pull_version_ ? pull_version_ : it.latest;
+  ImGui::TextColored(theme::Accent(), "Pull into claim");
+  ImGui::SetNextItemWidth(-1);
+  const std::string preview = claim_pick_ < 0 ? std::string(claims.empty() ? "(no claims yet)" : "Pick a claim...")
+                                              : claims[claim_pick_].name + "  (" + claims[claim_pick_].kind + ")";
+  if (ImGui::BeginCombo("##claimpick", preview.c_str())) {
+    for (int i = 0; i < static_cast<int>(claims.size()); ++i) {
+      const std::string label = claims[i].name + "  (" + claims[i].kind + ")##" + claims[i].path;
+      if (ImGui::Selectable(label.c_str(), i == claim_pick_)) claim_pick_ = i;
+      if (ImGui::IsItemHovered()) ux::SetTooltip("%s", claims[i].path.c_str());
+    }
+    ImGui::EndCombo();
+  }
+  ImGui::BeginDisabled(claim_pick_ < 0);
+  const std::string pull_label = "Pull v" + std::to_string(target) + " into claim";
+  if (theme::PrimaryButton(pull_label.c_str())) pull_into(claims[claim_pick_].path, it.id, pull_version_);
+  ImGui::EndDisabled();
+  theme::Divider();
+  if (theme::SecondaryButton("Edit details")) begin_edit();
+  ImGui::SameLine();
+  if (pull_version_ != 0 && it.versions.size() > 1) {
+    const std::string dv = "Delete v" + std::to_string(pull_version_);
+    if (theme::DangerButton(dv.c_str())) {
+      del_item_ = it.id;
+      del_name_ = it.name;
+      del_version_ = pull_version_;
+      open_delete_ = true;
+    }
+    ImGui::SameLine();
+  }
+  if (theme::DangerButton("Delete item")) {
+    del_item_ = it.id;
+    del_name_ = it.name;
+    del_version_ = 0;
+    open_delete_ = true;
+  }
+  ImGui::EndDisabled();
+  ImGui::TextDisabled(it.versions.size() > 1 ? "Pick a version above to delete just that one."
+                                             : "Pulled copies in claims are not touched.");
+}
+
+void VaultPanel::draw_delete_modal() {
+  if (open_delete_) {
+    ImGui::OpenPopup("Delete from the Vault?");
+    open_delete_ = false;
+  }
+  if (!ImGui::BeginPopupModal("Delete from the Vault?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+  if (del_version_ == 0) ImGui::Text("Delete \"%s\" and every version from the Vault?", del_name_.c_str());
+  else ImGui::Text("Delete v%d of \"%s\" from the Vault?", del_version_, del_name_.c_str());
+  theme::StatusWarn("Claims that already pulled it keep their copies. No coming back.");
+  ImGui::Spacing();
+  if (theme::DangerButton("Delete", ImVec2(120, 0))) {
+    auto backend = std::shared_ptr<vault::Backend>(make_backend());
+    const std::string id = del_item_, name = del_name_;
+    const int ver = del_version_;
+    start("Deleting", [backend, id, name, ver] {
+      JobResult r;
+      r.ok = ver == 0 ? backend->remove_item(id, &r.error) : backend->remove_version(id, ver, &r.error);
+      if (r.ok) r.message = ver == 0 ? "deleted " + name : "deleted " + name + " v" + std::to_string(ver);
+      std::string err;
+      if (r.ok && ver != 0) r.has_detail = backend->get(id, &r.detail, &err);
+      r.listed = backend->list({}, &r.items, &err);
+      return r;
+    }, [this, id, ver](const JobResult& r) {
+      if (!r.ok) return;
+      pull_version_ = 0;
+      if (ver == 0 && selected_ == id) {
+        selected_.clear();
+        detail_ = vault::Item{};
+      }
+    });
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::SameLine();
+  if (theme::SecondaryButton("Keep it", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
   ImGui::EndPopup();
 }
 

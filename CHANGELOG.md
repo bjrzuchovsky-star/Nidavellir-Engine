@@ -2,9 +2,110 @@
 
 All notable changes to TombStone Engine. The version number lives in the `VERSION` file at the repo root.
 
-## Unreleased
+## Unreleased (0.2.0)
 
-### Editor
+Work in progress for 0.2.0. Optional features ship as Trading Post plugins rather than in every game, starting with physics and player movement.
+
+### Cameras are scene objects (2D and 3D)
+- **Create > Camera** in both editors. A camera is an ordinary object: select it, move it with the gizmo, parent it, give it scripts. It has a viewport icon and a frustum (3D) or view rectangle (2D), with the Play camera drawn in brass. Icons are hidden in Play.
+- Inspector: active, priority, perspective / orthographic, FOV, near / far, ortho size, clear colour and viewport rect (split screen, picture-in-picture). 3D adds the Fixed / Orbit / First person rig with distance, height and collision. 2D adds zoom, follow target, smoothing, dead zone and bounds.
+- Several cameras per scene: Play looks through the **active camera with the highest priority** (ties go by scene order). **Make active camera** puts one on top in a single undo step. A new camera does not take over from the one already playing.
+- 3D: a **Camera preview** inset (rendered to a texture) when a camera is selected; **Look through camera** (Numpad0) and **Align camera to view** (Ctrl+Alt+Numpad0), also on the new **Object** menu and the context menu.
+- Scripts switch cameras: Lua `camera.set_active / reset / active / set_priority / set_fov / set_zoom / count`, graph nodes **Set Active Camera**, **Reset Camera** and **Active Camera**, C++ `<tombstone/camera.h>` and C# `SetActiveCamera` / `ResetCamera` / `ActiveCamera` / `SetCameraPriority`.
+- 3D Orbit collision: static boxes always, plus a sphere cast along the boom when the physics plugin is on. Without the plugin the sphere cast does nothing.
+- VR claims still look through the headset; scene cameras are ignored while it drives the view.
+- **Old claims** (3D scene v17 and earlier, 2D v12 and earlier) play as before until opened in the editor. On open the scene is backed up to `.tombstone/backup/scene.json.pre-cameras` and a **Main Camera** is added that matches the old follow camera tick for tick. Then the scene is saved (3D v18, 2D v13) and the change is logged to `.tombstone/migrations.log` and the Telegraph. Nothing migrates if the backup cannot be written.
+- `ts_admin --smoke-camera` (also in `--smoke`); `ts_admin --camera-shot camera <out.png>`. Docs: [docs/camera.md](docs/camera.md).
+- Not yet: the 2D editor shows the camera's view rectangle rather than a rendered preview inset.
+
+### Attach, follow and snap tools (2D and 3D)
+- On the viewport and Hierarchy context menus and the new **Object** menu: **Attach to...** (keep current position or snap to the target), **Attach to bone...** (3D; rides the animated bone), **Detach** (keeps the world transform), **Follow...** (position, rotation or both, keeping the offset, editable in the Inspector), **Remove Follow**, **Snap to object**, **Copy transform from** (position / rotation / scale checkboxes) and **Align to surface** (3D: rays down plus the surface normal; 2D: onto the top of the tile or collider below).
+- Pick the target from a list, with the **eyedropper** (click it in the viewport or Hierarchy, Esc cancels), or by dragging in the Hierarchy (**Alt+drag** snaps).
+- Every tool works on the whole selection as one undo step and refuses loops. Locked objects are not moved.
+- Scene format: 3D v18 adds `"follow"`, `"parent_bone"` and `"bone_offset"`; 2D v13 adds `"follow"`.
+- `ts_admin --smoke-attach` (also in `--smoke`); `ts_admin --camera-shot attach <out.png>`. Docs: [docs/transforms.md](docs/transforms.md#attach-follow-and-snap-tools).
+
+### Script components: several scripts per object (2D and 3D)
+- Objects carry any number of scripts (up to 16) in any mix of Lua, visual graph, C++ and C#, like Unity components. Each one is an Inspector section with its own properties, an on/off checkbox, move up / down and remove, all undoable. Properties are saved per object, per script.
+- Order: on one object, events reach scripts in Inspector order; across the world each phase runs stack position by stack position, keeping lua, graph, cpp, cs within a position. Single-script claims behave as before.
+- **Add Component** at the bottom of the Inspector: **New Script...** (name, language, template) writes the file under `scripts/` and attaches it; **Script** picks an existing one with search. The 2D menu also adds Collider, Player, Camera and Spawn Point.
+- Templates for every language: Blank, Gate, Pickup, Sign and Ticker. C++ ones compile against `script_sdk.h`, C# ones against the SDK.
+- Drag a script from the Asset Browser or Scripts panel onto an object in the viewport, a Hierarchy row or the Inspector to attach it. The Asset Browser now shows scripts.
+- **Open in VS Code / Visual Studio** on each script, with detection and a **Settings > Tools > Open scripts in** default. TombStone writes the VS Code workspace and settings, `compile_commands.json` for C++ and a `.csproj` referencing the C# SDK. A missing editor gives a status message rather than an error.
+- Script errors name the object and the script: `"Wagon" (scripts/boom.lua): ...`.
+- Scene format: 2D v12 and 3D v17 add a `"scripts"` array with `"enabled"`. Older scenes with one `"script"` still load.
+- `ts_admin --smoke-scripts-multi` (also in `--smoke`); `ts_admin --scripts-shot <out.png>`. Docs: [docs/scripting.md](docs/scripting.md#script-components-several-per-object).
+- Not yet: the 3D Add Component menu lists scripts only (other 3D components stay on the + buttons).
+
+### Blender-style transforms and gizmos (2D and 3D)
+- **G / R / S** move, rotate and scale with the mouse over the viewport in both editors. **X / Y / Z** lock an axis; press it twice for the local axis. **Shift+X / Y / Z** lock a plane. Type exact values (with `-` and Backspace, Tab for the next component); the viewport header shows them. **Ctrl** flips snap and **Shift** gives precision. **Enter** or LMB confirms, as one undo step. **Esc** or RMB cancels and puts everything back. **Alt+G / R / S** clear location, rotation or scale. Multi-select and children work, and locked entities stay put.
+- New gizmos in red / green / blue that keep their size on screen and light up under the mouse:
+  - **Move:** a free-move centre circle, axis arrows and plane squares.
+  - **Rotate:** axis rings, a view ring and a 3D trackball.
+  - **Scale:** a uniform outer circle, cube-tipped handles and plane squares.
+  - **Transform:** all three together.
+- Choose the gizmo from the buttons along the top of the viewport, the toolbar, or the keys **Q / W / E / T / Y** (or 0-4). E is the 3D Rotate gizmo; 2D keeps E for Erase, so its Rotate gizmo is on 2. Choose **Local / Global** from the toolbar checkbox or press `,`.
+- Pivot modes **Median Point / Individual Origins / Active Element / Cursor / Bounding Box Centre** are in a dropdown and on the `.` menu. **Shift+right-click** places the 3D or 2D cursor; **Shift+C** resets it.
+- **Shortcut changes:**
+  - The grid toggle moved from G to `'` in both editors.
+  - 3D: the Scale gizmo moved from R to T. Surface snapping moved from holding Ctrl to the toolbar snap target **Surface**.
+  - 2D: R rotates over the viewport when the Select tool has a selection, and is the Rect tool otherwise. Shift+right-click no longer opens the context menu. The 2D editor starts in **Tweak** mode with the old box handles.
+  - Shift+Tab also toggles snap.
+  - No key fires while you type in a text field.
+  - See [docs/transforms.md](docs/transforms.md) for the full list.
+- `ts_admin --smoke-transform` (also in `--smoke`) covers modal transforms, typed values, locks, snap, pivots, gizmo picking and drags, and undo in both editors. `ts_admin --gizmo-shot 3d|2d <out.png>` renders the gizmos.
+- Not yet: mirroring with a negative scale (clamped), and resetting a 2D sprite to its frame size with Alt+S (it resets to 64 × 64).
+
+### Source engine formats (.mdl/.vtf/.vmt/.gma)
+- `.gma` addon import: **Asset Browser > Import... > Import Source addon (.gma)...** (or dropping a `.gma` on the editor window) opens a picker (addon name / author, files grouped as Models / Materials / Sounds / Other with checkboxes, CRC32 checked per file) and extracts the chosen files into `assets/Models/<Addon>/`, keeping Source paths. A selected `.mdl` brings its `.vvd` / `.vtx` / `.phy`; existing files are never overwritten; unsafe paths are refused. LZMA-compressed Workshop downloads (`.bin`) are decompressed by a new clean-room LZMA decoder. CLI: `ts_admin --import-gma <file> --claim <dir> [--dest] [--only] [--list]`.
+- Source materials are found far more often: each `$cdmaterials` folder is tried against the asset's search path, the folders above the model, the claim (including every addon extracted into it) and the new **Settings > Tools > Source content search folders** (with `garrysmod/`, `addons/*` and `download/` below them; Steam game folders are suggested, read-only). Missing ones keep the checker, and the model's `.meta` lists which `.vmt` files were tried where. **Relink...** in the Asset Browser fixes one by hand (`material_overrides`).
+- VMT: proper KeyValues parsing (comments, case, `[$X360]` conditions, fallback blocks, proxies ignored), nested `patch` materials with `insert` / `replace`, `$color2`, `$translucent`, `$alphatest` (+ reference), `$additive`, `$iris`, `$ssbump` skipped. VTF: correct cube-map face count (sphere map before 7.5), format names, header info.
+- Renderer: materials have an alpha mode (opaque / mask with cutoff / blend). Masked materials discard below the cutoff; blended ones draw after the opaque meshes.
+- `.vtf` files are texture assets (info, thumbnails). Model `importer_version` is now 3, so models imported earlier re-resolve their materials on the next scan; **Reimport** now also reloads the model in the open scene.
+- Rights check: files extracted from a `.gma` are tagged in `.tombstone/provenance.json` (origin `gma:<addon>`, author); Source-format files count even untagged. Ship It warns "you need the rights to ship these" with an **I have the rights** acknowledgement per file or per claim (saved, never a block); `ts_admin --ack-rights`.
+- `ts_admin --smoke-gmod` (also in `--smoke`): everything above with generated files only. Docs: [docs/model-import.md](docs/model-import.md#source-engine-formats-mdlvtfvmtgma). TombStone is not affiliated with Valve or Facepunch; import and ship only content you have the rights to.
+
+### Physics and movement are Trading Post plugins
+- Five new built-in plugins (category **Engine**, off by default), listed in the Trading Post and the Outfitter's Wagon: **Jolt Physics (3D)** `ts.physics.jolt`, **Box2D Physics (2D)** `ts.physics.box2d`, **Rider 3D (first / third person)** `ts.move.rider3d` (mouse look with Look Mouse / Keys, Sensitivity, Invert Y, Smoothing and Capture cursor on Play), **Top-down Rider (2D)** `ts.move.topdown` (with Face mouse) and **Platformer Rider (2D)** `ts.move.platformer`. See [docs/physics.md](docs/physics.md).
+- The engine core keeps small interfaces (a physics world for 3D and 2D, rider controllers for 3D and 2D). The editor, scripting (Lua, graphs, C++ and C# hooks including `on_trigger_enter` / `on_trigger_exit`), VR grabbing and exported games all go through them.
+- A claim without the plugins still opens and plays. Without a physics plugin, bodies stay put while colliders and triggers still work. Without a movement plugin, the Player stands still. Either way the Telegraph says which plugin to switch on. VR rig locomotion doesn't need a rider plugin.
+- Templates list the plugins they need, and a new claim also gets whatever its scenes use. Adding a Player, Rigid Body, Joint, Grabbable or VR Rig in the editor switches on its plugin the next time you press Play, and the Telegraph says so. A plugin you switch off stays off.
+- **Older claims migrate on first open.** The editor adds the plugins the claim's scenes use and backs up `project.json` to `.tombstone/backup/project.json.pre-0.2.0` first. It also writes `.tombstone/plugin_split.json` and logs what it did to `.tombstone/migrations.log` and the Telegraph. A claim that uses no physics or Player is only marked. Until a claim is opened, `ts_game`, the servers and export add the plugins in memory, so nothing breaks.
+- **Exports ship only the plugins the claim uses.** The list goes into the cooked `project.json` and into `game.json` under `"plugins"`, and the export report has a `plugins:` line. `ts_game` prints what it rides with.
+- The scene formats are unchanged (Scene3D v16, 2D v11), and so are the Player and collider inspector settings.
+- `ts_admin --smoke-plugin-split` (also in `--smoke`) checks four things. Templates add their plugins automatically. An old claim migrates (backup, marker, log, a second open changes nothing, a plugin switched off stays off). 2D and 3D Play work with and without the plugins. Four exported games ship only their plugins, and each one runs.
+
+## 0.1.2 — 2026-10-23
+
+A small patch release: the Vault without opening a claim. `TombStone-0.1.2-update.exe` upgrades a 0.1.0 or 0.1.1 install in place and keeps your claims, settings and the Vault.
+
+### The Vault
+- **Vault** on the Project Manager opens the library without a claim: the same browse, search, kind / tag / 2D / 3D / VR filters, thumbnails, details and versions as the in-claim panel, plus Settings and **Test connection**. See [docs/vault.md](docs/vault.md#the-vault-manager-project-manager).
+- **Add files...** sends loose files straight to the Vault (Windows file picker, a pasted path, or files dropped from Explorer on the window), with the usual send dialog (name, author, licence, tags, 2D / 3D / VR). A model brings its sibling files and the textures it names as dependency items.
+- **Edit details** (name, author, licence, tags, 2D / 3D / VR, description), **Delete item** and **Delete vN**, each with a confirm. Deleting something another item still needs is refused with the reason, claims keep the copies they pulled, and a deleted version number is never reused.
+- **Pull into claim...** with a picker listing your claims, through the regular pull path (metadata in `.tombstone/meta`, sorted type folders, `.vault/lock.json`).
+- `ts_vault` API: `PATCH /items/<id>`, `DELETE /items/<id>` and `DELETE /items/<id>/versions/<n>` (write key; **409** while in use). The local library supports the same.
+- `ts_admin --smoke-vault-pm` (also in `--smoke`) and `ts_admin --vault-pm-shot <png>`.
+
+## 0.1.1 (2026-10-23)
+
+A trail update for 0.1.0: The Vault asset library, empty claim templates, an update notice with an in-place update installer, mouse look, much tighter model bounds and hitboxes, better Blender detection, and asset metadata tucked away in a hidden folder. `TombStone-0.1.1-update.exe` upgrades a 0.1.0 install in place and keeps your claims, settings and the Vault.
+
+### The Vault
+- The Vault, a universal asset library that sits outside your claims: send textures, models, sounds, fonts and prefabs from any claim and pull them into any other. A pulled asset keeps its `.meta` GUID, so references to it hold in every claim, and pulls bring their dependencies (a model's textures, a prefab's models). See [docs/vault.md](docs/vault.md).
+- Two kinds of library behind one interface: a **local library** shared by every claim on the PC (default `Documents\TombStone\Vault`, override with `TS_VAULT_DIR`) and **`ts_vault`**, a small self-hosted HTTP server with a JSON API and hashed API keys (`--add-key`, `--list-keys`, `--revoke-key`). Both store SHA-256 content-addressed blobs with a SQLite index.
+- **View > Vault** panel in the 2D and 3D editors: search, kind / tag / 2D / 3D / VR filters, thumbnail tiles with versions and **UPDATE** / **PINNED** badges, details with versions and dependencies, **Pull**, **Update all**, **Pin**, and settings (API key in a password field, **Test connection**; the key is never logged).
+- **Send to Vault...** from the Asset Browser (right-click or the details pane) with name, author, licence presets, tags, 2D / 3D / VR, description, version note and thumbnail. Changed files make a new version (v2, v3, ...). Vault tiles can be dragged into the Asset Browser or straight into the scene.
+- Pulled assets show a **V** badge and an origin line (**UPD** when a newer version is waiting). Pulls never overwrite another asset's file or a pulled file you changed locally. Exports leave out pulled assets the game doesn't use.
+- `ts_admin --vault push|pull|list|status|update` and `ts_admin --smoke-vault` (also in `--smoke`); `ts_vault --smoke`. `TS_BUILD_VAULT` (on) builds the server.
+
+### Templates
+- New **Empty** template group, shown first in the New Claim dialog: 2D, 2D Top-down, 2D Platformer, 3D, 3D First-person, 3D Third-person, VR and **Truly Blank** (one card with a 2D / 3D switch). Each is a clean, playable starting point with no plugins and, where there's a player, a starter `scripts/player.lua`. The sample claims move to a **Samples** group. Blank 2D / Blank 3D are retired in favour of the Empty group, and the setup and update installers remove them from an existing install.
+- Every template thumbnail is rendered by the engine (`ts_admin --bake-thumbnails`). All template content is engine-made or CC0.
+- Engine support behind them: a 2D **platformer** controller mode (gravity, grounded jumps, ceiling hits) alongside top-down, playable empty 2D scenes, a 3D **first-person** view with eye height, and a new 3D **Camera** component (field of view) used as the Play camera when there's no player. New inspector fields: Movement, Gravity, Jump Speed, View, Eye height and Camera. The new `scene.json` fields are optional, so older scenes load unchanged.
+- `--smoke-templates` now creates every template in a temp folder, opens it in its editor and runs Play headless (top-down walk, platformer land and jump, first-person eye height and look, third-person orbit, VR snap turn and teleport).
+
+### Updates
 - "New update available" notice on the Project Manager. On open (at most every 6 hours, cached in settings), a background check asks GitHub for the latest release and compares it with the built-in `VERSION`. The notice has **Update** (downloads `TombStone-<ver>-update.exe`, falling back to `-setup.exe`, checks it against `SHA256SUMS.txt`, runs it and closes the editor), **Release notes**, **Later** and **Skip this version**. There's a Settings toggle, **Check for updates on start** (on by default). Errors and offline stay quiet (log only). The check uses the Vault's HTTP client (WinHTTP, Windows). `TS_FAKE_UPDATE=9.9.9` forces the notice for testing. See [docs/updates.md](docs/updates.md).
 - `ts_admin --smoke-update-check` (also in `--smoke`): canned release JSON and a loopback server, no internet.
 
@@ -29,10 +130,17 @@ All notable changes to TombStone Engine. The version number lives in the `VERSIO
 - `ts_admin --smoke-bounds` (also in `--smoke-models` / `--smoke`) and Source hitbox checks in `--smoke-mdl`.
 - `.blend` import finds Blender in more places: Steam libraries on any drive (parsed from `libraryfolders.vdf`; Steam found through the registry), *Add or remove programs* entries, Microsoft Store / winget installs and the `Blender Foundation\*` registry keys. There's a new editor setting, **Settings > Tools > Blender executable** (Browse..., saved), and `TS_BLENDER` still overrides it. The "not found" error lists where it looked and points to the setting.
 
+### Assets
+- Asset metadata moved to one hidden folder: every `.meta` now lives in `<claim>/.tombstone/meta/<asset path>.meta` instead of next to its asset, so the Asset Browser and the folders on disk show only real assets. The first time an existing claim is opened, its sidecar `.meta` files move there automatically: GUIDs are kept, a backup goes to `.tombstone/meta_backup/<time>/`, the moves are logged in `.tombstone/meta.log`, and `.tombstone/meta.json` stamps the layout as version 2. Running it again does nothing. Editor renames, moves and deletes carry the `.meta`. Files moved in Explorer get their GUID back on the next scan (matched by content hash, or by a unique file name + type when the file was also edited; the relink is logged). Orphaned `.meta` files are reported in the toolbar and only moved to `.tombstone/meta_orphans/` or deleted after you confirm. Exports still pack model `.meta` files (as sidecars, for the runtime importer). See [docs/assets.md](docs/assets.md).
+- Sorted imports: files brought in from outside go to type folders by default: `assets/Models/<Name>/` (a model with its sibling files and textures), `assets/Textures/`, `Materials/`, `Audio/`, `Fonts/`, `Scenes/`, `Animations/`, `Other/`, plus the existing `prefabs/` and `scripts/`. This applies to files dropped from Explorer onto the editor window (new), Asset Browser > **Import...** (new), the Supply Wagon image import and new Vault pulls. Dropping on an Asset Browser folder puts files there instead. Per-claim options (`.tombstone/import.json`): **Sort imports into type folders** (on) and **Keep source folder structure for model packs** (on; off sends a model's textures to `assets/Textures/<Name>/` and rewrites glTF / OBJ texture paths).
+- The Vault reads and writes `.meta` files in the metadata folder. Library items keep naming them `<asset>.meta`, so items sent from sidecar-layout claims still pull, converted on arrival.
+- `ts_admin --smoke-meta` (also in `--smoke`): metadata folder, migration, relinks, orphans, sorted imports, and Vault round trips with both layouts.
+
 ### Release tooling
 - `build_release.ps1` also writes `TombStone-<ver>-update.exe`: same AppId, upgrades in place with a minimal wizard, and keeps claims, settings and the Vault. It's listed in `SHA256SUMS.txt`, and `-TestInstall` runs it over the test install.
+- The installers' publisher is now **TombStone Team**. The AppId is unchanged, so 0.1.1 upgrades a 0.1.0 install in place.
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-22)
 
 The first release: a C++20 engine and editor for 2D, 3D and VR games with multiplayer, scripting in four languages, and a Windows installer for both the engine and exported games.
 

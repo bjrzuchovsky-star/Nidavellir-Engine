@@ -8,38 +8,7 @@ namespace editor {
 
 using render3d::Camera3D;
 using render3d::Quat;
-using render3d::Transform;
 using render3d::Vec3;
-
-namespace {
-
-float seg_dist(float px, float py, float ax, float ay, float bx, float by) {
-  const float dx = bx - ax, dy = by - ay;
-  const float l2 = dx * dx + dy * dy;
-  float t = l2 > 0.0f ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0.0f;
-  t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
-  const float cx = ax + dx * t - px, cy = ay + dy * t - py;
-  return std::sqrt(cx * cx + cy * cy);
-}
-
-void ring_basis(int axis, Vec3* u, Vec3* v) {
-  if (axis == 0) {
-    *u = {0, 1, 0};
-    *v = {0, 0, 1};
-  } else if (axis == 1) {
-    *u = {0, 0, 1};
-    *v = {1, 0, 0};
-  } else {
-    *u = {1, 0, 0};
-    *v = {0, 1, 0};
-  }
-}
-
-float snap_to(float v, float step) {
-  return step > 0.0f ? std::round(v / step) * step : v;
-}
-
-}  // namespace
 
 float Gizmo3D::handle_length(const Camera3D& cam, float vh, const Vec3& origin) {
   const float dist = render3d::length(origin - cam.position);
@@ -48,100 +17,204 @@ float Gizmo3D::handle_length(const Camera3D& cam, float vh, const Vec3& origin) 
   return kHandlePixels * world_per_px;
 }
 
-int Gizmo3D::hit(const Camera3D& cam, float vw, float vh, const Vec3& o, float mx,
-                 float my) const {
-  const float len = handle_length(cam, vh, o);
+namespace {
+
+struct Ctx {
+  const Camera3D& cam;
+  float vw, vh;
+  Vec3 o;
+  float len;
   float ox = 0, oy = 0;
-  if (!cam.project(o, vw, vh, &ox, &oy)) return -1;
-  int best = -1;
-  float best_d = kPickPixels;
-  for (int a = 0; a < 3; ++a) {
-    if (mode == GizmoMode::Rotate) {
-      Vec3 u, v;
-      ring_basis(a, &u, &v);
-      float px = 0, py = 0;
-      bool have = false;
-      for (int i = 0; i <= 48; ++i) {
-        const float th = render3d::kPi * 2.0f * i / 48.0f;
-        float sx = 0, sy = 0;
-        if (!cam.project(o + (u * std::cos(th) + v * std::sin(th)) * len, vw, vh, &sx, &sy)) {
-          have = false;
-          continue;
-        }
-        if (have) {
-          const float d = seg_dist(mx, my, px, py, sx, sy);
-          if (d < best_d) {
-            best_d = d;
-            best = a;
-          }
-        }
-        px = sx;
-        py = sy;
-        have = true;
-      }
+  const GizmoHandle& hover;
+  std::vector<GizmoShape>* out;
+
+  bool proj(const Vec3& p, float* x, float* y) const { return cam.project(p, vw, vh, x, y); }
+
+  std::uint32_t tint(std::uint32_t c, const GizmoHandle& h) const {
+    return h == hover ? gizmo_highlight(c) : c;
+  }
+
+  void line(const Vec3& a, const Vec3& b, std::uint32_t c, float th, const GizmoHandle& h) {
+    float ax, ay, bx, by;
+    if (!proj(a, &ax, &ay) || !proj(b, &bx, &by)) return;
+    GizmoShape s;
+    s.kind = GizmoShape::Kind::Polyline;
+    s.xy = {ax, ay, bx, by};
+    s.colour = tint(c, h);
+    s.thickness = h == hover && h.any() ? th + 1.5f : th;
+    s.handle = h;
+    out->push_back(std::move(s));
+  }
+
+  void circle(float r_px, bool filled, std::uint32_t c, float th, const GizmoHandle& h) {
+    GizmoShape s;
+    s.kind = filled ? GizmoShape::Kind::Disc : GizmoShape::Kind::Circle;
+    s.cx = ox;
+    s.cy = oy;
+    s.radius = r_px;
+    s.colour = tint(c, h);
+    s.thickness = h == hover && h.any() ? th + 1.5f : th;
+    s.handle = h;
+    out->push_back(std::move(s));
+  }
+
+  // Screen direction and pixel length of a world axis from the origin.
+  bool screen_axis(const Vec3& dir, float* dx, float* dy, float* px_per_len) const {
+    float ex, ey;
+    if (!proj(o + dir * len, &ex, &ey)) return false;
+    *dx = ex - ox;
+    *dy = ey - oy;
+    const float l = std::sqrt(*dx * *dx + *dy * *dy);
+    if (l < 6.0f) return false;  // pointing at the camera
+    *dx /= l;
+    *dy /= l;
+    *px_per_len = l;
+    return true;
+  }
+
+  // Shaft from t0 to t1 (handle lengths) with a cone or a cube at the tip.
+  void arrow(int a, const Vec3& dir, float t0, float t1, bool cube, GizmoPart part) {
+    float dx, dy, pl;
+    if (!screen_axis(dir, &dx, &dy, &pl)) return;
+    const GizmoHandle h{part, a};
+    const std::uint32_t c = tint(gizmo_axis_colour(a), h);
+    line(o + dir * (len * t0), o + dir * (len * t1), gizmo_axis_colour(a), 2.5f, h);
+    float tx, ty;
+    if (!proj(o + dir * (len * t1), &tx, &ty)) return;
+    GizmoShape tip;
+    tip.kind = GizmoShape::Kind::Polygon;
+    tip.colour = c;
+    tip.handle = h;
+    const float nx = -dy, ny = dx;
+    if (cube) {
+      const float s = h == hover ? 6.5f : 5.5f;
+      tip.xy = {tx + (dx + nx) * s, ty + (dy + ny) * s, tx + (dx - nx) * s, ty + (dy - ny) * s,
+                tx + (-dx - nx) * s, ty + (-dy - ny) * s, tx + (-dx + nx) * s, ty + (-dy + ny) * s};
     } else {
-      float ex = 0, ey = 0;
-      if (!cam.project(o + axis_dir(a) * len, vw, vh, &ex, &ey)) continue;
-      const float d = seg_dist(mx, my, ox, oy, ex, ey);
-      if (d < best_d) {
-        best_d = d;
-        best = a;
+      const float w = h == hover ? 7.0f : 6.0f, l = 16.0f;
+      tip.xy = {tx + nx * w, ty + ny * w, tx + dx * l, ty + dy * l, tx - nx * w, ty - ny * w};
+    }
+    out->push_back(std::move(tip));
+  }
+
+  // Square in the plane spanned by u and v (normal axis `n`).
+  void plane(int n, const Vec3& u, const Vec3& v, float t0, float t1, GizmoPart part) {
+    const GizmoHandle h{part, n};
+    const Vec3 corners[4] = {o + (u * t0 + v * t0) * len, o + (u * t1 + v * t0) * len,
+                             o + (u * t1 + v * t1) * len, o + (u * t0 + v * t1) * len};
+    GizmoShape s;
+    s.kind = GizmoShape::Kind::Polygon;
+    for (const Vec3& p : corners) {
+      float x, y;
+      if (!proj(p, &x, &y)) return;
+      s.xy.push_back(x);
+      s.xy.push_back(y);
+    }
+    // Edge-on squares are slivers: skip them.
+    const float ax = s.xy[2] - s.xy[0], ay = s.xy[3] - s.xy[1];
+    const float bx = s.xy[6] - s.xy[0], by = s.xy[7] - s.xy[1];
+    if (std::fabs(ax * by - ay * bx) < 30.0f) return;
+    s.colour = tint(gizmo_axis_colour(n, 150), h);
+    s.handle = h;
+    out->push_back(std::move(s));
+  }
+
+  // Front half of the ring around `axis` (radius r handle lengths).
+  void ring(int a, const Vec3& axis, const Vec3& u, const Vec3& v, float r) {
+    const GizmoHandle h{GizmoPart::RotateAxis, a};
+    const Vec3 to_cam = render3d::normalize(cam.position - o);
+    GizmoShape s;
+    s.kind = GizmoShape::Kind::Polyline;
+    s.colour = tint(gizmo_axis_colour(a), h);
+    s.thickness = h == hover ? 4.0f : 2.5f;
+    s.handle = h;
+    auto flush = [&]() {
+      if (s.xy.size() >= 4) out->push_back(s);
+      s.xy.clear();
+    };
+    (void)axis;
+    for (int i = 0; i <= 64; ++i) {
+      const float t = 2.0f * render3d::kPi * static_cast<float>(i) / 64.0f;
+      const Vec3 d = u * std::cos(t) + v * std::sin(t);
+      float x, y;
+      if (render3d::dot(d, to_cam) < -0.02f || !proj(o + d * (len * r), &x, &y)) {
+        flush();
+        continue;
       }
+      s.xy.push_back(x);
+      s.xy.push_back(y);
+    }
+    flush();
+  }
+};
+
+}  // namespace
+
+void Gizmo3D::layout(const Camera3D& cam, float vw, float vh, const GizmoFrame& f,
+                     const GizmoHandle& hover, std::vector<GizmoShape>* out) const {
+  if (mode == GizmoMode::None) return;
+  Ctx c{cam, vw, vh, f.origin, handle_length(cam, vh, f.origin), 0, 0, hover, out};
+  if (!cam.project(f.origin, vw, vh, &c.ox, &c.oy)) return;
+  Vec3 ax[3], sx[3];
+  for (int a = 0; a < 3; ++a) {
+    ax[a] = f.axes.rotate(axis_dir(a));
+    sx[a] = f.scale_axes.rotate(axis_dir(a));
+  }
+  const float kPx = kHandlePixels;
+  const bool move = mode == GizmoMode::Translate, rot = mode == GizmoMode::Rotate,
+             scale = mode == GizmoMode::Scale, all = mode == GizmoMode::Transform;
+  // Order matters for picking: small, exact handles first.
+  if (move || all) c.circle(10.0f, false, kGizmoWhite, 2.0f, {GizmoPart::MoveFree, -1});
+  if (move || all) {
+    const float t0 = all ? 1.05f : 0.22f, t1 = all ? 1.4f : 1.0f;
+    for (int a = 0; a < 3; ++a) c.arrow(a, ax[a], t0, t1, false, GizmoPart::MoveAxis);
+  }
+  if (scale || all) {
+    const float t0 = all ? 0.18f : 0.22f, t1 = all ? 0.55f : 1.0f;
+    for (int a = 0; a < 3; ++a) c.arrow(a, sx[a], t0, t1, true, GizmoPart::ScaleAxis);
+  }
+  if (move) {
+    for (int a = 0; a < 3; ++a) c.plane(a, ax[(a + 1) % 3], ax[(a + 2) % 3], 0.3f, 0.48f, GizmoPart::MovePlane);
+  }
+  if (scale) {
+    for (int a = 0; a < 3; ++a) c.plane(a, sx[(a + 1) % 3], sx[(a + 2) % 3], 0.3f, 0.48f, GizmoPart::ScalePlane);
+  }
+  if (rot || all) {
+    const float r = all ? 0.8f : 1.0f;
+    for (int a = 0; a < 3; ++a) c.ring(a, ax[a], ax[(a + 1) % 3], ax[(a + 2) % 3], r);
+    c.circle(kPx * (all ? 0.95f : 1.2f), false, kGizmoWhite, 2.0f, {GizmoPart::RotateView, -1});
+    if (rot) {
+      // The ball: faint fill, drag inside it to tumble freely.
+      c.circle(kPx * r, true, hover.part == GizmoPart::Trackball ? gizmo_rgba(255, 255, 255, 40)
+                                                                 : gizmo_rgba(255, 255, 255, 14),
+               1.0f, {GizmoPart::Trackball, -1});
     }
   }
-  return best;
+  if (scale || all) {
+    c.circle(kPx * (all ? 1.6f : 1.2f), false, kGizmoWhite, 2.0f, {GizmoPart::ScaleUniform, -1});
+  }
+  // Origin dot (decoration).
+  c.circle(3.0f, true, gizmo_rgba(240, 230, 200), 1.0f, {});
 }
 
-void Gizmo3D::begin(int axis, const Transform& start, const Camera3D& cam, float vw, float vh,
-                    float mx, float my) {
-  axis_ = axis;
-  start_ = start;
-  start_mx_ = mx;
-  start_my_ = my;
-  float ox = 0, oy = 0;
-  cam.project(start.position, vw, vh, &ox, &oy);
-  start_angle_ = std::atan2(my - oy, mx - ox);
+GizmoHandle Gizmo3D::pick(const Camera3D& cam, float vw, float vh, const GizmoFrame& f, float mx,
+                          float my) const {
+  std::vector<GizmoShape> shapes;
+  layout(cam, vw, vh, f, {}, &shapes);
+  return gizmo_pick(shapes, mx, my, kPickPixels);
 }
 
-Transform Gizmo3D::drag(const Camera3D& cam, float vw, float vh, float mx, float my,
-                        const GizmoSnap* snap) const {
-  Transform t = start_;
-  if (axis_ < 0) return t;
-  const Vec3 o = start_.position;
-  const Vec3 dir = axis_dir(axis_);
-  const float len = handle_length(cam, vh, o);
-  float ox = 0, oy = 0, ex = 0, ey = 0;
-  if (!cam.project(o, vw, vh, &ox, &oy)) return t;
-  if (mode == GizmoMode::Rotate) {
-    float a = std::atan2(my - oy, mx - ox) - start_angle_;
-    while (a > render3d::kPi) a -= 2.0f * render3d::kPi;
-    while (a < -render3d::kPi) a += 2.0f * render3d::kPi;
-    // Screen y grows down, so a clockwise-looking drag is negative; flip
-    // when the axis points away from the viewer.
-    float deg = -render3d::degrees(a);
-    if (render3d::dot(dir, cam.position - o) < 0.0f) deg = -deg;
-    if (snap) deg = snap_to(deg, snap->rotate);
-    t.rotation = render3d::normalize(Quat::axis_angle(dir, render3d::radians(deg)) * start_.rotation);
-    return t;
+int Gizmo3D::hit(const Camera3D& cam, float vw, float vh, const Vec3& origin, float mx,
+                 float my) const {
+  GizmoFrame f;
+  f.origin = origin;
+  const GizmoHandle h = pick(cam, vw, vh, f, mx, my);
+  switch (h.part) {
+    case GizmoPart::MoveAxis:
+    case GizmoPart::RotateAxis:
+    case GizmoPart::ScaleAxis: return h.axis;
+    default: return -1;
   }
-  if (!cam.project(o + dir * len, vw, vh, &ex, &ey)) return t;
-  float sdx = ex - ox, sdy = ey - oy;
-  const float px_len = std::sqrt(sdx * sdx + sdy * sdy);
-  if (px_len < 1.0f) return t;  // axis points at the camera
-  sdx /= px_len;
-  sdy /= px_len;
-  const float moved_px = (mx - start_mx_) * sdx + (my - start_my_) * sdy;
-  const float world = moved_px * (len / px_len);
-  if (mode == GizmoMode::Translate) {
-    t.position[axis_] = start_.position[axis_] + world;
-    if (snap) t.position[axis_] = snap_to(t.position[axis_], snap->translate);
-  } else {
-    float s = start_.scale[axis_] * (1.0f + world / len);
-    if (snap) s = snap_to(s, snap->scale);
-    const float min_s = snap && snap->scale > 0 ? snap->scale : 0.01f;
-    t.scale[axis_] = s < min_s ? min_s : s;
-  }
-  return t;
 }
 
 }  // namespace editor

@@ -208,6 +208,15 @@ class Script {
     const auto it = props_.find(name);
     return it == props_.end() ? std::string(fallback) : it->second.text;
   }
+  bool prop(const std::string& name, bool fallback) const {
+    const auto it = props_.find(name);
+    return it == props_.end() ? fallback : it->second.number != 0.0;
+  }
+  double prop(const std::string& name, int fallback) const {
+    return prop(name, static_cast<double>(fallback));
+  }
+  // The editor's Inspector lists every prop("name", literal) call it finds
+  // in the file, with the literal as the default.
 
   // Engine side (set by the module before on_start).
   void ts_error(const std::string& what) {

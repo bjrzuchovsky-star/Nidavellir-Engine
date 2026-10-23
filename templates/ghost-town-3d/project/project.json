@@ -1,5 +1,5 @@
 {
   "name": "Ghost Town 3D",
   "dimension": "3d",
-  "plugins": "ts.ai,ts.story,ts.quests,ts.dialogue,ts.saves"
+  "plugins": "ts.ai,ts.story,ts.quests,ts.dialogue,ts.saves,ts.physics.jolt,ts.move.rider3d"
 }

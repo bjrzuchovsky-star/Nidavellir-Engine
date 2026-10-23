@@ -36,6 +36,14 @@ struct VaultHost {
   std::function<void()> after_pull;                    // rescan the Asset Browser
   std::function<void(const std::string&)> note;
   std::string dimension = "2d";                        // default dims tag for uploads
+  // Vault manager (Project Manager, no claim open): edit / delete items and
+  // versions, Add files... (loose files and OS drops), Pull into claim...
+  bool manager = false;
+  struct Claim {
+    std::string name, path, kind;  // kind: "2D" / "3D" / "VR"
+  };
+  std::function<std::vector<Claim>()> claims;
+  std::string scratch_dir;  // Add files staging ("" = config dir/vault_add)
 };
 
 class VaultPanel {
@@ -66,6 +74,20 @@ class VaultPanel {
   // Select an item (details pane) by id.
   void select_item(const std::string& id) { select(id); }
 
+  // Vault manager.
+  bool manager() const { return host_.manager; }
+  // Opens the send dialog for files from outside any claim (Add files...,
+  // OS drops). Empty = open it to browse / paste paths.
+  void add_files(const std::vector<std::string>& paths);
+  // Pull (worker) into a claim folder through the usual pull path.
+  void pull_into(const std::string& claim_dir, const std::string& item, int version = 0);
+  // Opens the metadata editor for the selected item (also the screenshot).
+  void begin_edit();
+  bool editing() const { return editing_; }
+  const std::vector<vault::Item>& items() const { return items_; }
+  const std::string& last_error() const { return error_; }
+  const std::string& last_status() const { return status_line_; }
+
  private:
   struct JobResult {
     bool ok = true;
@@ -95,6 +117,11 @@ class VaultPanel {
   bool tile(const vault::Item& it, float size);
   const vaultp::ItemStatus* status_of(const std::string& id) const;
   void replan_upload();
+  void draw_manager_actions(const vault::Item& it);
+  void draw_edit_form(const vault::Item& it);
+  void draw_delete_modal();
+  void draw_add_files_body();
+  void start_add_files(const vaultp::PushOptions& opt);
 
   std::string project_dir_;
   VaultHost host_;
@@ -145,6 +172,24 @@ class VaultPanel {
   bool up_dims_[3] = {false, false, false};
   std::vector<vaultp::Package> up_plan_;
   std::string up_plan_error_;
+
+  // Vault manager: loose files, editor, deletes, claim picker.
+  bool up_files_mode_ = false;
+  std::vector<std::string> up_files_;
+  char up_path_[1024] = "";
+  bool editing_ = false;
+  char ed_name_[128] = "";
+  char ed_author_[96] = "";
+  int ed_licence_ = 0;
+  char ed_licence_custom_[96] = "";
+  char ed_tags_[256] = "";
+  char ed_desc_[1024] = "";
+  bool ed_dims_[3] = {false, false, false};
+  bool open_delete_ = false;
+  std::string del_item_;
+  std::string del_name_;
+  int del_version_ = 0;  // 0 = the whole item
+  int claim_pick_ = -1;
 };
 
 }  // namespace editor

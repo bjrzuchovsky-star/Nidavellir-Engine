@@ -1,3 +1,10 @@
+# ts_physics_box2d: the Box2D v3 backend of the ts.physics.box2d Trading
+# Post plugin (physics2d::Box2DWorld). The only target that links box2d.
+add_library(ts_physics_box2d physics_box2d/Box2DWorld.cpp)
+target_include_directories(ts_physics_box2d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(ts_physics_box2d PUBLIC ts_physics2d PRIVATE box2d)
+target_compile_features(ts_physics_box2d PUBLIC cxx_std_20)
+
 # Built-in plugins (statically linked) + the dynamic sample.
 add_library(ts_plugins_builtin
   Builtins.cpp
@@ -20,6 +27,9 @@ add_library(ts_plugins_builtin
   story/StoryPlugins.cpp
   profiler/ProfilerPlugin.cpp
   weather/WeatherPlugin.cpp
+  split/SplitPlugins.cpp
+  split/Needs.cpp
+  movement2d/Riders2D.cpp
 )
 
 target_include_directories(ts_plugins_builtin
@@ -38,6 +48,7 @@ target_link_libraries(ts_plugins_builtin
     ts_ui
     ts_ai
     ts_physics2d
+    ts_physics_box2d
   PUBLIC
     ts_weather
     ts_story

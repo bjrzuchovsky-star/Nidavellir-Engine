@@ -1,5 +1,7 @@
 #include "vault/VaultLock.h"
 
+#include "core/AssetMeta.h"
+
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -198,8 +200,10 @@ std::set<std::string> unused_pulled_files(const std::string& project_dir,
   std::map<std::string, std::string> guid_path;
   for (const std::string& rel : content) {
     if (lower_ext(rel) != ".meta") continue;
+    // Logical "<asset>.meta": the claim's metadata folder, else a sidecar.
+    const std::string meta_file = core::asset_meta::resolve(project_dir, rel);
     std::string text;
-    if (!slurp(root / fs::u8path(rel), &text, 4u << 20)) continue;
+    if (meta_file.empty() || !slurp(fs::u8path(meta_file), &text, 4u << 20)) continue;
     Value m;
     std::string err;
     if (json::parse(text, &m, &err) && !m.str("guid").empty()) {

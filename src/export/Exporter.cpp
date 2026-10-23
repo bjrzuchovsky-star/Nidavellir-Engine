@@ -5,6 +5,7 @@
 #include "export/WinIcon.h"
 #include "export/Zip.h"
 
+#include "core/AssetMeta.h"
 #include "core/JsonMini.h"
 #include "runtime/CSharpScript.h"
 #include "runtime/NativeScript.h"
@@ -26,6 +27,23 @@ namespace exporter {
 namespace fs = std::filesystem;
 
 namespace {
+
+// Where a content path's bytes are (a logical .meta -> its file).
+fs::path content_source(const fs::path& proj, const std::string& rel) {
+  if (core::asset_meta::is_meta_rel(rel)) {
+    const std::string m = core::asset_meta::resolve(proj.string(), rel);
+    if (!m.empty()) return fs::u8path(m);
+  }
+  return proj / fs::u8path(rel);
+}
+
+// Only a model's .meta ships: the runtime importer reads its unit scale /
+// up axis / LOD / skin from there (as a "<model>.meta" sidecar in the pak).
+bool shipped_meta(const fs::path& proj, const std::string& rel) {
+  std::ifstream meta(content_source(proj, rel), std::ios::binary);
+  std::string text((std::istreambuf_iterator<char>(meta)), std::istreambuf_iterator<char>());
+  return text.find("\"kind\": \"model\"") != std::string::npos;
+}
 
 #if defined(_WIN32)
 constexpr const char* kExeExt = ".exe";
@@ -100,6 +118,28 @@ std::string json_num_object(const std::vector<std::pair<std::string, std::string
 
 }  // namespace
 
+// The claim's content plus each asset's .meta by its logical sidecar name
+// ("assets/a.gltf.meta"): the metadata lives in .tombstone/meta (a dot
+// folder content_files skips), older claims may still have sidecars.
+std::vector<std::string> content_files_with_metas(const std::string& project_dir) {
+  const fs::path proj = fs::u8path(project_dir);
+  std::vector<std::string> out = content_files(proj.string());
+  std::set<std::string> have(out.begin(), out.end());
+  const std::size_t n = out.size();
+  for (std::size_t i = 0; i < n; ++i) {
+    const std::string& rel = out[i];
+    if (core::asset_meta::is_meta_rel(rel)) continue;
+    const std::string logical = rel + core::asset_meta::kMetaExt;
+    if (!have.count(logical) && !core::asset_meta::find_for_asset(proj.string(), rel).empty()) {
+      out.push_back(logical);
+      have.insert(logical);
+    }
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+
 std::string ExportResult::text() const {
   std::ostringstream o;
   o << "TombStone Freight Office - export report\n";
@@ -114,6 +154,9 @@ std::string ExportResult::text() const {
   if (!installer_path.empty()) o << "installer: " << installer_path << '\n';
   if (!iss_path.empty()) o << "installer script: " << iss_path << '\n';
   for (const std::string& m : missing_dlls) o << "MISSING DLL: " << m << '\n';
+  o << "plugins: " << (plugins_used.empty() ? std::string("(none)") : "") ;
+  for (std::size_t i = 0; i < plugins_used.size(); ++i) o << (i ? ", " : "") << plugins_used[i];
+  o << '\n';
   for (const std::string& p : plugins_shipped) o << "plugin dll: " << p << '\n';
   for (const std::string& e : report.errors) o << "ERROR: " << e << '\n';
   for (const std::string& w : report.warnings) o << "warning: " << w << '\n';
@@ -171,6 +214,16 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
   const std::string vr_flag = json_mini::get_string(*pj, "vr", json_mini::get_string(*pj, "xr", ""));
   const bool vr = dimension == "vr" || (dimension == "3d" && vr_flag == "true");
   if (dimension == "vr") dimension = "3d";
+  // Plugins the game rides with: project.json's list, plus (for a claim
+  // from before the 0.2.0 split) the physics / movement plugins its scenes
+  // use. Only these load in the exported game; editor-only ones stay home.
+  std::string plugin_list, runtime_plugins;
+  for (const PluginNeed& p : project_plugins(proj.string(), {})) {
+    plugin_list += (plugin_list.empty() ? "" : ",") + p.id;
+    if (p.editor_only) continue;
+    runtime_plugins += (runtime_plugins.empty() ? "" : ",") + p.id;
+    r.plugins_used.push_back(p.id);
+  }
   const std::string slug = slugify(name);
   const std::string exe_name = (opt.exe_name.empty() ? slug : opt.exe_name) + kExeExt;
   auto pick_int = [&](int given, const char* key, int fallback) {
@@ -256,7 +309,7 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
     }
     r.report.notes.push_back("C# scripts: shipped dotnet/ProjectScripts.dll + TombStone.Scripting (needs the .NET 8+ runtime)");
   }
-  const std::vector<std::string> content = content_files(proj.string());
+  const std::vector<std::string> content = content_files_with_metas(proj.string());
   // The Vault: pulled items nothing in the game uses stay home.
   const std::set<std::string> vault_unused = vault::unused_pulled_files(proj.string(), content);
   if (!vault_unused.empty()) {
@@ -265,12 +318,12 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
   }
   for (const std::string& rel : content) {
     if (vault_unused.count(rel)) continue;
-    if (rel.size() > 5 && rel.compare(rel.size() - 5, 5, ".meta") == 0) {
-      // Editor import settings stay behind, except a model's: the runtime
-      // importer reads its unit scale / up axis / LOD / skin from there.
-      std::ifstream meta(proj / fs::u8path(rel), std::ios::binary);
-      std::string text((std::istreambuf_iterator<char>(meta)), std::istreambuf_iterator<char>());
-      if (text.find("\"kind\": \"model\"") == std::string::npos) continue;
+    if (core::asset_meta::is_meta_rel(rel)) {
+      // Editor import settings stay behind, except a model's (see
+      // shipped_meta), packed as a sidecar from .tombstone/meta.
+      if (!shipped_meta(proj, rel)) continue;
+      if (!pak.add_file(rel, content_source(proj, rel).string(), &err)) return fail(err);
+      continue;
     }
     if (!dev && rel.rfind("scripts/", 0) == 0 && rel.size() > 3 && rel.compare(rel.size() - 3, 3, ".cs") == 0) {
       continue;  // compiled into dotnet/
@@ -280,12 +333,16 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
                  rel.rfind("scripts/", 0) == 0)) {
       continue;  // compiled into native/
     }
-    if (rel == "project.json" && !dev) {
-      // Strip editor-only bookkeeping (created / last_opened / editor_*).
-      std::vector<std::pair<std::string, std::string>> keep;
+    if (rel == "project.json") {
+      // Strip editor-only bookkeeping (created / last_opened / editor_*;
+      // the dev profile keeps it) and pin the plugin list: the effective
+      // one, marked past the 0.2.0 split so the game never re-scans.
+      std::vector<std::pair<std::string, std::string>> keep = {
+          {"plugins", plugin_list}, {"plugin_split", "1"}};
       std::vector<std::pair<std::string, bool>> bools;
       for (const auto& [k, v] : *pj) {
-        if (k == "created" || k == "last_opened" || k.rfind("editor", 0) == 0) continue;
+        if (k == "plugins" || k == "plugin_split") continue;
+        if (!dev && (k == "created" || k == "last_opened" || k.rfind("editor", 0) == 0)) continue;
         if (v == "true" || v == "false") bools.emplace_back(k, v == "true");
         else keep.emplace_back(k, v);
       }
@@ -406,7 +463,7 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
       {"name", name},           {"version", version},  {"dimension", dimension},
       {"start_scene", "scene.json"}, {"icon", icon},   {"pak", "game.tspak"},
       {"profile", profile},     {"engine", "TombStone Engine"},
-      {"vr", vr ? "true" : "false"}};
+      {"vr", vr ? "true" : "false"}, {"plugins", runtime_plugins}};
   if (!write_all(game_dir / "game.json",
                  json_num_object(gs, {{"window_width", ww}, {"window_height", wh}}))) {
     return fail("cannot write game.json");
@@ -450,8 +507,10 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
       }
       fs::permissions(sbin, fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
                       fs::perm_options::add, ec);
-      for (const std::string& rel : content_files(proj.string())) {
-        if (!copy_into(proj / rel, sdir / "content" / rel, &err)) return fail(err);
+      for (const std::string& rel : content_files_with_metas(proj.string())) {
+        // The server loads models too (colliders): their .meta as a sidecar.
+        if (core::asset_meta::is_meta_rel(rel) && !shipped_meta(proj, rel)) continue;
+        if (!copy_into(content_source(proj, rel), sdir / "content" / rel, &err)) return fail(err);
       }
 #if defined(_WIN32)
       write_all(sdir / "run_server.bat",

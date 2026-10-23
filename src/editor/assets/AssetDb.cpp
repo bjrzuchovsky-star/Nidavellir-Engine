@@ -1,10 +1,12 @@
 #include "editor/assets/AssetDb.h"
 
+#include "core/AssetMeta.h"
 #include "render3d/ModelImport.h"
 
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <ctime>
 #include <cstdio>
 #include <fstream>
 #include <random>
@@ -18,6 +20,7 @@ namespace editor {
 namespace assetdb {
 
 namespace fs = std::filesystem;
+namespace am = core::asset_meta;
 using json::Value;
 
 namespace {
@@ -108,11 +111,38 @@ std::vector<std::pair<fs::path, std::string>> mdl_siblings(const std::string& ab
   return out;
 }
 
+std::string local_time(const char* fmt) {
+  const std::time_t t = std::time(nullptr);
+  std::tm tm{};
+#if defined(_WIN32)
+  localtime_s(&tm, &t);
+#else
+  localtime_r(&t, &tm);
+#endif
+  char buf[64];
+  std::strftime(buf, sizeof(buf), fmt, &tm);
+  return buf;
+}
+
+// Rename, or copy + delete across volumes.
+bool move_file(const fs::path& from, const fs::path& to) {
+  std::error_code ec;
+  fs::create_directories(to.parent_path(), ec);
+  fs::rename(from, to, ec);
+  if (!ec) return true;
+  ec.clear();
+  fs::copy_file(from, to, fs::copy_options::overwrite_existing, ec);
+  if (ec) return false;
+  fs::remove(from, ec);
+  return true;
+}
+
 }  // namespace
 
 Kind kind_for(const std::string& path) {
   const std::string e = lower_ext(path);
-  if (e == ".png" || e == ".jpg" || e == ".jpeg" || e == ".bmp" || e == ".tga" || e == ".gif") {
+  if (e == ".png" || e == ".jpg" || e == ".jpeg" || e == ".bmp" || e == ".tga" || e == ".gif" ||
+      e == ".vtf") {
     return Kind::Texture;
   }
   // glTF, Source .mdl, Assimp formats, .blend (render3d/ModelImport.h).
@@ -276,6 +306,138 @@ void AssetDb::open(const std::string& project_dir) {
   dir_ = project_dir;
   entries_.clear();
   extra_folders_.clear();
+  migration_ = MigrationReport{};
+  if (!dir_.empty()) migration_ = migrate();
+}
+
+std::string AssetDb::meta_abs(const std::string& rel) const { return am::meta_path(dir_, clean_rel(rel)); }
+
+void AssetDb::log(const std::string& line) const {
+  if (dir_.empty()) return;
+  const fs::path p = fs::u8path(dir_) / fs::u8path(am::kLogFile);
+  std::error_code ec;
+  fs::create_directories(p.parent_path(), ec);
+  std::ofstream out(p, std::ios::binary | std::ios::app);
+  out << local_time("%Y-%m-%d %H:%M:%S") << "  " << line << "\n";
+}
+
+void AssetDb::prune_meta_dirs(const std::string& asset_rel) const {
+  // Empty mirror folders left by a move / delete go too.
+  std::error_code ec;
+  const fs::path store = fs::u8path(am::store_dir(dir_));
+  fs::path d = fs::u8path(meta_abs(asset_rel)).parent_path();
+  while (!d.empty() && d != store && d.string().size() > store.string().size()) {
+    if (!fs::is_directory(d, ec) || !fs::is_empty(d, ec)) break;
+    fs::remove(d, ec);
+    d = d.parent_path();
+  }
+}
+
+void AssetDb::adopt_sidecars(const std::vector<std::string>& sidecars, MigrationReport* rep) {
+  std::error_code ec;
+  const fs::path root = fs::u8path(dir_);
+  for (const std::string& side_rel : sidecars) {
+    const std::string asset = side_rel.substr(0, side_rel.size() - std::string(kMetaExt).size());
+    const fs::path side = root / fs::u8path(side_rel);
+    Meta sm;
+    if (!read_meta(side.string(), &sm)) continue;  // not ours (no GUID): leave it alone
+    if (rep->backup_dir.empty()) {
+      rep->backup_dir = std::string(am::kBackupDir) + "/" + local_time("%Y%m%d-%H%M%S");
+    }
+    const fs::path backup = root / fs::u8path(rep->backup_dir) / fs::u8path(side_rel);
+    fs::create_directories(backup.parent_path(), ec);
+    fs::copy_file(side, backup, fs::copy_options::overwrite_existing, ec);
+    const fs::path dest = fs::u8path(meta_abs(asset));
+    Meta have;
+    if (fs::exists(dest, ec) && read_meta(dest.string(), &have)) {
+      if (have.guid == sm.guid) {
+        ++rep->duplicates;
+        log("migrate: " + side_rel + " already in the metadata folder (GUID " + sm.guid + "), sidecar removed");
+      } else {
+        ++rep->conflicts;
+        log("migrate: CONFLICT " + side_rel + " has GUID " + sm.guid + " but the metadata folder has " + have.guid +
+            "; kept the folder's, sidecar saved in " + rep->backup_dir);
+      }
+      fs::remove(side, ec);
+    } else if (move_file(side, dest)) {
+      ++rep->moved;
+      log("migrate: " + side_rel + " -> " + std::string(am::kMetaDir) + "/" + asset + kMetaExt + " (GUID " + sm.guid + ")");
+    } else {
+      log("migrate: FAILED to move " + side_rel + " (left in place)");
+      continue;
+    }
+    rep->assets.push_back(asset);
+  }
+}
+
+AssetDb::MigrationReport AssetDb::migrate() {
+  MigrationReport rep;
+  std::error_code ec;
+  const fs::path root = fs::u8path(dir_);
+  if (dir_.empty() || !fs::is_directory(root, ec)) return rep;
+  std::vector<std::string> sidecars;
+  for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end;
+       !ec && it != end; it.increment(ec)) {
+    const std::string name = it->path().filename().string();
+    if (it->is_directory(ec)) {
+      if (ignored_dir(name) || it.depth() > 8) it.disable_recursion_pending();
+      continue;
+    }
+    if (!it->is_regular_file(ec) || lower_ext(name) != kMetaExt) continue;
+    const std::string rel = fs::relative(it->path(), root, ec).generic_string();
+    if (kind_for(rel.substr(0, rel.size() - std::string(kMetaExt).size())) != Kind::Unknown) sidecars.push_back(rel);
+  }
+  std::sort(sidecars.begin(), sidecars.end());
+  adopt_sidecars(sidecars, &rep);
+  // Layout stamp: the claim's metadata now lives in the folder.
+  const fs::path stamp = root / fs::u8path(am::kLayoutFile);
+  std::string text;
+  Value v;
+  std::string err;
+  const bool have = slurp(stamp, &text) && json::parse(text, &v, &err) && v.is_object() &&
+                    v["meta_layout"].as_number(0) >= am::kLayoutVersion;
+  if (!have || rep.any()) {
+    if (!have) {
+      v = Value::object();
+      v.set("meta_layout", Value::number(am::kLayoutVersion));
+      v.set("folder", Value::string(am::kMetaDir));
+      v.set("since", Value::string(local_time("%Y-%m-%dT%H:%M:%S")));
+    }
+    if (rep.any()) {
+      v.set("migrated", Value::number(v["migrated"].as_number(0) + rep.moved + rep.duplicates + rep.conflicts));
+      v.set("last_backup", Value::string(rep.backup_dir));
+    }
+    fs::create_directories(stamp.parent_path(), ec);
+    spit(stamp, json::write(v));
+  }
+  if (rep.any()) {
+    log("migrate: " + std::to_string(rep.moved) + " moved, " + std::to_string(rep.duplicates) + " duplicate(s), " +
+        std::to_string(rep.conflicts) + " conflict(s); backup " + rep.backup_dir);
+  }
+  return rep;
+}
+
+int AssetDb::clean_orphans(const std::vector<std::string>& rels, bool keep) {
+  int n = 0;
+  std::error_code ec;
+  for (const std::string& r : rels) {
+    const std::string rel = clean_rel(r);
+    if (rel.empty() || rel.find("..") != std::string::npos || by_path(rel)) continue;
+    const fs::path m = fs::u8path(meta_abs(rel));
+    if (!fs::is_regular_file(m, ec)) continue;
+    if (keep) {
+      const fs::path to = fs::u8path(dir_) / fs::u8path(am::kOrphanDir) / fs::u8path(rel + kMetaExt);
+      if (!move_file(m, to)) continue;
+      log("orphan: " + rel + kMetaExt + " moved to " + am::kOrphanDir);
+    } else {
+      fs::remove(m, ec);
+      if (ec) continue;
+      log("orphan: " + rel + kMetaExt + " deleted");
+    }
+    prune_meta_dirs(rel);
+    ++n;
+  }
+  return n;
 }
 
 std::string AssetDb::abs(const std::string& rel) const {
@@ -308,7 +470,7 @@ AssetDb::ScanReport AssetDb::scan() {
   std::map<std::string, Entry> known;
   for (Entry& e : entries_) known.emplace(e.rel, std::move(e));
   std::vector<std::string> files;
-  std::vector<std::string> metas;
+  std::vector<std::string> sidecars;
   std::error_code ec;
   const fs::path root = fs::u8path(dir_);
   if (dir_.empty() || !fs::is_directory(root, ec)) {
@@ -325,27 +487,52 @@ AssetDb::ScanReport AssetDb::scan() {
     if (!it->is_regular_file(ec)) continue;
     const std::string rel = fs::relative(it->path(), root, ec).generic_string();
     if (lower_ext(name) == kMetaExt) {
-      metas.push_back(rel);
+      if (kind_for(rel.substr(0, rel.size() - std::string(kMetaExt).size())) != Kind::Unknown) sidecars.push_back(rel);
     } else if (kind_for(name) != Kind::Unknown) {
       files.push_back(rel);
     }
   }
+  if (!sidecars.empty()) {
+    // A sidecar .meta (copied in from an older claim, or written by an old
+    // build): into the metadata folder, GUID kept.
+    std::sort(sidecars.begin(), sidecars.end());
+    MigrationReport mr;
+    adopt_sidecars(sidecars, &mr);
+    rep.adopted = mr.assets;
+  }
   std::sort(files.begin(), files.end());
   const std::set<std::string> file_set(files.begin(), files.end());
-  // .meta files whose asset is gone: candidates for "moved without meta".
+  // .meta files whose asset is gone: candidates for "moved outside the
+  // editor"; then the cleaned-up orphans (a file that comes back).
   struct Orphan {
-    std::string meta_rel;
+    std::string asset;     // asset rel the .meta was for
+    fs::path file;         // the .meta on disk
     Meta meta;
+    bool parked = false;   // in .tombstone/meta_orphans
     bool used = false;
   };
   std::vector<Orphan> orphans;
-  for (const std::string& m : metas) {
-    const std::string asset = m.substr(0, m.size() - std::string(kMetaExt).size());
-    if (file_set.count(asset) || kind_for(asset) == Kind::Unknown) continue;
-    Orphan o;
-    o.meta_rel = m;
-    if (read_meta(abs(m), &o.meta)) orphans.push_back(std::move(o));
-  }
+  auto collect = [&](const fs::path& base, bool parked) {
+    if (!fs::is_directory(base, ec)) return;
+    for (fs::recursive_directory_iterator it(base, fs::directory_options::skip_permission_denied, ec), end;
+         !ec && it != end; it.increment(ec)) {
+      if (!it->is_regular_file(ec) || lower_ext(it->path().filename().string()) != kMetaExt) continue;
+      const std::string mrel = fs::relative(it->path(), base, ec).generic_string();
+      const std::string asset = mrel.substr(0, mrel.size() - std::string(kMetaExt).size());
+      if ((!parked && file_set.count(asset)) || kind_for(asset) == Kind::Unknown) continue;
+      Orphan o;
+      o.asset = asset;
+      o.file = it->path();
+      o.parked = parked;
+      if (read_meta(o.file.string(), &o.meta)) orphans.push_back(std::move(o));
+    }
+  };
+  collect(fs::u8path(am::store_dir(dir_)), false);
+  collect(root / fs::u8path(am::kOrphanDir), true);
+  auto file_name = [](const std::string& rel) {
+    const auto slash = rel.find_last_of('/');
+    return slash == std::string::npos ? rel : rel.substr(slash + 1);
+  };
 
   std::vector<Entry> out;
   std::set<std::string> guids;
@@ -354,6 +541,7 @@ AssetDb::ScanReport AssetDb::scan() {
     Entry e;
     e.rel = rel;
     const std::string a = abs(rel);
+    const std::string meta_file = meta_abs(rel);
     asset_stat(a, &e.mtime, &e.size);
     const Kind kind = kind_for(rel);
     const auto old = known.find(rel);
@@ -361,7 +549,7 @@ AssetDb::ScanReport AssetDb::scan() {
         old != known.end() && old->second.mtime == e.mtime && old->second.size == e.size;
     Meta m;
     bool dirty = false, reimport = false;
-    const bool have_meta = fs::exists(fs::u8path(a + kMetaExt), ec) && read_meta(a + kMetaExt, &m);
+    const bool have_meta = fs::exists(fs::u8path(meta_file), ec) && read_meta(meta_file, &m);
     if (have_meta) {
       if (guids.count(m.guid)) {
         m.guid = new_guid();  // a copy of another asset
@@ -369,8 +557,7 @@ AssetDb::ScanReport AssetDb::scan() {
         dirty = true;
       } else if (!m.path.empty() && m.path != rel) {
         Meta other;
-        if (file_set.count(m.path) && read_meta(abs(m.path) + kMetaExt, &other) &&
-            other.guid == m.guid) {
+        if (file_set.count(m.path) && read_meta(meta_abs(m.path), &other) && other.guid == m.guid) {
           m.guid = new_guid();  // copied next to an original that still exists
           rep.duplicated.push_back(rel);
         } else {
@@ -394,15 +581,43 @@ AssetDb::ScanReport AssetDb::scan() {
       }
     } else {
       const std::string h = asset_hash(a);
-      auto orphan = std::find_if(orphans.begin(), orphans.end(), [&](const Orphan& o) {
-        return !o.used && o.meta.hash == h && o.meta.kind == kind && !guids.count(o.meta.guid);
-      });
+      auto usable = [&](const Orphan& o) { return !o.used && o.meta.kind == kind && !guids.count(o.meta.guid); };
+      // 1) Same content (moved / renamed outside the editor).
+      auto orphan = std::find_if(orphans.begin(), orphans.end(),
+                                 [&](const Orphan& o) { return usable(o) && !o.meta.hash.empty() && o.meta.hash == h; });
+      std::string how = "hash";
+      if (orphan == orphans.end()) {
+        // 2) Same file name + type, and only one such orphan (moved, then
+        // edited before the editor saw it).
+        const std::string fname = file_name(rel);
+        int matches = 0;
+        auto pick = orphans.end();
+        for (auto it = orphans.begin(); it != orphans.end(); ++it) {
+          if (usable(*it) && !it->parked && file_name(it->asset) == fname) {
+            ++matches;
+            pick = it;
+          }
+        }
+        if (matches == 1) {
+          orphan = pick;
+          how = "name";
+        }
+      }
       if (orphan != orphans.end()) {
         orphan->used = true;
         m = orphan->meta;
-        fs::remove(fs::u8path(abs(orphan->meta_rel)), ec);
-        rep.moved.emplace_back(m.path, rel);
-        moved_from.insert(m.path);
+        fs::remove(orphan->file, ec);
+        if (!orphan->parked) prune_meta_dirs(orphan->asset);
+        const std::string from = m.path.empty() ? orphan->asset : m.path;
+        rep.moved.emplace_back(from, rel);
+        rep.relinked.push_back({from, rel, how});
+        moved_from.insert(from);
+        log("relink: " + from + " -> " + rel + " (GUID " + m.guid + ", matched by " +
+            (how == "hash" ? "content hash" : "file name") + (orphan->parked ? ", from meta_orphans" : "") + ")");
+        if (m.hash != h) {
+          m.hash = h;
+          reimport = true;
+        }
       } else {
         m.guid = new_guid();
         m.kind = kind;
@@ -427,7 +642,10 @@ AssetDb::ScanReport AssetDb::scan() {
       e.import_ok = !e.meta.info.has("error");
       e.import_error = e.meta.info.str("error");
     }
-    if (dirty || reimport) write_meta(a + kMetaExt, e.meta);
+    if (dirty || reimport) {
+      fs::create_directories(fs::u8path(meta_file).parent_path(), ec);
+      write_meta(meta_file, e.meta);
+    }
     guids.insert(e.meta.guid);
     out.push_back(std::move(e));
   }
@@ -435,8 +653,9 @@ AssetDb::ScanReport AssetDb::scan() {
     if (!file_set.count(rel) && !moved_from.count(rel)) rep.removed.push_back(rel);
   }
   for (const Orphan& o : orphans) {
-    if (!o.used) rep.orphan_metas.push_back(o.meta_rel);
+    if (!o.used && !o.parked) rep.orphan_metas.push_back(o.asset);
   }
+  std::sort(rep.orphan_metas.begin(), rep.orphan_metas.end());
   entries_ = std::move(out);
   sort_entries();
   return rep;
@@ -501,7 +720,9 @@ bool AssetDb::set_settings(const std::string& rel, const Value& settings, std::s
     if (e.rel != clean_rel(rel)) continue;
     e.meta.settings = settings;
     import_entry(&e);
-    return write_meta(abs(e.rel) + kMetaExt, e.meta, error);
+    std::error_code ec;
+    fs::create_directories(fs::u8path(meta_abs(e.rel)).parent_path(), ec);
+    return write_meta(meta_abs(e.rel), e.meta, error);
   }
   if (error) *error = "unknown asset " + rel;
   return false;
@@ -512,7 +733,9 @@ bool AssetDb::reimport(const std::string& rel) {
     if (e.rel != clean_rel(rel)) continue;
     e.meta.hash = asset_hash(abs(e.rel));
     import_entry(&e);
-    write_meta(abs(e.rel) + kMetaExt, e.meta);
+    std::error_code ec;
+    fs::create_directories(fs::u8path(meta_abs(e.rel)).parent_path(), ec);
+    write_meta(meta_abs(e.rel), e.meta);
     return e.import_ok;
   }
   return false;
@@ -586,11 +809,15 @@ bool AssetDb::move(const std::string& old_in, const std::string& new_in, std::st
   fs::rename(src, dst, ec);
   if (ec) return fail("rename failed: " + ec.message());
   for (const auto& [p, suffix] : siblings) fs::rename(p, fs::u8path(dst_base.string() + suffix), ec);
-  fs::rename(fs::u8path(abs(from) + kMetaExt), fs::u8path(abs(to) + kMetaExt), ec);
+  // The .meta follows in the metadata folder (and a stray sidecar goes).
+  move_file(fs::u8path(meta_abs(from)), fs::u8path(meta_abs(to)));
+  fs::remove(fs::u8path(abs(from) + kMetaExt), ec);
+  prune_meta_dirs(from);
   e->rel = to;
   e->meta.path = to;
   e->mtime = fs::last_write_time(dst, ec);
-  write_meta(abs(to) + kMetaExt, e->meta);
+  fs::create_directories(fs::u8path(meta_abs(to)).parent_path(), ec);
+  write_meta(meta_abs(to), e->meta);
   const std::size_t n = rewrite_references(from, to);
   if (refs_rewritten) *refs_rewritten = n;
   sort_entries();
@@ -613,7 +840,9 @@ bool AssetDb::remove(const std::string& rel_in, bool force, std::vector<Ref>* re
     return false;
   }
   for (const auto& [p, suffix] : siblings) fs::remove(p, ec);
+  fs::remove(fs::u8path(meta_abs(rel)), ec);
   fs::remove(fs::u8path(abs(rel) + kMetaExt), ec);
+  prune_meta_dirs(rel);
   entries_.erase(std::remove_if(entries_.begin(), entries_.end(),
                                 [&](const Entry& e) { return e.rel == rel; }),
                  entries_.end());

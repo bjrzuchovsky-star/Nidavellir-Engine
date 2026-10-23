@@ -4,9 +4,15 @@
 // tree, thumbnail grid with search and type filter, drag into the scene
 // (the host picks the payload), drag onto a folder to move, rename /
 // delete with "in use" warnings, find references, per-asset import
-// settings (.meta) and hot reload of changed files.
+// settings (.meta, kept in the claim's .tombstone/meta folder), hot reload
+// of changed files, imports from outside (Import... button, files dropped
+// on the window) sorted into type folders (ImportSort.h), orphaned .meta
+// clean-up.
 
 #include "editor/assets/AssetDb.h"
+#include "editor/assets/GmaImport.h"
+#include "editor/assets/ImportSort.h"
+#include "editor/ui/FolderBrowser.h"
 #include "gfx/TextureCache.h"
 
 #include <functional>
@@ -38,6 +44,11 @@ struct AssetBrowserHost {
   std::function<int(const std::string& rel)> vault_badge;  // 0 none, 1 pulled, 2 update, 3 sent
   std::function<std::string(const std::string& rel)> vault_origin;
   std::function<void(const std::string& item)> on_vault_drop;
+  // Scripts (any language) shown as tiles after the assets: drag one onto an
+  // entity to attach it (payload "TS_SCRIPT"); double-click / right-click
+  // opens it (which: 0 default editor, 1 VS Code, 2 Visual Studio).
+  std::function<std::vector<std::string>()> scripts;
+  std::function<void(const std::string& rel, int which)> open_script;
 };
 
 class AssetBrowser {
@@ -56,19 +67,33 @@ class AssetBrowser {
   bool move(const std::string& from, const std::string& to, std::string* error = nullptr);
   bool remove(const std::string& rel, bool force, std::vector<assetdb::Ref>* refs = nullptr,
               std::string* error = nullptr);
+  // Copy outside files / folders in (dest_folder "" = sorted by type, see
+  // ImportSort.h), then rescan so they get their .meta. Returns the result.
+  importsort::Result import_files(const std::vector<std::string>& sources, const std::string& dest_folder = {});
+  const importsort::Settings& import_settings() const { return import_settings_; }
+  void set_import_settings(const importsort::Settings& s);
+  // Orphaned .meta files from the last scan (asset paths).
+  const std::vector<std::string>& orphans() const { return orphans_; }
 
   void draw();
+  // Source addon import (.gma): opens the picker on a file (drops).
+  void import_gma(const std::string& path) { gma_dialog_.open_file(db_.project_dir(), path); }
+  // Reimport and tell the host (the scene reloads the model / texture).
+  void reimport(const std::string& rel);
   const std::string& selected() const { return selected_; }
   void select(const std::string& rel) { selected_ = rel; }
 
  private:
   void draw_folders();
   void draw_grid();
+  bool script_tile(const std::string& rel, float size);
   void draw_details();
   void draw_settings(const assetdb::AssetDb::Entry& e);
   bool tile(const assetdb::AssetDb::Entry& e, float size);
   void accept_move_into(const std::string& folder);
   void accept_vault_drop();
+  void take_os_drop(const std::string& folder);
+  void draw_import_popup();
 
   assetdb::AssetDb db_;
   AssetBrowserHost host_;
@@ -88,8 +113,19 @@ class AssetBrowser {
   std::string material_path_for_;
   char blender_path_[512] = "";
   std::string blender_path_for_;
+  importsort::Settings import_settings_;
+  std::vector<std::string> orphans_;
+  bool orphans_popup_ = false;
+  FolderBrowser import_picker_;
+  bool import_pick_folder_ = false;
+  std::string drop_folder_;  // folder row under the mouse this frame ("" none)
+  bool grid_hovered_ = false;
+  double drop_seen_ = -1.0;
   std::string delete_pending_;
   std::vector<assetdb::Ref> delete_refs_;
+  gmaimport::Dialog gma_dialog_;
+  FolderBrowser relink_picker_;
+  std::string relink_for_;  // "rel|material" while the relink picker is open
 };
 
 }  // namespace editor

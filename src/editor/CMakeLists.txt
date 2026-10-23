@@ -1,6 +1,13 @@
 add_library(ts_editor
   AppFlow.cpp
   AppFlow_Delete.cpp
+  ux/UxPrefs.cpp
+  ux/UxStrings.cpp
+  ux/Tooltip.cpp
+  ux/EmptyState.cpp
+  ux/Actions.cpp
+  ux/CommandPalette.cpp
+  ux/EditorUx.cpp
   settings/Settings.cpp
   projects/ProjectStore.cpp
   projects/ProjectStore_Delete.cpp
@@ -12,13 +19,17 @@ add_library(ts_editor
   workspace/Workspace2D_History.cpp
   workspace/Workspace2D_Tiles.cpp
   workspace/Workspace2D_Tools.cpp
+  workspace/Workspace2D_Attach.cpp
+  workspace/Workspace2D_Xform.cpp
   workspace/SceneIO_Load.cpp
   workspace/SceneIO_Save.cpp
   assets/AssetLibrary.cpp
   assets/PrefabLibrary.cpp
   assets/AssetDb.cpp
   assets/AssetImport.cpp
+  assets/ImportSort.cpp
   assets/AssetBrowser.cpp
+  assets/GmaImport.cpp
   screens/Editor2DScreen_Assets.cpp
   editor3d/Editor3DScreen_Assets.cpp
   screens/Editor2DScreen_Prefabs.cpp
@@ -37,6 +48,7 @@ add_library(ts_editor
   screens/Editor2DScreen_Viewport.cpp
   screens/Editor2DScreen_Tiles.cpp
   screens/Editor2DScreen_Tools.cpp
+  screens/Editor2DScreen_Attach.cpp
   screens/Editor2DScreen_TilePanels.cpp
   screens/Editor2DScreen_Play.cpp
   screens/Editor2DScreen_Collision.cpp
@@ -46,14 +58,24 @@ add_library(ts_editor
   screens/Editor2DScreen_Scripts.cpp
   screens/Editor2DScreen_Plugins.cpp
   editor3d/Gizmo3D.cpp
+  editor3d/Editor3DScreen_Transform.cpp
+  transform/ModalTransform.cpp
+  transform/ModalKeys.cpp
+  transform/GizmoShapes.cpp
+  transform/Gizmo2D.cpp
+  screens/Editor2DScreen_Transform.cpp
   editor3d/Editor3DScreen.cpp
   editor3d/Editor3DScreen_UI.cpp
   editor3d/Editor3DScreen_Panels.cpp
+  editor3d/Editor3DScreen_Scripts.cpp
   editor3d/Editor3DScreen_VR.cpp
   editor3d/Editor3DScreen_Anim.cpp
   editor3d/Editor3DScreen_Tools.cpp
+  editor3d/Editor3DScreen_Camera.cpp
+  editor3d/Editor3DScreen_Attach.cpp
   editor3d/Editor3DScreen_Terrain.cpp
   plugins/EditorPlugins.cpp
+  plugins/PluginNeeds.cpp
   plugins/EditorBuiltinPlugins.cpp
   plugins/FrontierPanels.cpp
   plugins/AiPanels.cpp
@@ -82,9 +104,11 @@ add_library(ts_editor
   store/TradingPostPanel.cpp
   vault/VaultProject.cpp
   vault/VaultPanel.cpp
+  vault/FilePick.cpp
   update/UpdateCheck.cpp
   update/UpdateService.cpp
   scripting/BrandBook.cpp
+  scripting/ScriptComponents.cpp
   tools/StringsPanel.cpp
   tools/AutoTilePanel.cpp
   tools/SpriteSlicerPanel.cpp
@@ -135,4 +159,6 @@ target_compile_definitions(ts_editor PRIVATE TS_ENGINE_VERSION="${PROJECT_VERSIO
 if(WIN32)
   # ShellExecuteW (open a script in the OS default editor).
   target_link_libraries(ts_editor PRIVATE shell32)
+  # GetOpenFileNameW (Vault manager > Add files...).
+  target_link_libraries(ts_editor PRIVATE comdlg32)
 endif()

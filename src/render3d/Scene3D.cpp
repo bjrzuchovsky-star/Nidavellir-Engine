@@ -1,5 +1,7 @@
 #include "render3d/Scene3D.h"
 
+#include "render3d/Attach3D.h"
+
 #include "core/JsonMini.h"
 #include "render3d/Animator.h"
 #include "render3d/Gltf.h"
@@ -203,9 +205,50 @@ Value entity_json(const Entity3D& e) {
     o.set("player", std::move(p));
   }
   if (e.camera) {
+    const PlayCamera3D& cam = *e.camera;
+    const PlayCamera3D def;
     Value c = Value::object();
-    c.set("fov", Value::number(e.camera->fov));
+    c.set("fov", Value::number(cam.fov));
+    // v18 fields: only what differs from the defaults.
+    if (cam.projection == PlayCamera3D::Projection::Orthographic)
+      c.set("projection", Value::string("orthographic"));
+    if (cam.near_clip != def.near_clip) c.set("near", Value::number(cam.near_clip));
+    if (cam.far_clip != def.far_clip) c.set("far", Value::number(cam.far_clip));
+    if (cam.ortho_size != def.ortho_size) c.set("ortho_size", Value::number(cam.ortho_size));
+    if (cam.use_clear) {
+      c.set("use_clear", Value::boolean(true));
+    }
+    if (cam.use_clear || !std::equal(cam.clear_color, cam.clear_color + 4, def.clear_color))
+      c.set("clear_color", json::floats(cam.clear_color, 4));
+    if (!std::equal(cam.viewport, cam.viewport + 4, def.viewport))
+      c.set("viewport", json::floats(cam.viewport, 4));
+    if (cam.priority != 0) c.set("priority", Value::number(cam.priority));
+    if (!cam.active) c.set("active", Value::boolean(false));
+    if (cam.rig != PlayCamera3D::Rig::Fixed) c.set("rig", Value::string(camera_rig_name(cam.rig)));
+    if (cam.follow != 0) c.set("follow", Value::number(static_cast<double>(cam.follow)));
+    if (cam.distance != def.distance) c.set("distance", Value::number(cam.distance));
+    if (cam.height != def.height) c.set("height", Value::number(cam.height));
+    if (!cam.collision) c.set("collision", Value::boolean(false));
+    if (cam.collision_radius != def.collision_radius)
+      c.set("collision_radius", Value::number(cam.collision_radius));
     o.set("camera", std::move(c));
+  }
+  if (e.follow) {
+    Value f = Value::object();
+    f.set("target", Value::number(static_cast<double>(e.follow->target)));
+    f.set("position", Value::boolean(e.follow->position));
+    f.set("rotation", Value::boolean(e.follow->rotation));
+    f.set("offset", vec3(e.follow->offset));
+    f.set("rotation_offset", quat(e.follow->rotation_offset));
+    o.set("follow", std::move(f));
+  }
+  if (!e.parent_bone.empty()) {
+    o.set("parent_bone", Value::string(e.parent_bone));
+    Value b = Value::object();
+    b.set("position", vec3(e.bone_offset.position));
+    b.set("rotation", quat(e.bone_offset.rotation));
+    b.set("scale", vec3(e.bone_offset.scale));
+    o.set("bone_offset", std::move(b));
   }
   if (e.vr_rig) {
     const VrRig3D& r = *e.vr_rig;
@@ -234,14 +277,26 @@ Value entity_json(const Entity3D& e) {
   if (e.joint) o.set("joint", physics_json::joint(*e.joint));
   if (e.prefab) o.set("prefab", prefab::link_to_json(*e.prefab));
   if (e.script) {
-    Value s = Value::object();
-    s.set("path", Value::string(e.script->path));
-    if (!e.script->props.empty()) {
-      Value props = Value::object();
-      for (const ScriptProp& p : e.script->props) props.set(p.name, script_value(p.value));
-      s.set("props", std::move(props));
+    // One enabled script: the v6-style "script" object (unchanged); a
+    // stack or a disabled script: "scripts" (v17), every one in order.
+    auto one = [](const ScriptData& sd) {
+      Value s = Value::object();
+      s.set("path", Value::string(sd.path));
+      if (!sd.props.empty()) {
+        Value props = Value::object();
+        for (const ScriptProp& p : sd.props) props.set(p.name, script_value(p.value));
+        s.set("props", std::move(props));
+      }
+      if (!sd.enabled) s.set("enabled", Value::boolean(false));
+      return s;
+    };
+    if (e.extra_scripts.empty() && e.script->enabled) {
+      o.set("script", one(*e.script));
+    } else {
+      Value list = Value::array();
+      for (const ScriptData& sd : script_stack(e)) list.push(one(sd));
+      o.set("scripts", std::move(list));
     }
-    o.set("script", std::move(s));
   }
   if (e.audio) {
     const AudioSourceData& a = *e.audio;
@@ -367,9 +422,52 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     e.player = p;
   }
   if (o["camera"].is_object()) {
+    const Value& v = o["camera"];
     PlayCamera3D c;
-    c.fov = std::clamp(o["camera"].flt("fov", c.fov), 10.0f, 150.0f);
+    c.fov = std::clamp(v.flt("fov", c.fov), 10.0f, 150.0f);
+    if (v.str("projection") == "orthographic") c.projection = PlayCamera3D::Projection::Orthographic;
+    c.near_clip = std::clamp(v.flt("near", c.near_clip), 0.001f, 100.0f);
+    c.far_clip = std::clamp(v.flt("far", c.far_clip), c.near_clip + 0.01f, 100000.0f);
+    c.ortho_size = std::clamp(v.flt("ortho_size", c.ortho_size), 0.01f, 10000.0f);
+    c.use_clear = v.flag("use_clear", false);
+    v.floats("clear_color", c.clear_color, 4);
+    v.floats("viewport", c.viewport, 4);
+    for (int i = 0; i < 4; ++i) c.viewport[i] = std::clamp(c.viewport[i], 0.0f, 1.0f);
+    if (c.viewport[2] <= 0.01f) c.viewport[2] = 1.0f;
+    if (c.viewport[3] <= 0.01f) c.viewport[3] = 1.0f;
+    c.priority = static_cast<int>(v.num("priority", 0));
+    c.active = v.flag("active", true);
+    const std::string rig = v.str("rig");
+    c.rig = rig == "orbit"          ? PlayCamera3D::Rig::Orbit
+            : rig == "first_person" ? PlayCamera3D::Rig::FirstPerson
+                                    : PlayCamera3D::Rig::Fixed;
+    const double fol = v.num("follow", 0);
+    c.follow = fol > 0 ? static_cast<std::uint64_t>(fol + 0.5) : 0;
+    c.distance = std::clamp(v.flt("distance", c.distance), 0.1f, 500.0f);
+    c.height = std::clamp(v.flt("height", c.height), -100.0f, 100.0f);
+    c.collision = v.flag("collision", true);
+    c.collision_radius = std::clamp(v.flt("collision_radius", c.collision_radius), 0.0f, 5.0f);
     e.camera = c;
+  }
+  if (o["follow"].is_object()) {
+    const Value& v = o["follow"];
+    Follow3D f;
+    const double t = v.num("target", 0);
+    f.target = t > 0 ? static_cast<std::uint64_t>(t + 0.5) : 0;
+    f.position = v.flag("position", true);
+    f.rotation = v.flag("rotation", false);
+    read_vec3(v, "offset", &f.offset);
+    float fq[4];
+    if (v.floats("rotation_offset", fq, 4)) f.rotation_offset = render3d::normalize(Quat{fq[0], fq[1], fq[2], fq[3]});
+    e.follow = f;
+  }
+  e.parent_bone = o.str("parent_bone");
+  if (!e.parent_bone.empty() && o["bone_offset"].is_object()) {
+    const Value& b = o["bone_offset"];
+    read_vec3(b, "position", &e.bone_offset.position);
+    float bq[4];
+    if (b.floats("rotation", bq, 4)) e.bone_offset.rotation = render3d::normalize(Quat{bq[0], bq[1], bq[2], bq[3]});
+    read_vec3(b, "scale", &e.bone_offset.scale);
   }
   if (o["vr_rig"].is_object()) {
     const Value& v = o["vr_rig"];
@@ -396,17 +494,28 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     g.throw_scale = std::clamp(v.flt("throw_scale", g.throw_scale), 0.0f, 5.0f);
     e.grabbable = g;
   }
-  if (o["script"].is_object()) {
-    const Value& v = o["script"];
-    ScriptData s;
-    s.path = v.str("path");
-    for (const auto& [k, pv] : v["props"].members()) {
-      if (pv.is_bool()) s.set(k, ScriptValue::of_bool(pv.as_bool()));
-      else if (pv.is_number()) s.set(k, ScriptValue::of_number(pv.as_number()));
-      else if (pv.is_string()) s.set(k, ScriptValue::of_text(pv.as_string()));
+  {
+    auto read_one = [](const Value& v) {
+      ScriptData s;
+      s.path = v.str("path");
+      for (const auto& [k, pv] : v["props"].members()) {
+        if (pv.is_bool()) s.set(k, ScriptValue::of_bool(pv.as_bool()));
+        else if (pv.is_number()) s.set(k, ScriptValue::of_number(pv.as_number()));
+        else if (pv.is_string()) s.set(k, ScriptValue::of_text(pv.as_string()));
+      }
+      s.enabled = v.flag("enabled", true);
+      normalize_script(s);
+      return s;
+    };
+    std::vector<ScriptData> stack;
+    if (o["scripts"].is_array()) {  // v17 stack
+      for (const Value& v : o["scripts"].items()) {
+        if (v.is_object()) stack.push_back(read_one(v));
+      }
+    } else if (o["script"].is_object()) {  // v6 .. v16: one script
+      stack.push_back(read_one(o["script"]));
     }
-    normalize_script(s);
-    e.script = s;
+    set_script_stack(e, std::move(stack));
   }
   if (o["audio"].is_object()) {
     const Value& v = o["audio"];
@@ -598,6 +707,15 @@ std::vector<std::uint64_t> descendants_of(const std::vector<Entity3D>& entities,
   return out;
 }
 
+const char* camera_rig_name(PlayCamera3D::Rig r) {
+  switch (r) {
+    case PlayCamera3D::Rig::Orbit: return "orbit";
+    case PlayCamera3D::Rig::FirstPerson: return "first_person";
+    case PlayCamera3D::Rig::Fixed:
+    default: return "fixed";
+  }
+}
+
 void carry_child(Entity3D* child, const Transform& prev, const Transform& now) {
   if (prev == now) return;
   const render3d::Mat4 m = now.matrix() * prev.matrix().inverse();
@@ -696,6 +814,7 @@ bool parse(const std::string& text, Scene3D* out, std::string* error) {
   }
   Scene3D s;
   s.version = static_cast<int>(root.num("version", kScene3DVersion));
+  s.legacy_cameras = s.version < 18;
   if (s.version > kScene3DVersion) {
     if (error) {
       *error = "scene.json v" + std::to_string(s.version) +
@@ -872,6 +991,17 @@ Scene3D make_starter_scene() {
   lamp.light = Light3D{};
   s.entities.push_back(lamp);
   s.entities.push_back(rider(4, {0.0f, 1.0f, 3.0f}));
+  // v18: the follow camera is a real object (docs/camera.md).
+  Entity3D cam;
+  cam.id = 5;
+  cam.name = "Main Camera";
+  PlayCamera3D pc;
+  pc.rig = PlayCamera3D::Rig::Orbit;
+  pc.follow = 4;
+  cam.camera = pc;
+  cam.transform.position = {0.0f, 3.5f, 9.0f};
+  cam.transform.rotation = look_rotation(Vec3{0.0f, 2.0f, 3.0f} - cam.transform.position);
+  s.entities.push_back(cam);
   return s;
 }
 

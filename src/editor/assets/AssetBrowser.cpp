@@ -1,4 +1,8 @@
 #include "editor/assets/AssetBrowser.h"
+#include "editor/ux/EmptyState.h"
+#include "editor/ux/Tooltip.h"
+#include "editor/ux/Actions.h"
+#include "editor/scripting/ScriptComponents.h"
 
 #include "editor/assets/AssetImport.h"
 #include "editor/ui/Theme.h"
@@ -62,11 +66,84 @@ const char* const kPayloads[] = {kAssetAnyPayload, "TS_ASSET_IMAGE", "TS_ASSET3D
 void AssetBrowser::open(const std::string& project_dir, AssetBrowserHost host) {
   host_ = std::move(host);
   db_.set_importer(assetdb::import_asset);
-  db_.open(project_dir);
+  db_.open(project_dir);  // moves legacy sidecar .meta files into .tombstone/meta
+  import_settings_ = importsort::load_settings(project_dir);
   thumbs_.clear();
   selected_.clear();
   folder_.clear();
+  const AssetDb::MigrationReport& mr = db_.last_migration();
+  if (mr.any() && host_.note) {
+    host_.note("Asset metadata moved into .tombstone/meta: " + std::to_string(mr.moved) + " .meta file(s) (GUIDs kept; backup in " +
+               mr.backup_dir + ", log in .tombstone/meta.log)");
+  }
   rescan();
+}
+
+void AssetBrowser::set_import_settings(const importsort::Settings& s) {
+  import_settings_ = s;
+  std::string err;
+  if (!importsort::save_settings(db_.project_dir(), s, &err) && host_.note) host_.note("Import settings: " + err);
+}
+
+importsort::Result AssetBrowser::import_files(const std::vector<std::string>& all_sources, const std::string& dest_folder) {
+  importsort::Result r;
+  // Source addons (.gma) open the addon picker instead of being copied in.
+  std::vector<std::string> sources;
+  for (const std::string& src : all_sources) {
+    std::string ext = src.size() >= 4 ? src.substr(src.size() - 4) : std::string();
+    for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+    if (ext == ".gma") import_gma(src);
+    else sources.push_back(src);
+  }
+  if (sources.empty()) return r;
+  importsort::import_files(db_.project_dir(), sources, dest_folder, import_settings_, &r);
+  rescan();
+  if (host_.note) {
+    std::string where = dest_folder.empty() ? (import_settings_.sort_imports ? "sorted into type folders" : "into assets/")
+                                            : "into " + dest_folder;
+    host_.note("Imported " + std::to_string(r.mains.size()) + " asset(s), " + std::to_string(r.files.size()) +
+               " file(s) " + where);
+    for (const std::string& n : r.notes) host_.note("Import: " + n);
+    for (const std::string& e : r.errors) host_.note("Import failed: " + e);
+  }
+  if (!r.mains.empty()) {
+    selected_ = r.mains.front();
+    const auto slash = selected_.find_last_of('/');
+    if (!folder_.empty() && slash != std::string::npos) folder_ = selected_.substr(0, slash);
+  }
+  return r;
+}
+
+void AssetBrowser::take_os_drop(const std::string& folder) {
+  const std::vector<std::string> paths = importsort::take_os_drop();
+  if (!paths.empty()) import_files(paths, folder);
+}
+
+void AssetBrowser::draw_import_popup() {
+  if (ImGui::BeginPopup("##importmenu")) {
+    if (ux::MenuItem("Import file...")) {
+      import_pick_folder_ = false;
+      import_picker_.open_file({}, {}, "Pick a file to import");
+    }
+    if (ux::MenuItem("Import folder (model pack)...")) {
+      import_pick_folder_ = true;
+      import_picker_.open({});
+    }
+    if (ux::MenuItem("Import Source addon (.gma)...")) gma_dialog_.open_picker(db_.project_dir());
+    if (ImGui::IsItemHovered()) {
+      ux::SetTooltip("Source engine formats (.mdl/.vtf/.vmt/.gma): pick the models / materials / sounds\n"
+                        "to extract into assets/Models/<Addon>/. Dropping a .gma here does the same.");
+    }
+    ImGui::Separator();
+    ImGui::TextDisabled("Destination: %s", folder_.empty() ? (import_settings_.sort_imports ? "sorted by type" : "assets/")
+                                                           : folder_.c_str());
+    ImGui::TextDisabled("(or drop files from Explorer onto this panel / a folder)");
+    ImGui::EndPopup();
+  }
+  if (import_picker_.draw(import_pick_folder_ ? "Import folder##assets" : "Import file##assets")) {
+    const std::string picked = import_picker_.take_result();
+    if (!picked.empty()) import_files({picked}, folder_);
+  }
 }
 
 AssetDb::ScanReport AssetBrowser::rescan() {
@@ -74,6 +151,16 @@ AssetDb::ScanReport AssetBrowser::rescan() {
   // first only when needed (we learn that from the scan itself, which does
   // not touch references).
   AssetDb::ScanReport rep = db_.scan();
+  orphans_ = rep.orphan_metas;
+  if (!rep.relinked.empty() && host_.note) {
+    for (const auto& r : rep.relinked) {
+      host_.note("Relinked " + r.from + " -> " + r.to + " (GUID kept, matched by " +
+                 (r.how == "hash" ? "content" : "file name") + ")");
+    }
+  }
+  if (!rep.adopted.empty() && host_.note) {
+    host_.note("Moved " + std::to_string(rep.adopted.size()) + " sidecar .meta file(s) into .tombstone/meta");
+  }
   if (!rep.moved.empty()) {
     if (host_.before_disk_change) host_.before_disk_change();
     const std::size_t n = db_.fix_references(rep);
@@ -151,6 +238,12 @@ void AssetBrowser::accept_vault_drop() {
   ImGui::EndDragDropTarget();
 }
 
+void AssetBrowser::reimport(const std::string& rel) {
+  db_.reimport(rel);
+  thumbs_.invalidate(db_.abs(rel));
+  if (host_.on_assets_changed) host_.on_assets_changed({rel});
+}
+
 void AssetBrowser::draw() {
   thumbs_.poll_changes(ImGui::GetTime());
   // Toolbar.
@@ -179,7 +272,47 @@ void AssetBrowser::draw() {
     ImGui::EndPopup();
   }
   ImGui::SameLine();
+  if (ImGui::Button("Import...")) ImGui::OpenPopup("##importmenu");
+  draw_import_popup();
+  ImGui::SameLine();
+  if (ImGui::Button("Options")) ImGui::OpenPopup("##importopts");
+  if (ImGui::BeginPopup("##importopts")) {
+    importsort::Settings st = import_settings_;
+    bool changed = ImGui::Checkbox("Sort imports into type folders", &st.sort_imports);
+    if (ImGui::IsItemHovered()) {
+      ux::SetTooltip("assets/Models/<Name>/, Textures/, Materials/, Audio/, Fonts/, Scenes/, Animations/, Other/,\n"
+                        "prefabs/ and scripts/. Dropping on a folder puts files there instead.");
+    }
+    ImGui::BeginDisabled(!st.sort_imports);
+    changed |= ImGui::Checkbox("Keep source folder structure for model packs", &st.keep_model_packs);
+    if (ImGui::IsItemHovered()) {
+      ux::SetTooltip("On: a model's textures stay with it in assets/Models/<Name>/.\n"
+                        "Off: they go to assets/Textures/<Name>/ (glTF / OBJ paths rewritten).");
+    }
+    ImGui::EndDisabled();
+    if (changed) set_import_settings(st);
+    ImGui::Separator();
+    ImGui::TextDisabled("Metadata (.meta) lives in .tombstone/meta");
+    ImGui::EndPopup();
+  }
+  if (gma_dialog_.draw()) {
+    const gmaimport::Result& r = gma_dialog_.result();
+    rescan();
+    if (!r.models.empty()) selected_ = r.models.front();
+    if (host_.note) {
+      host_.note("Imported " + std::to_string(r.written.size()) + " file(s) from the addon into " + r.dest +
+                 (r.skipped.empty() ? "" : " (" + std::to_string(r.skipped.size()) + " skipped)"));
+    }
+  }
+  ImGui::SameLine();
   ImGui::TextDisabled("%zu assets", db_.entries().size());
+  if (!orphans_.empty()) {
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, theme::Warning());
+    if (ImGui::SmallButton((std::to_string(orphans_.size()) + " orphaned .meta").c_str())) orphans_popup_ = true;
+    ImGui::PopStyleColor();
+    if (ImGui::IsItemHovered()) ux::SetTooltip("Metadata whose file is gone (deleted or moved outside the editor and not found)");
+  }
 
   const float details_h = selected_.empty() ? 0.0f : 150.0f;
   const float body_h = ImGui::GetContentRegionAvail().y - details_h;
@@ -188,10 +321,52 @@ void AssetBrowser::draw() {
   ImGui::SameLine();
   if (ImGui::BeginChild("##grid", ImVec2(0, body_h), ImGuiChildFlags_Borders)) draw_grid();
   ImGui::EndChild();
+  grid_hovered_ = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
   accept_vault_drop();  // a Vault tile dropped on the grid: pull it into the claim
   if (!selected_.empty()) {
     if (ImGui::BeginChild("##details", ImVec2(0, 0), ImGuiChildFlags_Borders)) draw_details();
     ImGui::EndChild();
+  }
+
+  // Files dropped from the OS: onto a folder row = that folder; onto the
+  // grid = the open folder (or sorted when showing all assets).
+  if (importsort::os_drop_pending() && !db_.project_dir().empty()) {
+    if (drop_seen_ < 0) drop_seen_ = ImGui::GetTime();
+    if (!drop_folder_.empty()) take_os_drop(drop_folder_ == "\x01all" ? std::string() : drop_folder_);
+    else if (grid_hovered_) take_os_drop(folder_);
+    else if (ImGui::GetTime() - drop_seen_ > 0.25) take_os_drop({});  // dropped elsewhere: sorted
+    if (!importsort::os_drop_pending()) drop_seen_ = -1.0;
+  }
+  // Orphaned metadata: confirm before anything is removed.
+  if (orphans_popup_) {
+    ImGui::OpenPopup("Orphaned asset metadata");
+    orphans_popup_ = false;
+  }
+  if (ImGui::BeginPopupModal("Orphaned asset metadata", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::TextUnformatted("These .meta files belong to assets that are no longer in the claim:");
+    const std::size_t show = std::min<std::size_t>(orphans_.size(), 12);
+    for (std::size_t i = 0; i < show; ++i) ImGui::BulletText("%s", orphans_[i].c_str());
+    if (orphans_.size() > show) ImGui::TextDisabled("... and %zu more", orphans_.size() - show);
+    ImGui::TextDisabled("If a file was moved outside the editor, put it back or rescan first:\n"
+                        "a file with the same content or name gets its GUID back.");
+    if (ImGui::Button("Move to .tombstone/meta_orphans")) {
+      const int n = db_.clean_orphans(orphans_, true);
+      if (host_.note) host_.note("Moved " + std::to_string(n) + " orphaned .meta file(s) to .tombstone/meta_orphans");
+      rescan();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Button, theme::Danger());
+    if (ImGui::Button("Delete them")) {
+      const int n = db_.clean_orphans(orphans_, false);
+      if (host_.note) host_.note("Deleted " + std::to_string(n) + " orphaned .meta file(s)");
+      rescan();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::PopStyleColor();
+    ImGui::SameLine();
+    if (ImGui::Button("Keep")) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
   }
 
   // Delete confirmation (asset in use).
@@ -217,7 +392,9 @@ void AssetBrowser::draw() {
 }
 
 void AssetBrowser::draw_folders() {
+  drop_folder_.clear();
   if (ImGui::Selectable("All assets", folder_.empty())) folder_.clear();
+  if (ImGui::IsItemHovered()) drop_folder_ = "\x01all";
   accept_move_into("assets");
   accept_vault_drop();
   for (const std::string& f : db_.folders()) {
@@ -228,6 +405,7 @@ void AssetBrowser::draw_folders() {
     const std::string label = name_of(f) + (n ? "  (" + std::to_string(n) + ")" : "") + "##" + f;
     ImGui::PushStyleColor(ImGuiCol_Text, folder_ == f ? theme::Accent() : theme::Text());
     if (ImGui::Selectable(label.c_str(), folder_ == f)) folder_ = f;
+    if (ImGui::IsItemHovered()) drop_folder_ = f;
     ImGui::PopStyleColor();
     accept_move_into(f);
     ImGui::Unindent(10.0f * depth + 4.0f);
@@ -295,18 +473,18 @@ bool AssetBrowser::tile(const AssetDb::Entry& e, float size) {
     ImGui::EndDragDropSource();
   }
   if (hovered) {
-    ImGui::SetTooltip("%s\n%s  %s\nGUID %s", e.rel.c_str(), assetdb::kind_name(e.meta.kind),
+    ux::SetTooltip("%s\n%s  %s\nGUID %s", e.rel.c_str(), assetdb::kind_name(e.meta.kind),
                       assetdb::info_summary(e.meta.info, e.meta.kind).c_str(), e.meta.guid.c_str());
   }
   if (ImGui::BeginPopupContextItem("##ctx")) {
     selected_ = e.rel;
-    if (ImGui::MenuItem("Find references")) {
+    if (ux::MenuItem("Find references")) {
       refs_for_ = e.rel;
       refs_shown_ = db_.find_references(e.rel);
     }
-    if (ImGui::MenuItem("Reimport")) db_.reimport(e.rel);
-    if (host_.send_to_vault && ImGui::MenuItem("Send to Vault...")) host_.send_to_vault(e.rel);
-    if (ImGui::MenuItem("Delete")) {
+    if (ux::MenuItem("Reimport")) reimport(e.rel);
+    if (host_.send_to_vault && ux::MenuItem("Send to Vault...")) host_.send_to_vault(e.rel);
+    if (ux::MenuItem("Delete")) {
       std::vector<assetdb::Ref> refs;
       if (!remove(e.rel, false, &refs)) {
         delete_pending_ = e.rel;
@@ -345,12 +523,88 @@ void AssetBrowser::draw_grid() {
     col = (col + 1) % per_row;
     ++shown;
   }
-  if (shown == 0) {
-    theme::StatusInfo(db_.entries().empty()
-                          ? "No assets yet. Drop .png / .jpg / .gltf / .glb / .wav / .ogg / .mp3 / "
-                            ".ttf files into the project's assets/ folder."
-                          : "Nothing matches.");
+  if (host_.scripts && (filter_ == 0)) {
+    for (const std::string& rel : host_.scripts()) {
+      if (!q.empty()) {
+        if (lower(rel).find(q) == std::string::npos) continue;
+        if (!folder_.empty() && rel.rfind(folder_ + "/", 0) != 0) continue;
+      } else if (!folder_.empty() && dir_of(rel) != folder_) {
+        continue;
+      }
+      if (col > 0) ImGui::SameLine(0, 8);
+      if (script_tile(rel, size)) selected_ = rel;
+      col = (col + 1) % per_row;
+      ++shown;
+    }
   }
+  if (shown == 0 && db_.entries().empty() && (!host_.scripts || host_.scripts().empty())) {
+    ux::EmptyState("assets", {{"Import file...", [this] {
+                                 import_pick_folder_ = false;
+                                 import_picker_.open_file({}, {}, "Pick a file to import");
+                               }, "Images (.png .jpg), models (.gltf .glb .fbx .obj .blend), sounds (.wav .ogg .mp3), fonts (.ttf)"},
+                              {"Import folder...", [this] {
+                                 import_pick_folder_ = true;
+                                 import_picker_.open({});
+                               }, "A model pack: the model and its textures together"},
+                              {"Rescan", [this] { rescan(); }, "Look again for files copied into assets/ outside the editor"}});
+  } else if (shown == 0) {
+    const bool narrowed = !q.empty() || filter_ != 0 || !folder_.empty();
+    ux::EmptyState("asset_search", {{"Show all assets", [this] {
+                                       search_[0] = '\0';
+                                       filter_ = 0;
+                                       folder_.clear();
+                                     }, nullptr, narrowed}},
+                   !q.empty() ? "Nothing matches the search here. Clear it, or try another folder or type filter." : nullptr);
+  }
+}
+
+bool AssetBrowser::script_tile(const std::string& rel, float size) {
+  ImGui::PushID(rel.c_str());
+  ImGui::BeginGroup();
+  const ImVec2 p0 = ImGui::GetCursorScreenPos();
+  const bool clicked = ImGui::InvisibleButton("##tile", ImVec2(size, size + 18));
+  const bool hovered = ImGui::IsItemHovered();
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  const bool sel = selected_ == rel;
+  dl->AddRectFilled(p0, ImVec2(p0.x + size, p0.y + size + 18),
+                    ImGui::GetColorU32(sel ? theme::AccentMuted() : (hovered ? theme::HeaderBg() : theme::PanelBg())),
+                    4.0f);
+  const ImVec2 t0(p0.x + 4, p0.y + 4), t1(p0.x + size - 4, p0.y + size - 4);
+  const ScriptLang lang = lang_of(rel);
+  const ImVec4 c = lang_colour(lang);
+  dl->AddRectFilled(t0, t1, ImGui::GetColorU32(ImVec4(c.x, c.y, c.z, 0.22f)), 6.0f);
+  dl->AddRect(t0, t1, ImGui::GetColorU32(ImVec4(c.x, c.y, c.z, 0.8f)), 6.0f, 0, 1.5f);
+  const char* g = lang_tag(lang);
+  const float px = size * 0.26f;
+  const ImVec2 ts = theme::MeasureText(px, g);
+  theme::DrawSizedText(dl, ImVec2((t0.x + t1.x - ts.x) * 0.5f, (t0.y + t1.y - ts.y) * 0.5f), px,
+                       ImGui::GetColorU32(c), g);
+  dl->AddRectFilled(ImVec2(t0.x, t1.y - 3), ImVec2(t1.x, t1.y), ImGui::GetColorU32(c));
+  std::string name = name_of(rel);
+  const float max_w = size - 4;
+  while (name.size() > 3 && ImGui::CalcTextSize(name.c_str()).x > max_w) {
+    name = name.substr(0, name.size() - 4) + "..";
+  }
+  dl->AddText(ImVec2(p0.x + 2, p0.y + size), ImGui::GetColorU32(sel ? theme::Accent() : theme::Text()),
+              name.c_str());
+  ImGui::EndGroup();
+  script_drag_source(rel);
+  if (hovered) {
+    ux::SetTooltip("%s\n%s script - drag onto an entity to attach, double-click to open", rel.c_str(),
+                      lang_label(lang));
+    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && host_.open_script) host_.open_script(rel, 0);
+  }
+  if (ImGui::BeginPopupContextItem("##ctx")) {
+    selected_ = rel;
+    if (host_.open_script) {
+      if (ux::MenuItem(lang == ScriptLang::Graph ? "Open in Brand Book" : "Open")) host_.open_script(rel, 0);
+      if (ux::MenuItem("Open in VS Code")) host_.open_script(rel, 1);
+      if (ux::MenuItem("Open in Visual Studio")) host_.open_script(rel, 2);
+    }
+    ImGui::EndPopup();
+  }
+  ImGui::PopID();
+  return clicked;
 }
 
 void AssetBrowser::draw_settings(const AssetDb::Entry& e) {
@@ -395,7 +649,7 @@ void AssetBrowser::draw_settings(const AssetDb::Entry& e) {
       ImGui::TextColored(theme::Warning(), "%s", render3d::kModelRightsNote);
       ImGui::PopTextWrapPos();
       number("unit_scale", "Unit scale", 0.0001f, 100, "%.4f");
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip("File units to metres (Source: 0.0254, centimetres: 0.01)");
+      if (ImGui::IsItemHovered()) ux::SetTooltip("File units to metres (Source: 0.0254, centimetres: 0.01)");
       int up = s.str("up_axis") == "y" ? 1 : s.str("up_axis") == "z" ? 2 : 0;
       const char* ups[] = {"Auto (file)", "Y up", "Z up (convert)"};
       ImGui::SetNextItemWidth(140);
@@ -553,7 +807,7 @@ void AssetBrowser::draw_details() {
       refs_shown_ = db_.find_references(entry.rel);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Reimport")) db_.reimport(entry.rel);
+    if (ImGui::Button("Reimport")) reimport(entry.rel);
     if (host_.send_to_vault) {
       ImGui::SameLine();
       if (ImGui::Button("Send to Vault")) host_.send_to_vault(entry.rel);
@@ -578,6 +832,10 @@ void AssetBrowser::draw_details() {
     ImGui::TableNextColumn();
     ImGui::TextColored(theme::Accent(), "Import settings");
     draw_settings(entry);
+    if (entry.meta.kind == Kind::Model &&
+        gmaimport::draw_source_materials(db_, entry, &relink_picker_, &relink_for_)) {
+      reimport(entry.rel);
+    }
     ImGui::EndTable();
   }
 }

@@ -66,6 +66,8 @@ fs::path sdk_dir() {
 }
 }  // namespace
 
+std::string sdk_include_dir() { return sdk_dir().string(); }
+
 void set_blocking_builds(bool on) { set_compiled_scripts_blocking(on); }
 bool blocking_builds() { return compiled_scripts_blocking(); }
 

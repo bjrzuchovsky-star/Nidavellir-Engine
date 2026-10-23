@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <vector>
@@ -60,8 +61,34 @@ struct Camera2DData {
   float bounds_y = 0.0f;
   float bounds_w = 1024.0f;
   float bounds_h = 768.0f;
+  // v13: several cameras per scene. Play looks through the active camera
+  // with the highest priority (ties: scene order); scripts switch with
+  // camera.set_active.
+  bool active = true;
+  int priority = 0;
+  // Dead zone (world px, centred): the target roams inside it without
+  // moving the camera. 0 x 0 = always centred.
+  float dead_zone_w = 0.0f;
+  float dead_zone_h = 0.0f;
+  bool use_clear = false;  // fill the background with clear_color
+  float clear_color[4] = {0.10f, 0.08f, 0.07f, 1.0f};
+  float viewport[4] = {0.0f, 0.0f, 1.0f, 1.0f};  // x, y, w, h (0..1 of the window)
 
   bool operator==(const Camera2DData& o) const = default;
+};
+
+// v13 "follow": a lightweight constraint instead of parenting. Each tick
+// the entity's centre takes the target's centre plus the offset (turned
+// with the target when rotation follows too) and / or its rotation plus
+// rotation_offset.
+struct FollowData {
+  std::uint64_t target = 0;
+  bool position = true;
+  bool rotation = false;
+  float offset_x = 0.0f;  // world px (target space when rotation follows)
+  float offset_y = 0.0f;
+  float rotation_offset = 0.0f;  // degrees
+  bool operator==(const FollowData& o) const = default;
 };
 
 // Where player `slot` starts when play begins (scene.json "spawn").
@@ -205,6 +232,9 @@ struct ScriptData {
 
   std::string path;  // project-relative, e.g. "scripts/gate.lua"
   std::vector<ScriptProp> props;
+  // Inspector toggle (scene.json v12 / Scene3D v17): a disabled script is
+  // kept on the entity but never attached when the ride starts.
+  bool enabled = true;
 
   const ScriptProp* find(const std::string& name) const;
   // Add or replace an override (keeps the list sorted).
@@ -233,13 +263,18 @@ struct Entity2D {
   // Gameplay components (scene.json v3).
   std::optional<PlayerControllerData> player;
   std::optional<Camera2DData> camera;
+  std::optional<FollowData> follow;  // v13
   std::optional<SpawnPointData> spawn;
   // Collision (scene.json v4).
   std::optional<ColliderData> collider;
   // Sprite animation (scene.json v5).
   std::optional<AnimatorData> animator;
-  // Gameplay script (scene.json v6).
+  // Gameplay script (scene.json v6). An entity can carry several
+  // (scene.json v12): `script` is the first, `extra_scripts` the rest, in
+  // Inspector order. Use script_stack() / set_script_stack() for the whole
+  // list; `script` stays set whenever the entity has any script at all.
   std::optional<ScriptData> script;
+  std::vector<ScriptData> extra_scripts;
   // Editor tools (scene.json v7). rotation turns the drawn quad about its
   // centre (colliders stay axis-aligned). parent: the entity this one hangs
   // under in the Hierarchy; positions stay in world space and follow the
@@ -283,6 +318,66 @@ void normalize_components(Entity2D& e);
 // Sort props by name, drop blank / duplicate names and non-finite numbers,
 // cap counts and text lengths.
 void normalize_script(ScriptData& s);
+
+// Most scripts one entity carries (Inspector stack).
+inline constexpr std::size_t kMaxScriptsPerEntity = 16;
+
+// The whole script stack of an entity (Entity2D or scene3d::Entity3D), in
+// Inspector order: script, then extra_scripts. Empty = no scripts.
+template <class E>
+std::vector<ScriptData> script_stack(const E& e) {
+  std::vector<ScriptData> out;
+  if (!e.script) return out;
+  out.reserve(1 + e.extra_scripts.size());
+  out.push_back(*e.script);
+  out.insert(out.end(), e.extra_scripts.begin(), e.extra_scripts.end());
+  return out;
+}
+template <class E>
+std::size_t script_count(const E& e) {
+  return e.script ? 1 + e.extra_scripts.size() : 0;
+}
+// Replace the stack (first -> script, the rest -> extra_scripts; capped at
+// kMaxScriptsPerEntity).
+template <class E>
+void set_script_stack(E& e, std::vector<ScriptData> list) {
+  if (list.size() > kMaxScriptsPerEntity) list.resize(kMaxScriptsPerEntity);
+  if (list.empty()) {
+    e.script.reset();
+    e.extra_scripts.clear();
+    return;
+  }
+  e.script = std::move(list.front());
+  e.extra_scripts.assign(std::make_move_iterator(list.begin() + 1),
+                         std::make_move_iterator(list.end()));
+}
+// The i-th script of the stack (0 = e.script), null past the end.
+template <class E>
+ScriptData* script_at(E& e, std::size_t i) {
+  if (!e.script) return nullptr;
+  if (i == 0) return &*e.script;
+  return i - 1 < e.extra_scripts.size() ? &e.extra_scripts[i - 1] : nullptr;
+}
+template <class E>
+const ScriptData* script_at(const E& e, std::size_t i) {
+  if (!e.script) return nullptr;
+  if (i == 0) return &*e.script;
+  return i - 1 < e.extra_scripts.size() ? &e.extra_scripts[i - 1] : nullptr;
+}
+// Normalise every script of the stack; extra scripts without a first one
+// move up (so `script` is set whenever there are any).
+template <class E>
+void normalize_script_stack(E& e) {
+  if (!e.script && !e.extra_scripts.empty()) {
+    e.script = std::move(e.extra_scripts.front());
+    e.extra_scripts.erase(e.extra_scripts.begin());
+  }
+  if (e.extra_scripts.size() + 1 > kMaxScriptsPerEntity) {
+    e.extra_scripts.resize(kMaxScriptsPerEntity - 1);
+  }
+  if (e.script) normalize_script(*e.script);
+  for (ScriptData& s : e.extra_scripts) normalize_script(s);
+}
 
 // Lookup helpers over a flat entity list.
 const Entity2D* find_entity(const std::vector<Entity2D>& entities,

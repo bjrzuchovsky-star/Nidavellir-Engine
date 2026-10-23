@@ -4,7 +4,8 @@
   "dimension": "2d",
   "description": "Airship Works: build a grid ship, fly the sloop and fight two marauders. Shipyard plugin on.",
   "plugins": [
-    "ts.shipyard"
+    "ts.shipyard",
+    "ts.move.topdown"
   ],
   "tags": [
     "sample",

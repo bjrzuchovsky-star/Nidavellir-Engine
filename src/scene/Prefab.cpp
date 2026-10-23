@@ -291,7 +291,7 @@ std::vector<std::string> scan_assets(const std::string& project_dir) {
        it != end; it.increment(ec)) {
     if (ec) break;
     const std::string name = it->path().filename().string();
-    if (it->is_directory(ec) && (name == "build" || name == ".git" || name == "export")) {
+    if (it->is_directory(ec) && (name == "build" || name == ".git" || name == "export" || name == ".tombstone" || name == ".vault")) {
       it.disable_recursion_pending();
       continue;
     }

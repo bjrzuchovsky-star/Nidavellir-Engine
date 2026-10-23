@@ -2,6 +2,7 @@
 // inspector sections and the scene Lighting panel.
 
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/fx/FxInspector.h"
 #include "editor/ui/Theme.h"
@@ -50,7 +51,7 @@ void Editor2DScreen::draw_inspector_fx(std::uint64_t id) {
       apply("Add Light", [](Entity2D& t) { t.light = fx::Light2DData{}; });
     }
     if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("A point / spot light (needs scene Lighting on: View > Lighting).");
+      ux::SetTooltip("A point / spot light (needs scene Lighting on: View > Lighting).");
   } else if (ImGui::CollapsingHeader("Light", ImGuiTreeNodeFlags_DefaultOpen)) {
     ImGui::PushID("light");
     fx::Light2DData copy = *e->light;

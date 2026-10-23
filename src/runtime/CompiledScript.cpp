@@ -26,6 +26,7 @@ namespace {
 
 struct Inst {
   std::uint64_t entity = 0;
+  int slot = 0;  // place in the entity's script stack
   std::string path, stem, name;
   std::vector<ScriptProp> props;
   void* obj = nullptr;
@@ -184,13 +185,14 @@ struct CompiledScriptHost::Impl {
     in.obj = mod->create(in.stem.c_str(), &api, in.entity, props.c_str());
     if (!in.obj) {
       log(LogLevel::Error, "no " + be.label + " script class registered as \"" + in.stem + "\" (" +
-                               be.class_hint(in.stem) + ") for " + in.name, in.path, 0, in.entity);
+                               be.class_hint(in.stem) + ") -- \"" + in.name + "\" (" + in.path + ")",
+          in.path, 0, in.entity);
     }
     return in.obj != nullptr;
   }
 
-  Inst* find(std::uint64_t e) const {
-    for (const auto& i : insts) if (i->entity == e) return i.get();
+  Inst* find(std::uint64_t e, int slot) const {
+    for (const auto& i : insts) if (i->entity == e && i->slot == slot) return i.get();
     return nullptr;
   }
 
@@ -219,10 +221,11 @@ CompiledScriptHost::~CompiledScriptHost() {
   m_->mod.reset();
 }
 
-bool CompiledScriptHost::attach(const Entity2D& e) {
-  if (!e.script || m_->find(e.id)) return false;
+bool CompiledScriptHost::attach(const Entity2D& e, int slot) {
+  if (!e.script || m_->find(e.id, slot)) return false;
   auto in = std::make_unique<Inst>();
   in->entity = e.id;
+  in->slot = slot;
   in->path = e.script->path;
   in->stem = stem_of(e.script->path);
   in->name = e.name;
@@ -230,7 +233,9 @@ bool CompiledScriptHost::attach(const Entity2D& e) {
   Inst& ref = *in;
   m_->insts.push_back(std::move(in));
   if (m_->project_dir.empty()) {
-    m_->log(LogLevel::Error, m_->be.label + " scripts need a project folder (" + e.name + ")", ref.path, 0, e.id);
+    m_->log(LogLevel::Error,
+            m_->be.label + " scripts need a project folder -- \"" + e.name + "\" (" + ref.path + ")",
+            ref.path, 0, e.id);
     return false;
   }
   if (!m_->ensure_module()) return m_->building();  // waits for the background build
@@ -238,25 +243,28 @@ bool CompiledScriptHost::attach(const Entity2D& e) {
 }
 
 void CompiledScriptHost::detach(std::uint64_t entity) {
-  for (auto it = m_->insts.begin(); it != m_->insts.end(); ++it) {
-    if ((*it)->entity != entity) continue;
+  // Every script on the entity, in stack order (on_destroy first to last).
+  for (auto it = m_->insts.begin(); it != m_->insts.end();) {
+    if ((*it)->entity != entity) {
+      ++it;
+      continue;
+    }
     Inst& in = **it;
     if (in.obj && m_->mod) {
       if (in.started) m_->call(in, TS_HOOK_DESTROY, 0, 0, "");
       m_->mod->destroy(in.obj);
     }
-    m_->insts.erase(it);
-    return;
+    it = m_->insts.erase(it);
   }
 }
 
-bool CompiledScriptHost::has(std::uint64_t e) const { return m_->find(e) != nullptr; }
-bool CompiledScriptHost::running(std::uint64_t e) const {
-  const Inst* i = m_->find(e);
+bool CompiledScriptHost::has(std::uint64_t e, int slot) const { return m_->find(e, slot) != nullptr; }
+bool CompiledScriptHost::running(std::uint64_t e, int slot) const {
+  const Inst* i = m_->find(e, slot);
   return i && i->obj && i->enabled;
 }
-bool CompiledScriptHost::has_hook(std::uint64_t e, const char* hook) {
-  const Inst* i = m_->find(e);
+bool CompiledScriptHost::has_hook(std::uint64_t e, int slot, const char* hook) {
+  const Inst* i = m_->find(e, slot);
   if (!i || !i->obj) return false;
   const std::string h = hook;
   return h == "on_start" || h == "on_tick" || h == "on_interact" || h == "on_trigger_enter" ||
@@ -264,25 +272,26 @@ bool CompiledScriptHost::has_hook(std::uint64_t e, const char* hook) {
 }
 std::size_t CompiledScriptHost::instance_count() const { return m_->insts.size(); }
 
-void CompiledScriptHost::start_pending() {
+void CompiledScriptHost::start_pending(int slot) {
   for (std::size_t i = 0; i < m_->insts.size(); ++i) {
     Inst& in = *m_->insts[i];
-    if (in.started || !in.obj) continue;
+    if (in.slot != slot || in.started || !in.obj) continue;
     in.started = true;
     m_->call(in, TS_HOOK_START, 0, 0, "");
   }
 }
 
-void CompiledScriptHost::trigger(bool enter, std::uint64_t t, std::uint64_t other) {
-  if (Inst* in = m_->find(t); in && in->started) {
+void CompiledScriptHost::trigger(bool enter, std::uint64_t t, int slot, std::uint64_t other) {
+  if (Inst* in = m_->find(t, slot); in && in->started) {
     m_->call(*in, enter ? TS_HOOK_TRIGGER_ENTER : TS_HOOK_TRIGGER_EXIT, other, 0, "");
   }
 }
-void CompiledScriptHost::interact(std::uint64_t t, std::uint64_t rider) {
-  if (Inst* in = m_->find(t); in && in->started) m_->call(*in, TS_HOOK_INTERACT, rider, 0, "");
+void CompiledScriptHost::interact(std::uint64_t t, int slot, std::uint64_t rider) {
+  if (Inst* in = m_->find(t, slot); in && in->started) m_->call(*in, TS_HOOK_INTERACT, rider, 0, "");
 }
-void CompiledScriptHost::hand_event(std::uint64_t t, const char* hook, const std::string& text, double n) {
-  if (Inst* in = m_->find(t); in && in->started) {
+void CompiledScriptHost::hand_event(std::uint64_t t, int slot, const char* hook, const std::string& text,
+                                    double n) {
+  if (Inst* in = m_->find(t, slot); in && in->started) {
     m_->call(*in, TS_HOOK_HAND, 0, n, std::string(hook) + "\t" + text);
   }
 }
@@ -292,21 +301,21 @@ void CompiledScriptHost::ui_event(const std::string& widget, bool change, double
     if (in.started) m_->call(in, TS_HOOK_UI, change ? 1 : 0, value, widget + "\t" + text);
   }
 }
-void CompiledScriptHost::broadcast(const char* hook, const std::string& text, double n) {
+void CompiledScriptHost::broadcast(int slot, const char* hook, const std::string& text, double n) {
   std::vector<std::uint64_t> ids;
-  for (const auto& in : m_->insts) if (in->started) ids.push_back(in->entity);
+  for (const auto& in : m_->insts) if (in->started && in->slot == slot) ids.push_back(in->entity);
   std::sort(ids.begin(), ids.end());
   const std::string payload = std::string(hook) + "\t" + text;
   for (std::uint64_t id : ids) {
-    if (Inst* in = m_->find(id); in && in->started) m_->call(*in, TS_HOOK_EVENT, 0, n, payload);
+    if (Inst* in = m_->find(id, slot); in && in->started) m_->call(*in, TS_HOOK_EVENT, 0, n, payload);
   }
 }
-void CompiledScriptHost::tick(double dt) {
-  m_->poll();
+void CompiledScriptHost::tick(double dt, int slot) {
+  if (slot == 0) m_->poll();  // housekeeping once per world tick
   const std::size_t n = m_->insts.size();
   for (std::size_t i = 0; i < n && i < m_->insts.size(); ++i) {
     Inst& in = *m_->insts[i];
-    if (in.started) m_->call(in, TS_HOOK_TICK, 0, dt, "");
+    if (in.slot == slot && in.started) m_->call(in, TS_HOOK_TICK, 0, dt, "");
   }
 }
 

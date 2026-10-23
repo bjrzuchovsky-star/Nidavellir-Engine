@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+#include <sstream>
 
 namespace ts {
 namespace tombstone {
@@ -202,31 +203,59 @@ std::size_t vtf_image_bytes(int f, int w, int h) {
   return bpp ? static_cast<std::size_t>(w) * h * bpp : 0;
 }
 
-bool decode_vtf(const unsigned char* d, std::size_t size, Image* out, std::string* error) {
+std::string vtf_format_name(int f) {
+  static const char* names[] = {"RGBA8888", "ABGR8888", "RGB888", "BGR888", "RGB565", "I8", "IA88", "P8",
+                                "A8", "RGB888_BLUESCREEN", "BGR888_BLUESCREEN", "ARGB8888", "BGRA8888",
+                                "DXT1", "DXT3", "DXT5", "BGRX8888", "BGR565", "BGRX5551", "BGRA4444",
+                                "DXT1_ONEBITALPHA", "BGRA5551", "UV88", "UVWQ8888", "RGBA16161616F",
+                                "RGBA16161616", "UVLX8888"};
+  if (f >= 0 && f < static_cast<int>(sizeof(names) / sizeof(names[0]))) return names[f];
+  return "format " + std::to_string(f);
+}
+
+bool vtf_info(const unsigned char* d, std::size_t size, VtfInfo* o, std::string* error) {
   auto fail = [&](const std::string& why) {
     if (error) *error = "VTF: " + why;
     return false;
   };
   if (size < 64 || std::memcmp(d, "VTF\0", 4) != 0) return fail("not a VTF file");
-  const std::uint32_t major = rd32(d + 4), minor = rd32(d + 8), header = rd32(d + 12);
-  if (major != 7 || minor > 5) return fail("unsupported version " + std::to_string(major) + "." + std::to_string(minor));
-  const int w = rd16(d + 16), h = rd16(d + 18);
-  const std::uint32_t flags = rd32(d + 20);
-  const int frames = std::max<int>(1, rd16(d + 24));
-  const int fmt = static_cast<int>(rd32(d + 52));
-  const int mips = std::max<int>(1, d[56]);
+  *o = VtfInfo{};
+  o->major = static_cast<int>(rd32(d + 4));
+  o->minor = static_cast<int>(rd32(d + 8));
+  if (o->major != 7 || o->minor < 0 || o->minor > 5) {
+    return fail("unsupported version " + std::to_string(o->major) + "." + std::to_string(o->minor));
+  }
+  o->width = rd16(d + 16);
+  o->height = rd16(d + 18);
+  o->flags = rd32(d + 20);
+  o->frames = std::max<int>(1, rd16(d + 24));
+  o->first_frame = rd16(d + 26);
+  o->format = static_cast<int>(rd32(d + 52));
+  o->mips = std::max<int>(1, d[56]);
+  o->depth = (o->minor >= 2 && size >= 65) ? std::max<int>(1, rd16(d + 63)) : 1;
+  if (o->envmap()) o->faces = (o->minor < 5 && o->first_frame != 0xFFFF) ? 7 : 6;
+  if (o->width <= 0 || o->height <= 0 || o->width > 16384 || o->height > 16384) return fail("bad size");
+  return true;
+}
+
+bool decode_vtf(const unsigned char* d, std::size_t size, Image* out, std::string* error) {
+  auto fail = [&](const std::string& why) {
+    if (error) *error = "VTF: " + why;
+    return false;
+  };
+  VtfInfo vi;
+  if (!vtf_info(d, size, &vi, error)) return false;
+  const std::uint32_t header = rd32(d + 12);
+  const int w = vi.width, h = vi.height, fmt = vi.format, mips = vi.mips, frames = vi.frames,
+            faces = vi.faces, depth = vi.depth, minor = vi.minor;
   const int low_fmt = static_cast<int>(rd32(d + 57));
   const int low_w = d[61], low_h = d[62];
-  const int depth = (minor >= 2 && size >= 65) ? std::max<int>(1, rd16(d + 63)) : 1;
-  if (w <= 0 || h <= 0 || w > 16384 || h > 16384) return fail("bad size");
-  if (vtf_image_bytes(fmt, 1, 1) == 0) return fail("unsupported image format " + std::to_string(fmt));
-  const bool envmap = (flags & 0x4000u) != 0;
-  const int faces = envmap ? (minor < 5 ? 7 : 6) : 1;
+  if (vtf_image_bytes(fmt, 1, 1) == 0) return fail("unsupported image format " + vtf_format_name(fmt));
   std::size_t data = header;
   if (minor >= 3 && size >= 80) {
     const std::uint32_t n = rd32(d + 68);
     data = 0;
-    for (std::uint32_t i = 0; i < n && 80 + (i + 1) * 8 <= size; ++i) {
+    for (std::uint32_t i = 0; i < n && i < 32 && 80 + (i + 1) * 8 <= size; ++i) {
       const unsigned char* r = d + 80 + i * 8;
       if (r[0] == 0x30 && r[1] == 0 && r[2] == 0) data = rd32(r + 4);
     }
@@ -235,7 +264,8 @@ bool decode_vtf(const unsigned char* d, std::size_t size, Image* out, std::strin
     // Low-res thumbnail first.
     if (low_w > 0 && low_h > 0 && low_fmt >= 0) data += vtf_image_bytes(low_fmt, low_w, low_h);
   }
-  // Mips are stored smallest first; skip to mip 0.
+  // Mips are stored smallest first, each holding every frame / face /
+  // slice; skip to mip 0, whose first frame / face / slice comes first.
   for (int m = mips - 1; m >= 1; --m) {
     const int mw = std::max(1, w >> m), mh = std::max(1, h >> m), md = std::max(1, depth >> m);
     data += vtf_image_bytes(fmt, mw, mh) * frames * faces * md;
@@ -257,7 +287,18 @@ bool decode_vtf(const unsigned char* d, std::size_t size, Image* out, std::strin
   return true;
 }
 
-// ---- VMT (KeyValues) ------------------------------------------------------
+bool decode_vtf_rgba(const unsigned char* data, std::size_t size, std::vector<unsigned char>* rgba,
+                     int* width, int* height) {
+  if (size < 4 || std::memcmp(data, "VTF\0", 4) != 0) return false;
+  Image im;
+  if (!decode_vtf(data, size, &im, nullptr)) return false;
+  *rgba = std::move(im.rgba);
+  *width = im.width;
+  *height = im.height;
+  return true;
+}
+
+// ---- KeyValues / VMT ---------------------------------------------------------
 
 namespace {
 
@@ -266,11 +307,22 @@ struct Lexer {
   std::size_t i = 0;
   enum Tok { End, Str, Open, Close };
   std::string text;
+  bool quoted = false;
   Tok next() {
     for (;;) {
-      while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+      while (i < s.size() && (std::isspace(static_cast<unsigned char>(s[i])) || s[i] == '\0')) ++i;
       if (i + 1 < s.size() && s[i] == '/' && s[i + 1] == '/') {
         while (i < s.size() && s[i] != '\n') ++i;
+        continue;
+      }
+      if (i + 1 < s.size() && s[i] == '/' && s[i + 1] == '*') {  // tolerated
+        const std::size_t e = s.find("*/", i + 2);
+        i = e == std::string::npos ? s.size() : e + 2;
+        continue;
+      }
+      if (i < s.size() && s[i] == '[') {  // [$WIN32] style conditional: skip
+        while (i < s.size() && s[i] != ']' && s[i] != '\n') ++i;
+        if (i < s.size() && s[i] == ']') ++i;
         continue;
       }
       break;
@@ -280,7 +332,8 @@ struct Lexer {
     if (c == '{') { ++i; return Open; }
     if (c == '}') { ++i; return Close; }
     text.clear();
-    if (c == '"') {
+    quoted = c == '"';
+    if (quoted) {
       ++i;
       while (i < s.size() && s[i] != '"') {
         if (s[i] == '\\' && i + 1 < s.size() && (s[i + 1] == '"' || s[i + 1] == '\\')) ++i;
@@ -303,42 +356,141 @@ std::string lower(std::string s) {
   return s;
 }
 
-// Reads a block's key / values after its '{'. Nested blocks (patch
-// "insert" / "replace", fallbacks) are flattened; the first value of a key
-// wins, so a patch's own values beat its include's.
-void read_block(Lexer& lx, Vmt* out, int depth) {
+// Children of a block after its '{' (or the whole text at depth 0).
+bool read_kv_block(Lexer& lx, std::vector<KeyValue>* out, int depth, std::string* error) {
   for (;;) {
     Lexer::Tok t = lx.next();
-    if (t == Lexer::End || t == Lexer::Close) return;
-    if (t != Lexer::Str) continue;
-    const std::string key = lower(lx.text);
-    t = lx.next();
-    if (t == Lexer::Open) {
-      if (depth < 4) read_block(lx, out, depth + 1);
+    if (t == Lexer::End) {
+      if (depth > 0 && error) *error = "KeyValues: missing '}'";
+      return depth == 0;
+    }
+    if (t == Lexer::Close) {
+      if (depth == 0) continue;  // stray '}' at the top: ignore
+      return true;
+    }
+    if (t == Lexer::Open) {  // anonymous block
+      KeyValue kv;
+      kv.block = true;
+      if (depth < 32 && !read_kv_block(lx, &kv.children, depth + 1, error)) return false;
+      out->push_back(std::move(kv));
       continue;
     }
-    if (t != Lexer::Str) return;
-    if (key == "include") out->include = lx.text;
-    else if (!key.empty() && key[0] == '$' && depth <= 2 && !out->params.count(key)) out->params[key] = lx.text;
-    else if (!key.empty() && key[0] == '%' && !out->params.count(key)) out->params[key] = lx.text;
+    KeyValue kv;
+    kv.key = lx.text;
+    t = lx.next();
+    if (t == Lexer::Open) {
+      kv.block = true;
+      if (depth >= 32 || !read_kv_block(lx, &kv.children, depth + 1, error)) return false;
+    } else if (t == Lexer::Str) {
+      kv.value = lx.text;
+    } else {
+      out->push_back(std::move(kv));
+      if (t == Lexer::Close && depth > 0) return true;
+      return depth == 0;
+    }
+    out->push_back(std::move(kv));
+  }
+}
+
+void collect_params(const std::vector<KeyValue>& kids, std::map<std::string, std::string>* params, bool overwrite) {
+  for (const KeyValue& kv : kids) {
+    if (kv.block) continue;
+    const std::string k = lower(kv.key);
+    if (k.empty() || k == "include") continue;
+    if (overwrite) (*params)[k] = kv.value;
+    else params->emplace(k, kv.value);
   }
 }
 
 }  // namespace
 
-bool parse_vmt(const std::string& text, Vmt* out, std::string* error) {
+bool parse_keyvalues(const std::string& text, KeyValue* root, std::string* error) {
   Lexer lx{text};
+  *root = KeyValue{};
+  root->block = true;
+  return read_kv_block(lx, &root->children, 0, error);
+}
+
+bool Vmt::flag(const std::string& key) const {
+  const std::string v = lower(param(key));
+  if (v.empty()) return false;
+  if (v == "true") return true;
+  return std::strtod(v.c_str(), nullptr) != 0.0;
+}
+
+bool parse_vmt(const std::string& text, Vmt* out, std::string* error) {
   *out = Vmt{};
-  if (lx.next() != Lexer::Str) {
-    if (error) *error = "VMT: no shader name";
+  KeyValue root;
+  std::string err;
+  if (!parse_keyvalues(text, &root, &err)) {
+    if (error) *error = "VMT: " + err;
     return false;
   }
-  out->shader = lower(lx.text);
-  if (lx.next() != Lexer::Open) {
-    if (error) *error = "VMT: expected '{'";
+  const KeyValue* top = nullptr;
+  for (const KeyValue& kv : root.children) {
+    if (kv.block && !kv.key.empty()) {
+      top = &kv;
+      break;
+    }
+  }
+  if (!top) {
+    if (error) *error = "VMT: no shader block";
     return false;
   }
-  read_block(lx, out, 1);
+  out->shader = lower(top->key);
+  collect_params(top->children, &out->params, true);
+  for (const KeyValue& kv : top->children) {
+    const std::string k = lower(kv.key);
+    if (!kv.block && k == "include") out->include = kv.value;
+    if (!kv.block) continue;
+    if (k == "insert") collect_params(kv.children, &out->insert, true);
+    else if (k == "replace") collect_params(kv.children, &out->replace, true);
+    else if (k != "proxies") collect_params(kv.children, &out->params, false);  // fallback / dx-level blocks
+  }
+  return true;
+}
+
+bool resolve_vmt(const std::string& text, const VmtLoader& load, Vmt* out, std::string* error,
+                 std::vector<std::string>* chain) {
+  if (!parse_vmt(text, out, error)) return false;
+  int depth = 0;
+  Vmt cur = *out;
+  // Patch stack, innermost last; then applied from the base outwards.
+  std::vector<Vmt> patches;
+  while (!cur.include.empty()) {
+    if (++depth > 8) {
+      if (error) *error = "VMT: patch includes nest too deep";
+      break;
+    }
+    patches.push_back(cur);
+    std::string inc_text;
+    if (chain) chain->push_back(cur.include);
+    if (!load || !load(cur.include, &inc_text)) {
+      if (error) *error = "VMT: included material not found: " + cur.include;
+      Vmt partial;
+      partial.shader = cur.shader;
+      for (auto it = patches.rbegin(); it != patches.rend(); ++it) {
+        for (const auto& [k, v] : it->insert) partial.params.emplace(k, v);
+        for (const auto& [k, v] : it->replace) partial.params[k] = v;
+        for (const auto& [k, v] : it->params) partial.params[k] = v;
+      }
+      *out = partial;
+      return false;
+    }
+    Vmt next;
+    if (!parse_vmt(inc_text, &next, error)) return false;
+    cur = next;
+  }
+  Vmt res = cur;  // the base material
+  res.include.clear();
+  res.insert.clear();
+  res.replace.clear();
+  for (auto it = patches.rbegin(); it != patches.rend(); ++it) {
+    for (const auto& [k, v] : it->insert) res.params.emplace(k, v);
+    for (const auto& [k, v] : it->replace) res.params[k] = v;
+    for (const auto& [k, v] : it->params) res.params[k] = v;  // stray top-level keys in a patch
+  }
+  *out = res;
   return true;
 }
 

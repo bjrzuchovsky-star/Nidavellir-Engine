@@ -4,6 +4,7 @@
 // Editor2DScreen_Anim.cpp for the edit ops themselves).
 
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/assets/AssetLibrary.h"
 #include "editor/ui/Theme.h"
@@ -101,7 +102,7 @@ void Editor2DScreen::draw_stable() {
     ImGui::EndCombo();
   }
   if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip("Sheet to break. [set] = a .anim.json already rides "
+    ux::SetTooltip("Sheet to break. [set] = a .anim.json already rides "
                       "beside it; others start a new one.");
   }
   if (stable_path_.empty()) {
@@ -132,7 +133,7 @@ void Editor2DScreen::draw_stable() {
     stable_slice(stable_frame_w_, stable_frame_h_);
   }
   if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip("Cut the sheet into W x H frames (columns and rows "
+    ux::SetTooltip("Cut the sheet into W x H frames (columns and rows "
                       "fitted to the image).");
   }
   ImGui::TextDisabled("%d x %d px frames | %d cols x %d rows | %s", g.frame_w,
@@ -179,7 +180,7 @@ void Editor2DScreen::draw_stable() {
     stable_add_clip(name, start, 1);
   }
   if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip("New clip starting at the last frame you clicked. "
+    ux::SetTooltip("New clip starting at the last frame you clicked. "
                       "Name it idle_down / walk_left ... so riders pick it.");
   }
   const bool has_clip = stable_clip_ >= 0 && stable_clip_ < n;
@@ -197,7 +198,7 @@ void Editor2DScreen::draw_stable() {
       stable_delete_clip(stable_clip_);
     }
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("Delete this clip from the set.");
+      ux::SetTooltip("Delete this clip from the set.");
     }
     if (stable_clip_ >= 0 &&
         stable_clip_ < static_cast<int>(stable_set_.clips.size())) {

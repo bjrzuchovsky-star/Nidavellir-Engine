@@ -124,6 +124,16 @@ bool LocalBackend::publish(const Item& meta, const Version& v, PublishResult* ou
 
 // ---- remote ------------------------------------------------------------------------
 
+bool LocalBackend::update_item(const Item& meta, Item* out, std::string* error) {
+  return ensure(error) && store_.update_item(meta, out, error);
+}
+bool LocalBackend::remove_item(const std::string& id, std::string* error) {
+  return ensure(error) && store_.remove_item(id, nullptr, error);
+}
+bool LocalBackend::remove_version(const std::string& id, int version, std::string* error) {
+  return ensure(error) && store_.remove_version(id, version, nullptr, error);
+}
+
 RemoteBackend::RemoteBackend(std::string url, std::string api_key, RemoteOptions opt)
     : url_(std::move(url)), key_(std::move(api_key)), opt_(opt) {
   while (!url_.empty() && url_.back() == '/') url_.pop_back();
@@ -349,6 +359,45 @@ bool RemoteBackend::publish(const Item& meta, const Version& v, PublishResult* o
   out->version = static_cast<int>(r.num("version", 0));
   out->created = r.flag("created", false);
   return out->version > 0;
+}
+
+bool RemoteBackend::update_item(const Item& meta, Item* out, std::string* error) {
+  int st = 0;
+  Value r;
+  if (!call("PATCH", "/api/v1/items/" + url_encode(meta.id), json::write(to_json(meta, false, false)),
+            "application/json", &st, &r, error)) {
+    return false;
+  }
+  if (st == 409) {
+    if (error) *error = r.str("error").empty() ? "server: conflict" : r.str("error");
+    return false;
+  }
+  return out ? from_json(r, out) : true;
+}
+
+bool RemoteBackend::remove_item(const std::string& id, std::string* error) {
+  int st = 0;
+  Value r;
+  if (!call("DELETE", "/api/v1/items/" + url_encode(id), "", "", &st, &r, error)) return false;
+  if (st == 409) {
+    if (error) *error = r.str("error").empty() ? "server: still in use" : r.str("error");
+    return false;
+  }
+  return true;
+}
+
+bool RemoteBackend::remove_version(const std::string& id, int version, std::string* error) {
+  int st = 0;
+  Value r;
+  if (!call("DELETE", "/api/v1/items/" + url_encode(id) + "/versions/" + std::to_string(version), "", "", &st, &r,
+            error)) {
+    return false;
+  }
+  if (st == 409) {
+    if (error) *error = r.str("error").empty() ? "server: still in use" : r.str("error");
+    return false;
+  }
+  return true;
 }
 
 }  // namespace vault

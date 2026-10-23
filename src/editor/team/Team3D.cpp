@@ -61,7 +61,7 @@ class Team3DBinding final : public TeamBinding {
   const char* space() const override { return "3d"; }
 
   bool busy() const override {
-    return s_.gizmo_before_.has_value() || s_.inspector_before_.has_value() ||
+    return s_.modal_.before.has_value() || s_.inspector_before_.has_value() ||
            s_.stroke_.has_value() || s_.terrain_edit_before_.has_value() || s_.playing();
   }
 
@@ -124,7 +124,7 @@ class Team3DBinding final : public TeamBinding {
       fn(sc);
       for (auto& st : s_.undo_) fn(st.scene);
       for (auto& st : s_.redo_) fn(st.scene);
-      if (s_.gizmo_before_) fn(*s_.gizmo_before_);
+      if (s_.modal_.before) fn(*s_.modal_.before);
       if (s_.inspector_before_) fn(*s_.inspector_before_);
       if (s_.terrain_edit_before_) fn(*s_.terrain_edit_before_);
     };

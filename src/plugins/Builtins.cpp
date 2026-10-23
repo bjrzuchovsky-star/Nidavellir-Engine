@@ -1,6 +1,7 @@
 #include "plugins/Builtins.h"
 #include "core/AppPaths.h"
 
+#include "plugins/split/Split.h"
 #include "plugins/survival/SurvivalPlugin.h"
 #include "runtime/World.h"
 
@@ -55,6 +56,9 @@ void register_builtin_plugins(plugin::Catalog& catalog,
   if (!TS_PLUGIN_LINK(profiler, catalog, &err) && errors) errors->push_back(err);
   err.clear();
   if (!TS_PLUGIN_LINK(weather, catalog, &err) && errors) errors->push_back(err);
+  // 0.2.0: physics backends and rider controllers (src/plugins/split).
+  register_split_plugins(catalog, errors);
+  offer_builtin_providers();
 }
 
 std::vector<std::string> plugin_search_dirs(const std::string& project_dir) {

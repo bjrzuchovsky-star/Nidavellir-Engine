@@ -4,6 +4,7 @@
 #include "editor/projects/ProjectStore.h"
 #include "editor/templates/TemplateStore.h"
 #include "editor/templates/TemplateThumbs.h"
+#include "plugins/split/Split.h"
 #include "store/Json.h"
 
 #include <algorithm>
@@ -17,6 +18,12 @@ namespace fs = std::filesystem;
 using namespace ts::tombstone;
 
 namespace {
+
+std::string join_ids(const std::vector<std::string>& ids) {
+  std::string out;
+  for (const std::string& id : ids) out += (out.empty() ? "" : ",") + id;
+  return out;
+}
 
 int fail(const std::string& why) {
   std::cerr << "[smoke] templates: " << why << '\n';
@@ -91,7 +98,11 @@ int run_templates_smoke() {
       ++empties;
       // Clean starting points: no optional plugins, listed before the samples.
       if (seen_sample) return fail("the Empty group comes first: " + t.id);
-      if (!t.plugins_set || !t.plugins.empty()) return fail("empty templates enable no plugins: " + t.id);
+      // 0.2.0: only the physics / movement plugins their rider needs.
+      if (!t.plugins_set) return fail("empty templates list their plugins: " + t.id);
+      for (const std::string& id : t.plugins) {
+        if (!plugins::is_split_plugin(id)) return fail("empty templates enable no optional plugins: " + t.id + " " + id);
+      }
     } else if (!t.user) {
       seen_sample = true;
       if (t.group != "samples") return fail("engine samples are in the Samples group: " + t.id);
@@ -102,8 +113,9 @@ int run_templates_smoke() {
   if (saloon->kind != editor::ProjectKind::ThreeD || !saloon->vr) {
     return fail("haunted-saloon-vr is 3D with VR on");
   }
-  if (ts.find("dusty-town")->plugins != std::vector<std::string>{"ts.posse"} ||
-      ts.find("frontier-survival")->plugins != std::vector<std::string>{"ts.frontier"}) {
+  if (ts.find("dusty-town")->plugins != std::vector<std::string>{"ts.posse", "ts.move.topdown"} ||
+      ts.find("frontier-survival")->plugins !=
+          std::vector<std::string>{"ts.frontier", "ts.move.topdown"}) {
     return fail("template plugin lists");
   }
   const auto* blank = ts.find("truly-blank");
@@ -137,8 +149,10 @@ int run_templates_smoke() {
       return fail("created project fields for " + t.id);
     }
     if (t.plugins_set && (!p.plugins_set || p.plugins != t.plugins)) {
-      return fail("created project plugins for " + t.id);
+      return fail("created project plugins for " + t.id + ": " + join_ids(p.plugins));
     }
+    // 0.2.0: a new claim is past the plugin split (no migration on open).
+    if (!plugins::claim_is_split(p.path)) return fail("new claims are marked split: " + t.id);
     const store::Json pj = read_json(fs::path(p.path) / "project.json");
     if (pj.string_at("dimension") == "vr" || pj.has("last_opened") || pj.string_at("created").empty()) {
       return fail("project.json stamp for " + t.id + ": " + pj.dump());
@@ -209,7 +223,7 @@ int run_templates_smoke() {
   ts.refresh_dirs(editor::TemplateStore::engine_template_dirs(), user_dir);
   const auto* kit = ts.find("homestead-kit");
   if (!kit || !kit->user || kit->description != "My survival start" ||
-      kit->plugins != std::vector<std::string>{"ts.frontier"} || ts.templates().back().id != "homestead-kit") {
+      kit->plugins != std::vector<std::string>{"ts.frontier", "ts.move.topdown"} || ts.templates().back().id != "homestead-kit") {
     return fail("the saved template is listed as mine, last, with its plugins");
   }
   if (!store.refresh()) return fail("refresh");
@@ -219,7 +233,7 @@ int run_templates_smoke() {
   editor::ProjectInfo again;
   if (!editor::TemplateStore::create_project(store, *kit, "Second Homestead", &again, &err) ||
       !fs::exists(fs::path(again.path) / "scripts_note.txt") || again.name != "Second Homestead" ||
-      again.plugins != std::vector<std::string>{"ts.frontier"}) {
+      again.plugins != std::vector<std::string>{"ts.frontier", "ts.move.topdown"}) {
     return fail("create from my template: " + err);
   }
 

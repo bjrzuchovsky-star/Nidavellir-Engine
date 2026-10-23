@@ -6,13 +6,16 @@ These pages are written from the source in this repository (`src/`, `apps/`, `sd
 |---|---|
 | [Getting started (Windows, VS2022, CMake)](getting-started.md) | Requirements, configure and build, the executables, first run, smoke tests |
 | [Editor guide](editor-guide.md) | Admin flow, the 2D and 3D editors, tools, TileMaps, the Stable, Play mode, the Telegraph |
+| [Cameras](camera.md) | Scene cameras in 2D and 3D: priority, the Inspector fields, preview, look through / align to view, scripts switching cameras, orbit collision, VR, old-claim migration, `--smoke-camera` |
+| [Transforms and gizmos](transforms.md) | Blender-style G / R / S, axis locks, typed values, snap, pivots, the 2D / 3D cursor, gizmos, every shortcut and what changed in 0.2.0, the attach / follow / snap tools, `--smoke-transform`, `--smoke-attach` |
 | [Prefabs](prefabs.md) | `.prefab.json` assets in the 2D and 3D editors: instances, overrides, apply / revert, undo, `--smoke-prefab` |
-| [Assets](assets.md) | Asset browser, importers, `.meta` GUIDs, move-safe references, hot reload, `--smoke-assets` |
+| [Assets](assets.md) | Asset browser, importers, `.meta` GUIDs in `.tombstone/meta`, sorted imports, move-safe references, hot reload, `--smoke-assets`, `--smoke-meta` |
 | [Model import](model-import.md) | glTF, Source `.mdl` (GMod), OBJ, FBX, DAE, PLY, STL, X and more through Assimp, `.blend` via Blender; import settings, VMT / VTF, limits, `--smoke-models` / `--smoke-mdl` |
 | [The Vault](vault.md) | The asset library shared by every claim: local folder or self-hosted `ts_vault` server, Send to Vault / Pull, GUID-stable pulls, versions and pins, API, CLI, hosting, `--smoke-vault` |
 | [Live Team Claims](team-claims.md) | Real-time team editing (0.2.0): Host from my editor or `ts_vault --team`, op sync, presence, cursors, soft locks, late join, version guard, `--smoke-team`; stage 2 / 3 design for 1.0.0 |
 | [Project types and templates](projects-and-templates.md) | 2D / 3D / VR, `project.json`, claim templates, plugins per project |
 | [The Trading Post](trading-post.md) | Plugin store, sources, the plugin cache, signed indexes, the plugin system |
+| [Physics and rider movement](physics.md) | The 0.2.0 plugins: Jolt (3D), Box2D (2D), Rider 3D, Top-down and Platformer riders; the core interfaces, play without them, templates, migrating old claims, export, `--smoke-plugin-split` |
 | [Scripting](scripting.md) | Lua, visual graphs (Brand Book), C++ scripts with hot reload, C# |
 | [Audio](audio.md) | `ts_audio`, buses, Audio Source, Lua `audio.*`, the Saloon Band mixer |
 | [UI and fonts](ui-and-fonts.md) | `ts_ui`, fonts, widgets, `.ui.json`, Lua `ui.*` |
@@ -33,10 +36,6 @@ These pages are written from the source in this repository (`src/`, `apps/`, `sd
 | [Profiler and debug tools: Assay Office](profiler.md) | Optional `ts.profiler`: CPU scopes, timeline, GPU timers, draws / memory / assets, net stats, F3 overlay, console, captures |
 | [Persistent world: Town Hall](mmo.md) | `ts_server --mmo`: accounts (Argon2i), SQLite riders + Strongbox bridge, zones + interest, anti-cheat movement, chat, resume, admin console, bot load test, editor panel |
 | [Multiplayer (the posse)](multiplayer.md) | `ts_server`, `ts_client`, protocol, prediction, Play with Posse |
-
-## Coming soon
-
-- **Physics (Jolt / Box2D):** in progress, not documented yet. Right now `src/physics/Physics2D.h` is only a stub class (`init`, `shutdown`, `step`), and the repository contains no Jolt or Box2D code. 2D collision currently lives in `src/runtime/World_Collision.cpp` (see the editor guide). 3D collision is a capsule against static box / capsule colliders in `World3D`.
 
 ## Note on the top-level README
 

@@ -3,6 +3,7 @@
 #include "editor/plugins/EditorPlugins.h"
 #include "editor/projects/ProjectStore.h"
 #include "editor/ui/Theme.h"
+#include "editor/ux/Tooltip.h"
 #include "plugins/Builtins.h"
 
 #include <imgui.h>
@@ -144,6 +145,40 @@ void draw_sources(TradingPostUi& ui) {
 
 }  // namespace
 
+std::string trading_post_entry_tip(const store::StoreEntry& e, bool hitched) {
+  std::string t = e.name + "  v" + e.version;
+  if (!e.author.empty()) t += "  by " + e.author;
+  if (!e.description.empty()) {
+    std::string d = e.description;
+    if (d.size() > 240) d = d.substr(0, 237) + "...";
+    t += "\n" + d;
+  }
+  t += "\nWorks in: " + types_label(e.types) + " claims.  ";
+  switch (e.source) {
+    case store::Source::BuiltIn: t += "Built in: ships with TombStone."; break;
+    case store::Source::Local: t += "From a local folder: " + e.origin; break;
+    case store::Source::ComingSoon: t += "Coming soon: nothing to install yet."; break;
+    default: t += "From " + (e.origin.empty() ? std::string("a remote index") : e.origin) + "."; break;
+  }
+  if (!e.deps.empty()) {
+    t += "\nNeeds:";
+    for (const store::StoreDep& d : e.deps) t += " " + d.id + (d.optional ? " (optional)" : "");
+  }
+  t += "\n";
+  if (e.source == store::Source::ComingSoon) {
+    t += "Check back after an update.";
+  } else if (e.update_available) {
+    t += "Update available (" + e.installed_version + " installed). Select it, then Update.";
+  } else if (hitched) {
+    t += "Hitched to this claim. Untick it in the details to switch it off.";
+  } else if (e.installed || e.source == store::Source::BuiltIn) {
+    t += "Installed. Select it, then tick Hitched to use it in this claim.";
+  } else {
+    t += "Select it, then Install (downloads are checked against their SHA-256).";
+  }
+  return t;
+}
+
 bool set_plugin_enabled_in_project(ProjectInfo& project, const std::string& id, bool on,
                                    const store::TradingPost& post, std::string* error,
                                    std::vector<std::string>* also) {
@@ -248,8 +283,10 @@ TradingPostResult draw_trading_post_window(TradingPostUi& ui, const TradingPostT
     trading_post_refresh(ui, !target.project_dir.empty() ? target.project_dir : target.project ? target.project->path : std::string());
     ui.status = "Shelves restocked.";
   }
+  if (ImGui::IsItemHovered()) ux::SetTooltip("Reload the catalogue from built-ins, your folders and index URLs.");
   ImGui::SameLine();
   theme::ToggleButton("Sources...", &ui.show_sources);
+  if (ImGui::IsItemHovered()) ux::SetTooltip("Where plugins come from: local folders, index URLs and signing keys.");
   if (!ui.status.empty()) {
     ImGui::SameLine();
     theme::StatusSuccess(ui.status.c_str());
@@ -290,6 +327,7 @@ TradingPostResult draw_trading_post_window(TradingPostUi& ui, const TradingPostT
     const bool sel = ui.selected == e->id;
     const ImVec2 p0 = ImGui::GetCursorScreenPos();
     if (ImGui::Selectable("##row", sel, 0, ImVec2(0, 44))) ui.selected = e->id;
+    if (ImGui::IsItemHovered()) ux::SetTooltip("%s", trading_post_entry_tip(*e, enabled_for(target, e->id)).c_str());
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddText(ImVec2(p0.x + 6, p0.y + 3), theme::U32(sel ? theme::Accent() : theme::Text()),
                 e->name.c_str());
@@ -362,7 +400,10 @@ TradingPostResult draw_trading_post_window(TradingPostUi& ui, const TradingPostT
     } else {
       if ((e->installable() && !e->installed) || e->update_available) {
         const char* label = e->update_available ? "Update" : "Install";
-        if (theme::PrimaryButton(label, ImVec2(120, 0))) {
+        const bool clicked = theme::PrimaryButton(label, ImVec2(120, 0));
+        if (ImGui::IsItemHovered())
+          ux::SetTooltip("%s", e->update_available ? "Download and install the newer version." : "Download and install into the plugin cache. Then hitch it to a claim.");
+        if (clicked) {
           std::string err;
           const std::string id = e->id;
           if (post.install(id, &err)) {
@@ -377,7 +418,9 @@ TradingPostResult draw_trading_post_window(TradingPostUi& ui, const TradingPostT
         ImGui::SameLine();
       }
       if (e && e->installed && !e->installed_dir.empty()) {
-        if (theme::DangerButton("Uninstall", ImVec2(110, 0))) {
+        const bool clicked = theme::DangerButton("Uninstall", ImVec2(110, 0));
+        if (ImGui::IsItemHovered()) ux::SetTooltip("Remove it from the plugin cache. Claims that use it will warn until you reinstall.");
+        if (clicked) {
           std::string err;
           const std::string id = e->id;
           if (post.uninstall(id, &err)) {
@@ -415,6 +458,9 @@ TradingPostResult draw_trading_post_window(TradingPostUi& ui, const TradingPostT
           }
         }
         ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+          ux::SetTooltip("%s", !usable ? "Install it first, then tick to use it in this claim."
+                                       : "Tick to use this plugin in the claim (its needs come along too); untick to switch it off.");
         if (!usable) {
           ImGui::SameLine();
           ImGui::TextDisabled("install it first");

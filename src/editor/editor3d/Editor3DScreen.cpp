@@ -1,4 +1,5 @@
 #include "editor/editor3d/Editor3DScreen.h"
+#include "editor/plugins/PluginNeeds.h"
 #include "terrain/TerrainView.h"
 #include "plugins/profiler/ProfilerPlugin.h"
 #include "profiler/Profiler.h"
@@ -55,6 +56,8 @@ void Editor3DScreen::note(const std::string& text, LogLevel level) {
 
 void Editor3DScreen::on_enter() {
   back_requested_ = quit_requested_ = false;
+  settings_requested_ = false;
+  setup_field_guide();
   log_.clear();
   plugins_.open(&project_, "editor3d", this,
                 [this](runtime::LogLevel level, const std::string& text) {
@@ -71,6 +74,8 @@ void Editor3DScreen::on_enter() {
     if (!scene3d::save_file(path, scene_, &err)) {
       note("Could not write the starter scene: " + err, LogLevel::Error);
     } else {
+      // The starter rider / grabbables ride with Rider 3D + Jolt (0.2.0).
+      if (!plugins_.follow_needs(plugin_needs(scene_)).empty()) plugins_.apply();
       note(vr_project() ? "Staked a fresh VR claim: ground, crate, lamp, a table of things to "
                           "grab and the VR rig"
                         : "Staked a fresh 3D claim: ground, crate, lamp and a rider");
@@ -78,7 +83,12 @@ void Editor3DScreen::on_enter() {
   } else if (!scene3d::load_file(path, &scene_, &err)) {
     note(err, LogLevel::Error);
     scene_ = scene3d::Scene3D{};
+  } else {
+    migrate_cameras_on_open(path);  // pre-v18: the follow camera becomes an entity
   }
+  look_through_ = 0;
+  pick_action_.clear();
+  plugins_.set_needs_baseline(plugin_needs(scene_));
   undo_.clear();
   redo_.clear();
   prefabs_.set_project(project_.path);
@@ -98,6 +108,9 @@ void Editor3DScreen::on_exit() {
   std::string err;
   save_scene(&err);
   plugins_.close();
+  preview_view_.reset();
+  if (preview_renderer_) preview_renderer_->shutdown();
+  preview_renderer_.reset();
   view_.reset();
   if (renderer_) renderer_->shutdown();
   renderer_.reset();
@@ -107,6 +120,9 @@ void Editor3DScreen::on_exit() {
 void Editor3DScreen::ensure_renderer() {
   const bool want_gl = ImGui::GetCurrentContext() != nullptr && glfwGetCurrentContext() != nullptr;
   if (renderer_ && gl_ == want_gl) return;
+  preview_view_.reset();
+  if (preview_renderer_) preview_renderer_->shutdown();
+  preview_renderer_.reset();
   view_.reset();
   if (renderer_) renderer_->shutdown();
   renderer_.reset();
@@ -176,7 +192,12 @@ AppState Editor3DScreen::on_update(float delta_seconds) {
   while (!toasts_.empty() && toasts_.front().second <= 0) toasts_.pop_front();
   if (ImGui::GetCurrentContext() != nullptr) draw_ui();
   if (quit_requested_) return AppState::Quit;
-  return back_requested_ ? AppState::ProjectManager : AppState::Editor3D;
+  if (back_requested_) return AppState::ProjectManager;
+  if (settings_requested_) {
+    settings_requested_ = false;
+    return AppState::Settings;  // AppFlow comes back to this claim afterwards
+  }
+  return AppState::Editor3D;
 }
 
 // ---- Selection -------------------------------------------------------------
@@ -548,6 +569,10 @@ GizmoSnap Editor3DScreen::snap_steps() const {
 // ---- Camera + picking -------------------------------------------------------------
 
 render3d::Camera3D Editor3DScreen::editor_camera() const {
+  if (look_through_ != 0) {
+    // Numpad0: the view through a camera entity.
+    if (const Entity3D* e = scene_.find(look_through_); e && e->camera) return camera_view(*e);
+  }
   const scene3d::EditorCamera3D& c = scene_.editor_camera;
   render3d::Camera3D cam;
   const float yaw = render3d::radians(c.yaw), pitch = render3d::radians(c.pitch);
@@ -560,15 +585,18 @@ render3d::Camera3D Editor3DScreen::editor_camera() const {
 }
 
 void Editor3DScreen::orbit(float dyaw, float dpitch) {
+  look_through_ = 0;  // moving the view leaves the camera
   scene_.editor_camera.yaw = std::fmod(scene_.editor_camera.yaw + dyaw, 360.0f);
   scene_.editor_camera.pitch = std::clamp(scene_.editor_camera.pitch + dpitch, -89.0f, 89.0f);
 }
 
 void Editor3DScreen::dolly(float factor) {
+  look_through_ = 0;
   scene_.editor_camera.distance = std::clamp(scene_.editor_camera.distance * factor, 0.5f, 500.0f);
 }
 
 void Editor3DScreen::pan(float dx, float dy, float vh) {
+  look_through_ = 0;
   const render3d::Camera3D cam = editor_camera();
   const Vec3 f = cam.forward();
   const Vec3 right = render3d::normalize(render3d::cross(f, {0, 1, 0}));
@@ -633,68 +661,7 @@ bool Editor3DScreen::ground_point(float px, float py, float vw, float vh, Vec3* 
 
 // ---- Gizmo -----------------------------------------------------------------------
 
-bool Editor3DScreen::gizmo_begin(float px, float py, float vw, float vh) {
-  const Entity3D* e = scene_.find(primary());
-  if (!e || playing() || effectively_locked(*e)) return false;
-  const int axis = gizmo_.hit(editor_camera(), vw, vh, e->transform.position, px, py);
-  if (axis < 0) return false;
-  return gizmo_begin_axis(axis, px, py, vw, vh);
-}
-
-bool Editor3DScreen::gizmo_begin_axis(int axis, float px, float py, float vw, float vh) {
-  const Entity3D* e = scene_.find(primary());
-  if (!e || playing() || axis < 0 || axis > 2) return false;
-  gizmo_before_ = scene_;
-  gizmo_.begin(axis, e->transform, editor_camera(), vw, vh, px, py);
-  return true;
-}
-
-void Editor3DScreen::gizmo_move(float px, float py, float vw, float vh) {
-  if (!gizmo_.active()) return;
-  Entity3D* e = scene_.find(primary());
-  if (!e) return;
-  const GizmoSnap steps = snap_steps();
-  const render3d::Transform prev = e->transform;
-  e->transform = gizmo_.drag(editor_camera(), vw, vh, px, py, scene_.snap ? &steps : nullptr);
-  if (surface_snap_ && gizmo_.mode == GizmoMode::Translate) {
-    // Stick the bounds' bottom onto whatever is under the mouse.
-    std::vector<std::uint64_t> skip{e->id};
-    for (std::uint64_t d : scene3d::descendants_of(scene_.entities, e->id)) skip.push_back(d);
-    Vec3 hit;
-    if (surface_point(px, py, vw, vh, skip, &hit)) {
-      const render3d::Aabb b = world_bounds(*e);
-      const Vec3 foot{b.center().x, b.min.y, b.center().z};
-      e->transform.position += hit - foot;
-    }
-    e = scene_.find(primary());
-  }
-  carry_descendants(e->id, prev);
-}
-
-void Editor3DScreen::gizmo_end() {
-  if (!gizmo_.active() || !gizmo_before_) return;
-  const Entity3D* e = scene_.find(primary());
-  const Entity3D* was = gizmo_before_->find(primary());
-  gizmo_.cancel();
-  if (dup_drag_) {
-    // The copies stay even when they did not move.
-    dup_drag_ = false;
-    push_undo("Duplicate", *gizmo_before_);
-  } else if (e && was && !(e->transform == was->transform)) {
-    const char* what = gizmo_.mode == GizmoMode::Translate
-                           ? "Move"
-                           : (gizmo_.mode == GizmoMode::Rotate ? "Rotate" : "Scale");
-    push_undo(std::string(what) + " " + e->name, *gizmo_before_);
-  }
-  gizmo_before_.reset();
-}
-
-void Editor3DScreen::gizmo_cancel() {
-  if (gizmo_.active() && gizmo_before_) scene_ = *gizmo_before_;  // copies go too
-  dup_drag_ = false;
-  gizmo_.cancel();
-  gizmo_before_.reset();
-}
+// Gizmo drags and modal transforms: Editor3DScreen_Transform.cpp.
 
 // ---- Rendering + play --------------------------------------------------------------
 
@@ -714,7 +681,8 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
       view_->begin(world_.environment(), ents, cam, width, height, opt);
       world3d::vr_overlay_lines(world_, renderer_.get());
     } else {
-      view_->begin(world_.environment(), world_.entities(), cam, width, height, opt);
+      // The active camera entity's clear colour (if any) sets the sky.
+      view_->begin(world_.view_environment(), world_.entities(), cam, width, height, opt);
     }
     std::vector<render3d::Renderer3D::Billboard> bills;
     world_.billboards(&bills);
@@ -747,6 +715,7 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
     } else {
       view_->begin(scene_.environment, scene_.entities, cam, width, height, opt);
     }
+    draw_camera_lines();  // frustums / view cones (cameras are hidden in Play)
   }
   last_stats_ = view_->end();
   collect_problems();
@@ -755,6 +724,10 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
 
 bool Editor3DScreen::play_start() {
   if (playing()) return true;
+  // Added a Player / Rigid Body / Grabbable since the last ride? Switch on
+  // the plugin it needs (0.2.0 split) before the world starts.
+  plugins_.follow_needs(plugin_needs(scene_));
+  if (plugins_.pending()) plugins_.apply();
   if (vr_project()) return vr_preview_start(true);
   world_.set_vr(false);
   gizmo_cancel();
@@ -908,9 +881,8 @@ void Editor3DScreen::rescan_assets() {
     std::transform(ext.begin(), ext.end(), ext.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     const std::string rel = fs::relative(it->path(), root, ec).generic_string();
-    if (ext == ".lua") {
-      scripts_.push_back(rel);
-      continue;
+    if (ext == ".lua" || ext == ".cpp" || ext == ".cs" || rel.size() > 11 && rel.compare(rel.size() - 11, 11, ".graph.json") == 0) {
+      continue;  // scripts: listed below
     }
     AssetEntry a;
     a.rel = rel;
@@ -921,7 +893,8 @@ void Editor3DScreen::rescan_assets() {
   }
   std::sort(files.begin(), files.end(),
             [](const AssetEntry& a, const AssetEntry& b) { return a.rel < b.rel; });
-  std::sort(scripts_.begin(), scripts_.end());
+  scripts_ = list_script_files(project_.path);
+  script_infos_.clear();
   assets_.insert(assets_.end(), files.begin(), files.end());
 }
 

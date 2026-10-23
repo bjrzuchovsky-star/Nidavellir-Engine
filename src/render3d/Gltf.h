@@ -49,6 +49,17 @@ struct ModelBodyGroup {
   int selected = 0;
 };
 
+// Where an imported material came from (Source .mdl: the .vmt / .vtf
+// files found, or where they were looked for). Saved in the model's .meta.
+struct MaterialSource {
+  std::string name;      // material name in the model file
+  std::string status;    // "ok", "partial" (vmt but no texture), "missing", "override"
+  std::string material;  // file used (.vmt / .vtf), "" when missing
+  std::string texture;   // base texture file used
+  std::string shader;    // VMT shader (lower case)
+  std::string searched;  // where it was looked for (missing ones)
+};
+
 struct Model {
   std::string source;  // path it came from
   std::string format;  // "gltf", "source-mdl", "fbx", "obj", "blend"...
@@ -65,6 +76,7 @@ struct Model {
   std::vector<ModelHitbox> hitboxes;
   std::vector<ModelPrimitive> primitives;
   std::vector<MaterialDesc> materials;
+  std::vector<MaterialSource> material_sources;  // Source .mdl (one per material)
   std::size_t textures = 0;  // images decoded
   // Model-space bounds of what is drawn: rest-posed skinned vertices,
   // referenced vertices only, after the import scale / up axis

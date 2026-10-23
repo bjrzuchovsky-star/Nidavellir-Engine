@@ -7,6 +7,7 @@ add_library(ts_export
   Zip.cpp
   WinIcon.cpp
   Installer.cpp
+  Provenance.cpp
 )
 
 target_include_directories(ts_export

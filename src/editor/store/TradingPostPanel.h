@@ -54,6 +54,10 @@ TradingPostResult draw_trading_post_window(TradingPostUi& ui, const TradingPostT
 // `project_dir`, cache, sources, coming soon.
 void trading_post_refresh(TradingPostUi& ui, const std::string& project_dir);
 
+// Hover text for a Trading Post row: what it is, where it works, where it
+// comes from, what state it's in and what to do next.
+std::string trading_post_entry_tip(const store::StoreEntry& e, bool hitched);
+
 // Project Manager path (no editor open): switch `id` on / off in
 // project.json. On adds its required deps (from the Trading Post's
 // catalog); off removes what requires it. Old projects start from their

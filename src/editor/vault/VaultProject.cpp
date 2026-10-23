@@ -1,6 +1,8 @@
 #include "editor/vault/VaultProject.h"
 
+#include "core/AssetMeta.h"
 #include "core/PngWrite.h"
+#include "editor/assets/ImportSort.h"
 #include "editor/assets/AssetImport.h"
 #include "gfx/TextureCache.h"
 #include "render3d/ModelImport.h"
@@ -22,6 +24,7 @@ namespace editor {
 namespace vaultp {
 
 namespace fs = std::filesystem;
+namespace am = core::asset_meta;
 using json::Value;
 using vault::Backend;
 
@@ -67,6 +70,24 @@ std::string to_rel(const fs::path& root, const std::string& abs) {
   std::error_code ec;
   const std::string r = fs::relative(fs::u8path(abs), root, ec).generic_string();
   return ec ? std::string() : norm_rel(r);
+}
+
+// A Vault / lock file path on disk. A .meta is named by its logical
+// sidecar path ("assets/a.png.meta", what libraries hold since the first
+// Vault and what older claims had on disk) and lives in the claim's
+// metadata folder (core/AssetMeta.h); a legacy sidecar is still found.
+fs::path disk_path(const fs::path& root, const std::string& rel) {
+  if (!am::is_meta_rel(rel)) return root / fs::u8path(rel);
+  const std::string found = am::resolve(root.string(), rel);
+  return fs::u8path(found.empty() ? am::meta_path(root.string(), am::asset_of(rel)) : found);
+}
+
+// Library paths from a claim that kept metadata in ".tombstone/meta/..."
+// read as the logical "<asset>.meta".
+std::string logical_rel(const std::string& rel) {
+  const std::string store = std::string(am::kMetaDir) + "/";
+  if (rel.rfind(store, 0) == 0 && am::is_meta_rel(rel)) return am::asset_of(rel) + am::kMetaExt;
+  return rel;
 }
 
 std::string percent_decode(const std::string& s) {
@@ -176,7 +197,7 @@ bool plan_push(const std::string& project_dir, assetdb::AssetDb& db, const std::
     auto add_file = [&](const std::string& r, const std::string& role, const std::string& guid) {
       if (r.empty() || !have.insert(r).second) return;
       std::error_code ec;
-      if (!fs::is_regular_file(root / fs::u8path(r), ec)) return;
+      if (!fs::is_regular_file(disk_path(root, r), ec)) return;
       PackFile f;
       f.rel = r;
       f.role = role;
@@ -226,7 +247,7 @@ bool plan_push(const std::string& project_dir, assetdb::AssetDb& db, const std::
       if (std::find(p.dep_mains.begin(), p.dep_mains.end(), d) == p.dep_mains.end()) p.dep_mains.push_back(d);
     }
     for (PackFile& f : p.files) {
-      f.sha = vault::sha256_file((root / fs::u8path(f.rel)).string(), &f.size);
+      f.sha = vault::sha256_file(disk_path(root, f.rel).string(), &f.size);
       if (f.sha.empty()) return fail(error, "cannot read " + f.rel);
     }
     out->push_back(std::move(p));
@@ -315,7 +336,7 @@ bool push_asset(const std::string& project_dir, assetdb::AssetDb* db_in, const s
     const Package& p = plan[i];
     const bool is_main = i + 1 == plan.size();
     std::vector<std::pair<std::string, std::string>> files;
-    for (const PackFile& f : p.files) files.emplace_back((root / fs::u8path(f.rel)).string(), f.sha);
+    for (const PackFile& f : p.files) files.emplace_back(disk_path(root, f.rel).string(), f.sha);
     // Thumbnail: the user's picture, the texture itself, or a texture it uses.
     std::string thumb_sha;
     std::string thumb_src = is_main && !opt.thumbnail_png.empty() ? opt.thumbnail_png
@@ -400,6 +421,56 @@ bool push_asset(const std::string& project_dir, assetdb::AssetDb* db_in, const s
   return true;
 }
 
+bool add_files(const std::vector<std::string>& sources, Backend& backend, const PushOptions& opt,
+               const std::string& scratch_root, AddFilesResult* out, std::string* error) {
+  *out = AddFilesResult{};
+  if (sources.empty()) return fail(error, "no files to add");
+  std::error_code ec;
+  const fs::path stage = fs::u8path(scratch_root) / ("add_" + vault::random_hex(6));
+  fs::remove_all(stage, ec);
+  fs::create_directories(stage / "assets", ec);
+  {
+    std::ofstream pj(stage / "project.json", std::ios::binary);
+    pj << R"({"name": "vault-add", "kind": "3d"})";
+  }
+  struct Cleanup {
+    fs::path p;
+    ~Cleanup() {
+      std::error_code e;
+      fs::remove_all(p, e);
+    }
+  } cleanup{stage};
+  importsort::Settings is;
+  is.sort_imports = true;
+  is.keep_model_packs = true;
+  importsort::save_settings(stage.string(), is);
+  importsort::Result ir;
+  importsort::import_files(stage.string(), sources, "", is, &ir);
+  std::vector<std::string> mains;
+  for (const std::string& m : ir.mains) {
+    if (vault_kind(m).empty()) out->skipped.push_back(m);
+    else mains.push_back(m);
+  }
+  if (mains.empty()) {
+    std::string why = "nothing the Vault can hold (textures, models, sounds, fonts, prefabs)";
+    if (!ir.errors.empty()) why += ": " + vault::join(ir.errors, "; ");
+    return fail(error, why);
+  }
+  for (const std::string& rel : mains) {
+    PushOptions o = opt;
+    if (mains.size() > 1) o.name.clear();
+    PushResult pr;
+    std::string err;
+    if (!push_asset(stage.string(), nullptr, rel, backend, o, &pr, &err)) {
+      return fail(error, fs::u8path(rel).filename().string() + ": " + err);
+    }
+    out->items.push_back(pr.item);
+    for (const std::string& p : pr.pushed) out->pushed.push_back(p);
+    out->bytes += pr.bytes;
+  }
+  return true;
+}
+
 namespace {
 
 struct PullCtx {
@@ -410,6 +481,7 @@ struct PullCtx {
   PullOptions opt;
   PullResult* out = nullptr;
   std::set<std::string> done;
+  std::map<std::string, std::string> remap;  // library path -> sorted claim path
 };
 
 bool files_present(const PullCtx& c, const vault::LockEntry& e) {
@@ -420,7 +492,7 @@ bool files_present(const PullCtx& c, const vault::LockEntry& e) {
       const std::string now = c.db->path_of(f.guid);
       if (!now.empty()) p = ends_with(f.path, ".meta") ? now + ".meta" : now;
     }
-    if (!fs::exists(c.root / fs::u8path(p), ec)) return false;
+    if (!fs::exists(disk_path(c.root, p), ec)) return false;
   }
   return true;
 }
@@ -451,7 +523,10 @@ bool pull_one(PullCtx& c, const std::string& id, int version, bool is_root, std:
       to_dir = dir_of(now);
     }
   }
-  auto dest_of = [&](const std::string& p) {
+  auto dest_of = [&](const std::string& lib_path) {
+    const std::string p = logical_rel(lib_path);
+    const auto sorted = c.remap.find(p);
+    if (sorted != c.remap.end()) return sorted->second;
     if (from_dir != to_dir && (from_dir.empty() || p.rfind(from_dir + "/", 0) == 0)) {
       const std::string tail = from_dir.empty() ? p : p.substr(from_dir.size() + 1);
       return to_dir.empty() ? tail : to_dir + "/" + tail;
@@ -468,7 +543,7 @@ bool pull_one(PullCtx& c, const std::string& id, int version, bool is_root, std:
   for (const vault::FileRec& f : ver->files) {
     const std::string dest = dest_of(f.path);
     if (!vault::safe_rel_path(dest)) return fail(error, "unsafe path in the library: " + f.path);
-    const fs::path abs = c.root / fs::u8path(dest);
+    const fs::path abs = disk_path(c.root, dest);
     std::error_code ec;
     bool download = true;
     if (fs::exists(abs, ec)) {
@@ -502,7 +577,20 @@ bool pull_one(PullCtx& c, const std::string& id, int version, bool is_root, std:
   }
   const std::string main_dest = dest_of(main->path);
   for (const Todo& t : todo) {
-    const fs::path abs = c.root / fs::u8path(t.dest);
+    // A .meta goes to the metadata folder (a library item from a sidecar
+    // claim converts here); any stray sidecar for it goes.
+    const bool is_meta = t.f->role == "meta" || am::is_meta_rel(t.dest);
+    const fs::path abs = is_meta ? fs::u8path(am::meta_path(c.root.string(), am::asset_of(t.dest)))
+                                 : c.root / fs::u8path(t.dest);
+    std::error_code dec;
+    fs::create_directories(abs.parent_path(), dec);
+    if (is_meta) {
+      const fs::path side = fs::u8path(am::sidecar_path(c.root.string(), am::asset_of(t.dest)));
+      if (fs::exists(side, dec) && fs::exists(abs, dec)) fs::remove(side, dec);
+      if (fs::exists(side, dec) && !fs::exists(abs, dec)) {
+        fs::rename(side, abs, dec);
+      }
+    }
     if (t.download) {
       if (!c.backend->download(t.f->sha256, abs.string(), error)) return false;
       c.out->written.push_back(t.dest);
@@ -545,6 +633,88 @@ bool pull_one(PullCtx& c, const std::string& id, int version, bool is_root, std:
   return true;
 }
 
+// Sorted pulls: where a new item's files land in this claim. A model and
+// the textures it brings keep their layout relative to each other under
+// assets/Models/<Name>/; textures, sounds, fonts on their own go to their
+// type folder. Items already here, and prefabs (which name their parts by
+// path), keep the library's paths.
+void plan_sorted_pull(PullCtx& c, const std::string& id, int version) {
+  std::error_code ec;
+  auto get_ver = [&](const std::string& item_id, int v, vault::Item* it) -> const vault::Version* {
+    std::string err;
+    if (!c.backend->get(item_id, it, &err)) return nullptr;
+    return it->version(v);
+  };
+  auto main_of = [](const vault::Version& v) -> const vault::FileRec* {
+    for (const vault::FileRec& f : v.files) {
+      if (f.role == "main") return &f;
+    }
+    return nullptr;
+  };
+  auto here = [&](const std::string& item_id, const vault::FileRec* main) {
+    if (c.lock.find(item_id)) return true;
+    return main && c.db && !main->guid.empty() && !c.db->path_of(main->guid).empty();
+  };
+  vault::Item root_item;
+  const vault::Version* rv = get_ver(id, version, &root_item);
+  if (!rv) return;
+  const vault::FileRec* rmain = main_of(*rv);
+  if (!rmain || here(id, rmain) || root_item.kind == "prefab") return;
+  const std::string main_path = logical_rel(rmain->path);
+  auto asset_part = [](const std::string& p) { return am::is_meta_rel(p) ? am::asset_of(p) : p; };
+  auto free_dest = [&](const std::string& rel) {
+    return !fs::exists(c.root / fs::u8path(asset_part(rel)), ec);
+  };
+  // One item into its type folder (files under its main's folder keep
+  // their place below it).
+  auto sort_item = [&](const vault::Version& v, const vault::FileRec& m) {
+    const std::string mp = logical_rel(m.path);
+    const std::string from = dir_of(mp);
+    const std::string to = importsort::type_folder(mp);
+    std::map<std::string, std::string> mine;
+    for (const vault::FileRec& f : v.files) {
+      const std::string p = logical_rel(f.path);
+      std::string dest = from.empty() ? to + "/" + p
+                         : p.rfind(from + "/", 0) == 0 ? to + p.substr(from.size())
+                                                       : to + "/" + fs::u8path(p).filename().string();
+      if (!free_dest(dest) && asset_part(dest) != asset_part(p)) return;  // taken: keep the library paths
+      mine[p] = dest;
+    }
+    c.remap.insert(mine.begin(), mine.end());
+  };
+  if (root_item.kind != "model") {
+    sort_item(*rv, *rmain);
+    return;
+  }
+  // A model pack: the model's files and the texture items it depends on.
+  std::vector<std::string> pack;
+  for (const vault::FileRec& f : rv->files) pack.push_back(logical_rel(f.path));
+  for (const vault::Dep& d : rv->deps) {
+    vault::Item di;
+    const vault::Version* dv = get_ver(d.item, d.version, &di);
+    if (!dv) continue;
+    const vault::FileRec* dm = main_of(*dv);
+    if (!dm || here(d.item, dm)) continue;
+    if (di.kind == "texture") {
+      for (const vault::FileRec& f : dv->files) pack.push_back(logical_rel(f.path));
+    } else if (di.kind != "prefab") {
+      sort_item(*dv, *dm);
+    }
+  }
+  // Their common folder becomes assets/Models/<Name>/.
+  std::string common = dir_of(main_path);
+  for (const std::string& p : pack) {
+    while (!common.empty() && p.rfind(common + "/", 0) != 0) common = dir_of(common);
+  }
+  std::string stem = fs::u8path(main_path).stem().string();
+  if (stem.empty()) stem = "model";
+  std::string target = "assets/Models/" + stem;
+  for (int n = 2; fs::exists(c.root / fs::u8path(target), ec) && n < 1000; ++n) {
+    target = "assets/Models/" + stem + "_" + std::to_string(n);
+  }
+  for (const std::string& p : pack) c.remap[p] = target + "/" + (common.empty() ? p : p.substr(common.size() + 1));
+}
+
 }  // namespace
 
 bool pull_item(const std::string& project_dir, assetdb::AssetDb* db_in, Backend& backend, const std::string& item,
@@ -563,6 +733,7 @@ bool pull_item(const std::string& project_dir, assetdb::AssetDb* db_in, Backend&
   c.out = out;
   std::string err;
   if (!c.lock.load(project_dir, &err)) return fail(error, err);
+  if (opt.sort && importsort::load_settings(project_dir).sort_imports) plan_sorted_pull(c, item, opt.version);
   const bool ok = pull_one(c, item, opt.version, true, error);
   // Record what did land even when a later file failed.
   if (!c.lock.save(&err) && ok) return fail(error, err);

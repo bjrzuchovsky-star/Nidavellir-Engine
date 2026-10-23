@@ -71,6 +71,15 @@ class EditorPlugins {
   // apply(). Same no-ride rule.
   std::size_t rescan();
 
+  // 0.2.0 split: the physics / movement plugins the open scene needs
+  // (editor/plugins/PluginNeeds.h). set_needs_baseline records what the
+  // scene used when it opened; follow_needs switches on plugins the scene
+  // started to need since the last call (a Player, Rigid Body, Grabbable,
+  // Joint or VR Rig was added) and logs it. Plugins switched off while the
+  // scene already used them stay off. Returns the ids switched on.
+  void set_needs_baseline(const std::vector<std::string>& needs) { seen_needs_ = needs; }
+  std::vector<std::string> follow_needs(const std::vector<std::string>& needs);
+
   // Why an enabled plugin is not loaded (from the last load), or "".
   std::string skip_reason(const std::string& id) const;
 
@@ -93,6 +102,7 @@ class EditorPlugins {
   Sink sink_;
   std::vector<std::string> enabled_;
   std::vector<std::string> loaded_list_;  // enabled_ as of the last apply()
+  std::vector<std::string> seen_needs_;   // follow_needs bookkeeping
 };
 
 }  // namespace editor

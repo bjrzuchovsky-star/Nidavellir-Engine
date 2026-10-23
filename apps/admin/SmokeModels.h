@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string>
+#include <vector>
+
 // Headless model import smokes (render3d/ModelImport.h). Every test file is
 // generated here, in a temp folder - nothing third-party is shipped.
 //
@@ -17,3 +20,16 @@ int run_mdl_smoke();
 // Assimp, the .blend "Blender not found" message, and the shared import
 // settings (unit scale, up axis) on every format.
 int run_models_smoke();
+
+// The synthetic Source model set used above (bytes; written by the
+// caller as <base>.mdl / .vvd / .dx90.vtx / .phy): a box (material 0)
+// and a hat (material 1), $cdmaterials `cd_paths`, material names tex0 /
+// tex1. Plus the generated VTFs: DXT1 8x8 (mip 0 green, mip 1 red) and
+// BGRA8888 2x2 (orange) through VTF 7.4 resources.
+struct SmokeSourceModel {
+  std::vector<unsigned char> mdl, vvd, vtx, phy;
+};
+SmokeSourceModel smoke_source_model(const std::vector<std::string>& cd_paths, const std::string& tex0,
+                                    const std::string& tex1);
+std::vector<unsigned char> smoke_vtf_dxt1_8x8_green();
+std::vector<unsigned char> smoke_vtf_bgra_2x2();

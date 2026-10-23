@@ -1,4 +1,5 @@
 #include "editor/plugins/PluginPanelHost.h"
+#include "editor/ux/Actions.h"
 
 #include <imgui.h>
 
@@ -13,7 +14,7 @@ int draw_plugin_panel_menu_items(EditorPlugins& plugins, std::map<std::string, b
   int n = 0;
   for (const auto& p : plugins.manager().editor_panels()) {
     bool* flag = p.item.open ? p.item.open : &open[p.item.id];
-    ImGui::MenuItem(p.item.menu_label.c_str(), nullptr, flag);
+    ux::MenuItem(p.item.menu_label.c_str(), nullptr, flag);
     ++n;
   }
   return n;

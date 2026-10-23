@@ -3,6 +3,7 @@
 // Alt+drag copies and the shared right-click menu. Every edit is one undo
 // step and autosaves scene.json; all locked while playing.
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/Actions.h"
 
 #include <imgui.h>
 
@@ -290,56 +291,59 @@ void Editor2DScreen::draw_entity_context_menu(std::uint64_t clicked) {
     ImGui::Separator();
   }
   const bool has = n > 0;
-  if (ImGui::MenuItem("Rename", "F2", false, e != nullptr && n == 1)) begin_rename(e->id);
-  if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, has)) duplicate_selected();
-  if (ImGui::MenuItem("Delete", "Del", false, has)) delete_selected();
+  if (ux::MenuItem("Rename", "F2", false, e != nullptr && n == 1)) begin_rename(e->id);
+  if (ux::MenuItem("Duplicate", "Ctrl+D", false, has)) duplicate_selected();
+  if (ux::MenuItem("Delete", "Del", false, has)) delete_selected();
   ImGui::Separator();
-  if (ImGui::MenuItem("Copy", "Ctrl+C", false, has)) copy_selected();
-  if (ImGui::MenuItem("Cut", "Ctrl+X", false, has)) cut_selected();
-  if (ImGui::MenuItem("Paste", "Ctrl+V", false, !clipboard_text().empty())) paste();
+  if (ux::MenuItem("Copy", "Ctrl+C", false, has)) copy_selected();
+  if (ux::MenuItem("Cut", "Ctrl+X", false, has)) cut_selected();
+  if (ux::MenuItem("Paste", "Ctrl+V", false, !clipboard_text().empty())) paste();
   ImGui::Separator();
-  if (ImGui::MenuItem("Group", "Ctrl+G", false, has)) group_selected();
+  if (ux::MenuItem("Group", "Ctrl+G", false, has)) group_selected();
   bool any_kids = false;
   for (std::uint64_t id : workspace_.selection()) {
     any_kids |= !workspace_.children_of(id).empty();
   }
-  if (ImGui::MenuItem("Ungroup", "Ctrl+Shift+G", false, any_kids)) ungroup_selected();
-  if (e && e->parent != 0 && ImGui::MenuItem("Unparent (to scene root)")) reparent(e->id, 0);
+  if (ux::MenuItem("Ungroup", "Ctrl+Shift+G", false, any_kids)) ungroup_selected();
+  ImGui::Separator();
+  draw_attach_menu_2d();
+  if (e && e->camera && ux::MenuItem("Make active camera", nullptr, false, !is_playing()))
+    make_active_camera_2d(e->id);
   ImGui::Separator();
   if (e) {
-    if (ImGui::MenuItem(e->locked ? "Unlock" : "Lock", "Ctrl+L")) lock_selected(!e->locked);
-    if (ImGui::MenuItem(e->hidden ? "Show" : "Hide", "H")) hide_selected(!e->hidden);
+    if (ux::MenuItem(e->locked ? "Unlock" : "Lock", "Ctrl+L")) lock_selected(!e->locked);
+    if (ux::MenuItem(e->hidden ? "Show" : "Hide", "H")) hide_selected(!e->hidden);
   }
-  if (ImGui::MenuItem("Focus", "F", false, has)) frame_selected();
-  if (n >= 2 && ImGui::BeginMenu("Align")) {
-    if (ImGui::MenuItem("Left edges")) align_selected(Workspace2D::Align::Left);
-    if (ImGui::MenuItem("Centres (horizontal)")) align_selected(Workspace2D::Align::CenterX);
-    if (ImGui::MenuItem("Right edges")) align_selected(Workspace2D::Align::Right);
+  if (ux::MenuItem("Focus", "F", false, has)) frame_selected();
+  if (n >= 2 && ux::BeginMenu("Align")) {
+    if (ux::MenuItem("Left edges")) align_selected(Workspace2D::Align::Left);
+    if (ux::MenuItem("Centres (horizontal)")) align_selected(Workspace2D::Align::CenterX);
+    if (ux::MenuItem("Right edges")) align_selected(Workspace2D::Align::Right);
     ImGui::Separator();
-    if (ImGui::MenuItem("Top edges")) align_selected(Workspace2D::Align::Top);
-    if (ImGui::MenuItem("Middles (vertical)")) align_selected(Workspace2D::Align::CenterY);
-    if (ImGui::MenuItem("Bottom edges")) align_selected(Workspace2D::Align::Bottom);
+    if (ux::MenuItem("Top edges")) align_selected(Workspace2D::Align::Top);
+    if (ux::MenuItem("Middles (vertical)")) align_selected(Workspace2D::Align::CenterY);
+    if (ux::MenuItem("Bottom edges")) align_selected(Workspace2D::Align::Bottom);
     ImGui::Separator();
-    if (ImGui::MenuItem("Distribute horizontally", nullptr, false, n >= 3)) {
+    if (ux::MenuItem("Distribute horizontally", nullptr, false, n >= 3)) {
       distribute_selected(true);
     }
-    if (ImGui::MenuItem("Distribute vertically", nullptr, false, n >= 3)) {
+    if (ux::MenuItem("Distribute vertically", nullptr, false, n >= 3)) {
       distribute_selected(false);
     }
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
-  if (e && ImGui::BeginMenu("Add component")) {
+  if (e && ux::BeginMenu("Add component")) {
     const Entity2D* t = workspace_.find(clicked);
-    if (ImGui::MenuItem("Collider", nullptr, false, t && !t->collider)) add_component(clicked, "Collider");
-    if (ImGui::MenuItem("Player", nullptr, false, t && !t->player)) add_component(clicked, "Player");
-    if (ImGui::MenuItem("Camera", nullptr, false, t && !t->camera)) add_component(clicked, "Camera");
-    if (ImGui::MenuItem("Spawn Point", nullptr, false, t && !t->spawn)) add_component(clicked, "Spawn");
-    ImGui::EndMenu();
+    if (ux::MenuItem("Collider", nullptr, false, t && !t->collider)) add_component(clicked, "Collider");
+    if (ux::MenuItem("Player", nullptr, false, t && !t->player)) add_component(clicked, "Player");
+    if (ux::MenuItem("Camera", nullptr, false, t && !t->camera)) add_component(clicked, "Camera");
+    if (ux::MenuItem("Spawn Point", nullptr, false, t && !t->spawn)) add_component(clicked, "Spawn");
+    ux::EndMenu();
   }
   // Always the last entries (the menu sizes to fit, so nothing is cut off).
   ImGui::Separator();
-  if (ImGui::MenuItem("New Entity", nullptr, false, !is_playing())) create_entity("Entity");
-  if (e && ImGui::MenuItem("New Child Entity", nullptr, false, !is_playing())) {
+  if (ux::MenuItem("New Entity", nullptr, false, !is_playing())) create_entity("Entity");
+  if (e && ux::MenuItem("New Child Entity", nullptr, false, !is_playing())) {
     const std::uint64_t parent = e->id;
     if (const std::uint64_t kid = create_entity("Entity")) reparent(kid, parent);
   }

@@ -1,5 +1,7 @@
 #include "render3d/ModelImport.h"
 
+#include "core/AssetMeta.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -166,11 +168,19 @@ ModelImportOptions model_options_from_settings(const json::Value& s, const std::
     for (const auto& [k, v] : bg.members()) o.body_groups[k] = static_cast<int>(v.as_number(0));
   }
   o.blender_path = s.str("blender_path");
+  if (const json::Value& mo = s["material_overrides"]; mo.is_object()) {
+    for (const auto& [k, v] : mo.members()) {
+      if (v.is_string() && !v.as_string().empty()) o.material_overrides[lower(k)] = v.as_string();
+    }
+  }
   return o;
 }
 
 bool read_model_options(const std::string& path, ModelImportOptions* out) {
-  std::ifstream in(fs::u8path(path + ".meta"), std::ios::binary);
+  // The claim's metadata folder (.tombstone/meta, core/AssetMeta.h), else a
+  // sidecar "<path>.meta" (shipped games, claims from before the folder).
+  const std::string meta = core::asset_meta::find_for_file(path);
+  std::ifstream in(fs::u8path(meta.empty() ? path + ".meta" : meta), std::ios::binary);
   if (!in) {
     *out = model_options_from_settings(json::Value::object(), path);
     return false;

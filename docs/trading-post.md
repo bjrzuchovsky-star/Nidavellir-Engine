@@ -16,6 +16,7 @@ Use **Trading Post** in the Project Manager, or **Visit the Trading Post...** in
 Entries come from four kinds of source (`TradingPost::refresh`):
 
 - **Built-ins** from the plugin catalog, including `ts.ai` (Pathfinder, the AI Toolkit; see the root README) and the optional story plugins: `ts.story` (Story Core), `ts.quests` (Bounty Board, [quests.md](quests.md)), `ts.dialogue` (Parley, [dialogue.md](dialogue.md)) and `ts.saves` (Strongbox, [saves.md](saves.md)). Enabling any feature plugin also enables `ts.story`.
+- **Physics and movement** (0.2.0, category Engine): `ts.physics.jolt` (Jolt Physics, 3D), `ts.physics.box2d` (Box2D Physics, 2D), `ts.move.rider3d` (Rider 3D), `ts.move.topdown` (Top-down Rider) and `ts.move.platformer` (Platformer Rider). Templates switch on what they need and older claims get them on first open; see [physics.md](physics.md).
 - **Local folders** that hold plugin libraries.
 - **Remote indexes** over `file://` or `http(s)://`. The README notes that https is supported on Windows.
 - **Coming soon** roadmap entries, hard-coded in `TradingPost.cpp`:

@@ -1,5 +1,7 @@
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/team/TeamPanel.h"
+#include "editor/ux/Tooltip.h"
+#include "editor/ux/Actions.h"
 #include "editor/export/FreightOffice.h"
 #include "editor/tools/AutoTilePanel.h"
 #include "editor/tools/SpriteSlicerPanel.h"
@@ -105,9 +107,19 @@ void Editor2DScreen::draw_help_menu_contents() {
   theme::KeyHint("Del", "Delete selection");
   theme::KeyHint("Ctrl+A / Esc", "Select all / clear (Esc cancels drag)");
   theme::KeyHint("F2", "Rename primary");
-  theme::KeyHint("G / Shift+G", "Toggle grid / snap");
+  theme::KeyHint("' / Shift+G", "Toggle grid / snap (also Shift+Tab)");
   theme::KeyHint("[ / ]", "Halve / double grid size");
   theme::KeyHint("Handles", "Drag edges/corners resize (Shift aspect), knob rotates");
+  ImGui::Separator();
+  theme::KeyHint("G / R / S", "Move / rotate / scale (mouse over the viewport)");
+  theme::KeyHint("  X / Y", "Lock an axis (twice: local); Shift+X/Y the other");
+  theme::KeyHint("  0-9 . - Tab", "Exact value (Backspace edits, Tab next field)");
+  theme::KeyHint("  Ctrl / Shift", "Toggle snap / precision while moving");
+  theme::KeyHint("  Enter / Esc", "Confirm (LMB) / cancel (RMB)");
+  theme::KeyHint("Alt+G / R / S", "Clear location / rotation / size (64 x 64)");
+  theme::KeyHint("Q W T Y / 0-4", "Gizmo: Tweak / Move / Scale / Transform (2 Rotate)");
+  theme::KeyHint(", / .", "Local-Global toggle / pivot menu");
+  theme::KeyHint("Shift+RMB", "Place the 2D cursor (Shift+C resets)");
   theme::KeyHint("Alt+drag", "Duplicate and drag the copy");
   theme::KeyHint("RMB click", "Context menu (viewport + hierarchy)");
   theme::KeyHint("Ctrl+C/X/V", "Copy / cut / paste (works across scenes)");
@@ -122,7 +134,7 @@ void Editor2DScreen::draw_help_menu_contents() {
   theme::KeyHint("V", "Select tool");
   theme::KeyHint("B / E", "Brush / Erase tiles (drag = 1 undo step)");
   theme::KeyHint("U", "Bucket fill");
-  theme::KeyHint("R", "Rect fill (Shift: erase box)");
+  theme::KeyHint("R", "Rect fill (Shift: erase box); over a selection: rotate");
   theme::KeyHint("I / Alt+click", "Pick tile from the map");
   theme::KeyHint("1 / 2 / 3", "Brush size (tile tools)");
   theme::KeyHint("Drag asset", "Supply Wagon -> viewport: new sprite");
@@ -156,8 +168,24 @@ void Editor2DScreen::draw_menu_bar() {
     ImGui::Dummy(ImVec2(6.0f, 0.0f));
   }
 
-  if (ImGui::BeginMenu("File")) {
-    if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, !is_playing())) {
+  draw_menus();
+
+  ImGui::TextDisabled("|");
+  ImGui::TextUnformatted(project_.name.c_str());
+  ImGui::TextDisabled("(%s)", to_string(project_.kind));
+  if (dirty_) {
+    ImGui::TextColored(theme::Copper(), "*");
+  }
+  if (is_playing()) {
+    ImGui::TextColored(is_paused() ? theme::Warning() : theme::Copper(),
+                       is_paused() ? "  [PAUSED]" : "  [RIDING]");
+  }
+  ImGui::EndMainMenuBar();
+}
+
+void Editor2DScreen::draw_menus() {
+  if (ux::BeginMenu("File")) {
+    if (ux::MenuItem("Save Scene", "Ctrl+S", false, !is_playing())) {
       std::string err;
       if (!save_scene(&err) && !err.empty()) {
         std::cout << "[Editor2D] save failed: " << err << '\n';
@@ -165,36 +193,36 @@ void Editor2DScreen::draw_menu_bar() {
         note("Scene saved");
       }
     }
-    if (ImGui::MenuItem("Launch Game (ts_game)", nullptr, false,
+    if (ux::MenuItem("Launch Game (ts_game)", nullptr, false,
                         !is_playing())) {
       launch_game();
     }
-    if (ImGui::MenuItem("Export... (Freight Office)", nullptr, false, !is_playing())) {
+    if (ux::MenuItem("Export... (Freight Office)", nullptr, false, !is_playing())) {
       FreightOffice::get().open(project_.path, project_.name);
     }
-    if (ImGui::MenuItem("Brand Book... (visual scripts)")) {
+    if (ux::MenuItem("Brand Book... (visual scripts)")) {
       BrandBook::get().open(project_.path, project_.name);
     }
-    if (ImGui::MenuItem("Strings... (localisation)")) {
+    if (ux::MenuItem("Strings... (localisation)")) {
       StringsPanel::get().open(project_.path, project_.name);
     }
-    if (ImGui::MenuItem("Autotiles... (terrain brushes)")) {
+    if (ux::MenuItem("Autotiles... (terrain brushes)")) {
       AutoTilePanel::get().open(project_.path, project_.name);
     }
-    if (ImGui::MenuItem("Sprite Slicer...")) {
+    if (ux::MenuItem("Sprite Slicer...")) {
       SpriteSlicerPanel::get().open(project_.path);
     }
     ImGui::Separator();
-    if (ImGui::MenuItem("Back to Projects")) {
+    if (ux::MenuItem("Back to Projects")) {
       request_back_to_projects();
     }
-    if (ImGui::MenuItem("Quit", "Alt+F4")) {
+    if (ux::MenuItem("Quit", "Alt+F4")) {
       request_quit();
     }
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
 
-  if (ImGui::BeginMenu("Edit", !is_playing())) {
+  if (ux::BeginMenu("Edit", !is_playing())) {
     const bool has_sel = workspace_.selection_count() > 0;
     {
       // Labels name the step ("Undo Move 3"); ### keeps the IDs stable.
@@ -209,126 +237,134 @@ void Editor2DScreen::draw_menu_bar() {
       const std::string redo_text =
           (can_redo ? "Redo " + workspace_.redo_label() : std::string("Redo")) +
           "###EditRedo";
-      if (ImGui::MenuItem(undo_text.c_str(), "Ctrl+Z", false, can_undo)) {
+      if (ux::MenuItem(undo_text.c_str(), "Ctrl+Z", false, can_undo)) {
         undo();
       }
-      if (ImGui::MenuItem(redo_text.c_str(), "Ctrl+Y", false, can_redo)) {
+      if (ux::MenuItem(redo_text.c_str(), "Ctrl+Y", false, can_redo)) {
         redo();
       }
       ImGui::Separator();
     }
-    if (ImGui::MenuItem("Create Entity")) {
+    if (ux::MenuItem("Create Entity")) {
       create_entity("Entity");
     }
-    if (ImGui::MenuItem("Create TileMap")) {
+    if (ux::MenuItem("Create Camera")) {
+      create_camera_2d();
+    }
+    if (ux::MenuItem("Create TileMap")) {
       create_tilemap();
     }
-    if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, has_sel)) {
+    if (ux::MenuItem("Duplicate", "Ctrl+D", false, has_sel)) {
       duplicate_selected();
     }
-    if (ImGui::MenuItem("Delete Selected", "Del", false, has_sel)) {
+    if (ux::MenuItem("Delete Selected", "Del", false, has_sel)) {
       delete_selected();
     }
     ImGui::Separator();
-    if (ImGui::MenuItem("Copy", "Ctrl+C", false, has_sel)) copy_selected();
-    if (ImGui::MenuItem("Cut", "Ctrl+X", false, has_sel)) cut_selected();
-    if (ImGui::MenuItem("Paste", "Ctrl+V", false, !clipboard_text().empty())) paste();
-    if (ImGui::MenuItem("Group", "Ctrl+G", false, has_sel)) group_selected();
-    if (ImGui::MenuItem("Ungroup", "Ctrl+Shift+G", false, has_sel)) ungroup_selected();
-    if (ImGui::MenuItem("Lock Selection", "Ctrl+L", false, has_sel)) lock_selected(true);
-    if (ImGui::MenuItem("Unlock Selection", "Ctrl+Shift+L", false, has_sel)) lock_selected(false);
-    if (ImGui::MenuItem("Hide Selection", "H", false, has_sel)) hide_selected(true);
-    if (ImGui::MenuItem("Show Selection", "Shift+H", false, has_sel)) hide_selected(false);
-    if (ImGui::MenuItem("Frame Selection", "F", false, has_sel)) frame_selected();
+    if (ux::MenuItem("Copy", "Ctrl+C", false, has_sel)) copy_selected();
+    if (ux::MenuItem("Cut", "Ctrl+X", false, has_sel)) cut_selected();
+    if (ux::MenuItem("Paste", "Ctrl+V", false, !clipboard_text().empty())) paste();
+    if (ux::MenuItem("Group", "Ctrl+G", false, has_sel)) group_selected();
+    if (ux::MenuItem("Ungroup", "Ctrl+Shift+G", false, has_sel)) ungroup_selected();
+    if (ux::MenuItem("Lock Selection", "Ctrl+L", false, has_sel)) lock_selected(true);
+    if (ux::MenuItem("Unlock Selection", "Ctrl+Shift+L", false, has_sel)) lock_selected(false);
+    if (ux::MenuItem("Hide Selection", "H", false, has_sel)) hide_selected(true);
+    if (ux::MenuItem("Show Selection", "Shift+H", false, has_sel)) hide_selected(false);
+    if (ux::MenuItem("Frame Selection", "F", false, has_sel)) frame_selected();
     const std::size_t nsel = workspace_.selection_count();
-    if (ImGui::BeginMenu("Align / Distribute", nsel >= 2)) {
-      if (ImGui::MenuItem("Align left")) align_selected(Workspace2D::Align::Left);
-      if (ImGui::MenuItem("Align centre (H)")) align_selected(Workspace2D::Align::CenterX);
-      if (ImGui::MenuItem("Align right")) align_selected(Workspace2D::Align::Right);
-      if (ImGui::MenuItem("Align top")) align_selected(Workspace2D::Align::Top);
-      if (ImGui::MenuItem("Align middle (V)")) align_selected(Workspace2D::Align::CenterY);
-      if (ImGui::MenuItem("Align bottom")) align_selected(Workspace2D::Align::Bottom);
+    if (ux::BeginMenu("Align / Distribute", nsel >= 2)) {
+      if (ux::MenuItem("Align left")) align_selected(Workspace2D::Align::Left);
+      if (ux::MenuItem("Align centre (H)")) align_selected(Workspace2D::Align::CenterX);
+      if (ux::MenuItem("Align right")) align_selected(Workspace2D::Align::Right);
+      if (ux::MenuItem("Align top")) align_selected(Workspace2D::Align::Top);
+      if (ux::MenuItem("Align middle (V)")) align_selected(Workspace2D::Align::CenterY);
+      if (ux::MenuItem("Align bottom")) align_selected(Workspace2D::Align::Bottom);
       ImGui::Separator();
-      if (ImGui::MenuItem("Distribute horizontally", nullptr, false, nsel >= 3)) distribute_selected(true);
-      if (ImGui::MenuItem("Distribute vertically", nullptr, false, nsel >= 3)) distribute_selected(false);
-      ImGui::EndMenu();
+      if (ux::MenuItem("Distribute horizontally", nullptr, false, nsel >= 3)) distribute_selected(true);
+      if (ux::MenuItem("Distribute vertically", nullptr, false, nsel >= 3)) distribute_selected(false);
+      ux::EndMenu();
     }
     ImGui::Separator();
-    if (ImGui::MenuItem("Select All", "Ctrl+A")) {
+    if (ux::MenuItem("Select All", "Ctrl+A")) {
       workspace_.select_all();
     }
-    if (ImGui::MenuItem("Clear Selection", "Esc", false, has_sel)) {
+    if (ux::MenuItem("Clear Selection", "Esc", false, has_sel)) {
       workspace_.clear_selection();
     }
-    if (ImGui::MenuItem("Snap Selection to Grid", nullptr, false, has_sel)) {
+    if (ux::MenuItem("Snap Selection to Grid", nullptr, false, has_sel)) {
       snap_selected_to_grid();
     }
     ImGui::Separator();
-    if (ImGui::MenuItem("Reset Scene Placeholders")) {
+    if (ux::MenuItem("Reset Scene Placeholders")) {
       reset_scene_placeholders();
     }
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
 
-  if (ImGui::BeginMenu("View")) {
-    ImGui::MenuItem("Hierarchy", nullptr, &show_hierarchy_);
-    ImGui::MenuItem("Viewport", nullptr, &show_viewport_);
-    ImGui::MenuItem("Inspector", nullptr, &show_inspector_);
-    ImGui::MenuItem("Tile Palette", nullptr, &show_tile_palette_);
-    ImGui::MenuItem("Supply Wagon", nullptr, &show_supply_wagon_);
-    ImGui::MenuItem("Prefabs", nullptr, &show_prefabs_);
-    ImGui::MenuItem("Asset Browser", nullptr, &show_asset_browser_);
-    ImGui::MenuItem("Vault", nullptr, &show_vault_);
-    ImGui::MenuItem("Stable (Animation)", nullptr, &show_stable_);
-    ImGui::MenuItem("UI Preview", nullptr, &show_ui_preview_);
-    ImGui::MenuItem("Lighting", nullptr, &show_lighting_);
-    ImGui::MenuItem("Scripts", nullptr, &show_scripts_);
-    ImGui::MenuItem("Telegraph (Console)", nullptr, &show_console_);
-    ImGui::MenuItem("Saloon Band (Mixer)", nullptr, &show_mixer_);
-    ImGui::MenuItem("Plugins (Outfitter)", nullptr, &show_plugins_);
+  if (ux::BeginMenu("Object", !is_playing())) {
+    draw_object_menu_2d();
+    ux::EndMenu();
+  }
+
+  if (ux::BeginMenu("View")) {
+    ux::MenuItem("Hierarchy", nullptr, &show_hierarchy_);
+    ux::MenuItem("Viewport", nullptr, &show_viewport_);
+    ux::MenuItem("Inspector", nullptr, &show_inspector_);
+    ux::MenuItem("Tile Palette", nullptr, &show_tile_palette_);
+    ux::MenuItem("Supply Wagon", nullptr, &show_supply_wagon_);
+    ux::MenuItem("Prefabs", nullptr, &show_prefabs_);
+    ux::MenuItem("Asset Browser", nullptr, &show_asset_browser_);
+    ux::MenuItem("Vault", nullptr, &show_vault_);
+    ux::MenuItem("Stable (Animation)", nullptr, &show_stable_);
+    ux::MenuItem("UI Preview", nullptr, &show_ui_preview_);
+    ux::MenuItem("Lighting", nullptr, &show_lighting_);
+    ux::MenuItem("Scripts", nullptr, &show_scripts_);
+    ux::MenuItem("Telegraph (Console)", nullptr, &show_console_);
+    ux::MenuItem("Saloon Band (Mixer)", nullptr, &show_mixer_);
+    ux::MenuItem("Plugins (Outfitter)", nullptr, &show_plugins_);
     draw_plugin_view_items();
-    ImGui::MenuItem("Toolbar", nullptr, &show_toolbar_);
-    ImGui::MenuItem("Status Bar", nullptr, &show_status_bar_);
+    ux::MenuItem("Toolbar", nullptr, &show_toolbar_);
+    ux::MenuItem("Status Bar", nullptr, &show_status_bar_);
     ImGui::Separator();
-    ImGui::MenuItem("Preview Animations", nullptr, &anim_preview_);
+    ux::MenuItem("Preview Animations", nullptr, &anim_preview_);
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("Edit mode: animators run their default clip in the "
+      ux::SetTooltip("Edit mode: animators run their default clip in the "
                         "viewport. Off = first frame.");
     }
     // Grid / snap / camera are saved with the scene: edit mode only.
     ImGui::BeginDisabled(is_playing());
     const bool grid = workspace_.show_grid();
-    if (ImGui::MenuItem("Show Grid", "G", grid)) {
+    if (ux::MenuItem("Show Grid", "'", grid)) {
       workspace_.set_show_grid(!grid);
       mark_dirty_and_autosave();
     }
     const bool snap = workspace_.snap_enabled();
-    if (ImGui::MenuItem("Snap to Grid", "Shift+G", snap)) {
+    if (ux::MenuItem("Snap to Grid", "Shift+G", snap)) {
       workspace_.set_snap_enabled(!snap);
       mark_dirty_and_autosave();
     }
-    if (ImGui::MenuItem("Snap to Objects", nullptr, workspace_.object_snap())) {
+    if (ux::MenuItem("Snap to Objects", nullptr, workspace_.object_snap())) {
       workspace_.set_object_snap(!workspace_.object_snap());
       note(workspace_.object_snap() ? "Object snap on (edges + centres)"
                                     : "Object snap off");
     }
-    if (ImGui::BeginMenu("Grid Size")) {
+    if (ux::BeginMenu("Grid Size")) {
       for (float g : kGridPresets) {
         char label[16];
         std::snprintf(label, sizeof(label), "%.0f px", g);
-        if (ImGui::MenuItem(label, nullptr, workspace_.grid_size() == g)) {
+        if (ux::MenuItem(label, nullptr, workspace_.grid_size() == g)) {
           workspace_.set_grid_size(g);
           mark_dirty_and_autosave();
         }
       }
-      ImGui::EndMenu();
+      ux::EndMenu();
     }
-    if (ImGui::MenuItem("Reset Camera")) {
+    if (ux::MenuItem("Reset Camera")) {
       workspace_.set_pan(0.0f, 0.0f);
       workspace_.set_zoom(1.0f);
     }
     ImGui::EndDisabled();
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
 
   draw_play_menu();
@@ -339,23 +375,14 @@ void Editor2DScreen::draw_menu_bar() {
     ImGui::EndMenu();
   }
 
-  if (ImGui::BeginMenu("Help")) {
+  if (ux::BeginMenu("Help")) {
+    if (ux::MenuItem("Command Palette...", "Ctrl+Shift+P")) ux_.palette().open();
+    ImGui::Separator();
     draw_help_menu_contents();
-    ImGui::EndMenu();
+    ux::EndMenu();
   }
-
-  ImGui::TextDisabled("|");
-  ImGui::TextUnformatted(project_.name.c_str());
-  ImGui::TextDisabled("(%s)", to_string(project_.kind));
-  if (dirty_) {
-    ImGui::TextColored(theme::Copper(), "*");
-  }
-  if (is_playing()) {
-    ImGui::TextColored(is_paused() ? theme::Warning() : theme::Copper(),
-                       is_paused() ? "  [PAUSED]" : "  [RIDING]");
-  }
-  ImGui::EndMainMenuBar();
 }
+
 
 void Editor2DScreen::draw_toolbar() {
   if (!show_toolbar_) {
@@ -400,9 +427,9 @@ void Editor2DScreen::draw_toolbar() {
                                  ? workspace_.edit_label()
                                  : workspace_.undo_label();
       if (can_undo) {
-        ImGui::SetTooltip("Undo %s (Ctrl+Z)", l.c_str());
+        ux::SetTooltip("Undo %s (Ctrl+Z)", l.c_str());
       } else {
-        ImGui::SetTooltip("Nothing to undo (Ctrl+Z)");
+        ux::SetTooltip("Nothing to undo (Ctrl+Z)");
       }
     }
     ImGui::EndDisabled();
@@ -413,10 +440,10 @@ void Editor2DScreen::draw_toolbar() {
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
       if (can_redo) {
-        ImGui::SetTooltip("Redo %s (Ctrl+Y / Ctrl+Shift+Z)",
+        ux::SetTooltip("Redo %s (Ctrl+Y / Ctrl+Shift+Z)",
                           workspace_.redo_label().c_str());
       } else {
-        ImGui::SetTooltip("Nothing to redo (Ctrl+Y / Ctrl+Shift+Z)");
+        ux::SetTooltip("Nothing to redo (Ctrl+Y / Ctrl+Shift+Z)");
       }
     }
     ImGui::EndDisabled();
@@ -432,7 +459,7 @@ void Editor2DScreen::draw_toolbar() {
     mark_dirty_and_autosave();
   }
   if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip("Show grid (G)");
+    ux::SetTooltip("Show grid (')");
   }
   ImGui::SameLine();
   bool snap = workspace_.snap_enabled();
@@ -441,8 +468,31 @@ void Editor2DScreen::draw_toolbar() {
     mark_dirty_and_autosave();
   }
   if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip(
-        "Snap drags, nudges and Inspector X/Y/W/H to the grid (Shift+G)");
+    ux::SetTooltip(
+        "Snap drags, nudges and Inspector X/Y/W/H to the grid (Shift+G). "
+        "Hold Ctrl while transforming to flip it.");
+  }
+  ImGui::SameLine();
+  {
+    // Gizmo mode + orientation (also in the viewport header).
+    const struct { GizmoMode m; const char* l; const char* tip; } modes[] = {
+        {GizmoMode::None, "Tweak", "Box handles, no gizmo (Q / 0)"},
+        {GizmoMode::Translate, "Move", "Move gizmo (W / 1)"},
+        {GizmoMode::Rotate, "Rotate", "Rotate gizmo (2)"},
+        {GizmoMode::Scale, "Scale", "Scale gizmo (T / 3)"},
+        {GizmoMode::Transform, "All", "Move, rotate and scale gizmo (Y / 4)"}};
+    for (const auto& m : modes) {
+      if (ImGui::RadioButton(m.l, gizmo_.mode == m.m)) gizmo_.mode = m.m;
+      if (ImGui::IsItemHovered()) ux::SetTooltip("%s", m.tip);
+      ImGui::SameLine();
+    }
+    bool local = orientation_ == XformSpace::Local;
+    if (ImGui::Checkbox("Local", &local)) {
+      orientation_ = local ? XformSpace::Local : XformSpace::Global;
+    }
+    if (ImGui::IsItemHovered()) {
+      ux::SetTooltip("Gizmo and axis locks follow the active entity's turn (,)");
+    }
   }
   ImGui::SameLine();
   int grid_px = static_cast<int>(workspace_.grid_size() + 0.5f);
@@ -458,7 +508,7 @@ void Editor2DScreen::draw_toolbar() {
     mark_dirty_and_autosave();
   }
   if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip("Grid cell size. Drag or Ctrl+click to type. [ / ] halves / doubles.");
+    ux::SetTooltip("Grid cell size. Drag or Ctrl+click to type. [ / ] halves / doubles.");
   }
 
   ImGui::SameLine(0.0f, 18.0f);
@@ -467,15 +517,9 @@ void Editor2DScreen::draw_toolbar() {
   if (theme::CopperButton("Duplicate", ImVec2(84, 0))) {
     duplicate_selected();
   }
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip("Ctrl+D");
-  }
   ImGui::SameLine();
   if (theme::DangerButton("Delete", ImVec2(70, 0))) {
     delete_selected();
-  }
-  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip("Del");
   }
   ImGui::EndDisabled();
 
@@ -641,6 +685,35 @@ void Editor2DScreen::handle_hotkeys() {
     return;  // every edit hotkey is locked while playing
   }
 
+  // A running G / R / S transform takes every key (X / Y / digits / Enter /
+  // Esc ...) until it is confirmed or cancelled; docs/transforms.md.
+  if (modal_active()) {
+    handle_modal_keys();
+    return;
+  }
+
+  // G / R / S: modal move / rotate / scale with the mouse over the
+  // viewport (Select tool, something selected). Alt+G / R / S clear
+  // location / rotation / size. Off the viewport R stays the Rect tool.
+  const bool xform_keys = viewport_hovered_ && tool_ == TileTool::Select &&
+                          drag_mode_ == DragMode::None && !ctrl && !shift &&
+                          workspace_.selection_count() > 0 && !ImGui::IsAnyItemActive() &&
+                          !ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+                          !ImGui::IsMouseDown(ImGuiMouseButton_Right);
+  if (xform_keys) {
+    const struct { ImGuiKey key; XformOp op; } kXformKeys[] = {
+        {ImGuiKey_G, XformOp::Move}, {ImGuiKey_R, XformOp::Rotate}, {ImGuiKey_S, XformOp::Scale}};
+    for (const auto& k : kXformKeys) {
+      if (!ImGui::IsKeyPressed(k.key, false)) continue;
+      if (alt) {
+        reset_transform(k.op);
+      } else {
+        modal_begin(k.op, io.MousePos.x - viewport_x_, io.MousePos.y - viewport_y_);
+      }
+      return;
+    }
+  }
+
   // Undo / redo (with key repeat). Not mid-drag or while a widget is held.
   if (drag_mode_ == DragMode::None && !ImGui::IsAnyItemActive()) {
     const ImGuiKeyChord mods = io.KeyMods;
@@ -679,7 +752,10 @@ void Editor2DScreen::handle_hotkeys() {
   if (scene_focus && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_A)) {
     workspace_.select_all();
   }
-  if (scene_focus && ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
+  if (target_picking_2d() && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+    cancel_target_pick_2d();
+    note("Target pick cancelled");
+  } else if (scene_focus && ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
       !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
     workspace_.clear_selection();
   }
@@ -717,14 +793,44 @@ void Editor2DScreen::handle_hotkeys() {
     }
   }
 
-  if (!ctrl && !alt) {
-    if (ImGui::IsKeyPressed(ImGuiKey_G, false)) {
-      if (shift) {
-        workspace_.set_snap_enabled(!workspace_.snap_enabled());
-        note(workspace_.snap_enabled() ? "Snap on" : "Snap off");
-      } else {
-        workspace_.set_show_grid(!workspace_.show_grid());
+  // Gizmo mode (Select tool): Q Tweak, W Move, T Scale, Y Transform, or
+  // 0-4 (E stays Erase, so Rotate is 2 or the header button). ',' flips
+  // Global / Local, '.' opens the pivot menu, Shift+C puts the 2D cursor
+  // back at 0, 0.
+  if (!ctrl && !alt && drag_mode_ == DragMode::None && tool_ == TileTool::Select &&
+      (scene_focus || viewport_hovered_)) {
+    if (!shift) {
+      const struct { ImGuiKey key; GizmoMode mode; } kGizmoKeys[] = {
+          {ImGuiKey_Q, GizmoMode::None},      {ImGuiKey_W, GizmoMode::Translate},
+          {ImGuiKey_T, GizmoMode::Scale},     {ImGuiKey_Y, GizmoMode::Transform},
+          {ImGuiKey_0, GizmoMode::None},      {ImGuiKey_1, GizmoMode::Translate},
+          {ImGuiKey_2, GizmoMode::Rotate},    {ImGuiKey_3, GizmoMode::Scale},
+          {ImGuiKey_4, GizmoMode::Transform},
+      };
+      for (const auto& k : kGizmoKeys) {
+        if (ImGui::IsKeyPressed(k.key, false)) gizmo_.mode = k.mode;
       }
+      if (ImGui::IsKeyPressed(ImGuiKey_Comma, false)) {
+        orientation_ = orientation_ == XformSpace::Local ? XformSpace::Global : XformSpace::Local;
+        note(std::string("Orientation: ") + xform_space_label(orientation_));
+      }
+      if (ImGui::IsKeyPressed(ImGuiKey_Period, false)) open_pivot_menu_ = true;
+    } else if (ImGui::IsKeyPressed(ImGuiKey_C, false)) {
+      set_cursor2d(0.0f, 0.0f);
+      note("2D cursor back at 0, 0");
+    }
+  }
+
+  if (!ctrl && !alt) {
+    // Shift+G / Shift+Tab: snap. ' : grid (G is the modal move now).
+    if ((shift && ImGui::IsKeyPressed(ImGuiKey_G, false)) ||
+        (shift && ImGui::IsKeyPressed(ImGuiKey_Tab, false) && (scene_focus || viewport_hovered_))) {
+      workspace_.set_snap_enabled(!workspace_.snap_enabled());
+      note(workspace_.snap_enabled() ? "Snap on" : "Snap off");
+      mark_dirty_and_autosave();
+    }
+    if (!shift && ImGui::IsKeyPressed(ImGuiKey_Apostrophe, false)) {
+      workspace_.set_show_grid(!workspace_.show_grid());
       mark_dirty_and_autosave();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_LeftBracket, false) ||
@@ -783,7 +889,9 @@ void Editor2DScreen::draw_ui() {
     update_posse(ImGui::GetIO().DeltaTime, poll_play_input().slot(0));
   }
   draw_menu_bar();
+  ux::BeginAutoTips("Toolbar2D");
   draw_toolbar();
+  ux::EndAutoTips();
   draw_status_bar();
 
   const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -855,7 +963,9 @@ void Editor2DScreen::draw_ui() {
       if (const Entity2D* pe = workspace_.selected(); pe && pe->prefab) {
         draw_prefab_inspector(pe->id);
       }
+      ux::BeginAutoTips("Inspector2D");
       draw_inspector();
+      ux::EndAutoTips();
       ImGui::EndDisabled();
     }
     ImGui::End();
@@ -974,6 +1084,7 @@ void Editor2DScreen::draw_ui() {
   textures_.poll_changes(now_seconds());
 
   handle_hotkeys();
+  ux_.frame();
 
   // Safety net: an Inspector edit whose widget vanished (selection change,
   // panel closed) without a deactivation still lands as one step.
@@ -982,6 +1093,52 @@ void Editor2DScreen::draw_ui() {
   }
 }
 
+
+void Editor2DScreen::setup_field_guide() {
+  ux_.set_menu_drawer([this] { draw_menus(); });
+  ux_.set_context_drawer([this] { draw_context_menus_for_audit(); });
+  struct Panel {
+    const char* label;
+    const char* window;
+    bool* shown;
+  };
+  const Panel panels[] = {
+      {"Hierarchy", "Hierarchy", &show_hierarchy_},
+      {"Viewport", "Viewport2D", &show_viewport_},
+      {"Inspector", "Inspector", &show_inspector_},
+      {"Tile Palette", "Tile Palette", &show_tile_palette_},
+      {"Supply Wagon", "Supply Wagon", &show_supply_wagon_},
+      {"Prefabs", "Prefabs", &show_prefabs_},
+      {"Asset Browser", "Asset Browser", &show_asset_browser_},
+      {"Vault", "Vault", &show_vault_},
+      {"Stable (Animation)", "Stable", &show_stable_},
+      {"Lighting", "Lighting", &show_lighting_},
+      {"Scripts", "Scripts", &show_scripts_},
+      {"Telegraph (Console)", "Telegraph", &show_console_},
+      {"Saloon Band (Mixer)", "Saloon Band (Mixer)", &show_mixer_},
+      {"Plugins (Outfitter)", "Plugins", &show_plugins_},
+  };
+  for (const Panel& p : panels) ux_.add_panel(p.label, p.window, p.shown);
+  ux_.add_settings_entries([this](const std::string& section) {
+    ux::request_settings_section(section);
+    settings_requested_ = true;
+  });
+  ux_.refresh_recent([this](const ux::RecentItem& r) {
+    if (r.kind == "claim") {
+      if (r.path == project_.path) {
+        note("Already riding this claim");
+        return;
+      }
+      ux::request_open_claim(r.path);
+      request_back_to_projects();
+    } else {
+      show_asset_browser_ = true;
+      asset_browser_.select(r.path);
+    }
+  });
+}
+
+void Editor2DScreen::draw_context_menus_for_audit() {}
 
 }  // namespace editor
 }  // namespace tombstone

@@ -11,5 +11,5 @@ The mouse looks (Play captures the cursor; Esc frees it, click the view to look 
 - Move the Camera child to change the eye point; its FOV is the view's FOV.
 - Add level geometry with Create > Primitive or glTF models.
 - Write your rules in scripts/player.lua.
-- No optional plugins are on. Turn them on from the Trading Post (or the Outfitter's Wagon) when you need them.
+- On: ts.physics.jolt,ts.move.rider3d (physics and movement for the rider, 0.2.0 Trading Post plugins). Turn more on from the Trading Post (or the Outfitter's Wagon) when you need them.
 - Everything in this claim was made by the engine (CC0). Replace it freely.

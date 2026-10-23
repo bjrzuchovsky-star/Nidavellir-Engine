@@ -2,8 +2,9 @@
 
 // Gameplay scripts: sandboxed Lua 5.4, run by the world on its fixed tick.
 //
-// Each entity with a `script` component gets its own instance of the file
-// (own globals, own `self`, own `props`). Hooks the file may define:
+// Each script on an entity (an entity may carry several, see script_stack
+// in SceneData.h) gets its own instance of the file (own globals, own
+// `props`; `self` is the entity, shared by its scripts). Hooks the file may define:
 //   on_start()                  first tick the entity is in the world
 //   on_tick(dt)                 every tick (dt = 1/60 s)
 //   on_trigger_enter(other)     somebody rode into this entity's trigger
@@ -160,24 +161,31 @@ class ScriptLanguageHost {
  public:
   virtual ~ScriptLanguageHost() = default;
   virtual const char* language() const = 0;
-  virtual bool attach(const Entity2D& e) = 0;
+  // An entity can carry several scripts (its Inspector stack); `slot` is
+  // the script's place in that stack (0 = first). attach() gets the entity
+  // with `script` set to that slot's script. One instance per (entity,
+  // slot); detach() drops every slot. World-wide phases (start, tick,
+  // broadcast) are run one slot at a time by ScriptHost, so an object's
+  // scripts always run in their Inspector order.
+  virtual bool attach(const Entity2D& e, int slot) = 0;
   virtual void detach(std::uint64_t entity) = 0;
-  virtual bool has(std::uint64_t entity) const = 0;
-  virtual bool running(std::uint64_t entity) const = 0;
-  virtual bool has_hook(std::uint64_t entity, const char* hook) = 0;
+  virtual bool has(std::uint64_t entity, int slot) const = 0;
+  virtual bool running(std::uint64_t entity, int slot) const = 0;
+  virtual bool has_hook(std::uint64_t entity, int slot, const char* hook) = 0;
   virtual std::size_t instance_count() const = 0;
-  virtual void start_pending() = 0;
-  virtual void trigger(bool enter, std::uint64_t trigger, std::uint64_t other) = 0;
-  virtual void interact(std::uint64_t target, std::uint64_t rider) = 0;
-  virtual void hand_event(std::uint64_t target, const char* hook, const std::string& text,
-                          double number) = 0;
+  virtual void start_pending(int slot) = 0;
+  virtual void trigger(bool enter, std::uint64_t trigger, int slot, std::uint64_t other) = 0;
+  virtual void interact(std::uint64_t target, int slot, std::uint64_t rider) = 0;
+  virtual void hand_event(std::uint64_t target, int slot, const char* hook,
+                          const std::string& text, double number) = 0;
   virtual void ui_event(const std::string& /*widget*/, bool /*change*/, double /*value*/,
                         const std::string& /*text*/) {}
   virtual void run_timers(std::uint64_t /*tick*/) {}
   // Call `hook(text, number)` on every running instance that defines it
   // (plugin events such as on_quest_completed); entity id order.
-  virtual void broadcast(const char* /*hook*/, const std::string& /*text*/, double /*number*/) {}
-  virtual void tick(double dt) = 0;
+  virtual void broadcast(int /*slot*/, const char* /*hook*/, const std::string& /*text*/,
+                         double /*number*/) {}
+  virtual void tick(double dt, int slot) = 0;
   virtual int reload_changed() = 0;
   virtual bool reload(const std::string& /*rel*/) { return false; }
   // Some running instance uses this file.
@@ -202,32 +210,32 @@ class LuaScriptHost final : public ScriptLanguageHost {
   // Give `e` its script instance and run the file's top level (props and
   // hook definitions). False (logged) when it cannot load; the instance is
   // kept, stopped, so a hot reload can bring it back.
-  bool attach(const Entity2D& e) override;
-  // The entity left the world: drop its instance and timers.
+  bool attach(const Entity2D& e, int slot) override;
+  // The entity left the world: drop its instances and timers.
   void detach(std::uint64_t entity) override;
-  bool has(std::uint64_t entity) const override;
-  bool running(std::uint64_t entity) const override;  // loaded and not stopped
-  bool has_hook(std::uint64_t entity, const char* hook) override;
+  bool has(std::uint64_t entity, int slot) const override;
+  bool running(std::uint64_t entity, int slot) const override;  // loaded and not stopped
+  bool has_hook(std::uint64_t entity, int slot, const char* hook) override;
   std::size_t instance_count() const override;
   std::size_t timer_count() const;
   std::size_t memory_used() const;
 
   // Tick phases, in World::step order.
-  void start_pending() override;
-  void trigger(bool enter, std::uint64_t trigger, std::uint64_t other) override;
-  void interact(std::uint64_t target, std::uint64_t rider) override;
+  void start_pending(int slot) override;
+  void trigger(bool enter, std::uint64_t trigger, int slot, std::uint64_t other) override;
+  void interact(std::uint64_t target, int slot, std::uint64_t rider) override;
   // A hook called with (text, number): the VR hand events on_grab(hand),
   // on_release(hand, speed), on_point(hand), on_unpoint(hand),
   // on_vr_trigger(hand). Missing hooks are skipped.
   // The host's UI reports a widget event: every ui.on_click(id, fn) /
   // ui.on_change(id, fn) handler for that widget id runs fn(id, value, text).
   void ui_event(const std::string& widget, bool change, double value, const std::string& text) override;
-  void broadcast(const char* hook, const std::string& text, double number) override;
+  void broadcast(int slot, const char* hook, const std::string& text, double number) override;
   std::size_t ui_handler_count() const;
-  void hand_event(std::uint64_t target, const char* hook, const std::string& text,
+  void hand_event(std::uint64_t target, int slot, const char* hook, const std::string& text,
                   double number) override;
   void run_timers(std::uint64_t tick) override;
-  void tick(double dt) override;
+  void tick(double dt, int slot) override;
 
   // Hot reload: re-run changed files in their instances (props re-applied,
   // stopped instances restarted, on_reload called). A file that no longer

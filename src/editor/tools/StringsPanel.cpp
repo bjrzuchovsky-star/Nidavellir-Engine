@@ -1,4 +1,5 @@
 #include "editor/tools/StringsPanel.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/ui/Theme.h"
 
@@ -262,7 +263,7 @@ void StringsPanel::draw() {
         selected_ = k;
       }
       if (!is_defined(k) && ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Used by a script / UI document but defined in no table");
+        ux::SetTooltip("Used by a script / UI document but defined in no table");
       }
       for (std::size_t c = 0; c < langs.size(); ++c) {
         ImGui::TableSetColumnIndex(static_cast<int>(c) + 1);

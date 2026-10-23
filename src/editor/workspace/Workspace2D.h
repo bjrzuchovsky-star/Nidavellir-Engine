@@ -125,6 +125,19 @@ class Workspace2D {
   // (same parent as target) or inside it (last child). True if changed.
   enum class HierDrop { Before, After, Inside };
   bool hierarchy_drop(std::uint64_t id, std::uint64_t target, HierDrop where);
+  // Attach tools (Workspace2D_Attach.cpp, docs/transforms.md). Each takes
+  // one entity (its subtree rides along) and returns true if it changed.
+  // attach_to: parent to `target`; snap = move the centre onto the
+  // target's first. Detach is set_parent(id, 0) (positions are world).
+  bool attach_to(std::uint64_t id, std::uint64_t target, bool snap);
+  // Follow constraint (runtime): offsets keep it where it is now.
+  bool set_follow(std::uint64_t id, std::uint64_t target, bool position, bool rotation);
+  bool snap_to(std::uint64_t id, std::uint64_t target);  // centres meet
+  bool copy_transform(std::uint64_t from, std::uint64_t id, bool position, bool rotation,
+                      bool scale);
+  // Drop onto the top of the first solid tile or collider below (upright).
+  bool align_to_surface(std::uint64_t id);
+
   // New "Group" around the selection roots (bounding box, transparent,
   // under their common parent) holding them; selected. Returns its id.
   std::uint64_t group_selection(const std::string& name = "Group");
@@ -166,6 +179,32 @@ class Workspace2D {
   bool end_transform();     // true if anything changed
   void cancel_transform();  // restore the start
   bool transform_active() const { return xform_active_; }
+
+  // Whole-selection move / rotate / scale for G / R / S and the 2D gizmo
+  // (Workspace2D_Xform.cpp): begin captures the unlocked selection roots
+  // and their subtrees, apply sets them from those starts (any number of
+  // times), end reports whether anything changed, cancel restores.
+  struct Xform2D {
+    enum class Op { Move, Rotate, Scale };
+    Op op = Op::Move;
+    float dx = 0.0f, dy = 0.0f;          // Move: world offset
+    float degrees = 0.0f;                // Rotate: clockwise on screen
+    float sx = 1.0f, sy = 1.0f;          // Scale: along each entity's own axes
+    float pivot_x = 0.0f, pivot_y = 0.0f;
+    bool individual = false;             // turn / scale each root about its centre
+    float frame_deg = 0.0f;              // axes the pivot offsets scale along
+  };
+  bool begin_xform();
+  void apply_xform(const Xform2D& x);
+  bool end_xform();
+  void cancel_xform();
+  bool xform_running() const { return modal_active_; }
+  // Start state of the roots being transformed (selection order).
+  const std::vector<Entity2D>& xform_root_starts() const { return modal_roots_; }
+  // Alt+G / Alt+R / Alt+S: position (0, 0) / rotation 0 / size 64 x 64
+  // (centre kept) for the unlocked selection roots; children follow. One
+  // undo step; false when nothing changed.
+  bool clear_selection_transform(Xform2D::Op what);
 
   // Align (multi-select; to the selection bounds) and distribute (3+, equal
   // gaps between the edges). Subtrees move with their roots.
@@ -384,6 +423,9 @@ class Workspace2D {
   std::vector<SnapGuide> guides_;
   bool xform_active_ = false;
   std::vector<Entity2D> xform_start_;  // primary first, then its subtree
+  bool modal_active_ = false;
+  std::vector<Entity2D> modal_roots_;                 // roots (start state)
+  std::vector<std::vector<Entity2D>> modal_subtrees_;  // per root: its descendants
 };
 
 }  // namespace editor

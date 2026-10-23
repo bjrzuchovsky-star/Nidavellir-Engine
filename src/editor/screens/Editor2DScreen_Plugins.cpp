@@ -3,6 +3,7 @@
 // toolbar buttons). See editor/plugins/EditorPlugins.h.
 
 #include "editor/plugins/PluginPanelHost.h"
+#include "editor/ux/Actions.h"
 #include "editor/screens/Editor2DScreen.h"
 
 #include "editor/ui/Theme.h"
@@ -95,7 +96,7 @@ void Editor2DScreen::draw_plugin_menu_items(const std::string& menu) {
     } else {
       const bool enabled = it.enabled ? it.enabled() : true;
       const bool checked = it.checked ? it.checked() : false;
-      if (ImGui::MenuItem(it.label.c_str(),
+      if (ux::MenuItem(it.label.c_str(),
                           it.shortcut.empty() ? nullptr : it.shortcut.c_str(),
                           checked, enabled) &&
           it.action) {
@@ -118,9 +119,9 @@ void Editor2DScreen::draw_plugin_top_menus() {
     if (!seen) menus.push_back(m.item.menu);
   }
   for (const std::string& menu : menus) {
-    if (ImGui::BeginMenu(menu.c_str())) {
+    if (ux::BeginMenu(menu.c_str())) {
       draw_plugin_menu_items(menu);
-      ImGui::EndMenu();
+      ux::EndMenu();
     }
   }
 }

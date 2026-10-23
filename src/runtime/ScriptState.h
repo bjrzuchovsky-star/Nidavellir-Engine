@@ -20,6 +20,8 @@ namespace runtime {
 
 struct ScriptInstance {
   std::uint64_t entity = 0;
+  int slot = 0;                       // place in the entity's script stack
+  std::string entity_label;           // "Gate" (for error lines)
   std::string path;
   std::vector<ScriptProp> overrides;  // the entity's Inspector values
   int env = LUA_NOREF;                // registry ref: the instance's globals
@@ -32,6 +34,7 @@ struct ScriptInstance {
 struct ScriptTimer {
   std::uint64_t id = 0;
   std::uint64_t entity = 0;
+  int slot = 0;              // the script (in the entity's stack) that set it
   std::uint64_t due = 0;     // tick it fires on
   std::uint64_t period = 0;  // ticks between repeats (0 = once)
   int fn = LUA_NOREF;
@@ -39,6 +42,7 @@ struct ScriptTimer {
 
 struct ScriptUiHandler {
   std::uint64_t entity = 0;
+  int slot = 0;
   std::string widget;
   bool change = false;  // on_change (else on_click)
   int fn = LUA_NOREF;
@@ -71,7 +75,7 @@ struct LuaScriptHost::State {
   static State* from(lua_State* L);
 
   bool open();
-  ScriptInstance* find(std::uint64_t entity);
+  ScriptInstance* find(std::uint64_t entity, int slot);
   // Push the instance's hook; false (nothing pushed) when it has none or
   // cannot run now.
   bool push_hook(ScriptInstance& in, const char* hook);
@@ -82,7 +86,10 @@ struct LuaScriptHost::State {
   bool run_file(ScriptInstance& in, const std::string& text);
   void apply_props(ScriptInstance& in);
   void fail(ScriptInstance* in, const std::string& message);
-  void drop_timers(std::uint64_t entity);
+  // slot -1: every script on the entity.
+  void drop_timers(std::uint64_t entity, int slot);
+  // "\"Gate\" (scripts/gate.lua)": which object and which script.
+  std::string who(const ScriptInstance& in) const;
   void sweep();
   void log(LogLevel level, const std::string& text, const std::string& file,
            int line, std::uint64_t entity);

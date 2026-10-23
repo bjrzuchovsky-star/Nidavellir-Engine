@@ -28,13 +28,15 @@ bool on_step(float v, float step) {
 
 constexpr float kW = 800.0f, kH = 600.0f;
 
-// Screen point along a gizmo axis handle (fraction of its length).
+// Screen point along a gizmo axis handle (fraction of its length). Scale
+// handles follow the entity's own axes.
 bool handle_point(ed::Editor3DScreen& e, int axis, float frac, float* x, float* y) {
-  const s3::Entity3D* s = e.find(e.primary());
   const r3::Camera3D cam = e.editor_camera();
-  const float len = ed::Gizmo3D::handle_length(cam, kH, s->transform.position);
-  return cam.project(s->transform.position + ed::Gizmo3D::axis_dir(axis) * (len * frac), kW, kH,
-                     x, y);
+  const ed::GizmoFrame f = e.gizmo_frame();
+  const float len = ed::Gizmo3D::handle_length(cam, kH, f.origin);
+  const r3::Quat q = e.gizmo().mode == ed::GizmoMode::Scale ? f.scale_axes : f.axes;
+  return cam.project(f.origin + q.rotate(ed::Gizmo3D::axis_dir(axis)) * (len * frac), kW, kH, x,
+                     y);
 }
 
 }  // namespace

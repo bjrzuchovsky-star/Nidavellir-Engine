@@ -1,4 +1,5 @@
 #include "editor/export/FreightOffice.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/launch/GameLauncher.h"
 #include "editor/launch/OpenWithOs.h"
@@ -54,7 +55,7 @@ void FreightOffice::draw_distribution() {
   ImGui::Checkbox("Windows setup installer", &installer_);
   ImGui::BeginDisabled(!installer_);
   ImGui::InputText("License / EULA (txt or rtf)", license_, sizeof(license_));
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Project-relative file; shown as the installer's license page");
+  if (ImGui::IsItemHovered()) ux::SetTooltip("Project-relative file; shown as the installer's license page");
   const char* modes[] = {"Ask the player (per-user default)", "Per-user (no admin)", "All users (admin)"};
   ImGui::Combo("Install for", &install_mode_, modes, 3);
   ImGui::Checkbox("Start menu shortcut", &start_menu_);
@@ -121,6 +122,43 @@ void FreightOffice::open(const std::string& project_dir, const std::string& proj
 void FreightOffice::inspect() {
   report_ = exporter::validate_project(project_dir_, profile_ == 1 ? "dev" : "shipping");
   inspected_ = true;
+  third_party_ = exporter::provenance::shipped_third_party(project_dir_, exporter::content_files(project_dir_));
+  exporter::provenance::Ledger l;
+  exporter::provenance::load(project_dir_, &l);
+  rights_all_ = !l.acknowledged_all.empty();
+}
+
+void FreightOffice::draw_rights() {
+  if (third_party_.empty()) return;
+  ImGui::SeparatorText("Rights");
+  int open = 0;
+  for (const auto& s : third_party_) open += s.acknowledged ? 0 : 1;
+  ImGui::PushStyleColor(ImGuiCol_Text, open ? theme::Warning() : theme::TextMuted());
+  ImGui::TextWrapped("%zu imported third-party file(s) (Source engine formats / .gma addons) will ship. "
+                     "You need the rights to ship these. TombStone is not affiliated with Valve or Facepunch.",
+                     third_party_.size());
+  ImGui::PopStyleColor();
+  bool changed = false;
+  if (ImGui::Checkbox("I have the rights to ship all of these (this claim)", &rights_all_)) {
+    exporter::provenance::acknowledge(project_dir_, "", rights_all_);
+    changed = true;
+  }
+  if (ImGui::TreeNode("rights_list", "Per asset (%d not acknowledged)", open)) {
+    for (const auto& s : third_party_) {
+      bool ack = s.acknowledged;
+      ImGui::BeginDisabled(rights_all_);
+      if (ImGui::Checkbox(("##ack" + s.path).c_str(), &ack)) {
+        exporter::provenance::acknowledge(project_dir_, s.path, ack);
+        changed = true;
+      }
+      ImGui::EndDisabled();
+      ImGui::SameLine();
+      ImGui::TextWrapped("%s  [%s%s]", s.path.c_str(), s.origin.c_str(),
+                         s.author.empty() ? "" : (", by " + s.author).c_str());
+    }
+    ImGui::TreePop();
+  }
+  if (changed) inspect();
 }
 
 void FreightOffice::save_settings() {
@@ -197,6 +235,7 @@ void FreightOffice::draw() {
   ImGui::Checkbox("Dedicated server (ts_server)", &server_);
 
   draw_distribution();
+  draw_rights();
 
   ImGui::SeparatorText("Depot");
   ImGui::InputText("Output folder", out_dir_, sizeof(out_dir_));

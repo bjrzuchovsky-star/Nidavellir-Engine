@@ -3,6 +3,7 @@
 // RTT, bandwidth, snapshot rate, trail map) and the posse Viewport.
 
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/Tooltip.h"
 
 #include "editor/launch/GameLauncher.h"
 #include "editor/ui/QuadBlend.h"
@@ -390,7 +391,7 @@ void Editor2DScreen::draw_network_panel() {
     ImGui::Checkbox("Bot reins for P2-P4", &posse_bots_);
     if (theme::PrimaryButton("Ride with Posse", ImVec2(150, 0))) start_posse();
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("Start a local server on a loopback port and %d client(s) in this "
+      ux::SetTooltip("Start a local server on a loopback port and %d client(s) in this "
                         "editor, riding a copy of the scene", posse_riders_);
     }
     ImGui::TextDisabled("You ride P1 (WASD / arrows, E / Space). Edits wait until you're back.");
@@ -422,7 +423,7 @@ void Editor2DScreen::draw_network_panel() {
     if (theme::CopperButton("Open Client Window")) open_posse_client_window();
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-      ImGui::SetTooltip("Start ts_client in its own window, riding into this server");
+      ux::SetTooltip("Start ts_client in its own window, riding into this server");
     }
     ImGui::Checkbox("Bot reins for P2-P4", &posse_bots_);
   }
@@ -445,7 +446,7 @@ void Editor2DScreen::draw_network_panel() {
       sim = p.sim;
       changed = true;
     }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", p.blurb);
+    if (ImGui::IsItemHovered()) ux::SetTooltip("%s", p.blurb);
     ImGui::SameLine();
   }
   ImGui::NewLine();
@@ -507,7 +508,7 @@ void Editor2DScreen::draw_network_panel() {
       if (c) {
         ImGui::Text("%llu", static_cast<unsigned long long>(c->stats().corrections));
         if (ImGui::IsItemHovered()) {
-          ImGui::SetTooltip("Reconciliations that moved the predicted rider\nlast %.2f px, worst "
+          ux::SetTooltip("Reconciliations that moved the predicted rider\nlast %.2f px, worst "
                             "%.2f px\n%zu inputs in flight",
                             static_cast<double>(c->stats().last_correction_px),
                             static_cast<double>(c->stats().max_correction_px),

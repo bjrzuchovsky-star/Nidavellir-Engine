@@ -6,6 +6,7 @@
 #include "editor/team/TeamSession.h"
 #include "net/Net.h"
 #include "net/SimTransport.h"
+#include "render3d/Scene3D.h"
 #include "scene/SceneJson.h"
 #include "team/TeamClient.h"
 #include "team/TeamServer.h"
@@ -276,7 +277,7 @@ int check_2d() {
     o.claim = "*";
     o.key = "tsv_nope";
     o.scene2d = ts::tombstone::scene_json::kSceneVersion;
-    o.scene3d = 16;
+    o.scene3d = ts::tombstone::scene3d::kScene3DVersion;
     o.dim = "2d";
     bad.join(o, &err);
     ticks.push_back([&](float) { bad.poll(); });

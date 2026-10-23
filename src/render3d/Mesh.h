@@ -73,6 +73,12 @@ struct MaterialDesc {
   std::shared_ptr<const Image> metal_rough_image;
   bool double_sided = false;
   bool unlit = false;  // albedo straight out (UI panels)
+  // Alpha: kAlphaOpaque ignores the albedo alpha, kAlphaMask discards
+  // fragments below alpha_cutoff (foliage, fences), kAlphaBlend draws
+  // after the opaque meshes with alpha blending (glass, decals).
+  static constexpr int kAlphaOpaque = 0, kAlphaMask = 1, kAlphaBlend = 2;
+  int alpha_mode = kAlphaOpaque;
+  float alpha_cutoff = 0.5f;
   // Terrain splat (terrain/, render3d/GlTerrainFoliage): the RGBA weights
   // image blends four layer textures tiled in world space (metres per
   // repeat), each tinted. No splat image = an ordinary material.

@@ -36,6 +36,19 @@ struct Settings {
   // Tools: Blender for .blend import ("" = find it: TS_BLENDER, PATH,
   // registry, Program Files, Store / winget, Steam libraries).
   std::string blender_path;
+  // Script editor for "Open" on a script: "auto" | "vscode" | "vs" | "os".
+  std::string script_editor = "auto";
+  // Source engine formats (.mdl / .vtf / .vmt / .gma): extra read-only
+  // content folders searched for materials (';' separated), e.g. a game's
+  // content folder or extracted addons. See docs/model-import.md.
+  std::string source_search_folders;
+  // Field Guide (editor help): hover tooltips, their delay, the first-run
+  // walkthroughs and the command palette's recent list (docs/editor-guide.md).
+  bool tooltips_enabled = true;
+  std::string tooltip_delay = "0.50";   // seconds before a tooltip shows
+  bool walkthrough_2d_done = false;     // "Don't show again" / finished
+  bool walkthrough_3d_done = false;
+  std::string recent_items;             // "kind\tpath\tlabel" lines, newest first
 };
 
 class SettingsStore {

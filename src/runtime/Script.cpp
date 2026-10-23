@@ -362,9 +362,9 @@ bool LuaScriptHost::State::open() {
   return true;
 }
 
-ScriptInstance* LuaScriptHost::State::find(std::uint64_t entity) {
+ScriptInstance* LuaScriptHost::State::find(std::uint64_t entity, int slot) {
   for (auto& in : instances) {
-    if (in->entity == entity && !in->gone) {
+    if (in->entity == entity && in->slot == slot && !in->gone) {
       return in.get();
     }
   }
@@ -374,6 +374,13 @@ ScriptInstance* LuaScriptHost::State::find(std::uint64_t entity) {
 std::string LuaScriptHost::State::entity_name(std::uint64_t id) const {
   const Entity2D* e = world ? world->script_entity(id) : nullptr;
   return e ? e->name : "#" + std::to_string(id);
+}
+
+std::string LuaScriptHost::State::who(const ScriptInstance& in) const {
+  const Entity2D* e = world ? world->script_entity(in.entity) : nullptr;
+  const std::string name = e ? e->name : (!in.entity_label.empty() ? in.entity_label
+                                                                    : "#" + std::to_string(in.entity));
+  return "\"" + name + "\" (" + in.path + ")";
 }
 
 void LuaScriptHost::State::log(LogLevel level, const std::string& text,
@@ -409,20 +416,20 @@ void LuaScriptHost::State::fail(ScriptInstance* in, const std::string& message) 
   }
   const bool was_running = in->enabled;
   in->enabled = false;
-  drop_timers(in->entity);
+  drop_timers(in->entity, in->slot);
   if (was_running || !in->loaded) {
     log(LogLevel::Error,
-        rest + " -- " + entity_name(in->entity) +
-            "'s script is stopped; the rest of the world rides on",
+        rest + " -- " + who(*in) +
+            " is stopped; the rest of the world rides on",
         file, line, in->entity);
   } else {
-    log(LogLevel::Error, rest, file, line, in->entity);
+    log(LogLevel::Error, rest + " -- " + who(*in), file, line, in->entity);
   }
 }
 
-void LuaScriptHost::State::drop_timers(std::uint64_t entity) {
+void LuaScriptHost::State::drop_timers(std::uint64_t entity, int slot) {
   auto it = std::remove_if(timers.begin(), timers.end(), [&](const ScriptTimer& t) {
-    if (t.entity != entity) {
+    if (t.entity != entity || (slot >= 0 && t.slot != slot)) {
       return false;
     }
     luaL_unref(L, LUA_REGISTRYINDEX, t.fn);
@@ -430,7 +437,7 @@ void LuaScriptHost::State::drop_timers(std::uint64_t entity) {
   });
   timers.erase(it, timers.end());
   auto ui = std::remove_if(ui_handlers.begin(), ui_handlers.end(), [&](const ScriptUiHandler& h) {
-    if (h.entity != entity) {
+    if (h.entity != entity || (slot >= 0 && h.slot != slot)) {
       return false;
     }
     luaL_unref(L, LUA_REGISTRYINDEX, h.fn);
@@ -578,19 +585,21 @@ LuaScriptHost::LuaScriptHost(ScriptWorld& world, ScriptLibrary& library,
 
 LuaScriptHost::~LuaScriptHost() = default;
 
-bool LuaScriptHost::attach(const Entity2D& e) {
+bool LuaScriptHost::attach(const Entity2D& e, int slot) {
   if (!e.script) {
     return false;
   }
   bool ok = false;
   guarded(*s_, [&] {
     State& s = *s_;
-    if (s.find(e.id)) {
+    if (s.find(e.id, slot)) {
       return;
     }
     auto owned = std::make_unique<ScriptInstance>();
     ScriptInstance& in = *owned;
     in.entity = e.id;
+    in.slot = slot;
+    in.entity_label = e.name;
     in.path = e.script->path;
     in.overrides = e.script->props;
     lua_newtable(s.L);
@@ -609,8 +618,8 @@ bool LuaScriptHost::attach(const Entity2D& e) {
     if (!src || !src->ok) {
       in.loaded = false;
       s.log(LogLevel::Error,
-            (src ? src->error : std::string("Script not found")) + " (" +
-                e.name + ")",
+            (src ? src->error : std::string("Script not found")) + " -- " +
+                s.who(in),
             in.path, 0, e.id);
       return;
     }
@@ -621,28 +630,34 @@ bool LuaScriptHost::attach(const Entity2D& e) {
 
 void LuaScriptHost::detach(std::uint64_t entity) {
   guarded(*s_, [&] {
-    if (ScriptInstance* in = s_->find(entity)) {
-      in->gone = true;
-      in->enabled = false;
-      s_->drop_timers(entity);
+    bool any = false;
+    for (auto& in : s_->instances) {
+      if (in->entity == entity && !in->gone) {
+        in->gone = true;
+        in->enabled = false;
+        any = true;
+      }
+    }
+    if (any) {
+      s_->drop_timers(entity, -1);
       s_->sweep();
     }
   });
 }
 
-bool LuaScriptHost::has(std::uint64_t entity) const {
-  return s_->find(entity) != nullptr;
+bool LuaScriptHost::has(std::uint64_t entity, int slot) const {
+  return s_->find(entity, slot) != nullptr;
 }
 
-bool LuaScriptHost::running(std::uint64_t entity) const {
-  const ScriptInstance* in = s_->find(entity);
+bool LuaScriptHost::running(std::uint64_t entity, int slot) const {
+  const ScriptInstance* in = s_->find(entity, slot);
   return in && in->loaded && in->enabled && !s_->broken;
 }
 
-bool LuaScriptHost::has_hook(std::uint64_t entity, const char* hook) {
+bool LuaScriptHost::has_hook(std::uint64_t entity, int slot, const char* hook) {
   bool yes = false;
   guarded(*s_, [&] {
-    ScriptInstance* in = s_->find(entity);
+    ScriptInstance* in = s_->find(entity, slot);
     if (in && s_->push_hook(*in, hook)) {
       lua_pop(s_->L, 1);
       yes = true;
@@ -655,13 +670,13 @@ std::size_t LuaScriptHost::instance_count() const { return s_->instances.size();
 std::size_t LuaScriptHost::timer_count() const { return s_->timers.size(); }
 std::size_t LuaScriptHost::memory_used() const { return s_->mem_used; }
 
-void LuaScriptHost::start_pending() {
+void LuaScriptHost::start_pending(int slot) {
   guarded(*s_, [&] {
     State& s = *s_;
     // Index loop: on_start may spawn (append) more instances.
     for (std::size_t i = 0; i < s.instances.size(); ++i) {
       ScriptInstance* in = s.instances[i].get();
-      if (in->started || in->gone || !in->loaded || !in->enabled) {
+      if (in->slot != slot || in->started || in->gone || !in->loaded || !in->enabled) {
         continue;
       }
       in->started = true;
@@ -673,11 +688,11 @@ void LuaScriptHost::start_pending() {
   });
 }
 
-void LuaScriptHost::trigger(bool enter, std::uint64_t trigger,
+void LuaScriptHost::trigger(bool enter, std::uint64_t trigger, int slot,
                          std::uint64_t other) {
   guarded(*s_, [&] {
     State& s = *s_;
-    ScriptInstance* in = s.find(trigger);
+    ScriptInstance* in = s.find(trigger, slot);
     if (in && in->started &&
         s.push_hook(*in, enter ? "on_trigger_enter" : "on_trigger_exit")) {
       push_entity(s.L, other);
@@ -687,10 +702,10 @@ void LuaScriptHost::trigger(bool enter, std::uint64_t trigger,
   });
 }
 
-void LuaScriptHost::interact(std::uint64_t target, std::uint64_t rider) {
+void LuaScriptHost::interact(std::uint64_t target, int slot, std::uint64_t rider) {
   guarded(*s_, [&] {
     State& s = *s_;
-    ScriptInstance* in = s.find(target);
+    ScriptInstance* in = s.find(target, slot);
     if (in && in->started && s.push_hook(*in, "on_interact")) {
       push_entity(s.L, rider);
       s.call(in, 1);
@@ -699,11 +714,11 @@ void LuaScriptHost::interact(std::uint64_t target, std::uint64_t rider) {
   });
 }
 
-void LuaScriptHost::hand_event(std::uint64_t target, const char* hook, const std::string& text,
-                            double number) {
+void LuaScriptHost::hand_event(std::uint64_t target, int slot, const char* hook,
+                            const std::string& text, double number) {
   guarded(*s_, [&] {
     State& s = *s_;
-    ScriptInstance* in = s.find(target);
+    ScriptInstance* in = s.find(target, slot);
     if (in && in->started && s.push_hook(*in, hook)) {
       lua_pushlstring(s.L, text.data(), text.size());
       lua_pushnumber(s.L, number);
@@ -721,7 +736,7 @@ void LuaScriptHost::ui_event(const std::string& widget, bool change, double valu
     const std::vector<ScriptUiHandler> hs = s.ui_handlers;
     for (const ScriptUiHandler& h : hs) {
       if (h.change != change || h.widget != widget) continue;
-      ScriptInstance* in = s.find(h.entity);
+      ScriptInstance* in = s.find(h.entity, h.slot);
       if (!in || !in->enabled || !s.world->script_entity(h.entity)) continue;
       lua_rawgeti(s.L, LUA_REGISTRYINDEX, h.fn);
       lua_pushlstring(s.L, widget.data(), widget.size());
@@ -733,16 +748,17 @@ void LuaScriptHost::ui_event(const std::string& widget, bool change, double valu
   });
 }
 
-void LuaScriptHost::broadcast(const char* hook, const std::string& text, double number) {
+void LuaScriptHost::broadcast(int slot, const char* hook, const std::string& text,
+                              double number) {
   guarded(*s_, [&] {
     State& s = *s_;
     std::vector<std::uint64_t> ids;
     for (const auto& in : s.instances) {
-      if (in && in->started) ids.push_back(in->entity);
+      if (in && in->started && in->slot == slot) ids.push_back(in->entity);
     }
     std::sort(ids.begin(), ids.end());
     for (std::uint64_t id : ids) {
-      ScriptInstance* in = s.find(id);
+      ScriptInstance* in = s.find(id, slot);
       if (!in || !in->started || !s.push_hook(*in, hook)) continue;
       lua_pushlstring(s.L, text.data(), text.size());
       lua_pushnumber(s.L, number);
@@ -776,7 +792,7 @@ void LuaScriptHost::run_timers(std::uint64_t tick) {
       } else {
         s.timers.erase(best);
       }
-      ScriptInstance* in = s.find(t.entity);
+      ScriptInstance* in = s.find(t.entity, t.slot);
       lua_rawgeti(s.L, LUA_REGISTRYINDEX, t.fn);
       if (t.period == 0) {
         luaL_unref(s.L, LUA_REGISTRYINDEX, t.fn);
@@ -791,13 +807,13 @@ void LuaScriptHost::run_timers(std::uint64_t tick) {
   });
 }
 
-void LuaScriptHost::tick(double dt) {
+void LuaScriptHost::tick(double dt, int slot) {
   guarded(*s_, [&] {
     State& s = *s_;
     const std::size_t n = s.instances.size();  // spawned this tick wait
     for (std::size_t i = 0; i < n && i < s.instances.size(); ++i) {
       ScriptInstance* in = s.instances[i].get();
-      if (in->started && s.push_hook(*in, "on_tick")) {
+      if (in->slot == slot && in->started && s.push_hook(*in, "on_tick")) {
         lua_pushnumber(s.L, dt);
         s.call(in, 1);
       }

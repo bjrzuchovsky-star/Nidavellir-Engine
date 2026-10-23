@@ -64,7 +64,8 @@ class Team2DBinding final : public TeamBinding {
 
   bool busy() const override {
     const Workspace2D& w = s_.workspace();
-    return w.edit_open() || w.move_active() || w.transform_active() || s_.is_playing() ||
+    return w.edit_open() || w.move_active() || w.transform_active() || w.xform_running() ||
+           s_.is_playing() ||
            s_.stroke_active();
   }
 

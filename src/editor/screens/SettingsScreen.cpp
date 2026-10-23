@@ -1,13 +1,18 @@
 #include "render3d/ModelImport.h"
+#include "render3d/import/SourceMaterials.h"
 #include "editor/screens/SettingsScreen.h"
 
 #include "editor/update/UpdateService.h"
 
 #include "editor/ui/Theme.h"
+#include "editor/ux/EditorUx.h"
+#include "editor/ux/Tooltip.h"
+#include "editor/scripting/ScriptComponents.h"
 
 #include <imgui.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 #include <iostream>
@@ -40,6 +45,8 @@ void SettingsScreen::sync_buffers_from_draft() {
                sizeof(username_buf_) - 1);
   std::memset(blender_buf_, 0, sizeof(blender_buf_));
   std::strncpy(blender_buf_, draft_.blender_path.c_str(), sizeof(blender_buf_) - 1);
+  std::memset(source_folders_buf_, 0, sizeof(source_folders_buf_));
+  std::strncpy(source_folders_buf_, draft_.source_search_folders.c_str(), sizeof(source_folders_buf_) - 1);
   theme_index_ = theme_to_index(draft_.theme);
 }
 
@@ -47,6 +54,7 @@ void SettingsScreen::sync_draft_from_buffers() {
   draft_.projects_root = projects_root_buf_;
   draft_.username = username_buf_;
   draft_.blender_path = blender_buf_;
+  draft_.source_search_folders = source_folders_buf_;
   draft_.theme = index_to_theme(theme_index_);
 }
 
@@ -57,13 +65,25 @@ void SettingsScreen::on_enter() {
   folder_browser_.close();
   blender_browser_.close();
   blender_probed_ = false;
+  source_browser_.close();
+  source_probed_ = false;
   sync_buffers_from_draft();
+  focus_section_ = ux::take_settings_section();  // palette "Settings > Tools" etc.
   std::cout << "[Settings] edit config\n";
 }
 
 void SettingsScreen::on_exit() {
   folder_browser_.close();
   std::cout << "[Settings] leaving\n";
+}
+
+void SettingsScreen::section_header(const char* name, const char* sub) {
+  theme::SectionHeader(name, sub);
+  if (!focus_section_.empty() && focus_section_ == name) {
+    ImGui::SetScrollHereY(0.0f);  // palette jump lands on this section
+    focused_section_ = focus_section_;
+    focus_section_.clear();
+  }
 }
 
 void SettingsScreen::draw_ui() {
@@ -80,7 +100,7 @@ void SettingsScreen::draw_ui() {
   ImGui::TextDisabled("Ledger file: %s",
                       SettingsStore::default_settings_path().c_str());
 
-  theme::SectionHeader("Territory", "where projects live");
+  section_header("Territory", "where projects live");
   ImGui::SetNextItemWidth(-110.0f);
   ImGui::InputTextWithHint("##projects_root", "./TombStoneProjects",
                            projects_root_buf_, sizeof(projects_root_buf_));
@@ -99,14 +119,14 @@ void SettingsScreen::draw_ui() {
     }
   }
 
-  theme::SectionHeader("Rider", "account");
+  section_header("Rider", "account");
   ImGui::SetNextItemWidth(-1);
   ImGui::InputTextWithHint("##username", "Default rider name", username_buf_,
                            sizeof(username_buf_));
   ImGui::Checkbox("Ride in on Dev login at startup", &draft_.auto_login_dev);
   theme::StatusInfo("Skips the gate and signs in as the saved rider.");
 
-  theme::SectionHeader("Lamplight", "appearance");
+  section_header("Lamplight", "appearance");
   const char* themes[] = {"Dusk  (charcoal + amber)",
                           "Parchment  (warm light)"};
   ImGui::SetNextItemWidth(280.0f);
@@ -114,7 +134,7 @@ void SettingsScreen::draw_ui() {
   ImGui::SameLine();
   ImGui::TextDisabled("Theme");
 
-  theme::SectionHeader("Supply Run", "engine updates");
+  section_header("Supply Run", "engine updates");
   ImGui::Checkbox("Check for updates on start", &draft_.check_updates_on_start);
   if (update::url_supported(update::kLatestReleaseUrl)) {
     theme::StatusInfo("Asks GitHub for a newer release when the Project Manager opens (at most every 6 hours).");
@@ -127,7 +147,7 @@ void SettingsScreen::draw_ui() {
     if (ImGui::SmallButton("Stop skipping")) draft_.update_skip_version.clear();
   }
 
-  theme::SectionHeader("Tools", "outside programs");
+  section_header("Tools", "outside programs");
   ImGui::SetNextItemWidth(-110.0f);
   ImGui::InputTextWithHint("Blender executable##blender", "auto (TS_BLENDER, PATH, registry, Steam...)",
                            blender_buf_, sizeof(blender_buf_));
@@ -166,8 +186,87 @@ void SettingsScreen::draw_ui() {
     }
   }
 
+  {
+    // Scripts: which outside editor "Open" uses (Inspector / Scripts panel /
+    // Asset Browser). VS Code / Visual Studio buttons always pick that one.
+    const ExternalEditor cur = external_editor_from_name(draft_.script_editor);
+    ImGui::SetNextItemWidth(-110.0f);
+    if (ImGui::BeginCombo("Open scripts in##script_editor", external_editor_label(cur))) {
+      for (ExternalEditor e : {ExternalEditor::Auto, ExternalEditor::VSCode, ExternalEditor::VisualStudio,
+                               ExternalEditor::Os}) {
+        if (ImGui::Selectable(external_editor_label(e), e == cur)) draft_.script_editor = external_editor_name(e);
+      }
+      ImGui::EndCombo();
+    }
+    const EditorInstall& vc = find_vscode();
+    const EditorInstall& vs = find_visual_studio();
+    ImGui::TextDisabled("VS Code: %s", vc.found ? vc.path.c_str() : "not found");
+    ImGui::TextDisabled("Visual Studio: %s", vs.found ? vs.path.c_str() : "not found");
+  }
+
+  {
+    // Source engine formats (.mdl / .vtf / .vmt / .gma): read-only content
+    // folders searched for materials (render3d/import/SourceMaterials.h).
+    ImGui::SetNextItemWidth(-110.0f);
+    ImGui::InputTextWithHint("Source content search folders##srcdirs",
+                             "folders with materials/ (';' separated), e.g. ...\\GarrysMod\\garrysmod",
+                             source_folders_buf_, sizeof(source_folders_buf_));
+    ImGui::SameLine();
+    if (theme::SecondaryButton("Add...##srcdirs", ImVec2(100, 0))) source_browser_.open(std::string());
+    auto add_folder = [&](const std::string& f) {
+      std::vector<std::string> list = render3d::source::split_folder_list(source_folders_buf_);
+      if (std::find(list.begin(), list.end(), f) == list.end()) list.push_back(f);
+      const std::string joined = render3d::source::join_folder_list(list);
+      std::memset(source_folders_buf_, 0, sizeof(source_folders_buf_));
+      std::strncpy(source_folders_buf_, joined.c_str(), sizeof(source_folders_buf_) - 1);
+    };
+    if (source_browser_.draw("Select a Source content folder")) {
+      const std::string picked = source_browser_.take_result();
+      if (!picked.empty()) add_folder(picked);
+    }
+    if (!source_probed_) {
+      source_found_ = render3d::source::detect_content_folders();
+      source_probed_ = true;
+    }
+    for (const std::string& f : source_found_) {
+      const std::vector<std::string> list = render3d::source::split_folder_list(source_folders_buf_);
+      if (std::find(list.begin(), list.end(), f) != list.end()) continue;
+      ImGui::TextDisabled("Found: %s", f.c_str());
+      ImGui::SameLine();
+      ImGui::PushID(f.c_str());
+      if (ImGui::SmallButton("Add")) add_folder(f);
+      ImGui::PopID();
+    }
+    theme::StatusInfo("Source engine formats (.mdl/.vtf/.vmt/.gma): materials are looked up here after the model's "
+                      "own folders and the claim. Only read, never copied. Import only content you have the rights to.");
+  }
+
+  section_header("Field Guide", "tooltips + walkthroughs");
+  ImGui::Checkbox("Show tooltips##ux_tips", &draft_.tooltips_enabled);
+  ux::SetTooltip("Hover help on buttons, fields and menus. Turn it off once you know the trail.");
+  {
+    float delay = std::strtof(draft_.tooltip_delay.c_str(), nullptr);
+    ImGui::BeginDisabled(!draft_.tooltips_enabled);
+    ImGui::SetNextItemWidth(200.0f);
+    if (ImGui::SliderFloat("Tooltip delay##ux_delay", &delay, 0.0f, 3.0f, "%.2f s")) {
+      draft_.tooltip_delay = ux::format_delay(delay);
+    }
+    ux::SetTooltip("How long to hover before a tooltip shows, in seconds (0 = straight away).");
+    ImGui::EndDisabled();
+  }
+  if (theme::SecondaryButton("Show walkthroughs again##ux_walk", ImVec2(220, 0))) {
+    draft_.walkthrough_2d_done = false;
+    draft_.walkthrough_3d_done = false;
+  }
+  ux::SetTooltip("The 2D and 3D tours run again next time each editor opens.\n"
+                 "You can also start one any time from Help > Walkthrough.");
+  ImGui::SameLine();
+  ImGui::TextDisabled("%s", (draft_.walkthrough_2d_done || draft_.walkthrough_3d_done)
+                                 ? "(seen)" : "(will run on next editor open)");
+  theme::StatusInfo("Ctrl+Shift+P in an editor opens the command palette: every menu action, panel and setting.");
+
   if (!draft_.last_project_path.empty()) {
-    theme::SectionHeader("Trail", "last session");
+    section_header("Trail", "last session");
     ImGui::TextDisabled("Last project: %s", draft_.last_project_path.c_str());
   }
 

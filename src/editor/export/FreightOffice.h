@@ -9,6 +9,9 @@
 
 #include "export/Exporter.h"
 #include "export/Installer.h"
+#include "export/Provenance.h"
+
+#include <vector>
 
 #include <string>
 
@@ -37,6 +40,7 @@ class FreightOffice {
   void ship();
   void save_settings();
   void draw_distribution();
+  void draw_rights();  // third-party content that would ship (export/Provenance.h)
 
   bool open_ = false;
   std::string project_dir_;
@@ -67,6 +71,8 @@ class FreightOffice {
   std::string settings_status_;
   bool pinned_ = false;
   float pin_[4] = {};
+  std::vector<exporter::provenance::Shipped> third_party_;
+  bool rights_all_ = false;
 };
 
 }  // namespace editor

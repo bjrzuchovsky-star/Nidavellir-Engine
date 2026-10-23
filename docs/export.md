@@ -21,9 +21,9 @@ On Windows, build Release first with `cmake --build build --config Release`. The
 | File | Contents |
 |---|---|
 | `<slug>.exe` | `ts_game`, renamed. On Windows, `icon.png` is stamped in as the exe icon. |
-| `game.json` | Manifest: name, version, icon, window size, start scene, dimension, `vr`, profile, pak |
+| `game.json` | Manifest: name, version, icon, window size, start scene, dimension, `vr`, profile, pak, `plugins` (what the game loads) |
 | `game.tspak` | Cooked content |
-| `plugins/` | Dynamic plugin DLLs the project enables |
+| `plugins/` | Dynamic plugin DLLs the project enables. Only the plugins the claim uses ship; physics and movement are built-in plugins that load only when the claim uses them ([physics.md](physics.md)). |
 | `server/` | Only with `--server`: `ts_server`, the content and a run script |
 | `README.txt`, `export_report.txt` | How to run the game, and the validation report |
 

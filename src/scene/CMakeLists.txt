@@ -3,6 +3,7 @@
 # no graphics API), so headless tools and servers can link it too.
 add_library(ts_scene
   Animation.cpp
+  CameraMigrate.cpp
   AutoTile.cpp
   SpriteSlice.cpp
   JsonFlat.cpp

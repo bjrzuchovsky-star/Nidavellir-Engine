@@ -1,5 +1,6 @@
 add_library(ts_core
   AppPaths.cpp
+  AssetMeta.cpp
   Engine.cpp
   MemImages.cpp
   Localization.cpp

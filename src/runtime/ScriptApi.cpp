@@ -312,6 +312,7 @@ int add_timer(lua_State* L, bool repeat) {
   ScriptTimer t;
   t.id = s.next_timer++;
   t.entity = s.current->entity;
+  t.slot = s.current->slot;
   t.due = s.world->script_tick() + ticks;
   t.period = repeat ? ticks : 0;
   lua_pushvalue(L, 2);
@@ -329,7 +330,7 @@ int g_cancel(lua_State* L) {
   State& s = host(L);
   for (auto it = s.timers.begin(); it != s.timers.end(); ++it) {
     if (static_cast<lua_Integer>(it->id) == id && s.current &&
-        it->entity == s.current->entity) {
+        it->entity == s.current->entity && it->slot == s.current->slot) {
       luaL_unref(L, LUA_REGISTRYINDEX, it->fn);
       s.timers.erase(it);
       lua_pushboolean(L, 1);
@@ -703,6 +704,7 @@ int add_ui_handler(lua_State* L, bool change) {
   lua_pushvalue(L, 2);
   ScriptUiHandler h;
   h.entity = s.current->entity;
+  h.slot = s.current->slot;
   h.widget = id;
   h.change = change;
   h.fn = luaL_ref(L, LUA_REGISTRYINDEX);
