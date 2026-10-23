@@ -6,6 +6,17 @@ All notable changes to TombStone Engine. The version number lives in the `VERSIO
 
 Work in progress for 0.2.0. Optional features ship as Trading Post plugins rather than in every game, starting with physics and player movement.
 
+### Team claims: ride a claim together, live (2D and 3D)
+- **Team > Host from my editor...** (LAN, UDP 24650, optional passcode) or **Team > Join a posse...** (a host's address, or `ts_vault --team` on UDP 8741 with your Vault key). Every edit lands on every screen within a few hundred milliseconds; late joiners get a snapshot and catch up.
+- Presence: the **Team** panel lists the posse with colours, scenes and locks; remote cursors and selection outlines in the viewport; `[locked: name]` badges in the Hierarchy. Viewers on read-only keys watch but take no locks.
+- Soft locks follow your selection. Edits to something another rider holds are turned back. **Take over** a lock its holder has left idle for 15 s.
+- **Mid-drag preview:** the posse sees an object move while you drag it; the edit itself lands once, when you let go.
+- Deletes, terrain sculpt / paint / foliage strokes (one compact patch per stroke) and files under `assets/` (through the Vault by SHA-256, on a worker thread with a progress bar; deleted files go to `.tombstone/team/trash/`) all travel.
+- Ctrl+Z undoes only your own steps.
+- **Sessions survive restarts:** the server keeps each claim's session on disk (`<vault>/team/`, or `<claim>/.tombstone/team/host/` when hosting from the editor). A dropped editor rides back in by itself as the same rider and merges what it changed while away; after an editor restart, **Ride back in** uses `.tombstone/team/last.json` (keys and passcodes are never saved).
+- `ts_admin --smoke-team` (also in `--smoke`). Docs: [docs/team-claims.md](docs/team-claims.md).
+- Not yet: a merge dialog for conflicting edits made while away (last write wins per entity), chat, roles, follow camera and playing together (1.0.0).
+
 ### Cameras are scene objects (2D and 3D)
 - **Create > Camera** in both editors. A camera is an ordinary object: select it, move it with the gizmo, parent it, give it scripts. It has a viewport icon and a frustum (3D) or view rectangle (2D), with the Play camera drawn in brass. Icons are hidden in Play.
 - Inspector: active, priority, perspective / orthographic, FOV, near / far, ortho size, clear colour and viewport rect (split screen, picture-in-picture). 3D adds the Fixed / Orbit / First person rig with distance, height and collision. 2D adds zoom, follow target, smoothing, dead zone and bounds.

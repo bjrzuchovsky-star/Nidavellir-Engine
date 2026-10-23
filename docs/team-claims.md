@@ -1,12 +1,12 @@
 # Live Team Claims (design, 0.2.0)
 
-> Status: **stage 1 in progress** on `feature/team-claims`.
+> Status: **stage 1 done** on `feature/team-claims` (ready for review for 0.2.0, not merged).
 >
 > | Stage | What | Ships in |
 > |---|---|---|
-> | 1 | Basic team claims: live op sync, presence / cursors / selection outlines, soft locks, late-join snapshot, Team menu (Host / Join / Users) | **0.2.0** |
+> | 1 | Basic team claims: live op sync, presence / cursors / selection outlines, soft locks with take-over, mid-drag preview, terrain sculpt / paint sync, files and deletes via the Vault, late-join snapshot, sessions that survive a restart, Team menu (Host / Join / Users) | **0.2.0** |
 > | 2 | Chat, roles, follow camera, play-test together | **1.0.0** |
-> | 3 | Offline edits + merge, change history with rollback | **1.0.0** |
+> | 3 | Conflict merge dialog, change history with rollback, LAN host hand-over | **1.0.0** |
 >
 > Stages 2 and 3 are designed here and not built yet.
 
@@ -31,6 +31,14 @@ The first rider joins with their Vault API key and their claim's id, which opens
 
 **While riding:** the **Team** panel lists the posse with colours, the scene each is in and how many locks each holds. Selecting an entity locks it for you; others see a coloured `[locked: name]` badge in the Hierarchy and your outline in the viewport, and an edit they make to it is turned back ("Edit undone: Locked by Annie"). Remote cursors show as coloured arrows with names. Ctrl+Z undoes only your own steps. **Leave** (or closing the editor) releases your locks at once; a crashed editor's locks go after 15 s.
 
+- **Mid-drag preview:** while you drag, rotate, scale or nudge something you hold, the posse sees it move live (about 20 times a second on the unreliable channel). The real edit still lands once, when you let go; Esc / right-click puts it back for everyone.
+- **Take over:** if someone has left a thing selected and walked off, the panel shows **Take over (n)** while you have it selected. Their lock passes to you once they have not touched it for **15 s**; while they are still working on it the server says so ("Annie is still working on it...") and nothing changes.
+- **Terrain:** sculpt, smooth, flatten, paint and foliage strokes travel as one compact patch per stroke (only the touched rectangle, base64 in the op), checked against the terrain entity's lock.
+- **Files:** with a Vault URL and key, files under `assets/` travel by SHA-256 on a worker thread; the panel shows a progress bar and the editor keeps running. Deleting a file deletes it for everyone (into `.tombstone/team/trash/`, never straight off the disk).
+- **Viewers** (read-only Vault keys) show in the posse with their cursor and selection, but take no locks and send no edits.
+- **Losing the trail:** if the connection drops, the editor keeps working and rides back in by itself (1 s, 2 s, 4 s ... up to every 15 s): "Lost the trail: riding back in". When it is back it is the same rider (same colour, same id range) and whatever you changed while away is merged on top of the posse's scene as one **Edits while away** step. A server restart works the same way, because the server keeps every claim's session on disk.
+- **Editor restart:** the panel remembers your last ride in `<claim>/.tombstone/team/last.json` (address, port, name, claim, a rejoin token; never your key or passcode) and offers **Ride back in**. Hosting again from the same claim picks up its saved session.
+
 **Checks:** `ts_admin --smoke-team` (in `--smoke` too) and `ts_vault --smoke`. `ts_admin --team-shot out.png` renders two editors riding together (docs screenshot).
 
 ---
@@ -39,7 +47,7 @@ The first rider joins with their Vault API key and their claim's id, which opens
 
 **Stage 1 goals**
 
-- Real-time edits for 2D (scene.json v11) and 3D / VR (Scene3D v16) claims, every editor tool included, because we sync what the undo system commits rather than each tool.
+- Real-time edits for 2D (scene.json v13) and 3D / VR (Scene3D v18) claims, every editor tool included, because we sync what the undo system commits rather than each tool.
 - Server-authoritative ordering: every committed edit gets a sequence number; clients apply their own edits straight away (optimistic) and reconcile when the server answers.
 - Late joiners get a snapshot plus the op tail and end up byte-identical with everyone else.
 - Soft locks per entity / asset while someone has it selected, is dragging it or has it in the Inspector. Released on deselect, disconnect or timeout.
@@ -48,7 +56,7 @@ The first rider joins with their Vault API key and their claim's id, which opens
 - Version guard: the session records the engine version and scene formats; a mismatched editor is refused (format) or warned (engine patch level).
 - `ts_admin --smoke-team`: a server and two headless editors in one process making conflicting edits; asserts convergence, lock behaviour and lock release on disconnect.
 
-**Not in stage 1 (0.2.0):** chat, roles beyond read-only keys, follow camera, play-testing together (stage 2, 1.0.0); offline edits, merge and history rollback (stage 3, 1.0.0); syncing terrain heightfield *data* files live (they go through the Vault as assets, see 7).
+**Not in stage 1 (0.2.0):** chat, roles beyond read-only keys, follow camera, play-testing together (stage 2, 1.0.0); a conflict merge dialog, history rollback and LAN host hand-over (stage 3, 1.0.0).
 
 ---
 
@@ -64,7 +72,8 @@ So a team op is the **entity-level difference a committed step made**:
 | `del` | `id` | remove one entity |
 | `order` | `ids` | the entity order (Hierarchy / draw order) after a reorder |
 | `set` | `key`, `v` | a scene-level block: 2D `tile_solidity`, `lighting`; 3D `environment`, `physics` |
-| `asset` | `path`, `sha256`, `size` | a project file changed; fetch that blob from the Vault |
+| `asset` | `path`, `sha256`, `size` | a project file changed; fetch that blob from the Vault (empty `sha256` = the file was deleted) |
+| `terrain` | `path`, `id`, `v` {`x`,`y`,`w`,`h` or `full`, heights / splat base64, foliage} | one stroke's rectangle of a terrain's height and splat data (3D) |
 
 An **op batch** (`commit`) is one undo step: a label ("Move 3", "Inspector: Speed"), the scene it applies to and its ops. The entity payload is the same JSON the scene file writes (`scene_json::entity_to_json` / `scene3d::entity_to_json`), so the wire format is versioned with the scene format and every component, present or future, syncs without team code knowing about it.
 
@@ -87,11 +96,11 @@ Why entity granularity: it is what locks protect, it makes concurrent edits to d
 - Transport: the engine's `net::Transport` over **ENet** (UDP, reliable ordered channel 0 for ops and locks, unreliable channel 1 for presence). The same code the multiplayer layer uses, tested and NAT-friendly; no WebSocket stack to maintain.
 - Auth: the `hello` carries a Vault **API key**; the server checks it with `VaultStore::check_key` (hash compare, never logged). The key name becomes the default display name. Read-only keys join as viewers (see edits, cannot send them).
 - Discovery: `GET /api/v1/team` (auth) lists open sessions (claim, scene formats, members) and the team port, so the editor's Join dialog can be filled from the Vault URL already in Settings.
-- One process, one folder: sessions live in memory; the op log is compacted into snapshots (3.4). Persisting a session across a server restart is stage 3.
+- One process, one folder: sessions live in memory, keyed by the claim's GUID, and the op log is compacted into snapshots (3.4). Each session is also written to `<vault root>/team/<claim>.team.json` about a second after it changes (and on shutdown): the scene docs, `seq`, the next id range and the riders with their rejoin tokens. On start the server loads them, so a restart keeps the posse's scene and everyone rides back in as themselves. This is the "claim checkpoint" in the Vault; clients still autosave their own scene.json.
 
 ### 3.2 Host from my editor (LAN)
 
-**Team > Host** starts the same `TeamServer` inside the editor on a UDP port (default 24650), seeded from the open scene, and joins it as the first member. Optional session passcode instead of API keys. Others **Team > Join** with `host:port`. If the host leaves, the session ends (stage 3: hand-over).
+**Team > Host** starts the same `TeamServer` inside the editor on a UDP port (default 24650), seeded from the open scene, and joins it as the first member. Optional session passcode instead of API keys. Others **Team > Join** with `host:port`. The session is saved in `<claim>/.tombstone/team/host/`, so hosting the same claim again continues it. If the host leaves, the session ends for now (stage 3: hand-over); the host's own editor does not try to reconnect to itself.
 
 ### 3.3 Protocol (proto 1)
 
@@ -99,14 +108,18 @@ One JSON object per ENet packet (`t` = type). Small, readable, versioned by `pro
 
 | Dir | `t` | Fields |
 |---|---|---|
-| C→S | `hello` | `proto`, `claim`, `claim_name`, `user`, `key` or `pass`, `engine`, `formats` {`scene2d`, `scene3d`}, `dim`, `scene`, `seed` (initial docs, only used if the session is new) |
-| S→C | `welcome` | `member`, `colour`, `session` {claim, engine, formats}, `ids` {lo, hi}, `snap_seq`, `docs`, `tail` (commits after the snapshot), `members`, `locks`, `warn` |
+| C→S | `hello` | `proto`, `claim`, `claim_name`, `user`, `key` or `pass`, `engine`, `formats` {`scene2d`, `scene3d`}, `dim`, `scene`, `seed` (initial docs, only used if the session is new), `rejoin` (token from an earlier welcome, optional) |
+| S→C | `welcome` | `member`, `colour`, `session` {claim, engine, formats}, `ids` {lo, hi}, `snap_seq`, `docs`, `tail` (commits after the snapshot), `members`, `locks`, `warn`, `rejoin` (token to keep), `back` (true when the token was known and the old id / colour restored) |
 | S→C | `refuse` | `reason` (version, auth, full) |
 | C→S | `op` | `cid` (client batch id), `scene`, `label`, `ops` |
 | S→* | `commit` | `seq`, `from`, `cid`, `scene`, `label`, `ops` (to everyone, sender included = the ack) |
 | S→C | `reject` | `cid`, `reason`, `by` (lock owner) |
 | C→S | `lock` | `keys`: the full set this member wants right now |
 | S→* | `locks` | the whole lock table `{key: member}` when it changes |
+| C→S | `take` | `keys`: take these locks over from an idle holder |
+| S→C | `lock_denied` | `keys`, `by`, `reason` (the holder is still working on it) |
+| S→* | `taken` | `keys`, `from`, `to` (a lock changed hands) |
+| C→S | `preview` / `preview_end` | unreliable, ~20 Hz while dragging: `scene`, `ops` (puts of entities the sender holds) / `ids`; relayed with `member`, never stored |
 | C→S | `pres` | unreliable, ~10 Hz: `scene`, `cursor` [x,y,z], `sel`, `cam` |
 | S→* | `pres` | the same plus `member` (relayed to the others) |
 | S→* | `member` / `left` | someone joined (name, colour) / left |
@@ -127,6 +140,8 @@ One JSON object per ENet packet (`t` = type). Small, readable, versioned by `pro
 - A client asks for the entities it has selected (and what the Inspector shows), which covers dragging and inspector focus. The server grants keys that are free or already the member's, denies keys held by others, and releases keys the member no longer asks for.
 - A batch touching an entity locked by someone else is **rejected** (the reject names the holder: "Locked by Mia"). Free entities are first come, first served.
 - Locks die with their holder: on disconnect at once; on silence after 15 s (ENet's own timeout usually beats it).
+- **Take-over:** each lock remembers when its holder last used it (a commit or preview touching it). `take` hands it over once it has been idle for 15 s (`ServerOptions::lock_idle_s`), otherwise `lock_denied`. The old holder's editor gets a note and stops asking for it; when a lock it still wants comes free it asks again.
+- Viewers never hold locks.
 - Shown as a coloured padlock and the holder's name in the Hierarchy, and a coloured outline in the viewport.
 
 ### 3.6 Presence
@@ -137,15 +152,15 @@ Server-assigned colours from the Dusk palette (sunset orange, sage, dusty blue, 
 
 ## 4. Assets via the Vault
 
-Scene ops reference assets by project path. When someone imports or changes a file during a session, the editor sends the blob to the Vault (resumable upload, `POST /api/v1/uploads`, content-addressed) and commits an `asset` op `{path, sha256, size}`. Every other member whose file hash differs downloads `GET /api/v1/blobs/<sha>` (verified SHA-256) and writes it in place; the asset database then rescans as usual. Nothing large goes over the op channel, and a repeated file is stored once. LAN sessions without a Vault fall back to a local-library folder share, or skip with a warning.
+Scene ops reference assets by project path. When someone imports or changes a file during a session, the editor sends the blob to the Vault (resumable upload, `POST /api/v1/uploads`, content-addressed) and commits an `asset` op `{path, sha256, size}`. Every other member whose file hash differs downloads `GET /api/v1/blobs/<sha>` (verified SHA-256) and writes it in place; the asset database then rescans as usual. Nothing large goes over the op channel, and a repeated file is stored once. This runs on a worker thread: big files never stall the editor, and the Team panel shows files and MB done. A deleted file travels as an `asset` op with no hash; the others move their copy into `.tombstone/team/trash/`. Sessions without a Vault URL sync the scene only, not files.
 
 ---
 
 ## 5. Version guard
 
-The session records the creator's engine version and scene formats (`scene2d` = 11, `scene3d` = 16).
+The session records the creator's engine version and scene formats (`scene2d` = 13, `scene3d` = 18 in 0.2.0).
 
-- Different scene format: **refused** ("This claim's posse rides Scene3D v17; this editor writes v16. Update TombStone to join.") because entity JSON could lose fields.
+- Different scene format: **refused** ("This claim's posse rides Scene3D v19; this editor writes v18. Update TombStone to join.") because entity JSON could lose fields.
 - Different engine version, same formats: allowed with a **warning** in the Team panel.
 - Different `proto`: refused.
 
@@ -162,12 +177,13 @@ The session records the creator's engine version and scene formats (`scene2d` = 
 
 ## 7. Known limits (stage 1)
 
-- Terrain heightfield / splat **data files** change outside scene.json; they sync as `asset` ops after each stroke (stage 1 sends them when the Vault is configured), not live per brush dab.
-- Mid-drag movement is only seen when the drag is committed (stage 2 may stream a transient preview on the unreliable channel).
-- Sessions are in memory; a server restart ends them (everyone keeps their local scene.json, which is always autosaved).
-- Remote batches wait while you are in the middle of a drag or Inspector edit and land when it ends.
-
----
+- **Merging after a dropped connection is entity-level, last write wins.** Your edits while away go on top of the posse's. If someone else changed the same entity meanwhile, yours wins; if they deleted it and you changed it, it comes back. Stage 3 adds a merge dialog for these.
+- **Terrain undo is a snapshot of the whole terrain.** Ctrl+Z after a stroke puts back the terrain as it was before it, which can undo another rider's stroke on the same terrain made in between. Lock the terrain (select it) while sculpting to avoid that.
+- Terrain patches are the touched rectangle, uncompressed; a stroke across the whole of a 1025 x 1025 terrain is a large op (several MB). Fine on a LAN, slow over the internet.
+- Your key and passcode are not saved, so after an editor restart you type them again before **Ride back in**.
+- The LAN host's editor does not reconnect to itself; when it closes, the session pauses until it hosts again.
+- Remote batches wait while you are in the middle of a drag or Inspector edit and land when it ends (the drag preview shows them moving in the meantime).
+- Deleted files go to `.tombstone/team/trash/` and are never emptied automatically.
 
 ## 8. Stage 2 (1.0.0; designed, not built)
 
@@ -178,14 +194,14 @@ The session records the creator's engine version and scene formats (`scene2d` = 
 
 ## 9. Stage 3 (1.0.0; designed, not built)
 
-- **Offline edits + merge**: the client journals its batches with the last seq it saw. On reconnect the server replays them on top of the current state: entities untouched since are applied; entities both sides changed are conflicts, shown in a merge dialog (theirs / mine / both as a copy).
+- **Conflict merge**: stage 1 already rides back in after a drop and merges edits made while away (last write wins per entity). Stage 3 shows the entities both sides changed in a merge dialog (theirs / mine / both as a copy) instead.
 - **Change history with rollback**: the server persists the commit log in SQLite next to `vault.db` (seq, author, label, time, ops, inverse ops). A History panel lists commits; **Roll back** commits the inverse ops as a new batch (history is never rewritten). Snapshots every N commits keep join fast.
-- Session persistence across server restarts and host hand-over for LAN sessions.
+- Host hand-over for LAN sessions. (Persistence across server restarts shipped in stage 1.)
 
-## 10. Open questions
+## 10. Decided for 0.2.0
 
-1. Should a 2D / 3D claim's session be keyed by the project GUID (stable across renames) or by the Vault item id once claims themselves live in the Vault?
-2. Locks: selection-based is simple but someone who leaves a selection on blocks others. Lease of 60 s idle, or "steal lock" for owners (stage 2)?
-3. Does the session server write the authoritative scene.json to the Vault (a "claim checkpoint" item), or do clients only autosave locally?
-4. Default team port: HTTP port + 1 (8741/UDP), or a fixed one so firewalls are simpler?
-5. Viewers on read-only keys: allowed to hold selection presence (outline) but no locks?
+1. Sessions are keyed by the **claim GUID** (stable across renames). Vault item ids can map onto it later.
+2. Locks follow the selection, and anyone can **take over** a lock idle for 15 s. Owner-only stealing waits for roles (stage 2).
+3. The server **writes the session to the Vault** (`<vault root>/team/`) and clients keep autosaving their scene.json.
+4. Team port: HTTP port + 1 for `ts_vault` (8741/UDP, `--team-port` to change); **24650/UDP** for hosting from the editor.
+5. Viewers show presence (cursor, selection outline) and take **no locks**.
