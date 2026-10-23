@@ -33,10 +33,21 @@ AppPublisher={#AppPublisher}
 AppPublisherURL={#AppUrl}
 AppSupportURL={#AppUrl}/issues
 VersionInfoVersion={#AppVersion}.0
+VersionInfoCompany={#AppPublisher}
+#ifdef Update
+VersionInfoDescription={#AppName} {#AppVersion} update
+#else
+VersionInfoDescription={#AppName} {#AppVersion} setup
+#endif
+VersionInfoProductName={#AppName}
+VersionInfoProductVersion={#AppVersion}
+VersionInfoCopyright=Copyright (c) 2026 Brenden Rzuchoveky / TombStone Engine. All rights reserved.
+; The Dusk tombstone icon (resources\windows\make_icons.py), same as ts_admin.exe.
+SetupIconFile=..\..\resources\windows\tombstone.ico
 DefaultDirName={autopf}\TombStone Engine
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
-UninstallDisplayIcon={app}\ts_admin.exe
+UninstallDisplayIcon={app}\ts_admin.exe,0
 UninstallDisplayName={#AppName} {#AppVersion}
 OutputDir={#OutDir}
 #ifdef Update

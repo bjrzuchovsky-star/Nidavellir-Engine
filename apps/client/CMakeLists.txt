@@ -20,6 +20,8 @@ add_executable(ts_client
   ${TS_GAME_APP_DIR}/HudText.cpp
   ${TS_GAME_APP_DIR}/GameUi.cpp
 )
+ts_win_resources(ts_client "TombStone multiplayer client")
+
 
 target_include_directories(ts_client PRIVATE
   ${TS_GAME_APP_DIR}

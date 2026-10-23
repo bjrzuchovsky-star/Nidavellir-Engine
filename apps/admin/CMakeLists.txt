@@ -57,6 +57,8 @@ add_executable(ts_admin
   VaultCli.cpp
   TerrainShot.cpp
 )
+ts_win_resources(ts_admin "TombStone Engine editor and Project Manager")
+
 
 target_link_libraries(ts_admin
   PRIVATE

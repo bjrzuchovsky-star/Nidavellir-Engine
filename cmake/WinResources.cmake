@@ -1,0 +1,30 @@
+# Windows resources for the shipped executables: VERSIONINFO (TombStone Team,
+# version from VERSION), the app icon and an application manifest (asInvoker,
+# per-monitor DPI aware, Windows 10/11). No-op off MSVC.
+#   ts_win_resources(<target> "<file description>" [ICON <file.ico> | NO_ICON])
+# ts_game takes NO_ICON: the exporter stamps each game's own icon into its copy.
+set(TS_WIN_RES_DIR "${CMAKE_CURRENT_LIST_DIR}/../resources/windows")
+function(ts_win_resources target description)
+  if(NOT MSVC)
+    return()
+  endif()
+  cmake_parse_arguments(TWR "NO_ICON" "ICON" "" ${ARGN})
+  set(TS_RC_NAME "${target}")
+  set(TS_RC_DESCRIPTION "${description}")
+  get_filename_component(_res "${TS_WIN_RES_DIR}" ABSOLUTE)
+  string(REPLACE "/" "\\\\" TS_RC_MANIFEST "${_res}/tombstone.manifest")
+  if(TWR_NO_ICON)
+    set(TS_RC_ICON_LINE "// no icon: stamped per game by the exporter")
+  else()
+    if(NOT TWR_ICON)
+      set(TWR_ICON tombstone.ico)
+    endif()
+    string(REPLACE "/" "\\\\" _ico "${_res}/${TWR_ICON}")
+    set(TS_RC_ICON_LINE "1 ICON \"${_ico}\"")
+  endif()
+  set(_rc "${CMAKE_CURRENT_BINARY_DIR}/${target}.rc")
+  configure_file("${TS_WIN_RES_DIR}/ts_app.rc.in" "${_rc}" @ONLY)
+  target_sources(${target} PRIVATE "${_rc}")
+  # The manifest is in the .rc; stop the linker adding its own default one.
+  target_link_options(${target} PRIVATE /MANIFEST:NO)
+endfunction()
