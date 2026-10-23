@@ -591,6 +591,22 @@ int check_3d() {
   if (!pump(ticks, [&] { return converged() && b.find(cb)->transform.position.y == before; }, 5)) {
     return fail("3D locked edit rolled back");
   }
+  // Deletes in 3D: B's delete of the sphere A holds is turned back ...
+  b.select(cb);
+  settle(ticks, 0.2);
+  if (b.delete_selected() == 0) return fail("3D delete (optimistic)");
+  if (!pump(ticks, [&] { return converged() && b.find(cb) != nullptr; }, 5)) {
+    return fail("3D delete of a locked entity comes back");
+  }
+  // ... and A's own delete of it reaches B, lock and all.
+  b.clear_selection();
+  if (a.delete_selected() == 0) return fail("3D host delete");
+  if (!pump(ticks, [&] { return converged() && !b.find(cb) && b.team().lock_holder(cb) == 0; }, 5)) {
+    return fail("3D delete reached B and freed the lock");
+  }
+  if (a.team().server()->sessions().at(0).locks.count(tc::entity_lock("scene.json", cb))) {
+    return fail("server dropped the deleted entity's lock");
+  }
   // Host leaves: the session ends for B.
   a.team().leave();
   if (!pump(ticks, [&] { return !b.team().joined(); }, 12)) return fail("host leaving ends the session");

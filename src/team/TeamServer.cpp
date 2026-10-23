@@ -334,6 +334,15 @@ void TeamServer::on_op(Member& m, const Value& msg) {
   Value c = batch_to_json(b);
   c.set("t", str("commit"));
   broadcast(s, c);
+  // A deleted entity (or file) holds no lock any more.
+  bool unlocked = false;
+  for (const Op& op : b.ops) {
+    std::string key;
+    if (op.kind == Op::Kind::Del) key = entity_lock(b.scene, op.id);
+    else if (op.kind == Op::Kind::Asset && op.sha256.empty()) key = asset_lock(op.key);
+    if (!key.empty()) unlocked |= s.locks.erase(key) > 0;
+  }
+  if (unlocked) send_locks(s);
   if (s.tail.size() >= std::max<std::size_t>(opt_.compact_every, 1)) {
     s.snap_docs = s.docs;
     s.snap_seq = s.seq;
