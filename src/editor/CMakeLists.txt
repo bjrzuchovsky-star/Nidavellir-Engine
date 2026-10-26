@@ -21,6 +21,7 @@ add_library(ts_editor
   team/Team3D.cpp
   team/TeamPanel.cpp
   team/TeamAssets.cpp
+  team/TeamFiles.cpp
   workspace/Workspace2D_History.cpp
   workspace/Workspace2D_Tiles.cpp
   workspace/Workspace2D_Tools.cpp

@@ -380,6 +380,13 @@ void Editor3DScreen::tick_team(float dt) {
   if (!team_) return;
   team_->tick(dt);
   for (const std::string& n : team_->take_notes()) note("Team: " + n);
+  // Files the posse sent (or removed): models / textures reload on the next
+  // draw and the Asset Browser shows them.
+  if (!team_->take_arrived().empty()) {
+    if (view_) view_->clear();
+    asset_browser_.rescan();
+    rescan_assets();
+  }
 }
 
 }  // namespace editor

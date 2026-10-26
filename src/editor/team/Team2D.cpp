@@ -212,6 +212,16 @@ void Editor2DScreen::tick_team(float dt) {
     note(n);
     telegraph_.add(runtime::LogLevel::Info, "team", n);
   }
+  // Files the posse sent (or removed): drop cached textures, rescan the
+  // Asset Browser, so sprites that point at them show up straight away.
+  const std::vector<std::string> arrived = team_->take_arrived();
+  if (!arrived.empty()) {
+    for (const std::string& rel : arrived) {
+      textures_.invalidate(asset_path(rel));
+      textures_.invalidate(rel);
+    }
+    asset_browser_.rescan();
+  }
 }
 
 }  // namespace editor

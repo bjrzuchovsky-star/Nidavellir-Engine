@@ -3,6 +3,7 @@
 #include "vault/Sha256.h"
 
 #include <filesystem>
+#include <algorithm>
 #include <set>
 
 namespace ts {
@@ -18,7 +19,25 @@ long long mtime_of(const fs::path& p) {
   return static_cast<long long>(fs::last_write_time(p, ec).time_since_epoch().count());
 }
 
+constexpr const char* kMetaPrefix = ".tombstone/meta/";
+
 }  // namespace
+
+bool team_meta_rel(const std::string& rel) {
+  return rel.rfind(std::string(kMetaPrefix) + "assets/", 0) == 0 && rel.size() > 5 &&
+         rel.compare(rel.size() - 5, 5, ".meta") == 0;
+}
+
+bool team_file_rel(const std::string& rel) {
+  if (rel.find(".team-part") != std::string::npos) return false;
+  return rel.rfind("assets/", 0) == 0 || team_meta_rel(rel);
+}
+
+std::string team_meta_asset(const std::string& rel) {
+  if (!team_meta_rel(rel)) return {};
+  const std::size_t n = std::string(kMetaPrefix).size();
+  return rel.substr(n, rel.size() - n - 5);
+}
 
 bool TeamAssetSync::start(TeamAssetPass pass, std::shared_ptr<vault::Backend> backend) {
   if (running() || !backend) return false;
@@ -85,13 +104,13 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
 
   // 1. Scan assets/ (mtime + size decide whether to re-hash).
   std::map<std::string, TeamLocalFile> now;
-  const fs::path dir = root / "assets";
-  if (fs::is_directory(dir, ec)) {
+  for (const fs::path dir : {root / "assets", root / ".tombstone" / "meta" / "assets"}) {
+    if (!fs::is_directory(dir, ec)) continue;
     for (fs::recursive_directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
       if (cancelled()) return;
       if (!it->is_regular_file(ec)) continue;
       const std::string rel = fs::relative(it->path(), root, ec).generic_string();
-      if (rel.empty() || rel.find(".team-part") != std::string::npos) continue;
+      if (rel.empty() || !team_file_rel(rel)) continue;
       TeamLocalFile f;
       f.size = static_cast<std::uint64_t>(it->file_size(ec));
       f.mtime = mtime_of(it->path());
@@ -107,6 +126,13 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
     }
   }
   p.files = now;
+  // An asset changed here since it came from the session is ours now.
+  for (auto it = p.fetched.begin(); it != p.fetched.end();) {
+    auto f = p.files.find(*it);
+    auto k = p.synced.find(*it);
+    if (f == p.files.end() || (k != p.synced.end() && k->second != f->second.sha)) it = p.fetched.erase(it);
+    else ++it;
+  }
   // What the session confirmed is in step; sends it confirmed are done.
   for (auto it = p.sent.begin(); it != p.sent.end();) {
     auto s = p.session.find(it->first);
@@ -132,7 +158,7 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
     if (f == p.files.end() && s != p.session.end() && s->second.sha256 == sha && !p.first) {
       if (p.can_write) {
         p.ops.push_back(team::Op::asset(rel, "", 0));
-        p.notes.push_back("Removed " + rel + " for the posse.");
+        if (!team_meta_rel(rel)) p.notes.push_back("Removed " + rel + " for the posse.");
         handled.insert(rel);
         it = p.synced.erase(it);
         continue;
@@ -150,8 +176,11 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
       if (ec) fs::remove(src, ec);
       if (!fs::exists(src, ec)) {
         p.files.erase(rel);
+        p.arrived.push_back(rel);
         ++p.removed;
-        p.notes.push_back("Removed " + rel + " (deleted by the posse; a copy is in .tombstone/team/trash).");
+        if (!team_meta_rel(rel)) {
+          p.notes.push_back("Removed " + rel + " (deleted by the posse; a copy is in .tombstone/team/trash).");
+        }
       }
       handled.insert(rel);
       it = p.synced.erase(it);
@@ -169,11 +198,21 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
       continue;
     }
     auto known = p.synced.find(rel);
-    if (s != p.session.end() && (p.first || (known != p.synced.end() && known->second == f.sha))) {
+    const bool meta = team_meta_rel(rel);
+    // A .meta never agreed with the session (made by this PC's asset scan
+    // for a file that just came in, or an older copy): the session's wins,
+    // so the GUID and import settings are the posse's.
+    if (s != p.session.end() && (p.first || (known != p.synced.end() && known->second == f.sha) ||
+                                 (meta && known == p.synced.end()))) {
       jobs.push_back({false, rel, s->second});  // unchanged here: theirs is newer
       continue;
     }
-    if (!p.can_write) continue;
+    // The .meta of a file fetched from the session waits for its author's.
+    if (meta && s == p.session.end() && p.fetched.count(team_meta_asset(rel))) continue;
+    if (!p.can_write) {
+      if (!meta && s == p.session.end()) p.held_back.push_back(rel);
+      continue;
+    }
     auto sent = p.sent.find(rel);
     if (sent != p.sent.end() && sent->second == f.sha) continue;  // waiting for the commit
     jobs.push_back({true, rel, team::AssetRef{f.sha, f.size}});
@@ -182,7 +221,9 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
     if (!p.files.count(rel) && !handled.count(rel) && !a.sha256.empty()) jobs.push_back({false, rel, a});
   }
 
-  // 4. Transfers.
+  // 4. Transfers. Fetched .meta files land before their assets, so the
+  // asset scan finds the posse's GUID instead of minting one.
+  std::stable_partition(jobs.begin(), jobs.end(), [](const Job& j) { return team_meta_rel(j.rel); });
   prog.files_total = static_cast<int>(jobs.size());
   prog.files_done = 0;
   prog.bytes_total = 0;
@@ -200,14 +241,17 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
       std::vector<std::string> missing;
       const std::string path = (root / fs::u8path(j.rel)).string();
       if (!backend.missing({j.ref.sha256}, &missing, &err)) {
-        p.notes.push_back("Vault: " + err);
+        p.error = err;
+        p.notes.push_back("Could not reach " + backend.label() + ": " + err);
         break;
       }
       if (!missing.empty() && !backend.upload(path, j.ref.sha256, j.ref.size, &err)) {
-        p.notes.push_back("Could not send " + j.rel + " to the Vault: " + err);
+        p.error = err;
+        p.notes.push_back("Could not send " + j.rel + " to " + backend.label() + ": " + err);
       } else {
         ups.push_back(team::Op::asset(j.rel, j.ref.sha256, j.ref.size));
         p.sent[j.rel] = j.ref.sha256;
+        p.fetched.erase(j.rel);
         ++p.up;
       }
     } else {
@@ -215,7 +259,9 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
       fs::create_directories(dest.parent_path(), ec);
       const fs::path part = dest.string() + ".team-part";
       if (!backend.download(j.ref.sha256, part.string(), &err)) {
-        p.notes.push_back("Could not fetch " + j.rel + " from the Vault: " + err);
+        p.error = err;
+        p.notes.push_back("Could not fetch " + j.rel + " from " + backend.label() + ": " + err);
+        fs::remove(part, ec);
       } else {
         fs::rename(part, dest, ec);
         if (ec) {
@@ -228,8 +274,10 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
         f.mtime = mtime_of(dest);
         p.files[j.rel] = f;
         p.synced[j.rel] = j.ref.sha256;
+        if (!team_meta_rel(j.rel)) p.fetched.insert(j.rel);
+        p.arrived.push_back(j.rel);
         ++p.down;
-        p.notes.push_back("Fetched " + j.rel + " from the Vault.");
+        if (!team_meta_rel(j.rel)) p.notes.push_back("Fetched " + j.rel + " from the posse.");
       }
     }
     ++prog.files_done;

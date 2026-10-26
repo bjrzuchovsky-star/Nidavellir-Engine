@@ -1,5 +1,8 @@
 #include "editor/team/TeamSession.h"
 
+#include "editor/settings/Settings.h"
+#include "editor/team/TeamFiles.h"
+
 #include "render3d/Scene3D.h"
 #include "scene/SceneJson.h"
 
@@ -25,7 +28,106 @@ const char* dim_of(const ProjectInfo& p) {
   return vr_enabled(p) ? "vr" : "3d";
 }
 
+bool is_loopback(const std::string& h) {
+  return h == "127.0.0.1" || h == "localhost" || h == "::1" || h == "[::1]" || h.rfind("127.", 0) == 0;
+}
+
+std::string url_host(const std::string& h) {
+  return h.find(':') != std::string::npos && h.front() != '[' ? "[" + h + "]" : h;
+}
+
+// "http://127.0.0.1:25565/x" -> its host part, and the URL with it swapped.
+bool split_url(const std::string& url, std::size_t* b, std::size_t* e) {
+  const std::size_t s = url.find("://");
+  if (s == std::string::npos) return false;
+  *b = s + 3;
+  if (*b < url.size() && url[*b] == '[') {
+    *e = url.find(']', *b);
+    if (*e == std::string::npos) return false;
+    ++*e;
+  } else {
+    *e = url.find_first_of(":/", *b);
+    if (*e == std::string::npos) *e = url.size();
+  }
+  return *e > *b;
+}
+
 }  // namespace
+
+bool TeamSession::settings_fallback = true;
+
+std::vector<std::string> TeamSession::take_arrived() {
+  std::vector<std::string> out;
+  out.swap(arrived_);
+  return out;
+}
+
+void TeamSession::choose_files_backend() {
+  files_chosen_ = true;
+  files_error_.clear();
+  const team::Value info = client_.files_info();
+  const std::string via = info.is_object() ? info.str("via") : std::string();
+  const std::string dialled = last_join_.host;
+  std::string key = files_key_;
+  Settings st;
+  bool have_st = false;
+  auto settings = [&]() -> const Settings& {
+    if (!have_st) {
+      st = SettingsStore::load();
+      have_st = true;
+    }
+    return st;
+  };
+  auto vault = [&](std::string url, const std::string& where) {
+    if (key.empty() && settings_fallback) key = settings().vault_api_key;
+    if (key.empty()) {
+      files_error_ = "Files can't travel: the posse's files live in the Vault at " + url +
+                     ", which needs your Vault API key. Put it in the Team panel's key box (or Settings > "
+                     "Vault > API key), then ride out and in again.";
+      return;
+    }
+    assets_ = std::make_shared<vault::RemoteBackend>(url, key);
+    files_route_ = "through the Vault at " + url + where;
+  };
+  if (!files_url_.empty()) {
+    vault(files_url_, " (typed in the Team panel)");
+  } else if (via == "vault") {
+    std::string url = info.str("url");
+    const bool far = !is_loopback(dialled);
+    if (url.empty()) {
+      const int port = static_cast<int>(info.num("port", 0));
+      if (info.flag("loopback", false) && far) {
+        files_error_ = "Files can't travel: the Vault at " + dialled + " only listens on its own PC "
+                       "(127.0.0.1). On the Vault PC, restart ts_vault with --host 0.0.0.0 and allow TCP " +
+                       std::to_string(port) + " through its firewall.";
+        return;
+      }
+      url = "http://" + url_host(dialled) + ":" + std::to_string(port);
+    } else {
+      std::size_t b = 0, e = 0;
+      if (far && split_url(url, &b, &e) && is_loopback(url.substr(b, e - b))) {
+        url = url.substr(0, b) + url_host(dialled) + url.substr(e);
+      }
+    }
+    vault(url, "");
+  } else if (via == "session") {
+    assets_ = std::make_shared<SessionBackend>(client_.rpc());
+    files_route_ = server_ ? "over the team session (you host them)" : "over the team session (the host keeps them)";
+  } else {
+    // An older host (TombStone 0.2.0) does not say where files travel.
+    const std::string url = settings_fallback ? settings().vault_url : std::string();
+    if (!url.empty()) {
+      vault(url, " (from Settings > Vault)");
+    } else {
+      files_error_ = "Files can't travel: this team host doesn't say where the posse's files live (it runs an "
+                     "older TombStone). Type its Vault URL in the Team panel (ts_vault: http://<host>:25565), "
+                     "or update the host.";
+    }
+  }
+  if (assets_ && !client_.can_write()) {
+    files_route_ += "; your key is read-only, so you see the posse's files but yours stay on this PC";
+  }
+}
 
 TeamSession::TeamSession(std::unique_ptr<TeamBinding> binding, ProjectInfo project)
     : binding_(std::move(binding)), project_(std::move(project)) {
@@ -103,6 +205,22 @@ bool TeamSession::host(const TeamHostSettings& s, std::string* error) {
   so.engine = TS_ENGINE_VERSION;
   // The claim's session outlives the editor: it is kept beside the project.
   if (!team_dir().empty()) so.state_dir = (std::filesystem::u8path(team_dir()) / "host").string();
+  // Where the posse's files travel: the Vault typed in the Team panel, else
+  // over the session itself (blobs kept beside the saved session).
+  if (!s.vault_url.empty()) {
+    so.files = team::Value::object();
+    so.files.set("via", team::Value::string("vault"));
+    so.files.set("url", team::Value::string(s.vault_url));
+  } else if (!so.state_dir.empty()) {
+    so.files = team::Value::object();
+    so.files.set("via", team::Value::string("session"));
+    blob_store_ = std::make_shared<SessionBlobStore>(
+        (std::filesystem::u8path(so.state_dir) / "blobs").string());
+    std::shared_ptr<SessionBlobStore> store = blob_store_;
+    so.blobs = [store](const std::string&, bool can_write, const team::Value& req) {
+      return store->handle(can_write, req);
+    };
+  }
   if (!server_->start(so, error)) {
     server_.reset();
     return false;
@@ -115,9 +233,8 @@ bool TeamSession::host(const TeamHostSettings& s, std::string* error) {
   o.seed[binding_->scene_key()] = binding_->capture();
   o.rejoin = saved_rejoin_;
   loaded_ = false;
-  if (!s.vault_url.empty()) {
-    assets_ = std::make_shared<vault::RemoteBackend>(s.vault_url, s.vault_key);
-  }
+  files_url_ = s.vault_url;
+  files_key_ = s.vault_key;
   last_join_ = o;
   last_join_host_ = true;
   if (!client_.join(o, error)) {
@@ -137,7 +254,8 @@ bool TeamSession::join(const TeamJoinSettings& s, std::string* error) {
   o.pass = s.pass;
   o.claim = s.claim.empty() ? "*" : s.claim;
   o.wrap_transport = s.wrap_transport;
-  if (!s.vault_url.empty()) assets_ = std::make_shared<vault::RemoteBackend>(s.vault_url, s.key);
+  files_url_ = s.vault_url;
+  files_key_ = s.key;
   // Seeds a session only if nobody is riding this claim yet (ts_vault).
   if (o.claim != "*") o.seed[binding_->scene_key()] = binding_->capture();
   o.rejoin = saved_rejoin_;
@@ -151,6 +269,7 @@ void TeamSession::leave() {
   was_joined_ = false;
   reconnecting_ = false;
   rejoin_pending_ = false;
+  client_.rpc()->close("You rode out.");  // a file transfer waiting on the host gives up
   asset_sync_.cancel_and_wait();
   client_.leave();
   if (server_) {
@@ -170,6 +289,13 @@ void TeamSession::leave() {
   files_.clear();
   synced_.clear();
   asset_sent_.clear();
+  fetched_.clear();
+  held_noted_.clear();
+  assets_.reset();
+  blob_store_.reset();
+  files_chosen_ = false;
+  files_route_.clear();
+  files_error_.clear();
   my_preview_ids_.clear();
   remote_preview_.clear();
   preview_closed_.clear();
@@ -180,6 +306,7 @@ void TeamSession::drop_now() {
   was_joined_ = false;
   reconnecting_ = false;
   rejoin_pending_ = false;
+  client_.rpc()->close("You rode out.");  // a file transfer waiting on the host gives up
   asset_sync_.cancel_and_wait();
   client_.drop_now();
   binding_->set_id_range(0, 0);
@@ -357,6 +484,10 @@ void TeamSession::tick(double dt) {
   team::Docs docs;
   if (client_.take_welcome(&docs)) {
     binding_->set_id_range(client_.id_lo(), client_.id_hi());
+    if (!assets_ && !files_chosen_) {
+      choose_files_backend();
+      if (!files_error_.empty()) notes_.push_back(files_error_);
+    }
     auto it = docs.find(scene);
     if (rejoin_pending_) {
       rejoin_pending_ = false;
@@ -583,6 +714,7 @@ bool TeamSession::sync_assets() {
   // Nothing in the saddlebag: a send the session never confirmed was
   // lost or turned back, so it may go again.
   if (client_.idle()) p.sent.clear();
+  p.fetched = fetched_;
   p.first = first_asset_pass_;
   p.can_write = client_.can_write();
   if (!asset_sync_.start(std::move(p), assets_)) return false;
@@ -596,6 +728,21 @@ void TeamSession::finish_asset_pass() {
   files_ = std::move(r.files);
   synced_ = std::move(r.synced);
   asset_sent_ = std::move(r.sent);
+  fetched_ = std::move(r.fetched);
+  for (const std::string& rel : r.arrived) {
+    const std::string asset = team_meta_asset(rel);
+    arrived_.push_back(asset.empty() ? rel : asset);
+  }
+  if (!r.error.empty()) {
+    files_error_ = "Files can't travel " + files_route_ + ": " + r.error;
+  } else if (assets_) {
+    files_error_.clear();
+  }
+  for (const std::string& rel : r.held_back) {
+    if (held_noted_.insert(rel).second) {
+      notes_.push_back("Read-only key: " + rel + " stays on this PC (the posse can't see it).");
+    }
+  }
   assets_up_ += r.up;
   assets_down_ += r.down;
   assets_removed_ += r.removed;

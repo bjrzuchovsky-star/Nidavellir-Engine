@@ -15,6 +15,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -37,6 +38,13 @@ struct TeamAssetProgress {
   std::uint64_t bytes_done = 0, bytes_total = 0;
 };
 
+// The files a pass carries: everything under assets/, and each asset's
+// .meta in the metadata folder (.tombstone/meta/assets/...), so GUIDs and
+// import settings match on every PC.
+bool team_file_rel(const std::string& rel);
+bool team_meta_rel(const std::string& rel);          // ".tombstone/meta/assets/....meta"
+std::string team_meta_asset(const std::string& rel);  // its asset ("assets/...") or ""
+
 struct TeamAssetPass {
   // In (copies: the pass never touches the session).
   std::string root;                                   // claim folder
@@ -44,11 +52,15 @@ struct TeamAssetPass {
   std::map<std::string, TeamLocalFile> files;         // last scan
   std::map<std::string, std::string> synced;          // path -> sha the session confirmed here
   std::map<std::string, std::string> sent;            // path -> sha sent, not confirmed yet
+  std::set<std::string> fetched;                      // assets that came from the session (not authored here)
   bool first = false;                                 // joining: the session's files win
   bool can_write = true;
   // Out.
   std::vector<team::Op> ops;  // asset ops to commit (sha "" = deleted here)
   std::vector<std::string> notes;
+  std::vector<std::string> arrived;  // project paths written / removed by this pass (caches reload)
+  std::vector<std::string> held_back;  // read-only: local files not sent
+  std::string error;                 // the Vault / host could not be used ("" = fine)
   std::uint64_t up = 0, down = 0, removed = 0;
 };
 

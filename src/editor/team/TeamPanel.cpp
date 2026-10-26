@@ -126,9 +126,10 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
       ImGui::InputInt("Port (UDP)", &t.ui.join_port);
       ImGui::InputText("Vault API key", t.ui.key, sizeof(t.ui.key), ImGuiInputTextFlags_Password);
       ImGui::InputText("Passcode", t.ui.pass, sizeof(t.ui.pass), ImGuiInputTextFlags_Password);
-      ImGui::InputText("Vault URL (files)", t.ui.vault_url, sizeof(t.ui.vault_url));
+      ImGui::InputText("Vault URL (optional)", t.ui.vault_url, sizeof(t.ui.vault_url));
       ImGui::TextDisabled("ts_vault --team: use your Vault key. LAN host: the passcode, if any.");
-      ImGui::TextDisabled("With a Vault URL, files under assets/ travel by SHA-256.");
+      ImGui::TextDisabled("Files under assets/ come to you on their own; leave the URL empty");
+      ImGui::TextDisabled("unless the host can't say where they live (older TombStone).");
       ImGui::TextDisabled("Joining swaps this claim's scene for the posse's.");
       const bool back = t.has_last_ride() && !t.last_ride_hosted();
       if (back) ImGui::TextDisabled("Filled in from your last ride (keys and passcodes are never saved).");
@@ -137,9 +138,10 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
       ImGui::InputInt("Port (UDP)", &t.ui.host_port);
       ImGui::InputText("Passcode (optional)", t.ui.pass, sizeof(t.ui.pass),
                        ImGuiInputTextFlags_Password);
-      ImGui::InputText("Vault URL (files)", t.ui.vault_url, sizeof(t.ui.vault_url));
+      ImGui::InputText("Vault URL (optional)", t.ui.vault_url, sizeof(t.ui.vault_url));
       ImGui::InputText("Vault API key", t.ui.key, sizeof(t.ui.key), ImGuiInputTextFlags_Password);
       ImGui::TextDisabled("Others join with this PC's address and the port.");
+      ImGui::TextDisabled("No Vault URL: the posse's files travel over the session itself.");
       ImGui::TextDisabled("The session is kept in .tombstone/team/host: hosting again picks it up.");
       const bool back = t.has_last_ride() && t.last_ride_hosted();
       if (ImGui::Button(back ? "Open the claim again (Host)" : "Open the claim (Host)")) host_now(t);
@@ -154,8 +156,14 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
     }
     ImGui::Text("Edits: %llu sent, seq %llu", static_cast<unsigned long long>(t.batches_sent()),
                 static_cast<unsigned long long>(c.seq()));
+    if (!t.files_error().empty()) {
+      ImGui::PushStyleColor(ImGuiCol_Text, theme::Danger());
+      ImGui::TextWrapped("%s", t.files_error().c_str());
+      ImGui::PopStyleColor();
+    }
     if (t.has_asset_backend()) {
-      ImGui::Text("Files via the Vault: %llu sent, %llu fetched, %llu removed",
+      if (!t.files_route().empty()) ImGui::TextWrapped("Files travel %s.", t.files_route().c_str());
+      ImGui::Text("Files: %llu sent, %llu fetched, %llu removed",
                   static_cast<unsigned long long>(t.assets_sent()),
                   static_cast<unsigned long long>(t.assets_fetched()),
                   static_cast<unsigned long long>(t.assets_removed()));

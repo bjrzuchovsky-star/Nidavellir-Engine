@@ -22,6 +22,7 @@
 #include <functional>
 #include <deque>
 #include <map>
+#include <set>
 #include <memory>
 #include <string>
 #include <vector>
@@ -103,6 +104,8 @@ struct TeamUiState {
   std::string last_error;
 };
 
+class SessionBlobStore;
+
 class TeamSession {
  public:
   TeamUiState ui;
@@ -146,6 +149,16 @@ class TeamSession {
   bool sync_assets();
   bool assets_busy() const { return asset_sync_.running(); }
   TeamAssetProgress asset_progress() const { return asset_sync_.progress(); }
+  // Where files travel for this ride, in words ("through the Vault at
+  // http://...", "over the team session"), and why they can't ("" = fine).
+  const std::string& files_route() const { return files_route_; }
+  const std::string& files_error() const { return files_error_; }
+  // Project paths the file passes wrote or removed since the last call: the
+  // editor drops its cached textures / models for them and rescans assets.
+  std::vector<std::string> take_arrived();
+  // Settings > Vault fills in a missing Vault URL / key (off in smokes, so
+  // they never read the PC's own settings).
+  static bool settings_fallback;
   std::uint64_t assets_sent() const { return assets_up_; }
   std::uint64_t assets_fetched() const { return assets_down_; }
   std::uint64_t assets_removed() const { return assets_removed_; }
@@ -203,12 +216,20 @@ class TeamSession {
   std::vector<std::string> notes_;
   std::deque<std::string> recent_notes_;
   void finish_asset_pass();
+  void choose_files_backend();
   void tick_previews(double dt, bool busy);
   void forget_previews(const std::vector<team::Op>& ops);
   std::shared_ptr<vault::Backend> assets_;
   std::map<std::string, TeamLocalFile> files_;  // project-relative path -> last scan
   std::map<std::string, std::string> synced_;   // path -> sha the session confirmed here
   std::map<std::string, std::string> asset_sent_;    // path -> sha sent, not confirmed yet
+  std::set<std::string> fetched_;               // assets that came from the session
+  std::vector<std::string> arrived_;
+  std::set<std::string> held_noted_;            // read-only: files we said stay here
+  std::string files_url_, files_key_;           // typed in the Team panel (override)
+  std::string files_route_, files_error_;
+  bool files_chosen_ = false;
+  std::shared_ptr<SessionBlobStore> blob_store_;  // hosting: files over the session
   double asset_clock_ = 0.0;
   bool first_asset_pass_ = true;  // joining: the session's files win
   std::uint64_t assets_up_ = 0, assets_down_ = 0, assets_removed_ = 0;
