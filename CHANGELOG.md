@@ -2,6 +2,16 @@
 
 All notable changes to TombStone Engine. The version number lives in the `VERSION` file at the repo root.
 
+## Unreleased
+
+### Team claims: riders see and place the posse's files
+- **Fixed:** a rider who joined could not see the claim's assets, and assets they imported or placed never reached anyone else. Files only travelled when every editor typed the Team panel's separate "Vault URL (files)", which was empty by default and silently skipped.
+- Riding in now brings every file under `assets/` and its `.meta` (same GUIDs and import settings) with nothing to type: `ts_vault --team` tells riders its HTTP port and they use the address they dialled; **Host from my editor** without a Vault carries the files over the team session itself (kept in `.tombstone/team/host/blobs/`). Whatever a rider imports, drops in, pulls from the Vault or places goes to the whole posse, in 2D and 3D.
+- Files that arrive mid-ride show up at once: cached textures and models reload and the Asset Browser rescans.
+- The Team panel says where files travel and, in red, why they can't: no Vault key, a Vault on 127.0.0.1 (use `ts_vault --host 0.0.0.0`), an older host with no URL, a refused key. Read-only keys see the posse's files and are told theirs stay on this PC.
+- The Team panel's Vault URL is now optional (an override). Older hosts fall back to Settings > Vault.
+- `ts_admin --smoke-team` checks a rider joining a ts_vault posse (files + identical `.meta`, both ways), a read-only rider, a LAN editor host with no Vault (3D models both ways) and the error for an older host.
+
 ## 0.2.0 — 2026-10-23
 
 A big ride: ride a claim together live with your posse (team claims), physics and player movement as Trading Post plugins, Garry's Mod / Source formats, Blender-style gizmos and G / R / S, Unity-style script components, cameras as scene objects with attach and follow tools, and the Field Guide (tooltips, command palette, walkthroughs, readable errors). `TombStone-0.2.0-update.exe` upgrades a 0.1.x install in place and keeps your claims, settings and the Vault. Older claims migrate on first open, with backups in `.tombstone/backup/`.

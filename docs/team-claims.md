@@ -27,6 +27,8 @@ ts_vault --root /srv/ts_vault --host 0.0.0.0 --port 8740 --team          # team 
 ts_vault --root /srv/ts_vault --team-port 9000                             # pick the UDP port
 ```
 
+`--host 0.0.0.0` matters: riders' files come over the HTTP port (TCP 8740 here, 25565 if that is your `--port`), so open it as well as the UDP team port. A Vault on `127.0.0.1` lets other PCs join but not get files, and their Team panel says so.
+
 The first rider joins with their Vault API key and their claim's id, which opens the session from their scene; the rest join with `*` (whatever claim the server runs, when it runs one) or the same id. The key's name is the rider's name unless they type one. Read-only keys ride as viewers. `GET /api/v1/team` (with a key) lists the open sessions. Team sessions listen on every interface; open the UDP port in the firewall only where you need it.
 
 **While riding:** the **Team** panel lists the posse with colours, the scene each is in and how many locks each holds. Selecting an entity locks it for you; others see a coloured `[locked: name]` badge in the Hierarchy and your outline in the viewport, and an edit they make to it is turned back ("Edit undone: Locked by Annie"). Remote cursors show as coloured arrows with names. Ctrl+Z undoes only your own steps. **Leave** (or closing the editor) releases your locks at once; a crashed editor's locks go after 15 s.
@@ -34,7 +36,7 @@ The first rider joins with their Vault API key and their claim's id, which opens
 - **Mid-drag preview:** while you drag, rotate, scale or nudge something you hold, the posse sees it move live (about 20 times a second on the unreliable channel). The real edit still lands once, when you let go; Esc / right-click puts it back for everyone.
 - **Take over:** if someone has left a thing selected and walked off, the panel shows **Take over (n)** while you have it selected. Their lock passes to you once they have not touched it for **15 s**; while they are still working on it the server says so ("Annie is still working on it...") and nothing changes.
 - **Terrain:** sculpt, smooth, flatten, paint and foliage strokes travel as one compact patch per stroke (only the touched rectangle, base64 in the op), checked against the terrain entity's lock.
-- **Files:** with a Vault URL and key, files under `assets/` travel by SHA-256 on a worker thread; the panel shows a progress bar and the editor keeps running. Deleting a file deletes it for everyone (into `.tombstone/team/trash/`, never straight off the disk).
+- **Files:** riding in brings the posse's files with you, with nothing extra to type: every file under `assets/` and its `.meta` (`.tombstone/meta/assets/...`, so GUIDs and import settings match) travel by SHA-256 on a worker thread, and whatever you import, drop in, pull from the Vault or place goes to everyone. The panel says where files travel ("through the Vault at http://...", "over the team session"), shows a progress bar, and the editor keeps running; sprites, models and the Asset Browser pick up files as they land. Deleting a file deletes it for everyone (into `.tombstone/team/trash/`, never straight off the disk). Details and the error messages in section 4.
 - **Viewers** (read-only Vault keys) show in the posse with their cursor and selection, but take no locks and send no edits.
 - **Losing the trail:** if the connection drops, the editor keeps working and rides back in by itself (1 s, 2 s, 4 s ... up to every 15 s): "Lost the trail: riding back in". When it is back it is the same rider (same colour, same id range) and whatever you changed while away is merged on top of the posse's scene as one **Edits while away** step. A server restart works the same way, because the server keeps every claim's session on disk.
 - **Editor restart:** the panel remembers your last ride in `<claim>/.tombstone/team/last.json` (address, port, name, claim, a rejoin token; never your key or passcode) and offers **Ride back in**. Hosting again from the same claim picks up its saved session.
@@ -52,7 +54,7 @@ The first rider joins with their Vault API key and their claim's id, which opens
 - Late joiners get a snapshot plus the op tail and end up byte-identical with everyone else.
 - Soft locks per entity / asset while someone has it selected, is dragging it or has it in the Inspector. Released on deselect, disconnect or timeout.
 - Presence: user list with colours, the scene each person is in, remote cursors in the viewport, remote selection outlines, lock badges in the Hierarchy.
-- Assets travel through the Vault by SHA-256, never inline in the op stream.
+- Assets (and their `.meta`) travel by SHA-256 through the Vault, or over the session for a LAN host, never inline in the op stream.
 - Version guard: the session records the engine version and scene formats; a mismatched editor is refused (format) or warned (engine patch level).
 - `ts_admin --smoke-team`: a server and two headless editors in one process making conflicting edits; asserts convergence, lock behaviour and lock release on disconnect.
 
@@ -109,7 +111,7 @@ One JSON object per ENet packet (`t` = type). Small, readable, versioned by `pro
 | Dir | `t` | Fields |
 |---|---|---|
 | C→S | `hello` | `proto`, `claim`, `claim_name`, `user`, `key` or `pass`, `engine`, `formats` {`scene2d`, `scene3d`}, `dim`, `scene`, `seed` (initial docs, only used if the session is new), `rejoin` (token from an earlier welcome, optional) |
-| S→C | `welcome` | `member`, `colour`, `session` {claim, engine, formats}, `ids` {lo, hi}, `snap_seq`, `docs`, `tail` (commits after the snapshot), `members`, `locks`, `warn`, `rejoin` (token to keep), `back` (true when the token was known and the old id / colour restored) |
+| S→C | `welcome` | `member`, `colour`, `session` {claim, engine, formats, `files` (where files travel, section 4)}, `ids` {lo, hi}, `snap_seq`, `docs`, `tail` (commits after the snapshot), `members`, `locks`, `warn`, `rejoin` (token to keep), `back` (true when the token was known and the old id / colour restored) |
 | S→C | `refuse` | `reason` (version, auth, full) |
 | C→S | `op` | `cid` (client batch id), `scene`, `label`, `ops` |
 | S→* | `commit` | `seq`, `from`, `cid`, `scene`, `label`, `ops` (to everyone, sender included = the ack) |
@@ -123,6 +125,8 @@ One JSON object per ENet packet (`t` = type). Small, readable, versioned by `pro
 | C→S | `pres` | unreliable, ~10 Hz: `scene`, `cursor` [x,y,z], `sel`, `cam` |
 | S→* | `pres` | the same plus `member` (relayed to the others) |
 | S→* | `member` / `left` | someone joined (name, colour) / left |
+| C→S | `blob_has` / `blob_put` / `blob_get` | files over the session (section 4): `rid`, `shas` / `sha`, `size`, `off`, `data` (base64) |
+| S→C | `blob_r` | the reply: `rid`, `ok`, `error`, `missing` / `done` / `size`, `data` |
 
 ### 3.4 Ordering, optimism and reconciling
 
@@ -150,9 +154,30 @@ Server-assigned colours from the Dusk palette (sunset orange, sage, dusty blue, 
 
 ---
 
-## 4. Assets via the Vault
+## 4. Project files (assets and their .meta)
 
-Scene ops reference assets by project path. When someone imports or changes a file during a session, the editor sends the blob to the Vault (resumable upload, `POST /api/v1/uploads`, content-addressed) and commits an `asset` op `{path, sha256, size}`. Every other member whose file hash differs downloads `GET /api/v1/blobs/<sha>` (verified SHA-256) and writes it in place; the asset database then rescans as usual. Nothing large goes over the op channel, and a repeated file is stored once. This runs on a worker thread: big files never stall the editor, and the Team panel shows files and MB done. A deleted file travels as an `asset` op with no hash; the others move their copy into `.tombstone/team/trash/`. Sessions without a Vault URL sync the scene only, not files.
+Scene ops reference assets by project path, so a rider needs the files as well as the scene. The files a session carries: everything under `assets/` and each asset's `.meta` under `.tombstone/meta/assets/` (the GUID, kind and import settings; without it a joiner would mint fresh GUIDs and default settings).
+
+**How it works.** A worker thread scans those two folders every 2 s (mtime + size decide whether to re-hash). A file that is new or changed here is sent by SHA-256 to the session's file store and announced with an `asset` op `{path, sha256, size}`; every other rider whose copy differs fetches the blob (verified SHA-256) and writes it in place. A deleted file travels as an `asset` op with no hash; the others move their copy into `.tombstone/team/trash/`. On joining, the session's files win. A `.meta` that never matched the session (the joiner's asset scan made one for a file that just arrived) is replaced by the posse's, and one for a file that came from the session waits for its author's, so GUIDs stay the same everywhere. A pass fetches `.meta` files before their assets. When files land, the editor drops its cached textures / models for them and rescans the Asset Browser, so sprites and models that use them show up straight away. Big files never stall the editor; the Team panel shows files and MB done.
+
+**Where files travel.** Nobody types a URL. The host says where in the `welcome` (`session.files`):
+
+| Host | `session.files` | Riders use |
+|---|---|---|
+| `ts_vault --team` | `{"via": "vault", "port": <HTTP port>}` (+ `"loopback": true` when it listens on 127.0.0.1) | the Vault's HTTP API at the address they dialled, `http://<that host>:<port>`, with their Vault key (`POST /api/v1/uploads`, `GET /api/v1/blobs/<sha>`) |
+| Host from my editor, Vault URL typed | `{"via": "vault", "url": ...}` (a 127.0.0.1 URL is swapped for the host's address) | that Vault, with their own key (the Team panel's key box, else Settings > Vault > API key) |
+| Host from my editor, no Vault | `{"via": "session"}` | the team session itself: `blob_has` / `blob_put` / `blob_get` requests (48 KB chunks, base64, reliable channel) answered by the host's editor from `<claim>/.tombstone/team/host/blobs/<aa>/<sha256>` |
+| older host (TombStone 0.2.0) | nothing | the Team panel's **Vault URL (optional)** if typed, else Settings > Vault > URL, else an error |
+
+A URL typed in the Team panel always wins (handy for a Vault behind a proxy with its own URL).
+
+**When files can't travel**, the Team panel says why in red, and the note goes to the Telegraph:
+
+- No key for the Vault: "Files can't travel: the posse's files live in the Vault at ..., which needs your Vault API key. Put it in the Team panel's key box (or Settings > Vault > API key), then ride out and in again."
+- Vault on 127.0.0.1 with a rider on another PC: "... restart ts_vault with --host 0.0.0.0 and allow TCP <port> through its firewall."
+- Older host, no URL: "Files can't travel: this team host doesn't say where the posse's files live (it runs an older TombStone). Type its Vault URL in the Team panel ..."
+- Vault or host unreachable, key refused: "Files can't travel through the Vault at ...: <the error>" (cleared by the next pass that works).
+- **Read-only key:** the panel says "your key is read-only, so you see the posse's files but yours stay on this PC"; each local file not sent gets a note once ("Read-only key: assets/cactus.png stays on this PC"), and an object you place is put back ("Read-only key: your edit was put back"). Session blobs refuse a read-only rider's upload with "Your key is read-only: you can see the posse's files but not place your own."
 
 ---
 
@@ -184,6 +209,9 @@ The session records the creator's engine version and scene formats (`scene2d` = 
 - The LAN host's editor does not reconnect to itself; when it closes, the session pauses until it hosts again.
 - Remote batches wait while you are in the middle of a drag or Inspector edit and land when it ends (the drag preview shows them moving in the meantime).
 - Deleted files go to `.tombstone/team/trash/` and are never emptied automatically.
+- Files over the team session (LAN host without a Vault) are kept by the host's editor in `.tombstone/team/host/blobs/` and never pruned; they move at LAN speed in 48 KB steps, fine for textures and models, slow for gigabytes. Use a Vault for big claims.
+- Only `assets/` and its `.meta` files travel. Scripts, prefabs and other files outside `assets/` stay local unless they are under it.
+- Two riders changing the same file at once: the last one sent wins (no file locks yet).
 
 ## 8. Stage 2 (1.0.0; designed, not built)
 
