@@ -295,6 +295,20 @@ void TeamServer::on_message(Member& m, const Value& msg, bool reliable) {
   if (t == "pres") return on_presence(m, msg);
   if (t == "prev") return on_preview(m, msg, false);
   if (t == "prev_end") return on_preview(m, msg, true);
+  if (t.rfind("blob_", 0) == 0) {
+    Value r = Value::object();
+    if (opt_.blobs) {
+      r = opt_.blobs(m.claim, m.can_write, msg);
+      if (!r.is_object()) r = Value::object();
+    } else {
+      r.set("ok", Value::boolean(false));
+      r.set("error", str("This team host does not carry files over the session; use a Vault URL."));
+    }
+    r.set("t", str("blob_r"));
+    r.set("rid", num(msg.num("rid", 0)));
+    send(m.peer, r);
+    return;
+  }
   if (t == "bye") {
     transport_->disconnect(m.peer, 0);
     on_gone(m.peer);
@@ -450,6 +464,7 @@ void TeamServer::on_hello(Member& m, const Value& msg) {
   formats.set("scene2d", num(s.scene2d));
   formats.set("scene3d", num(s.scene3d));
   sess.set("formats", std::move(formats));
+  if (!opt_.files.is_null()) sess.set("files", opt_.files);
   w.set("session", std::move(sess));
   Value ids = Value::object();
   ids.set("lo", id_value(lo));

@@ -70,6 +70,7 @@ void TeamClient::send(const Value& msg, bool reliable) {
 }
 
 void TeamClient::leave() {
+  rpc_->close("You rode off from the posse.");
   if (!transport_) return;
   if (state_ == State::Joined) {
     Value bye = Value::object();
@@ -94,6 +95,7 @@ void TeamClient::leave() {
 }
 
 void TeamClient::drop_now() {
+  rpc_->close("The connection to the team host was lost.");
   if (!transport_) return;
   transport_->close();
   transport_.reset();
@@ -131,6 +133,7 @@ void TeamClient::poll() {
         break;
       }
       case net::TransportEvent::Type::Disconnected:
+        rpc_->close("The connection to the team host was lost.");
         if (state_ != State::Refused) {
           state_ = State::Closed;
           if (error_.empty()) error_ = "The connection to the team host was lost.";
@@ -149,6 +152,9 @@ void TeamClient::poll() {
         break;
       }
     }
+  }
+  if (state_ == State::Joined && transport_) {
+    for (Value& req : rpc_->take_outgoing()) send(req);
   }
   if (state_ == State::Connecting && now() - connect_started_ > 10.0) {
     error_ = "No answer from " + opt_.host + ":" + std::to_string(opt_.port) + ".";
@@ -197,12 +203,17 @@ void TeamClient::on_message(const Value& msg) {
     }
     state_ = State::Joined;
     welcome_pending_ = true;
+    rpc_->open();
     want_sent_ = false;
     if (!want_.empty()) want_locks(want_);
     if (!warn_.empty()) notes_.push_back("Team: " + warn_);
     return;
   }
   if (state_ != State::Joined) return;
+  if (t == "blob_r") {
+    rpc_->deliver(msg);
+    return;
+  }
   if (t == "commit") {
     Batch b;
     if (batch_from_json(msg, &b)) on_commit(b);

@@ -50,6 +50,15 @@ struct ServerOptions {
   double save_delay_s = 1.0;
   // Tests: wrap the transport (net::SimTransport for latency).
   std::function<std::unique_ptr<net::Transport>(std::unique_ptr<net::Transport>)> wrap_transport;
+  // Where the claim's project files travel, told to every rider in the
+  // welcome (session.files): ts_vault {"via": "vault", "port": <HTTP>},
+  // an editor host {"via": "vault", "url": ...} or {"via": "session"}.
+  // Null = not said (riders fall back to their own Vault URL).
+  Value files;
+  // Blobs over the session ("blob_has" / "blob_put" / "blob_get" requests,
+  // docs/team-claims.md 4): the reply for one request (its "ok", "error",
+  // data). Null = this host carries no files.
+  std::function<Value(const std::string& claim, bool can_write, const Value& req)> blobs;
 };
 
 struct MemberInfo {

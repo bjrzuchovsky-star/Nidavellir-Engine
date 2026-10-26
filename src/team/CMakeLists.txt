@@ -5,6 +5,7 @@ add_library(ts_team
   TeamDoc.cpp
   TeamServer.cpp
   TeamClient.cpp
+  TeamRpc.cpp
 )
 
 target_include_directories(ts_team

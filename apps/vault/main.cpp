@@ -280,6 +280,14 @@ int main(int argc, char** argv) {
     to.log = log_line;
     // Sessions survive a restart: kept in the Vault beside the items.
     to.state_dir = (fs::absolute(root) / "team").string();
+    // Riders fetch and send the claim's files over this Vault's HTTP API
+    // (same key): tell them the port; they use the address they dialled.
+    to.files = team::Value::object();
+    to.files.set("via", team::Value::string("vault"));
+    to.files.set("port", team::Value::number(server.port()));
+    if (host == "127.0.0.1" || host == "localhost" || host == "::1") {
+      to.files.set("loopback", team::Value::boolean(true));
+    }
     if (!team_server.start(to, &err)) {
       std::cerr << "ts_vault: team sessions: " << err << '\n';
       return 1;
@@ -297,7 +305,12 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
       }
     });
-    log_line("team sessions on UDP " + std::to_string(team_server.port()));
+    log_line("team sessions on UDP " + std::to_string(team_server.port()) + "; riders' files travel over TCP " +
+             std::to_string(server.port()) + " (same API key)");
+    if (to.files.flag("loopback", false)) {
+      log_line("note: this Vault only listens on " + host +
+               ", so riders on other PCs can join but not get files; use --host 0.0.0.0");
+    }
   }
   while (!g_stop) std::this_thread::sleep_for(std::chrono::milliseconds(200));
   log_line("stopping");

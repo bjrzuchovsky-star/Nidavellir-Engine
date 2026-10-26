@@ -7,6 +7,7 @@
 
 #include "net/Transport.h"
 #include "team/TeamDoc.h"
+#include "team/TeamRpc.h"
 
 #include <chrono>
 #include <cstdint>
@@ -127,6 +128,14 @@ class TeamClient {
   // Things worth a toast ("Mia rode in", "Edit undone: locked by Mia").
   std::vector<std::string> take_notes();
 
+  // Request / reply with the session host from any thread (the file
+  // worker's blobs over the session). Open while joined.
+  std::shared_ptr<TeamRpc> rpc() const { return rpc_; }
+  // Where the session says project files travel (the welcome's
+  // session.files: {"via": "vault", "port" | "url"} or {"via": "session"});
+  // null from hosts before 0.2.1.
+  const Value& files_info() const { return session_["files"]; }
+
   std::uint64_t commits_seen() const { return commits_seen_; }
   std::uint64_t rejected() const { return rejected_; }
 
@@ -166,6 +175,7 @@ class TeamClient {
   std::uint64_t commits_seen_ = 0, rejected_ = 0;
   double connect_started_ = 0.0;
   std::chrono::steady_clock::time_point t0_;
+  std::shared_ptr<TeamRpc> rpc_ = std::make_shared<TeamRpc>();
 };
 
 }  // namespace team
