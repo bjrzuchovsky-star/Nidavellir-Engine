@@ -1,6 +1,9 @@
 // --smoke-team: Live Team Claims stage 1 (docs/team-claims.md).
 #include "SmokeTeam.h"
 
+#include "core/AssetMeta.h"
+#include "core/PngWrite.h"
+
 #include "editor/editor3d/Editor3DScreen.h"
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/team/TeamSession.h"
@@ -16,6 +19,7 @@
 #include "vault/VaultServer.h"
 #include "vault/VaultStore.h"
 
+#include <cstring>
 #include <fstream>
 #include <sstream>
 
@@ -603,6 +607,309 @@ int check_assets() {
   return rc;
 }
 
+// ---- Riding in: the posse's files and .meta come with you ----
+
+void spit(const fs::path& p, const std::string& d) {
+  std::error_code ec;
+  fs::create_directories(p.parent_path(), ec);
+  std::ofstream(p, std::ios::binary | std::ios::trunc) << d;
+}
+
+void png_file(const fs::path& p, int w, int h, unsigned char r) {
+  std::vector<unsigned char> px(static_cast<std::size_t>(w) * h * 4);
+  for (int i = 0; i < w * h; ++i) {
+    px[i * 4 + 0] = static_cast<unsigned char>(r ^ (i * 7));
+    px[i * 4 + 1] = 90;
+    px[i * 4 + 2] = 40;
+    px[i * 4 + 3] = 255;
+  }
+  std::error_code ec;
+  fs::create_directories(p.parent_path(), ec);
+  ts::tombstone::write_png_rgba(p.string(), w, h, px);
+}
+
+// One-triangle glTF with an external .bin.
+void gltf_file(const fs::path& file, float scale) {
+  std::string bin(36, '\0');
+  const float v[9] = {0, 0, 0, scale, 0, 0, 0, scale, 0};
+  std::memcpy(bin.data(), v, sizeof(v));
+  fs::path binp = file;
+  binp.replace_extension(".bin");
+  spit(binp, bin);
+  const std::string m = std::to_string(scale);
+  spit(file, R"({"asset":{"version":"2.0"},"buffers":[{"byteLength":36,"uri":")" + binp.filename().string() +
+                 R"("}],"bufferViews":[{"buffer":0,"byteLength":36}],)"
+                 R"("accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[)" +
+                 m + "," + m + R"(,0]}],)"
+                 R"("meshes":[{"primitives":[{"attributes":{"POSITION":0}}]}],"nodes":[{"mesh":0}],"scenes":[{"nodes":[0]}],"scene":0})");
+}
+
+fs::path meta_file(const fs::path& claim, const std::string& rel) {
+  return fs::u8path(ts::tombstone::core::asset_meta::meta_path(claim.string(), rel));
+}
+
+// Same bytes in both claims (file and its .meta).
+bool same_file(const fs::path& a, const fs::path& b, const std::string& rel) {
+  return fs::exists(a / rel) && fs::exists(b / rel) && slurp(a / rel) == slurp(b / rel);
+}
+bool same_meta(const fs::path& a, const fs::path& b, const std::string& rel) {
+  const fs::path ma = meta_file(a, rel), mb = meta_file(b, rel);
+  return fs::exists(ma) && fs::exists(mb) && slurp(ma) == slurp(mb);
+}
+
+bool has_sprite(ed::Editor2DScreen& s, const std::string& name, const std::string& path) {
+  for (const Entity2D& e : s.workspace().entities()) {
+    if (e.name == name && e.sprite && e.sprite->path == path) return true;
+  }
+  return false;
+}
+
+// ts_vault --team: no Vault URL typed anywhere; the server says where files
+// live. A has a texture + a sprite using it; B rides in and gets both, with
+// the identical .meta (same GUID); B imports a texture and places it, A gets
+// both; a read-only rider sees everything but can't place.
+int check_ride_in_vault() {
+  namespace tv = ts::tombstone::vault;
+  const fs::path vroot = fs::temp_directory_path() / "ts_team_smoke_ridein_vault";
+  std::error_code ec;
+  fs::remove_all(vroot, ec);
+  tv::VaultStore store;
+  std::string err;
+  if (!store.open(vroot.string(), &err)) return fail("ride-in vault open: " + err);
+  const std::string k_annie = store.add_key("Annie", true, &err);
+  const std::string k_wyatt = store.add_key("Wyatt", true, &err);
+  const std::string k_watch = store.add_key("Watcher", false, &err);
+  tv::VaultServer vs(store);
+  tv::ServerOptions vo;
+  vo.port = 0;
+  if (k_watch.empty() || !vs.start(vo, &err)) return fail("ride-in vault start: " + err);
+  int rc = 0;
+  {
+    tc::TeamServer server;
+    tc::ServerOptions so;
+    so.port = 0;
+    so.check_key = [&store](const std::string& k, std::string* name, bool* can_write) {
+      tv::KeyInfo info;
+      if (!store.check_key(k, &info)) return false;
+      *name = info.name;
+      *can_write = info.can_write;
+      return true;
+    };
+    // What ts_vault --team says (apps/vault/main.cpp).
+    so.files = tc::Value::object();
+    so.files.set("via", tc::Value::string("vault"));
+    so.files.set("port", tc::Value::number(vs.port()));
+    so.files.set("loopback", tc::Value::boolean(true));
+    if (!server.start(so, &err)) return fail("ride-in team server: " + err);
+
+    ed::Editor2DScreen a(fresh("_team_ridein_a", ed::ProjectKind::TwoD));
+    const fs::path pa(a.team().project().path);
+    const std::string ghost = "assets/sprites/ghost.png";
+    png_file(pa / ghost, 8, 8, 200);
+    a.on_enter();
+    a.asset_browser().rescan();
+    if (!fs::exists(meta_file(pa, ghost))) return fail("A's texture has a .meta");
+    const std::string ghost_meta = slurp(meta_file(pa, ghost));
+    a.workspace().create_sprite_entity("Ghost", ghost, 0, 0, 32, 32);
+
+    ed::Editor2DScreen b(fresh("_team_ridein_b", ed::ProjectKind::TwoD));
+    ed::Editor2DScreen c(fresh("_team_ridein_c", ed::ProjectKind::TwoD));
+    b.on_enter();
+    c.on_enter();
+    const fs::path pb(b.team().project().path), pc(c.team().project().path);
+    std::vector<Tick> ticks = {[&](float) { server.poll(); }, [&](float dt) { a.tick_team(dt); },
+                               [&](float dt) { b.tick_team(dt); }, [&](float dt) { c.tick_team(dt); }};
+    ed::TeamJoinSettings j;
+    j.port = server.port();
+    j.key = k_annie;
+    j.claim = "_team_ridein";
+    if (!a.team().join(j, &err) || !pump(ticks, [&] { return a.team().joined(); }, 5)) return fail("ride-in A join");
+    // A's own files go up to the posse.
+    if (!pump(ticks, [&] {
+          const tc::Docs* d = server.docs("_team_ridein");
+          return d && d->count("scene.json") && d->at("scene.json").assets.count(ghost) &&
+                 d->at("scene.json").assets.count(".tombstone/meta/" + ghost + ".meta");
+        }, 10)) {
+      rc = fail("A's texture and its .meta reached the session (" + a.team().files_error() + ")");
+    }
+    if (!rc && a.team().files_route().find("Vault at http://127.0.0.1:" + std::to_string(vs.port())) ==
+                   std::string::npos) {
+      rc = fail("files route from the server's advertisement: " + a.team().files_route());
+    }
+    // B rides in: file, identical .meta (same GUID) and the sprite.
+    if (!rc) {
+      j.key = k_wyatt;
+      j.claim = "*";
+      if (!b.team().join(j, &err) || !pump(ticks, [&] { return b.team().joined(); }, 5)) return fail("ride-in B join");
+      if (!pump(ticks, [&] { return same_file(pa, pb, ghost) && same_meta(pa, pb, ghost) && has_sprite(b, "Ghost", ghost); },
+                15)) {
+        rc = fail("B got A's texture, its .meta and the sprite (" + b.team().files_error() + ")");
+      }
+    }
+    if (!rc) {
+      settle(ticks, 2.5);
+      const auto* e = b.asset_browser().db().by_path(ghost);
+      const auto* ea = a.asset_browser().db().by_path(ghost);
+      if (!e || !ea || e->meta.guid != ea->meta.guid) rc = fail("B's Asset Browser shows the texture with A's GUID");
+      else if (slurp(meta_file(pa, ghost)) != ghost_meta) rc = fail("A's .meta untouched by B's ride-in");
+    }
+    // B imports a texture and places it; A gets the file, .meta and sprite.
+    const std::string horse = "assets/sprites/horse.png";
+    if (!rc) {
+      const fs::path in = fs::absolute("TombStoneProjects/_team_ridein_in");
+      fs::remove_all(in, ec);
+      png_file(in / "horse.png", 4, 4, 33);
+      const auto r = b.asset_browser().import_files({(in / "horse.png").string()}, "assets/sprites");
+      if (!fs::exists(pb / horse)) rc = fail("B imported horse.png");
+      b.workspace().create_sprite_entity("Horse", horse, 40, 0, 16, 16);
+    }
+    if (!rc && !pump(ticks, [&] { return same_file(pa, pb, horse) && same_meta(pa, pb, horse) && has_sprite(a, "Horse", horse) &&
+                                         a.asset_browser().db().by_path(horse); },
+                     15)) {
+      rc = fail("A got B's imported texture, its .meta and the placed sprite (" + b.team().files_error() + ")");
+    }
+    // Read-only rider: sees the posse's files, can't place their own.
+    if (!rc) {
+      j.key = k_watch;
+      if (!c.team().join(j, &err) || !pump(ticks, [&] { return c.team().joined(); }, 5)) return fail("ride-in C join");
+      if (!pump(ticks, [&] { return same_file(pa, pc, ghost) && same_file(pa, pc, horse) && same_meta(pa, pc, horse) &&
+                                    has_sprite(c, "Horse", horse); },
+                15)) {
+        rc = fail("read-only rider sees the posse's files (" + c.team().files_error() + ")");
+      } else if (c.team().files_route().find("read-only") == std::string::npos) {
+        rc = fail("read-only rider told why their files stay put: " + c.team().files_route());
+      }
+    }
+    if (!rc) {
+      const std::string cactus = "assets/sprites/cactus.png";
+      png_file(pc / cactus, 4, 4, 77);
+      c.asset_browser().rescan();
+      c.workspace().create_sprite_entity("Cactus", cactus, 80, 0, 16, 16);
+      const std::uint64_t moved = a.team().assets_sent() + b.team().assets_sent() + a.team().assets_fetched() +
+                                  b.team().assets_fetched();
+      settle(ticks, 5.0);
+      if (a.team().assets_sent() + b.team().assets_sent() + a.team().assets_fetched() + b.team().assets_fetched() != moved) {
+        rc = fail("files settle (no .meta ping-pong between riders)");
+      }
+      const tc::Docs* d = server.docs("_team_ridein");
+      if (rc) {
+      } else if (fs::exists(pa / cactus) || has_sprite(a, "Cactus", cactus) || (d && d->at("scene.json").assets.count(cactus))) {
+        rc = fail("read-only rider could not place a file or an object");
+      } else if (has_sprite(c, "Cactus", cactus)) {
+        rc = fail("read-only rider's object was put back");
+      }
+    }
+    if (!rc) {
+      std::cout << "[smoke] team ride-in (ts_vault, no URL typed): OK (B fetched " << b.team().assets_fetched()
+                << ", A fetched " << a.team().assets_fetched() << ", read-only fetched " << c.team().assets_fetched()
+                << ")\n";
+    }
+    c.team().leave();
+    b.team().leave();
+    a.team().leave();
+    server.stop();
+  }
+  vs.stop();
+  fs::remove_all(vroot, ec);
+  return rc;
+}
+
+// Host from my editor, no Vault: files travel over the session itself.
+int check_ride_in_lan() {
+  ed::Editor3DScreen a(fresh("_team_ridein_3a", ed::ProjectKind::ThreeD));
+  const fs::path pa(a.team().project().path);
+  const std::string crate = "assets/models/crate.gltf";
+  const std::string crate_bin = "assets/models/crate.bin";
+  gltf_file(pa / crate, 1.0f);
+  a.on_enter();
+  a.asset_browser().rescan();
+  if (!fs::exists(meta_file(pa, crate))) return fail("host's model has a .meta");
+  const std::uint64_t placed = a.drop_asset(crate, {0, 0, 0});
+  if (!placed) return fail("host placed its model");
+  ed::Editor3DScreen b(fresh("_team_ridein_3b", ed::ProjectKind::ThreeD));
+  b.on_enter();
+  const fs::path pb(b.team().project().path);
+  std::string err;
+  ed::TeamHostSettings hs;
+  hs.port = 0;
+  hs.pass = "dusk";
+  hs.user = "Calamity";
+  if (!a.team().host(hs, &err)) return fail("LAN host: " + err);
+  std::vector<Tick> ticks = {[&](float dt) { a.tick_team(dt); }, [&](float dt) { b.tick_team(dt); }};
+  if (!pump(ticks, [&] { return a.team().joined(); }, 5)) return fail("LAN host joined itself");
+  ed::TeamJoinSettings j;
+  j.port = a.team().server()->port();
+  j.pass = "dusk";
+  j.user = "Hickok";
+  if (!b.team().join(j, &err) || !pump(ticks, [&] { return b.team().joined(); }, 5)) return fail("LAN join");
+  int rc = 0;
+  if (!pump(ticks, [&] { return same_file(pa, pb, crate) && same_file(pa, pb, crate_bin) && same_meta(pa, pb, crate) &&
+                                b.find(placed) != nullptr; },
+            15)) {
+    rc = fail("LAN rider got the host's model, .bin, .meta and object (" + b.team().files_error() + ")");
+  } else if (b.team().files_route().find("over the team session") == std::string::npos) {
+    rc = fail("LAN files route: " + b.team().files_route());
+  } else {
+    const std::string sha = ts::tombstone::vault::sha256_file((pa / crate).string());
+    if (!fs::exists(pa / ".tombstone" / "team" / "host" / "blobs" / sha.substr(0, 2) / sha)) {
+      rc = fail("host keeps the session's files by SHA-256");
+    }
+  }
+  const std::string barrel = "assets/models/barrel.gltf";
+  std::uint64_t theirs = 0;
+  if (!rc) {
+    const fs::path in = fs::absolute("TombStoneProjects/_team_ridein_3in");
+    std::error_code ec;
+    fs::remove_all(in, ec);
+    gltf_file(in / "barrel.gltf", 2.0f);
+    b.asset_browser().import_files({(in / "barrel.gltf").string()}, "assets/models");
+    if (!fs::exists(pb / barrel)) rc = fail("LAN rider imported barrel.gltf");
+    else theirs = b.drop_asset(barrel, {2, 0, 0});
+    if (!rc && !theirs) rc = fail("LAN rider placed the barrel");
+  }
+  if (!rc && !pump(ticks, [&] { return same_file(pa, pb, barrel) && same_meta(pa, pb, barrel) && a.find(theirs) != nullptr &&
+                                       a.asset_browser().db().by_path(barrel); },
+                   15)) {
+    rc = fail("host got the rider's model, .meta and object (" + b.team().files_error() + ")");
+  }
+  if (!rc) {
+    settle(ticks, 0.5);
+    if (doc_of(a.team()) != doc_of(b.team())) rc = fail("LAN scenes agree after the files");
+  }
+  if (!rc) {
+    std::cout << "[smoke] team ride-in (Host from my editor, no Vault): OK (rider fetched " << b.team().assets_fetched()
+              << ", host fetched " << a.team().assets_fetched() << ")\n";
+  }
+  b.team().leave();
+  a.team().leave();
+  return rc;
+}
+
+// A host that doesn't say where files travel and no URL typed: a readable
+// error instead of silence.
+int check_ride_in_old_host() {
+  tc::TeamServer server;
+  tc::ServerOptions so;
+  so.port = 0;
+  std::string err;
+  if (!server.start(so, &err)) return fail("old host start: " + err);
+  ed::Editor2DScreen a(fresh("_team_ridein_old", ed::ProjectKind::TwoD));
+  a.on_enter();
+  std::vector<Tick> ticks = {[&](float) { server.poll(); }, [&](float dt) { a.tick_team(dt); }};
+  ed::TeamJoinSettings j;
+  j.port = server.port();
+  j.claim = "_team_old";
+  int rc = 0;
+  if (!a.team().join(j, &err) || !pump(ticks, [&] { return a.team().joined(); }, 5)) rc = fail("old host join");
+  else if (a.team().files_error().find("older TombStone") == std::string::npos) {
+    rc = fail("readable error for a host that doesn't carry files: " + a.team().files_error());
+  }
+  a.team().leave();
+  server.stop();
+  if (!rc) std::cout << "[smoke] team ride-in: older host without a Vault URL explains itself OK\n";
+  return rc;
+}
+
 // ---- 3D: Host from my editor + a joiner ----
 
 int check_3d() {
@@ -852,8 +1159,12 @@ namespace tombstone {
 
 int run_team_smoke() {
   if (!net::net_startup()) return fail("net startup");
+  ed::TeamSession::settings_fallback = false;  // never this PC's own Settings > Vault
   int rc = check_2d();
   if (rc == 0) rc = check_assets();
+  if (rc == 0) rc = check_ride_in_vault();
+  if (rc == 0) rc = check_ride_in_lan();
+  if (rc == 0) rc = check_ride_in_old_host();
   if (rc == 0) rc = check_3d();
   if (rc == 0) rc = check_persist();
   net::net_shutdown();
