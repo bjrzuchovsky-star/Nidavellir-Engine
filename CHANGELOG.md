@@ -2,7 +2,9 @@
 
 All notable changes to TombStone Engine. The version number lives in the `VERSION` file at the repo root.
 
-## Unreleased
+## 0.2.1 — 2026-10-26
+
+A patch for team claims: riders now see the claim's files when they ride in and can place their own. Run `TombStone-0.2.1-update.exe` over 0.2.0; it keeps your claims, settings and the Vault.
 
 ### Team claims: riders see and place the posse's files
 - **Fixed:** a rider who joined could not see the claim's assets, and assets they imported or placed never reached anyone else. Files only travelled when every editor typed the Team panel's separate "Vault URL (files)", which was empty by default and silently skipped.
@@ -11,6 +13,12 @@ All notable changes to TombStone Engine. The version number lives in the `VERSIO
 - The Team panel says where files travel and, in red, why they can't: no Vault key, a Vault on 127.0.0.1 (use `ts_vault --host 0.0.0.0`), an older host with no URL, a refused key. Read-only keys see the posse's files and are told theirs stay on this PC.
 - The Team panel's Vault URL is now optional (an override). Older hosts fall back to Settings > Vault.
 - `ts_admin --smoke-team` checks a rider joining a ts_vault posse (files + identical `.meta`, both ways), a read-only rider, a LAN editor host with no Vault (3D models both ways) and the error for an older host.
+
+### Windows
+- Every shipped exe carries version info (Company **TombStone Team**, Product **TombStone Engine**), an application manifest (per-monitor DPI aware, Windows 10 / 11) and the Dusk tombstone icon (`ts_game` takes each game's own). The installers carry the same publisher info and icon.
+
+### Docs
+- New [docs/security.md](docs/security.md): who publishes TombStone, checking downloads against `SHA256SUMS.txt`, why the builds are unsigned (SmartScreen / antivirus warnings) and how to report a false positive.
 
 ## 0.2.0 — 2026-10-23
 
