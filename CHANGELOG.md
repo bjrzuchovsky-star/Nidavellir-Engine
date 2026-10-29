@@ -2,9 +2,7 @@
 
 All notable changes to TombStone Engine. The version number lives in the `VERSION` file at the repo root.
 
-## Unreleased (0.2.2)
-
-`VERSION` is 0.2.2. Not tagged and not released.
+## 0.2.2 — 2026-10-29
 
 - C# templates compile again. `Player(slot)` is kept so older scripts still call it; `PlayerId(slot)` is the same id. `Position(e, out x, out y)` is now `TryPosition`, because `Position` is the vector the character sample reads.
 - `vswhere` is asked for every product (`-products *`), so Visual Studio 2022 Build Tools count as a C++ toolchain, not only the full IDE.
