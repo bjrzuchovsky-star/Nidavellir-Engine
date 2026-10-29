@@ -14,6 +14,7 @@
 // (dotnet build) and hot-reloads it by unloading the old collectible
 // AssemblyLoadContext. Same hooks and world API as Lua, graphs and C++.
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
@@ -149,6 +150,7 @@ namespace TombStone
     {
         internal TsScriptApi* api;
         internal Dictionary<string, Value> props = new Dictionary<string, Value>();
+        internal List<Coroutine> routines = new List<Coroutine>();
         internal static Script Active;
         public ulong Self { get; internal set; }
 
@@ -243,6 +245,9 @@ namespace TombStone
         public void SetVisible(ulong e, bool on) => api->SetVisible(W, e, on ? 1 : 0);
         public void SetCollider(ulong e, bool on) => api->SetCollider(W, e, on ? 1 : 0);
         public bool Play(ulong e, string clip, bool hold = false) { fixed (byte* p = Utf8.Z(clip)) return api->Play(W, e, p, hold ? 1 : 0) != 0; }
+        public bool PlayAnimation(string clip) => EngineQuery("anim", Self.ToString(CultureInfo.InvariantCulture) + "\t" + (clip ?? "")) == "1";
+        public bool SetFov(ulong camera, float degrees) =>
+            EngineQuery("fov", camera.ToString(CultureInfo.InvariantCulture) + "\t" + degrees.ToString("R", CultureInfo.InvariantCulture)) == "1";
         public ulong Spawn(string tmpl, float x, float y) { fixed (byte* p = Utf8.Z(tmpl)) return api->Spawn(W, p, x, y); }
         public void Destroy(ulong e) => api->Destroy(W, e);
         // Entity state (shared with Lua / graphs / C++, replicated).
@@ -599,6 +604,37 @@ namespace TombStone
             if (key == null || Query("add", Self + "\t" + key) != "1") return null;
             return GetComponent<T>();
         }
+        public Coroutine StartCoroutine(IEnumerator routine)
+        {
+            if (routine == null) return null;
+            var c = new Coroutine { Routine = routine };
+            routines.Add(c);
+            if (!StepCoroutine(c, 0)) routines.Remove(c);
+            return c;
+        }
+        public void StopCoroutine(Coroutine c)
+        {
+            if (c != null) routines.Remove(c);
+        }
+        internal void PumpCoroutines(float dt)
+        {
+            for (int i = routines.Count - 1; i >= 0; --i)
+            {
+                Coroutine c = routines[i];
+                if (c.Wait > 0)
+                {
+                    c.Wait -= dt;
+                    if (c.Wait > 0) continue;
+                }
+                if (!StepCoroutine(c, dt)) routines.RemoveAt(i);
+            }
+        }
+        bool StepCoroutine(Coroutine c, float dt)
+        {
+            if (c.Routine == null || !c.Routine.MoveNext()) return false;
+            if (c.Routine.Current is WaitForSeconds w) c.Wait = w.Seconds;
+            return true;
+        }
         public void RemoveComponent<T>() where T : class
         {
             if (typeof(Script).IsAssignableFrom(typeof(T)))
@@ -612,6 +648,30 @@ namespace TombStone
             string key = ComponentKey(typeof(T));
             if (key != null) Query("remove", Self + "\t" + key);
         }
+    }
+
+    public sealed class ScriptEvent
+    {
+        readonly List<Action> listeners = new List<Action>();
+        public void Add(Action listener) { if (listener != null) listeners.Add(listener); }
+        public void Remove(Action listener) { listeners.Remove(listener); }
+        public void Invoke()
+        {
+            Action[] copy = listeners.ToArray();
+            foreach (Action a in copy) a();
+        }
+    }
+
+    public sealed class WaitForSeconds
+    {
+        public float Seconds;
+        public WaitForSeconds(float seconds) { Seconds = seconds; }
+    }
+
+    public sealed class Coroutine
+    {
+        internal IEnumerator Routine;
+        internal float Wait;
     }
 
     public class Component

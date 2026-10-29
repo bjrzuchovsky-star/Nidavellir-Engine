@@ -558,6 +558,37 @@ struct Tune : ts::Script {
   return 0;
 }
 
+int check_async() {
+  const char* src = R"(using System.Collections;
+using TombStone;
+[Script("waiter")]
+public class Waiter : Script {
+    public override void OnStart() {
+        var ping = new ScriptEvent();
+        ping.Add(() => Log("pinged"));
+        ping.Invoke();
+        StartCoroutine(Later());
+    }
+    IEnumerator Later() {
+        yield return new WaitForSeconds(0.05f);
+        Log("coroutine done");
+    }
+}
+)";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cs_async";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "waiter.cs", src);
+  World w;
+  std::string err;
+  if (!w.build({scripted(2, "Waiter", "scripts/waiter.cs")}, proj.string(), &err))
+    return fail("async build: " + err + dump(w.take_logs()));
+  std::vector<LogEntry> logs = w.take_logs();
+  for (LogEntry& e : ride(w, 8)) logs.push_back(std::move(e));
+  if (!has(logs, "pinged") || !has(logs, "coroutine done")) return fail("event / coroutine:" + dump(logs));
+  return 0;
+}
+
 // A prebuilt assembly (what exports ship) needs only the .NET 8+ runtime:
 // TS_SMOKE_CS_PREBUILT=<folder with ProjectScripts.dll + TombStone.Scripting.*>
 // rides it in a project with no SDK on the machine.
@@ -670,6 +701,7 @@ int run_csharp_smoke() {
   if (int r = check_collision()) return r;
   if (int r = check_ray()) return r;
   if (int r = check_fields()) return r;
+  if (int r = check_async()) return r;
   if (int r = check_export()) return r;
   std::cout << "[smoke] C# scripts OK (.NET SDK " << csharp_scripts::dotnet_info().sdk << ", assembly built in "
             << static_cast<int>(build_s) << " s, hooks + props + state + plugin bridge, hot reload kept state "

@@ -353,6 +353,15 @@ int World3D::script_query(const char* op, const char* args, char* out, int cap) 
     if (id) script_set_position(id, x, y, z);
     return put_text(std::to_string(id), out, cap);
   }
+  if (ieq(op, "anim")) {
+    const std::uint64_t id = id_of(0);
+    const std::string clip = f.size() > 1 ? f[1] : "";
+    return put_text(anim_play(id, clip, 0.1f, false) ? "1" : "0", out, cap);
+  }
+  if (ieq(op, "fov")) {
+    const float deg = f.size() > 1 ? static_cast<float>(std::atof(f[1].c_str())) : 60.0f;
+    return put_text(set_camera_fov(id_of(0), deg) ? "1" : "0", out, cap);
+  }
   if (ieq(op, "overlap")) {
     float x = 0, y = 0, z = 0, r = 0.5f;
     if (!args || std::sscanf(args, "%f %f %f %f", &x, &y, &z, &r) < 3) return put_text("0", out, cap);

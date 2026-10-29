@@ -237,6 +237,7 @@ namespace TombStone
                         Time.Elapsed += (float)number;
                         PumpRuntime(1, (float)number);
                         s.OnTick(number);
+                        s.PumpCoroutines((float)number);
                         break;
                     case 10:
                         Time.DeltaTime = (float)number;

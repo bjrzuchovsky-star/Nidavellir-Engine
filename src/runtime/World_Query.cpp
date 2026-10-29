@@ -252,6 +252,19 @@ int World::script_query(const char* op, const char* args, char* out, int cap) {
     const std::uint64_t id = script_spawn(what, x, y);
     return put_text(std::to_string(id), out, cap);
   }
+  if (ieq(op, "anim")) {
+    const std::uint64_t id = id_of(0);
+    const std::string clip = f.size() > 1 ? f[1] : "";
+    return put_text(script_play(id, clip, false) ? "1" : "0", out, cap);
+  }
+  if (ieq(op, "fov")) {
+    Actor* a = live(id_of(0));
+    const float zoom = f.size() > 1 ? static_cast<float>(std::atof(f[1].c_str())) : 1.0f;
+    if (!a) return put_text("0", out, cap);
+    if (!a->data.camera) a->data.camera = Camera2DData{};
+    a->data.camera->zoom = std::clamp(zoom, 0.05f, 16.0f);
+    return put_text("1", out, cap);
+  }
   return -1;
 }
 

@@ -416,6 +416,9 @@ struct Looker : ts::Script {
     ts::RayHit hit = Raycast({0, 0, 0}, {0, 0, 1}, 20);
     Log(hit ? "ray " + std::to_string(hit.entity) : "ray miss");
     Log(Overlap({0, 0, 3}, 0.2f) ? "overlap yes" : "overlap no");
+    Log(SetFov(3, 40.0f) ? "fov set" : "fov no");
+    sound("click");
+    Log(PlayAnimation("wave") ? "anim yes" : "anim no");
   }
 };
 TS_SCRIPT(Looker, "looker")
@@ -437,7 +440,12 @@ TS_SCRIPT(Looker, "looker")
   wall.transform.position = {0, 0, 3};
   wall.collider = scene3d::Collider3D{};
   wall.collider->size = {1, 1, 1};
-  scene.entities = {looker, wall};
+  scene3d::Entity3D cam;
+  cam.id = 3;
+  cam.name = "MainCamera";
+  cam.camera = scene3d::PlayCamera3D{};
+  cam.camera->fov = 60.0f;
+  scene.entities = {looker, wall, cam};
   world3d::World3D world;
   std::string err;
   if (!world.start(scene, proj.string(), &err)) return fail("ray start: " + err);
@@ -450,6 +458,45 @@ TS_SCRIPT(Looker, "looker")
     d += "\n  " + e.text;
   }
   if (!ray || !over) return fail("3D ray / overlap:" + d);
+  bool fov = false;
+  for (const LogEntry& e : world.log()) fov = fov || e.text.find("fov set") != std::string::npos;
+  const scene3d::Entity3D* camera = world.find(3);
+  if (!fov || !camera || !camera->camera || std::fabs(camera->camera->fov - 40.0f) > 0.1f)
+    return fail("camera fov was not set:" + d);
+  bool heard = false;
+  for (const auto& s : world.take_sounds()) heard = heard || s.clip == "click";
+  if (!heard) return fail("Sound did not queue");
+  return 0;
+}
+
+int check_async() {
+  const char* src = R"(#include <tombstone/script_sdk.h>
+#include <string>
+struct Waiter : ts::Script {
+  void OnStart() override {
+    Event ping;
+    ping.Add([this] { Log("pinged"); });
+    ping.Invoke();
+    After(0.05f, [this] { Log("timer done"); });
+  }
+};
+TS_SCRIPT(Waiter, "waiter")
+)";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cpp_async";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "waiter.cpp", src);
+  World w;
+  Entity2D e;
+  e.id = 2;
+  e.name = "Waiter";
+  e.script = ScriptData{};
+  e.script->path = "scripts/waiter.cpp";
+  std::string err;
+  if (!w.build({e}, proj.string(), &err)) return fail("async build: " + err + dump(w.take_logs()));
+  std::vector<LogEntry> logs = w.take_logs();
+  for (LogEntry& ev : ride(w, 8)) logs.push_back(std::move(ev));
+  if (!has(logs, "pinged") || !has(logs, "timer done")) return fail("C++ event / timer:" + dump(logs));
   return 0;
 }
 
@@ -607,6 +654,7 @@ int run_native_smoke() {
   if (int r = check_lifecycle()) return r;
   if (int r = check_collision()) return r;
   if (int r = check_ray()) return r;
+  if (int r = check_async()) return r;
   if (int r = check_export()) return r;
   std::cout << "[smoke] C++ scripts OK (module built in " << static_cast<int>(build_s)
             << " s, hooks + props + state + plugin bridge, hot reload kept state, compile error at "

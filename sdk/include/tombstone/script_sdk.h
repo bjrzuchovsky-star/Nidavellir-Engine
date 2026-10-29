@@ -172,6 +172,12 @@ class Script {
   void move(Entity e, float x, float y) { api_->move(api_->world, e, x, y); }
   void set_visible(Entity e, bool on) { api_->set_visible(api_->world, e, on ? 1 : 0); }
   void set_collider(Entity e, bool on) { api_->set_collider(api_->world, e, on ? 1 : 0); }
+  bool PlayAnimation(const std::string& clip) {
+    return Query("anim", std::to_string(self_) + "\t" + clip) == "1";
+  }
+  bool SetFov(Entity camera, float degrees) {
+    return Query("fov", std::to_string(camera) + "\t" + std::to_string(degrees)) == "1";
+  }
   bool play(Entity e, const std::string& clip, bool hold = false) {
     return api_->play(api_->world, e, clip.c_str(), hold ? 1 : 0) != 0;
   }
@@ -327,6 +333,31 @@ class Script {
     }
     return hit;
   }
+  struct Event {
+    std::vector<std::function<void()>> listeners;
+    void Add(std::function<void()> fn) { if (fn) listeners.push_back(std::move(fn)); }
+    void Invoke() {
+      const auto copy = listeners;
+      for (const auto& fn : copy)
+        if (fn) fn();
+    }
+  };
+  int After(float seconds, std::function<void()> fn) {
+    timers_.push_back({seconds, std::move(fn)});
+    return static_cast<int>(timers_.size());
+  }
+  void pump_timers(float dt) {
+    for (auto it = timers_.begin(); it != timers_.end();) {
+      it->left -= dt;
+      if (it->left <= 0.0f) {
+        auto fn = std::move(it->fn);
+        it = timers_.erase(it);
+        if (fn) fn();
+      } else {
+        ++it;
+      }
+    }
+  }
   Entity Overlap(Vector3 point, float radius) const {
     const std::string args = std::to_string(point.X) + " " + std::to_string(point.Y) + " " + std::to_string(point.Z) +
                              " " + std::to_string(radius);
@@ -409,9 +440,14 @@ class Script {
   const TsScriptApi* api_ptr() const { return api_; }
 
  private:
+  struct PendingTimer {
+    float left = 0;
+    std::function<void()> fn;
+  };
   const TsScriptApi* api_ = nullptr;
   Entity self_ = 0;
   std::map<std::string, PropValue> props_;
+  std::vector<PendingTimer> timers_;
 };
 
 inline Script*& script_active() {
@@ -593,6 +629,7 @@ TS_SCRIPT_EXPORT void ts_script_call(void* sp, int hook, uint64_t e, double n, c
     }
     case TS_HOOK_TICK: {
       s->on_tick(n);
+      s->pump_timers(static_cast<float>(n));
       ::ts::ScriptLiveStore& store = ::ts::script_lives();
       const std::uint64_t now = s->tick();
       if (store.pumped != now) {

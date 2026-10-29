@@ -253,7 +253,7 @@ Designed on the ABI 4 `query` slot, not finished in this patch:
 - `GetComponent` / `AddComponent` / `RemoveComponent` for collider, rigidbody, renderer, audio, camera and animator, and for other scripts in the same language. `Instantiate` clones a named entity or a `.prefab.json`. `Destroy(id, seconds)` waits, then removes it. `FindWithTag` / `SetTag` use the optional scene `tag` field. Layers and parenting from script are not yet.
 - Public fields and `[SerializeField]` show in the Inspector, with `[Header]`, `[Range]` and `[Tooltip]` (C++ puts the same tags in comments above the field). Vectors, colours, enums and entity references are included. Custom property drawers are not.
 - `Physics.Raycast` and `Overlap` (C#) and `Raycast` / `Overlap` (C++) hit solid colliders without a physics plugin. Sweep casts are not yet.
-- Coroutines, events between scripts, scene loading, the full `anim.*` mirror, in-game UI, save helpers, networking hooks.
+- Coroutines: C# `StartCoroutine` / `WaitForSeconds`, C++ `After(seconds, fn)`, and a small `ScriptEvent` / `Event`. `PlayAnimation(clip)`, `SetFov` and `Sound` are wired. Loading another scene, the full `anim.*` parameter graph, in-game UI builders, save helpers and networking hooks are not yet.
 - Attaching the Visual Studio or VS Code debugger to a C# assembly or a C++ script DLL during Play.
 - Editor scripting (custom Inspector / menu tools).
 
