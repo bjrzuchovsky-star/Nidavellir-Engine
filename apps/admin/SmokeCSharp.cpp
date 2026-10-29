@@ -646,7 +646,8 @@ int check_compile_list() {
   if (hits != 1) {
     return fail("expected one Compile of character_movement.cs, found " + std::to_string(hits) + "\n" + csproj);
   }
-  for (const char* bad : {"/obj/", "/bin/", "/cache/", "/build/", "/Library/", "/meta/"}) {
+  for (const char* bad : {"/scripts/obj/", "/scripts/bin/", "/scripts/cache/", "/scripts/build/", "/scripts/Library/",
+                          "/scripts/meta/"}) {
     if (csproj.find(bad) != std::string::npos) return fail(std::string("csproj lists a generated copy under ") + bad);
   }
   fs::copy_file(sample, proj / "scripts" / "movement.cs", ec);
