@@ -1,0 +1,49 @@
+{
+  "version": 13,
+  "pan_x": 0,
+  "pan_y": 0,
+  "zoom": 1,
+  "show_grid": true,
+  "grid_size": 32,
+  "snap": true,
+  "selected_id": 3,
+  "selection": [3],
+  "tile_solidity": [],
+  "entities": [
+    {
+      "id": 1,
+      "name": "Camera2D",
+      "x": 0,
+      "y": 0,
+      "w": 48,
+      "h": 32,
+      "layer": 10,
+      "camera": {"target": 0, "smoothing": 0, "zoom": 1, "use_bounds": false, "bounds_x": 0, "bounds_y": 0, "bounds_w": 1024, "bounds_h": 768}
+    },
+    {
+      "id": 2,
+      "name": "TileMap",
+      "x": 0,
+      "y": 0,
+      "w": 1024,
+      "h": 576,
+      "layer": 0,
+      "tilemap": {"cols": 32, "rows": 18, "tile_size": 32, "tileset": "", "encoding": "rle", "data": "576*0"}
+    },
+    {
+      "id": 3,
+      "name": "Coin",
+      "x": 400,
+      "y": 280,
+      "w": 32,
+      "h": 32,
+      "layer": 2,
+      "r": 0.85,
+      "g": 0.65,
+      "b": 0.2,
+      "a": 1,
+      "collider": {"trigger": true, "w": 32, "h": 32},
+      "script": {"path": "scripts/coin.cs", "props": {"worth": 5}}
+    }
+  ]
+}

@@ -17,6 +17,9 @@
 #if !defined(TS_SCRIPT_SDK_DIR)
 #define TS_SCRIPT_SDK_DIR ""
 #endif
+#if !defined(TS_CXX_COMPILER)
+#define TS_CXX_COMPILER ""
+#endif
 
 namespace ts {
 namespace tombstone {
@@ -112,6 +115,32 @@ bool toolchain_available(std::string* why) {
     if (why) *why = "TombStone script SDK headers not found (set TS_SCRIPT_SDK)";
     return false;
   }
+#if defined(_WIN32)
+  // C++ scripts build with the user's MSVC toolchain (VS 2022). CMake on its
+  // own is not enough: without the C++ workload the module configure fails.
+  const char* pf86 = std::getenv("ProgramFiles(x86)");
+  const fs::path vswhere = fs::path(pf86 && *pf86 ? pf86 : "C:/Program Files (x86)") /
+                           "Microsoft Visual Studio" / "Installer" / "vswhere.exe";
+  std::error_code ec;
+  if (!fs::exists(vswhere, ec) ||
+      run_command(q(vswhere.string()) +
+                      " -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath",
+                  &out) != 0 ||
+      out.find_first_not_of(" \t\r\n") == std::string::npos) {
+    if (why) {
+      *why = "the Visual Studio 2022 C++ toolchain (MSVC) was not found. Install Build Tools for "
+             "Visual Studio, or the \"Desktop development with C++\" workload, from "
+             "https://visualstudio.microsoft.com/downloads/ so CMake can build scripts/*.cpp";
+    }
+    return false;
+  }
+#else
+  if (run_command("c++ --version", &out) != 0 && run_command("g++ --version", &out) != 0 &&
+      run_command("clang++ --version", &out) != 0) {
+    if (why) *why = "no C++ compiler (c++, g++ or clang++) is on PATH. C++ scripts need one, plus CMake";
+    return false;
+  }
+#endif
   return true;
 }
 
@@ -167,13 +196,19 @@ BuildResult build(const std::string& project, bool force) {
   const fs::path bdir = dir / "build";
   std::string out1, out2;
   if (!fs::exists(bdir / "CMakeCache.txt", ec)) {
-    const int rc = run_command(q(cmake_exe()) + " -S " + q(dir.string()) + " -B " + q(bdir.string()) +
-#if defined(_WIN32)
-                                   " -A x64"
+    // Use the compiler that built the engine. On some Linux machines `c++`
+    // is a clang that cannot link libstdc++, while the engine was built with g++.
+    std::string compiler;
+#if !defined(_WIN32)
+    if (std::string(TS_CXX_COMPILER).size() > 0)
+      compiler = " -DCMAKE_CXX_COMPILER=" + q(TS_CXX_COMPILER) + " -DCMAKE_BUILD_TYPE=Release";
+    else
+      compiler = " -DCMAKE_BUILD_TYPE=Release";
 #else
-                                   " -DCMAKE_BUILD_TYPE=Release"
+    compiler = " -A x64";
 #endif
-                               , &out1);
+    const int rc = run_command(q(cmake_exe()) + " -S " + q(dir.string()) + " -B " + q(bdir.string()) + compiler,
+                               &out1);
     if (rc != 0) {
       r.output = out1;
       r.error = "cmake could not configure the script module (" + std::to_string(rc) + ")";

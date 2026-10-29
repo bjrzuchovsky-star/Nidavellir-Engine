@@ -4,6 +4,7 @@
 // collectible AssemblyLoadContext; hot reload loads a new generation and
 // retires the old one, which unloads once its last script is destroyed.
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -40,6 +41,60 @@ namespace TombStone
         }
 
         static readonly Dictionary<int, Generation> gens = new Dictionary<int, Generation>();
+        static readonly Dictionary<ulong, List<Script>> byEntity = new Dictionary<ulong, List<Script>>();
+        static readonly List<Script> runtimeAdded = new List<Script>();
+        static readonly HashSet<Script> runtimeStarted = new HashSet<Script>();
+        static int pumpedFrame = -1;
+        static int pumpedMask;
+
+        internal static IEnumerable<Script> ScriptsOn(ulong id)
+        {
+            List<Script> list;
+            if (byEntity.TryGetValue(id, out list))
+                foreach (Script s in list) yield return s;
+            foreach (Script s in runtimeAdded)
+                if (s.Self == id) yield return s;
+        }
+        internal static void AddRuntime(Script s)
+        {
+            runtimeAdded.Add(s);
+            Script prev = Script.Active;
+            Script.Active = s;
+            try { s.Awake(); s.OnEnable(); }
+            catch (Exception e) { s.Error(s.GetType().Name + ": " + e.Message); }
+            finally { Script.Active = prev; }
+        }
+        internal static void RemoveRuntime(Script s)
+        {
+            if (!runtimeAdded.Remove(s)) return;
+            try { s.OnDisable(); s.OnDestroy(); }
+            catch (Exception e) { s.Error("remove: " + e.Message); }
+        }
+        internal static void PumpRuntime(int phase, float dt)
+        {
+            int bit = 1 << phase;
+            if (pumpedFrame != Time.Frame) { pumpedFrame = Time.Frame; pumpedMask = 0; }
+            if ((pumpedMask & bit) != 0) return;
+            pumpedMask |= bit;
+            Script[] copy = runtimeAdded.ToArray();
+            foreach (Script s in copy)
+            {
+                Script prev = Script.Active;
+                Script.Active = s;
+                try
+                {
+                    if (phase == 0) s.OnFixedUpdate(dt);
+                    else if (phase == 1)
+                    {
+                        if (runtimeStarted.Add(s)) s.OnStart();
+                        s.OnTick(dt);
+                    }
+                    else s.OnLateUpdate(dt);
+                }
+                catch (Exception e) { s.Error(s.GetType().Name + ": " + e.Message); }
+                finally { Script.Active = prev; }
+            }
+        }
         static readonly List<WeakReference> unloading = new List<WeakReference>();
         static int nextGen = 1;
 
@@ -53,7 +108,7 @@ namespace TombStone
         }
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-        public static int Abi() => 3;
+        public static int Abi() => 4;
 
         // Loads the project's script assembly from bytes (the file stays
         // free for the next build). Generation id, 0 on error (text in err).
@@ -134,6 +189,14 @@ namespace TombStone
                     s.props[f[0]] = v;
                 }
                 g.Live++;
+                List<Script> list;
+                if (!byEntity.TryGetValue(self, out list)) byEntity[self] = list = new List<Script>();
+                list.Add(s);
+                Script prev = Script.Active;
+                Script.Active = s;
+                try { s.Awake(); s.OnEnable(); }
+                catch (Exception e) { s.Error(s.GetType().Name + " awake: " + e.Message); }
+                finally { Script.Active = prev; }
                 return GCHandle.ToIntPtr(GCHandle.Alloc(new Instance { Script = s, Gen = g }));
             }
             catch (Exception e)
@@ -150,6 +213,7 @@ namespace TombStone
         {
             Instance i = Get(h);
             if (i == null) return;
+            if (byEntity.TryGetValue(i.Script.Self, out List<Script> list)) list.Remove(i.Script);
             GCHandle.FromIntPtr(h).Free();
             i.Gen.Live--;
             MaybeUnload(i.Gen);
@@ -161,17 +225,44 @@ namespace TombStone
             Instance i = Get(h);
             if (i == null) return;
             Script s = i.Script;
+            Script prev = Script.Active;
+            Script.Active = s;
             try
             {
                 switch (hook)
                 {
                     case 0: s.OnStart(); break;
-                    case 1: s.OnTick(number); break;
+                    case 1:
+                        Time.DeltaTime = (float)number;
+                        Time.Elapsed += (float)number;
+                        PumpRuntime(1, (float)number);
+                        s.OnTick(number);
+                        s.PumpCoroutines((float)number);
+                        break;
+                    case 10:
+                        Time.DeltaTime = (float)number;
+                        Time.Frame++;
+                        PumpRuntime(0, (float)number);
+                        s.OnFixedUpdate((float)number);
+                        break;
+                    case 11:
+                        Time.DeltaTime = (float)number;
+                        PumpRuntime(2, (float)number);
+                        s.OnLateUpdate((float)number);
+                        break;
+                    case 12:
+                    {
+                        string phase = Utf8.Read(text);
+                        if (phase == "enter") s.OnCollisionEnter(entity);
+                        else if (phase == "stay") s.OnCollisionStay(entity);
+                        else s.OnCollisionExit(entity);
+                        break;
+                    }
                     case 2: s.OnTriggerEnter(entity); break;
                     case 3: s.OnTriggerExit(entity); break;
                     case 4: s.OnInteract(entity); break;
                     case 5: s.OnReload(); break;
-                    case 6: s.OnDestroy(); break;
+                    case 6: s.OnDisable(); s.OnDestroy(); break;
                     case 7:
                     {
                         string[] f = Utf8.Read(text).Split('\t');
@@ -197,6 +288,10 @@ namespace TombStone
             catch (Exception e)
             {
                 s.Error(s.GetType().Name + ": " + e.GetType().Name + ": " + e.Message + Where(e));
+            }
+            finally
+            {
+                Script.Active = prev;
             }
         }
 

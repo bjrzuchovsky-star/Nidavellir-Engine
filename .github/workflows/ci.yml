@@ -30,6 +30,18 @@ jobs:
       # No pinned generator: windows-latest images move to newer Visual
       # Studio releases, and a hard-coded "Visual Studio 17 2022" fails to
       # configure on them. CMake picks the newest VS installed (x64 MSVC).
+      - name: .NET 8 SDK
+        shell: pwsh
+        run: |
+          $sdk = dotnet --list-sdks 2>$null
+          if (-not ($sdk -match '^8\.')) {
+            Invoke-WebRequest -Uri https://dot.net/v1/dotnet-install.ps1 -OutFile "$env:TEMP\dot-install.ps1"
+            & "$env:TEMP\dot-install.ps1" -Channel 8.0 -InstallDir "$env:LOCALAPPDATA\dotnet8"
+            Add-Content $env:GITHUB_PATH "$env:LOCALAPPDATA\dotnet8"
+            "DOTNET_ROOT=$env:LOCALAPPDATA\dotnet8" | Out-File -Append -FilePath $env:GITHUB_ENV
+          }
+          "TS_SMOKE_REQUIRE_CS=1" | Out-File -Append -FilePath $env:GITHUB_ENV
+          "TS_SMOKE_REQUIRE_CPP=1" | Out-File -Append -FilePath $env:GITHUB_ENV
       - name: Configure
         run: cmake -S . -B build -A x64
       - name: Build (Release)
@@ -66,6 +78,14 @@ jobs:
           sudo apt-get install -y --no-install-recommends ninja-build \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libgl1-mesa-dev libwayland-dev libxkbcommon-dev wayland-protocols xvfb
+      - name: .NET 8 SDK
+        run: |
+          curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+          bash /tmp/dotnet-install.sh --channel 8.0 --install-dir "$HOME/.dotnet"
+          echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> "$GITHUB_ENV"
+          echo "TS_SMOKE_REQUIRE_CS=1" >> "$GITHUB_ENV"
+          echo "TS_SMOKE_REQUIRE_CPP=1" >> "$GITHUB_ENV"
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - name: Build

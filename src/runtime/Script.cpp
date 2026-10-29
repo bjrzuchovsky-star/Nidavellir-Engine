@@ -4,6 +4,7 @@
 #include "runtime/ScriptState.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -53,6 +54,13 @@ bool valid_script_path(const std::string& rel) {
     start = end + 1;
   }
   return true;
+}
+
+bool generated_script_directory(const std::string& name) {
+  if (name.empty() || name[0] == '.') return true;
+  std::string n = name;
+  for (char& c : n) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return n == "obj" || n == "bin" || n == "cache" || n == "build" || n == "library" || n == "meta";
 }
 
 bool split_location(const std::string& msg, std::string* file, int* line,

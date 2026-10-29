@@ -432,6 +432,7 @@ void World::move_rider(Actor& a, const PlayerInput& in) {
 }
 
 void World::step(const InputFrame& input) {
+  flush_delayed();
   if (actors_.empty()) {
     input_ = input;
     ++tick_;
@@ -441,9 +442,10 @@ void World::step(const InputFrame& input) {
   events_.clear();
   input_ = input;
   in_step_ = true;
-  // Scripts that joined since the last tick start before anybody moves.
+  // OnStart, then OnFixedUpdate, then the physics step, then OnUpdate / OnLateUpdate.
   if (scripts_) {
     scripts_->start_pending();
+    scripts_->fixed_tick(kTickSeconds);
   }
   apply_changes();
   {
@@ -452,6 +454,7 @@ void World::step(const InputFrame& input) {
     separate_dynamics();
     step_physics2d();
     update_triggers();
+    update_collisions();
   }
   for (const TriggerEvent& ev : events_) {
     post(LogLevel::Info, "trigger", describe(ev), ev.trigger);
@@ -459,6 +462,7 @@ void World::step(const InputFrame& input) {
   {
     TS_PROFILE_SCOPE("world.scripts");
     step_scripts(input);
+    if (scripts_) scripts_->late_tick(kTickSeconds);
   }
   {
     TS_PROFILE_SCOPE("world.plugins");

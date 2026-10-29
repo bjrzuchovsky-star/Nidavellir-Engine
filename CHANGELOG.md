@@ -2,6 +2,44 @@
 
 All notable changes to TombStone Engine. The version number lives in the `VERSION` file at the repo root.
 
+## Unreleased (0.2.2)
+
+`VERSION` is 0.2.2. Not tagged and not released.
+
+- C# templates compile again. `Player(slot)` is kept so older scripts still call it; `PlayerId(slot)` is the same id. `Position(e, out x, out y)` is now `TryPosition`, because `Position` is the vector the character sample reads.
+- `vswhere` is asked for every product (`-products *`), so Visual Studio 2022 Build Tools count as a C++ toolchain, not only the full IDE.
+
+C# and C++ gameplay scripts can actually drive a game. The acceptance script is `samples/scripting/fps-cs/scripts/character_movement.cs`: it compiles unchanged, and Play runs it with no Rider plugin. `samples/scripting/fps-cpp/` is the C++ twin. `samples/scripting/2d/` is a small coin in both languages.
+
+### C# (.NET 8)
+- Every `scripts/*.cs` builds into one `ProjectScripts.dll` (net8.0) and hot-reloads on save. Compile errors land in the Telegraph with file:line; a failed build keeps the last good assembly. Float, int, bool, string and vector fields survive a reload unless the script replaces `Save` / `Load`.
+- The C# build lists each source once and skips `obj`, `bin`, `cache` and `build` (a recursive `scripts/**/*.cs` glob was compiling a second copy, and every CS0101 / CS0111 then pointed at the later file only). Two different files that declare the same script class are named in the console, with a hint to rename one.
+- API matches the sample: `OnStart`, `OnUpdate(float)`, `Prop(name, default)` (typed), `Toast(title, message)`, `Position` (with `.Y` and a readable `ToString`), `Vector3`, `Transform.Right` / `Forward`, `Move(Vector3)`, `Rotate`, `Find` + `SetLocalRotation`, `Input.GetAxis` / `GetButtonDown`, `Log`, `Sound`.
+- `OnFixedUpdate` and `OnLateUpdate` run on the same fixed tick. `OnEnable` / `OnDisable` run with start and destroy.
+- Without the .NET 8 SDK the editor says C# is switched off, links the install page, and everything else keeps working. An exported game ships the compiled assembly and needs the .NET 8 **runtime** only when the claim uses C# scripts. See [docs/scripting.md](docs/scripting.md).
+
+### C++
+- The same names on `ts::Script` (`OnStart`, `OnUpdate`, `Prop`, `Move`, `Input::GetAxis`, …). Older `on_start` / `on_tick` scripts still run.
+- One module per claim, hot-reload on save, errors with file:line, last good module kept. `save()` / `load()` keep the fields you write out.
+- A missing MSVC toolchain (Windows) or C++ compiler (Linux) is reported in plain language instead of a raw CMake failure.
+
+### Play
+- A C# or C++ script can move, jump, fall and look with no Player component and no Rider 3D plugin. `Move` separates the body from static colliders. Mouse look is captured in Play for that kind of claim.
+- If Rider 3D is on **and** the player object also has a C# or C++ script, Play warns that the two will fight.
+
+### Smokes
+- `--smoke-cs` and `--smoke-cpp` compile, load, tick, round-trip a Prop, walk the sample controller and hot-reload it. They no longer skip when the SDK and a compiler are present. CI installs the .NET 8 SDK and requires both.
+
+- Scripts can `GetComponent` / `AddComponent` / `RemoveComponent` (built-in components and other scripts), `Instantiate` a named entity or a `.prefab.json`, `Destroy` after a delay, and `FindWithTag` / `SetTag`.
+- Lifecycle on both languages, in order: `Awake`, `OnEnable`, `OnStart`, `OnFixedUpdate` (before physics), `OnUpdate`, `OnLateUpdate`, then `OnDisable` and `OnDestroy`.
+- `OnCollisionEnter`, `OnCollisionStay` and `OnCollisionExit` fire in 2D and 3D when solid colliders overlap, separate from triggers.
+- `Physics.Raycast` / `Overlap` in C# and `Raycast` / `Overlap` in C++ query solid colliders directly, with no physics plugin required.
+- The Inspector lists public fields and `[SerializeField]` members, with `[Header]`, `[Range]` and `[Tooltip]`. C++ uses the same tags in comments above the field. Vectors, colours, enums and entity references are included.
+- C# coroutines (`StartCoroutine`, `WaitForSeconds`) and C++ `After(seconds, fn)`, plus a small event you can subscribe to and invoke.
+- `PlayAnimation(clip)`, `SetFov` and the existing `Sound` call cover clip playback, camera field of view and audio from both languages. Loading a different scene from a script is not yet.
+
+Not in this patch yet (see the parity list in docs/scripting.md): collision callbacks beyond triggers, attribute Inspector, coroutines, debugger attach, and editor scripting.
+
 ## 0.2.1 — 2026-10-26
 
 A patch for team claims: riders now see the claim's files when they ride in and can place their own. Run `TombStone-0.2.1-update.exe` over 0.2.0; it keeps your claims, settings and the Vault.

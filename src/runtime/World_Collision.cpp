@@ -467,6 +467,38 @@ void World::separate_dynamics() {
   }
 }
 
+void World::update_collisions() {
+  std::vector<std::pair<std::uint64_t, std::uint64_t>> now;
+  for (std::size_t i = 0; i < actors_.size(); ++i) {
+    const Actor& a = actors_[i];
+    if (a.dead || !a.data.collider || a.data.collider->trigger) continue;
+    const Aabb ab = collider_box(a.data);
+    for (std::size_t j = i + 1; j < actors_.size(); ++j) {
+      const Actor& b = actors_[j];
+      if (b.dead || !b.data.collider || b.data.collider->trigger) continue;
+      if (!overlaps(ab, collider_box(b.data))) continue;
+      const std::uint64_t lo = std::min(a.data.id, b.data.id);
+      const std::uint64_t hi = std::max(a.data.id, b.data.id);
+      now.emplace_back(lo, hi);
+    }
+  }
+  std::sort(now.begin(), now.end());
+  now.erase(std::unique(now.begin(), now.end()), now.end());
+  auto tell = [&](std::uint64_t x, std::uint64_t y, int phase) {
+    if (!scripts_) return;
+    scripts_->collide(x, y, phase);
+    scripts_->collide(y, x, phase);
+  };
+  std::vector<std::pair<std::uint64_t, std::uint64_t>> left, entered, stayed;
+  std::set_difference(solid_hits_.begin(), solid_hits_.end(), now.begin(), now.end(), std::back_inserter(left));
+  std::set_difference(now.begin(), now.end(), solid_hits_.begin(), solid_hits_.end(), std::back_inserter(entered));
+  std::set_intersection(now.begin(), now.end(), solid_hits_.begin(), solid_hits_.end(), std::back_inserter(stayed));
+  for (const auto& p : left) tell(p.first, p.second, 2);
+  for (const auto& p : entered) tell(p.first, p.second, 0);
+  for (const auto& p : stayed) tell(p.first, p.second, 1);
+  solid_hits_ = std::move(now);
+}
+
 void World::update_triggers() {
   std::vector<std::pair<std::uint64_t, std::uint64_t>> now;
   for (std::size_t t : triggers_) {

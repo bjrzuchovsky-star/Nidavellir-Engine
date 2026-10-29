@@ -281,6 +281,13 @@ void CompiledScriptHost::start_pending(int slot) {
   }
 }
 
+void CompiledScriptHost::collide(std::uint64_t self, int slot, std::uint64_t other, int phase) {
+  if (Inst* in = m_->find(self, slot); in && in->started) {
+    const char* text = phase == 0 ? "enter" : phase == 1 ? "stay" : "exit";
+    m_->call(*in, TS_HOOK_COLLISION, other, 0, text);
+  }
+}
+
 void CompiledScriptHost::trigger(bool enter, std::uint64_t t, int slot, std::uint64_t other) {
   if (Inst* in = m_->find(t, slot); in && in->started) {
     m_->call(*in, enter ? TS_HOOK_TRIGGER_ENTER : TS_HOOK_TRIGGER_EXIT, other, 0, "");
@@ -316,6 +323,20 @@ void CompiledScriptHost::tick(double dt, int slot) {
   for (std::size_t i = 0; i < n && i < m_->insts.size(); ++i) {
     Inst& in = *m_->insts[i];
     if (in.slot == slot && in.started) m_->call(in, TS_HOOK_TICK, 0, dt, "");
+  }
+}
+
+void CompiledScriptHost::fixed_tick(double dt, int slot) {
+  for (std::size_t i = 0; i < m_->insts.size(); ++i) {
+    Inst& in = *m_->insts[i];
+    if (in.slot == slot && in.started) m_->call(in, TS_HOOK_FIXED, 0, dt, "");
+  }
+}
+
+void CompiledScriptHost::late_tick(double dt, int slot) {
+  for (std::size_t i = 0; i < m_->insts.size(); ++i) {
+    Inst& in = *m_->insts[i];
+    if (in.slot == slot && in.started) m_->call(in, TS_HOOK_LATE, 0, dt, "");
   }
 }
 

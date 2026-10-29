@@ -378,6 +378,7 @@ Animator3D default_locomotion_animator();
 struct Entity3D {
   std::uint64_t id = 0;
   std::string name;
+  std::string tag;  // optional label for FindWithTag (scene.json "tag")
   Transform transform;
   bool visible = true;
   std::optional<MeshRef> mesh;

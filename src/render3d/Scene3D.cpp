@@ -141,6 +141,7 @@ Value entity_json(const Entity3D& e) {
   Value o = Value::object();
   o.set("id", Value::number(static_cast<double>(e.id)));
   o.set("name", Value::string(e.name));
+  if (!e.tag.empty()) o.set("tag", Value::string(e.tag));
   o.set("position", vec3(e.transform.position));
   o.set("rotation", quat(e.transform.rotation));
   o.set("scale", vec3(e.transform.scale));
@@ -357,6 +358,7 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
   const double id = o.num("id", 0);
   e.id = id > 0 ? static_cast<std::uint64_t>(id + 0.5) : 0;
   e.name = o.str("name");
+  e.tag = o.str("tag");
   if (e.id == 0 || e.name.empty()) {
     *why = "entity missing id/name";
     return false;

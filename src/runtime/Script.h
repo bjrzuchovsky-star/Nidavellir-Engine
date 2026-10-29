@@ -52,6 +52,10 @@ inline constexpr int kScriptTickRate = 60;
 // "scripts/gate.lua"-style: relative, forward slashes, no "." / ".."
 // parts, ends in a script language's extension (see script_language).
 bool valid_script_path(const std::string& rel);
+// Build and tooling folders under scripts/ that must not be compiled:
+// obj, bin, cache, build, Library, meta, and dot-folders (.git, .vs).
+// The name is compared case-insensitively.
+bool generated_script_directory(const std::string& name);
 // Language a script file is written in, by extension: "lua" (.lua),
 // "graph" (.graph.json, visual scripts), "cpp" (.cpp, compiled into the
 // project's native module), "cs" (.cs, .NET); "" for anything else.
@@ -138,6 +142,18 @@ class ScriptWorld {
   // graphs' Key event and compiled scripts read it. Default: none.
   virtual std::uint32_t script_buttons(int /*slot*/) const { return 0; }
 
+  // ABI 4. Defaults keep a world that only implements the 2D calls usable:
+  // pose reads script_entity, move_by adds to that x/y, the rest no-op.
+  // out18: px,py,pz, ex,ey,ez, sx,sy,sz, fx,fy,fz, rx,ry,rz, ux,uy,uz.
+  virtual bool script_pose(std::uint64_t id, float* out18) const;
+  virtual void script_move_by(std::uint64_t id, float x, float y, float z);
+  virtual void script_rotate_by(std::uint64_t id, float ex, float ey, float ez);
+  virtual void script_set_local_euler(std::uint64_t id, float ex, float ey, float ez);
+  virtual void script_set_position(std::uint64_t id, float x, float y, float z);
+  virtual float script_axis(int slot, const char* name) const;
+  virtual bool script_button_down(int slot, const char* name) const;
+  virtual int script_query(const char* op, const char* args, char* out, int cap);
+
   // Plugin call bridge: table.fn(args...) on a plugin's Lua table (the ones
   // script_open_extensions hands Lua scripts), for graphs, C++ and C#. One
   // value back (nil = false). False + *error when there is no such table /
@@ -186,6 +202,12 @@ class ScriptLanguageHost {
   virtual void broadcast(int /*slot*/, const char* /*hook*/, const std::string& /*text*/,
                          double /*number*/) {}
   virtual void tick(double dt, int slot) = 0;
+  // Physics step (before tick) and the pass after tick. Default: nothing,
+  // so Lua and graphs are unchanged.
+  virtual void fixed_tick(double /*dt*/, int /*slot*/) {}
+  virtual void late_tick(double /*dt*/, int /*slot*/) {}
+  // Solid-collider overlap. phase 0 enter, 1 stay, 2 exit.
+  virtual void collide(std::uint64_t /*self*/, int /*slot*/, std::uint64_t /*other*/, int /*phase*/) {}
   virtual int reload_changed() = 0;
   virtual bool reload(const std::string& /*rel*/) { return false; }
   // Some running instance uses this file.

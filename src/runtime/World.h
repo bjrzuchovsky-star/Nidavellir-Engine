@@ -354,6 +354,14 @@ class World final : public ScriptWorld {
   void script_ui(UiCommand command) override;
   void script_fx(FxEvent event) override;
   std::uint32_t script_buttons(int slot) const override;
+  bool script_pose(std::uint64_t id, float* out18) const override;
+  void script_move_by(std::uint64_t id, float x, float y, float z) override;
+  void script_rotate_by(std::uint64_t id, float ex, float ey, float ez) override;
+  void script_set_local_euler(std::uint64_t id, float ex, float ey, float ez) override;
+  void script_set_position(std::uint64_t id, float x, float y, float z) override;
+  float script_axis(int slot, const char* name) const override;
+  bool script_button_down(int slot, const char* name) const override;
+  int script_query(const char* op, const char* args, char* out, int cap) override;
 
   // --- Particles + 2D lighting (World_Fx.cpp) --------------------------------
   // Entity emitters ("particles") run on the tick; fx() adds one-shot
@@ -577,6 +585,8 @@ class World final : public ScriptWorld {
   float step_limit_ = 1.0e9f;
   // (trigger id, other id) pairs overlapping after the latest tick, sorted.
   std::vector<std::pair<std::uint64_t, std::uint64_t>> inside_;
+  std::vector<std::pair<std::uint64_t, std::uint64_t>> solid_hits_;
+  void update_collisions();
   std::vector<TriggerEvent> events_;
   std::optional<TriggerEvent> last_event_;
   std::uint64_t events_total_ = 0;
@@ -599,6 +609,13 @@ class World final : public ScriptWorld {
   std::uint64_t log_total_ = 0;
   std::vector<Toast> toasts_;
   std::uint64_t next_id_ = 1;
+  struct DelayedKill {
+    std::uint64_t id = 0;
+    std::uint64_t tick = 0;
+  };
+  std::vector<DelayedKill> delayed_;
+  void flush_delayed();
+  std::uint64_t script_adopt(Entity2D data);
   std::array<std::uint32_t, kMaxPlayers> prev_buttons_{};
   InputFrame input_{};
   NetRole net_role_ = NetRole::Local;

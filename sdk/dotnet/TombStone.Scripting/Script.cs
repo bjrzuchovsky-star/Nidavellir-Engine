@@ -14,8 +14,12 @@
 // (dotnet build) and hot-reloads it by unloading the old collectible
 // AssemblyLoadContext. Same hooks and world API as Lua, graphs and C++.
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Text;
 using TombStone.Native;
 
 namespace TombStone
@@ -47,15 +51,122 @@ namespace TombStone
             : Number.ToString(CultureInfo.InvariantCulture);
     }
 
+    // Right-handed, Y up. Forward is the entity's -Z. Fields are settable
+    // (`velocity.Y = -2f`). ToString is readable in logs.
+    public struct Vector3
+    {
+        public float X, Y, Z;
+        public Vector3(float x, float y, float z) { X = x; Y = y; Z = z; }
+        public static Vector3 Zero => new Vector3(0, 0, 0);
+        public static Vector3 One => new Vector3(1, 1, 1);
+        public static Vector3 Up => new Vector3(0, 1, 0);
+        public static Vector3 Down => new Vector3(0, -1, 0);
+        public static Vector3 Right => new Vector3(1, 0, 0);
+        public static Vector3 Forward => new Vector3(0, 0, -1);
+        public static Vector3 operator +(Vector3 a, Vector3 b) => new Vector3(a.X + b.X, a.Y + b.Y, a.Z + b.Z);
+        public static Vector3 operator -(Vector3 a, Vector3 b) => new Vector3(a.X - b.X, a.Y - b.Y, a.Z - b.Z);
+        public static Vector3 operator *(Vector3 a, float s) => new Vector3(a.X * s, a.Y * s, a.Z * s);
+        public static Vector3 operator *(float s, Vector3 a) => a * s;
+        public float Magnitude => (float)Math.Sqrt(X * X + Y * Y + Z * Z);
+        public override string ToString() =>
+            "(" + X.ToString("0.###", CultureInfo.InvariantCulture) + ", " +
+            Y.ToString("0.###", CultureInfo.InvariantCulture) + ", " +
+            Z.ToString("0.###", CultureInfo.InvariantCulture) + ")";
+    }
+
+    public struct Vector2
+    {
+        public float X, Y;
+        public Vector2(float x, float y) { X = x; Y = y; }
+        public static Vector2 Zero => new Vector2(0, 0);
+        public static Vector2 operator +(Vector2 a, Vector2 b) => new Vector2(a.X + b.X, a.Y + b.Y);
+        public static Vector2 operator *(Vector2 a, float s) => new Vector2(a.X * s, a.Y * s);
+        public override string ToString() =>
+            "(" + X.ToString("0.###", CultureInfo.InvariantCulture) + ", " +
+            Y.ToString("0.###", CultureInfo.InvariantCulture) + ")";
+    }
+
+    // A live object. Null when Find misses. Implicitly a ulong id so older
+    // calls (`Get("gold", -1, Find("Bank"))`) keep compiling.
+    public sealed class Entity
+    {
+        internal Script Owner;
+        public ulong Id;
+        public static implicit operator ulong(Entity e) => e == null ? 0UL : e.Id;
+        public static bool operator ==(Entity a, Entity b)
+        {
+            if (ReferenceEquals(a, b)) return true;
+            if (a is null || b is null) return false;
+            return a.Id == b.Id;
+        }
+        public static bool operator !=(Entity a, Entity b) => !(a == b);
+        public override bool Equals(object obj) => obj is Entity e && this == e;
+        public override int GetHashCode() => Id.GetHashCode();
+        public Vector3 Position
+        {
+            get => Owner == null ? Vector3.Zero : Owner.PosePosition(Id);
+            set { if (Owner != null) Owner.SetPosition(Id, value); }
+        }
+        public void SetLocalRotation(float x, float y, float z)
+        {
+            if (Owner != null) Owner.SetLocalEuler(Id, x, y, z);
+        }
+        public void SetVisible(bool on) { if (Owner != null) Owner.SetVisible(Id, on); }
+        public void Destroy() { if (Owner != null) Owner.Destroy(Id); }
+    }
+
+    // Axes of one object. Script.Transform returns this for the script's own body.
+    public sealed class Transform
+    {
+        internal Script Owner;
+        internal ulong Id;
+        public Vector3 Position
+        {
+            get => Owner.PosePosition(Id);
+            set => Owner.SetPosition(Id, value);
+        }
+        public Vector3 Forward => Owner.PoseAxis(Id, 9);
+        public Vector3 Right => Owner.PoseAxis(Id, 12);
+        public Vector3 Up => Owner.PoseAxis(Id, 15);
+        public void Rotate(Vector3 eulerDegrees) => Owner.RotateBy(Id, eulerDegrees);
+        public void SetLocalRotation(float x, float y, float z) => Owner.SetLocalEuler(Id, x, y, z);
+    }
+
+    public static class Input
+    {
+        public static float GetAxis(string name) => Script.Active == null ? 0f : Script.Active.Axis(name);
+        public static bool GetButtonDown(string name) => Script.Active != null && Script.Active.ButtonDown(name);
+        public static bool GetButton(string name) => Script.Active != null && Script.Active.ButtonHeld(name);
+    }
+
+    public static class Time
+    {
+        public static float DeltaTime { get; internal set; }
+        public static float Elapsed { get; internal set; }
+        public static int Frame { get; internal set; }
+    }
+
     public abstract unsafe class Script
     {
         internal TsScriptApi* api;
         internal Dictionary<string, Value> props = new Dictionary<string, Value>();
+        internal List<Coroutine> routines = new List<Coroutine>();
+        internal static Script Active;
         public ulong Self { get; internal set; }
 
-        // Hooks.
+        // Hooks. OnTick's default runs OnUpdate, so a script overrides one of them.
+        // A script that overrides OnTick and does not call the base skips OnUpdate.
+        public virtual void Awake() { }
+        public virtual void OnEnable() { }
         public virtual void OnStart() { }
-        public virtual void OnTick(double dt) { }
+        public virtual void OnDisable() { }
+        public virtual void OnUpdate(float deltaTime) { }
+        public virtual void OnFixedUpdate(float deltaTime) { }
+        public virtual void OnLateUpdate(float deltaTime) { }
+        public virtual void OnTick(double dt) { OnUpdate((float)dt); }
+        public virtual void OnCollisionEnter(ulong other) { }
+        public virtual void OnCollisionStay(ulong other) { }
+        public virtual void OnCollisionExit(ulong other) { }
         public virtual void OnTriggerEnter(ulong other) { }
         public virtual void OnTriggerExit(ulong other) { }
         public virtual void OnInteract(ulong rider) { }
@@ -89,27 +200,56 @@ namespace TombStone
         public virtual void OnDialogueEnd(string dialogueId) { }
         public virtual void OnGameSaved(string slot) { }
         public virtual void OnGameLoaded(string slot) { }
-        public virtual string Save() => "";
-        public virtual void Load(string state) { }
+        // Hot reload keeps fields (float, int, bool, string, Vector2, Vector3)
+        // unless a script replaces Save / Load. Prefixed so a hand-written
+        // save string is left alone.
+        public virtual string Save() => PackFields();
+        public virtual void Load(string state) { if (state != null && state.StartsWith("tsf1\n")) UnpackFields(state); }
 
         IntPtr W => api->World;
         ulong Id(ulong e) => e != 0 ? e : Self;
 
         // The world.
         public ulong Tick => api->Tick(W);
-        public ulong Find(string name) { fixed (byte* p = Utf8.Z(name)) return api->Find(W, p); }
+        public Entity Find(string name)
+        {
+            ulong id;
+            fixed (byte* p = Utf8.Z(name)) id = api->Find(W, p);
+            return id == 0 ? null : new Entity { Owner = this, Id = id };
+        }
+        // Slot is 1-based. Player(slot) is the older call (an id) and still
+        // compiles. PlayerId is the same id. PlayerEntity is that body as an
+        // object (null when the slot is empty). There is no Player property:
+        // it would hide Player(slot).
         public ulong Player(int slot1) => api->Player(W, slot1 - 1);
-        public bool Position(ulong e, out float x, out float y)
+        public ulong PlayerId(int slot1) => Player(slot1);
+        public Entity PlayerEntity(int slot1 = 1)
+        {
+            ulong id = Player(slot1);
+            return id == 0 ? null : new Entity { Owner = this, Id = id };
+        }
+        public bool TryPosition(ulong e, out float x, out float y)
         {
             float a = 0, b = 0;
             bool ok = api->Position(W, e, &a, &b) != 0;
             x = a; y = b;
             return ok;
         }
+        public Vector3 Position
+        {
+            get => PosePosition(Self);
+            set => SetPosition(Self, value);
+        }
+        public Transform Transform => new Transform { Owner = this, Id = Self };
+        public void Move(Vector3 delta) => MoveBy(Self, delta);
+        public void Rotate(Vector3 eulerDegrees) => RotateBy(Self, eulerDegrees);
         public void Move(ulong e, float x, float y) => api->Move(W, e, x, y);
         public void SetVisible(ulong e, bool on) => api->SetVisible(W, e, on ? 1 : 0);
         public void SetCollider(ulong e, bool on) => api->SetCollider(W, e, on ? 1 : 0);
         public bool Play(ulong e, string clip, bool hold = false) { fixed (byte* p = Utf8.Z(clip)) return api->Play(W, e, p, hold ? 1 : 0) != 0; }
+        public bool PlayAnimation(string clip) => EngineQuery("anim", Self.ToString(CultureInfo.InvariantCulture) + "\t" + (clip ?? "")) == "1";
+        public bool SetFov(ulong camera, float degrees) =>
+            EngineQuery("fov", camera.ToString(CultureInfo.InvariantCulture) + "\t" + degrees.ToString("R", CultureInfo.InvariantCulture)) == "1";
         public ulong Spawn(string tmpl, float x, float y) { fixed (byte* p = Utf8.Z(tmpl)) return api->Spawn(W, p, x, y); }
         public void Destroy(ulong e) => api->Destroy(W, e);
         // Entity state (shared with Lua / graphs / C++, replicated).
@@ -135,10 +275,25 @@ namespace TombStone
         {
             fixed (byte* p = Utf8.Z(text)) api->Toast(W, slot1 <= 0 ? -1 : slot1 - 1, p, seconds, Self);
         }
-        void LogAt(int level, string text) { fixed (byte* p = Utf8.Z(text)) api->Log(W, level, p, Self); }
-        public void Log(string text) => LogAt(0, text);
-        public void Warn(string text) => LogAt(1, text);
-        internal void Error(string text) => LogAt(2, text);
+        public void Toast(string title, string message)
+        {
+            string text = string.IsNullOrEmpty(message) ? (title ?? "") : (title ?? "") + " — " + message;
+            Toast(text);
+        }
+        void LogAt(int level, string text, string file, int line)
+        {
+            if (api->LogAt != null)
+            {
+                fixed (byte* p = Utf8.Z(text)) fixed (byte* f = Utf8.Z(file ?? ""))
+                    api->LogAt(W, level, p, Self, f, line);
+                return;
+            }
+            fixed (byte* p = Utf8.Z(text)) api->Log(W, level, p, Self);
+        }
+        public void Log(string text, [CallerFilePath] string file = "", [CallerLineNumber] int line = 0) => LogAt(0, text, file, line);
+        public void Warn(string text, [CallerFilePath] string file = "", [CallerLineNumber] int line = 0) => LogAt(1, text, file, line);
+        public void ErrorLog(string text, [CallerFilePath] string file = "", [CallerLineNumber] int line = 0) => LogAt(2, text, file, line);
+        internal void Error(string text) => LogAt(2, text, "", 0);
         public void Sound(string clip, float volume = 1) { fixed (byte* p = Utf8.Z(clip)) api->Sound(W, p, volume, Self); }
         public void Music(string clip, float fade = 1) { fixed (byte* p = Utf8.Z(clip)) api->Music(W, p, fade); }
         public void Burst(string preset, ulong at = 0) { fixed (byte* p = Utf8.Z(preset)) api->FxBurst(W, p, Id(at)); }
@@ -214,9 +369,323 @@ namespace TombStone
             return r;
         }
 
-        // Props (scene overrides of the defaults you pass).
+        // Props (scene overrides of the defaults you pass). The overload
+        // matches the default's type, so `float s = Prop("moveSpeed", 6.0f)` compiles.
+        public float Prop(string name, float fallback) => (float)Prop(name, (double)fallback);
+        public int Prop(string name, int fallback) => (int)Prop(name, (double)fallback);
         public double Prop(string name, double fallback) => props.TryGetValue(name, out Value v) ? v.Number : fallback;
-        public string Prop(string name, string fallback) => props.TryGetValue(name, out Value v) ? v.Text : fallback;
+        public string Prop(string name, string fallback) => props.TryGetValue(name, out Value v) ? (v.Type == 't' ? v.Text : v.ToString()) : fallback;
         public bool Prop(string name, bool fallback) => props.TryGetValue(name, out Value v) ? v.Number != 0 : fallback;
+        public Vector3 Prop(string name, Vector3 fallback)
+        {
+            if (!props.TryGetValue(name, out Value v) || v.Type != 't') return fallback;
+            string[] p = (v.Text ?? "").Split(',');
+            if (p.Length < 3) return fallback;
+            float x, y, z;
+            if (!float.TryParse(p[0], NumberStyles.Float, CultureInfo.InvariantCulture, out x)) return fallback;
+            if (!float.TryParse(p[1], NumberStyles.Float, CultureInfo.InvariantCulture, out y)) return fallback;
+            if (!float.TryParse(p[2], NumberStyles.Float, CultureInfo.InvariantCulture, out z)) return fallback;
+            return new Vector3(x, y, z);
+        }
+
+        internal bool ReadPose(ulong id, float[] o)
+        {
+            if (o == null || o.Length < 18 || api->Pose == null) return false;
+            float* buf = stackalloc float[18];
+            if (api->Pose(W, id, buf) == 0) return false;
+            for (int i = 0; i < 18; ++i) o[i] = buf[i];
+            return true;
+        }
+        internal Vector3 PosePosition(ulong id)
+        {
+            float[] o = new float[18];
+            if (!ReadPose(id, o))
+            {
+                float x, y;
+                if (TryPosition(id, out x, out y)) return new Vector3(x, y, 0);
+                return Vector3.Zero;
+            }
+            return new Vector3(o[0], o[1], o[2]);
+        }
+        internal Vector3 PoseAxis(ulong id, int at)
+        {
+            float[] o = new float[18];
+            if (!ReadPose(id, o)) return Vector3.Zero;
+            return new Vector3(o[at], o[at + 1], o[at + 2]);
+        }
+        internal void MoveBy(ulong id, Vector3 d)
+        {
+            if (api->MoveBy != null) api->MoveBy(W, id, d.X, d.Y, d.Z);
+        }
+        internal void RotateBy(ulong id, Vector3 e)
+        {
+            if (api->RotateBy != null) api->RotateBy(W, id, e.X, e.Y, e.Z);
+        }
+        internal void SetLocalEuler(ulong id, float x, float y, float z)
+        {
+            if (api->SetLocalEuler != null) api->SetLocalEuler(W, id, x, y, z);
+        }
+        internal void SetPosition(ulong id, Vector3 p)
+        {
+            if (api->SetPosition != null) api->SetPosition(W, id, p.X, p.Y, p.Z);
+            else api->Move(W, id, p.X, p.Y);
+        }
+        internal float Axis(string name)
+        {
+            if (api->Axis == null) return 0;
+            fixed (byte* p = Utf8.Z(name)) return api->Axis(W, 0, p);
+        }
+        internal bool ButtonDown(string name)
+        {
+            if (api->ButtonDown == null) return false;
+            fixed (byte* p = Utf8.Z(name)) return api->ButtonDown(W, 0, p) != 0;
+        }
+        internal bool ButtonHeld(string name)
+        {
+            if (name == "Jump") return Held(Button.Action);
+            return false;
+        }
+
+        string PackFields()
+        {
+            var sb = new StringBuilder("tsf1\n");
+            for (Type t = GetType(); t != null && t != typeof(Script); t = t.BaseType)
+            {
+                foreach (FieldInfo f in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                {
+                    if (f.IsStatic || f.Name.IndexOf('<') >= 0) continue;
+                    object v = f.GetValue(this);
+                    if (f.FieldType == typeof(float)) sb.Append(f.Name).Append("\tf\t").Append(((float)v).ToString("R", CultureInfo.InvariantCulture)).Append('\n');
+                    else if (f.FieldType == typeof(double)) sb.Append(f.Name).Append("\td\t").Append(((double)v).ToString("R", CultureInfo.InvariantCulture)).Append('\n');
+                    else if (f.FieldType == typeof(int)) sb.Append(f.Name).Append("\ti\t").Append((int)v).Append('\n');
+                    else if (f.FieldType == typeof(bool)) sb.Append(f.Name).Append("\tb\t").Append((bool)v ? "1" : "0").Append('\n');
+                    else if (f.FieldType == typeof(string)) sb.Append(f.Name).Append("\ts\t").Append(((string)v) ?? "").Append('\n');
+                    else if (f.FieldType == typeof(Vector3))
+                    {
+                        Vector3 p = (Vector3)v;
+                        sb.Append(f.Name).Append("\tv\t").Append(p.X.ToString("R", CultureInfo.InvariantCulture)).Append(',')
+                          .Append(p.Y.ToString("R", CultureInfo.InvariantCulture)).Append(',')
+                          .Append(p.Z.ToString("R", CultureInfo.InvariantCulture)).Append('\n');
+                    }
+                    else if (f.FieldType == typeof(Vector2))
+                    {
+                        Vector2 p = (Vector2)v;
+                        sb.Append(f.Name).Append("\t2\t").Append(p.X.ToString("R", CultureInfo.InvariantCulture)).Append(',')
+                          .Append(p.Y.ToString("R", CultureInfo.InvariantCulture)).Append('\n');
+                    }
+                }
+            }
+            return sb.ToString();
+        }
+        void UnpackFields(string state)
+        {
+            foreach (string line in state.Split('\n'))
+            {
+                if (line.Length < 4 || line == "tsf1") continue;
+                string[] f = line.Split('\t');
+                if (f.Length < 3) continue;
+                FieldInfo field = null;
+                for (Type t = GetType(); t != null && t != typeof(Script) && field == null; t = t.BaseType)
+                    field = t.GetField(f[0], BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+                if (field == null) continue;
+                if (f[1] == "f" && field.FieldType == typeof(float))
+                { float n; if (float.TryParse(f[2], NumberStyles.Float, CultureInfo.InvariantCulture, out n)) field.SetValue(this, n); }
+                else if (f[1] == "d" && field.FieldType == typeof(double))
+                { double n; if (double.TryParse(f[2], NumberStyles.Float, CultureInfo.InvariantCulture, out n)) field.SetValue(this, n); }
+                else if (f[1] == "i" && field.FieldType == typeof(int))
+                { int n; if (int.TryParse(f[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out n)) field.SetValue(this, n); }
+                else if (f[1] == "b" && field.FieldType == typeof(bool)) field.SetValue(this, f[2] == "1");
+                else if (f[1] == "s" && field.FieldType == typeof(string)) field.SetValue(this, f[2]);
+                else if (f[1] == "v" && field.FieldType == typeof(Vector3)) field.SetValue(this, ParseVec(f[2]));
+                else if (f[1] == "2" && field.FieldType == typeof(Vector2))
+                {
+                    string[] p = f[2].Split(',');
+                    float x, y;
+                    if (p.Length >= 2 && float.TryParse(p[0], NumberStyles.Float, CultureInfo.InvariantCulture, out x)
+                        && float.TryParse(p[1], NumberStyles.Float, CultureInfo.InvariantCulture, out y))
+                        field.SetValue(this, new Vector2(x, y));
+                }
+            }
+        }
+        static Vector3 ParseVec(string text)
+        {
+            string[] p = (text ?? "").Split(',');
+            float x = 0, y = 0, z = 0;
+            if (p.Length >= 3)
+            {
+                float.TryParse(p[0], NumberStyles.Float, CultureInfo.InvariantCulture, out x);
+                float.TryParse(p[1], NumberStyles.Float, CultureInfo.InvariantCulture, out y);
+                float.TryParse(p[2], NumberStyles.Float, CultureInfo.InvariantCulture, out z);
+            }
+            return new Vector3(x, y, z);
+        }
+
+        internal string EngineQuery(string op, string args) => Query(op, args);
+        string Query(string op, string args)
+        {
+            if (api == null || api->Query == null) return "";
+            byte[] buf = new byte[128];
+            int n;
+            fixed (byte* o = Utf8.Z(op)) fixed (byte* a = Utf8.Z(args ?? ""))
+            {
+                fixed (byte* bp = buf) n = api->Query(W, o, a, bp, buf.Length);
+                if (n > buf.Length)
+                {
+                    buf = new byte[n];
+                    fixed (byte* bp2 = buf) n = api->Query(W, o, a, bp2, buf.Length);
+                }
+            }
+            return n <= 0 ? "" : System.Text.Encoding.UTF8.GetString(buf, 0, n);
+        }
+        static string ComponentKey(Type t)
+        {
+            if (t == typeof(Collider)) return "collider";
+            if (t == typeof(Rigidbody)) return "rigidbody";
+            if (t == typeof(Renderer)) return "renderer";
+            if (t == typeof(AudioSource)) return "audio";
+            if (t == typeof(SceneCamera)) return "camera";
+            if (t == typeof(Animator)) return "animator";
+            return null;
+        }
+        public bool HasComponent(string name) => Query("has", Self + "\t" + (name ?? "")) == "1";
+        public bool AddComponent(string name) => Query("add", Self + "\t" + (name ?? "")) == "1";
+        public bool RemoveComponent(string name) => Query("remove", Self + "\t" + (name ?? "")) == "1";
+        public bool Alive(ulong id) => Query("alive", id.ToString(CultureInfo.InvariantCulture)) == "1";
+        public string Tag() => Query("tag", Self.ToString(CultureInfo.InvariantCulture));
+        public void SetTag(string tag) => Query("set_tag", Self.ToString(CultureInfo.InvariantCulture) + "\t" + (tag ?? ""));
+        public Entity FindWithTag(string tag)
+        {
+            string id = Query("find_tag", tag ?? "");
+            ulong n;
+            if (!ulong.TryParse(id, out n) || n == 0) return null;
+            return new Entity { Owner = this, Id = n };
+        }
+        public Entity Instantiate(string nameOrPrefab, Vector3 position)
+        {
+            string args = (nameOrPrefab ?? "") + "\t" +
+                position.X.ToString("R", CultureInfo.InvariantCulture) + "\t" +
+                position.Y.ToString("R", CultureInfo.InvariantCulture) + "\t" +
+                position.Z.ToString("R", CultureInfo.InvariantCulture);
+            string id = Query("instantiate", args);
+            ulong n;
+            if (!ulong.TryParse(id, out n) || n == 0) return null;
+            return new Entity { Owner = this, Id = n };
+        }
+        public Entity Instantiate(string nameOrPrefab) => Instantiate(nameOrPrefab, Vector3.Zero);
+        public void Destroy(ulong e, float delaySeconds) =>
+            Query("destroy_in", e.ToString(CultureInfo.InvariantCulture) + "\t" + delaySeconds.ToString("R", CultureInfo.InvariantCulture));
+        public T GetComponent<T>() where T : class
+        {
+            if (typeof(Script).IsAssignableFrom(typeof(T)))
+            {
+                if (this is T self) return self;
+                foreach (Script s in Host.ScriptsOn(Self))
+                    if (s is T found) return found;
+                return null;
+            }
+            string key = ComponentKey(typeof(T));
+            if (key == null || Query("has", Self + "\t" + key) != "1") return null;
+            var c = (Component)Activator.CreateInstance(typeof(T));
+            c.Owner = this;
+            c.Id = Self;
+            c.Kind = key;
+            return (T)(object)c;
+        }
+        public T AddComponent<T>() where T : class, new()
+        {
+            if (typeof(Script).IsAssignableFrom(typeof(T)) && typeof(T) != typeof(Script))
+            {
+                var s = new T() as Script;
+                if (s == null) return null;
+                s.api = api;
+                s.Self = Self;
+                Host.AddRuntime(s);
+                return (T)(object)s;
+            }
+            string key = ComponentKey(typeof(T));
+            if (key == null || Query("add", Self + "\t" + key) != "1") return null;
+            return GetComponent<T>();
+        }
+        public Coroutine StartCoroutine(IEnumerator routine)
+        {
+            if (routine == null) return null;
+            var c = new Coroutine { Routine = routine };
+            routines.Add(c);
+            if (!StepCoroutine(c, 0)) routines.Remove(c);
+            return c;
+        }
+        public void StopCoroutine(Coroutine c)
+        {
+            if (c != null) routines.Remove(c);
+        }
+        internal void PumpCoroutines(float dt)
+        {
+            for (int i = routines.Count - 1; i >= 0; --i)
+            {
+                Coroutine c = routines[i];
+                if (c.Wait > 0)
+                {
+                    c.Wait -= dt;
+                    if (c.Wait > 0) continue;
+                }
+                if (!StepCoroutine(c, dt)) routines.RemoveAt(i);
+            }
+        }
+        bool StepCoroutine(Coroutine c, float dt)
+        {
+            if (c.Routine == null || !c.Routine.MoveNext()) return false;
+            if (c.Routine.Current is WaitForSeconds w) c.Wait = w.Seconds;
+            return true;
+        }
+        public void RemoveComponent<T>() where T : class
+        {
+            if (typeof(Script).IsAssignableFrom(typeof(T)))
+            {
+                foreach (Script s in Host.ScriptsOn(Self))
+                {
+                    if (s is T && !ReferenceEquals(s, this)) { Host.RemoveRuntime(s); return; }
+                }
+                return;
+            }
+            string key = ComponentKey(typeof(T));
+            if (key != null) Query("remove", Self + "\t" + key);
+        }
     }
+
+    public sealed class ScriptEvent
+    {
+        readonly List<Action> listeners = new List<Action>();
+        public void Add(Action listener) { if (listener != null) listeners.Add(listener); }
+        public void Remove(Action listener) { listeners.Remove(listener); }
+        public void Invoke()
+        {
+            Action[] copy = listeners.ToArray();
+            foreach (Action a in copy) a();
+        }
+    }
+
+    public sealed class WaitForSeconds
+    {
+        public float Seconds;
+        public WaitForSeconds(float seconds) { Seconds = seconds; }
+    }
+
+    public sealed class Coroutine
+    {
+        internal IEnumerator Routine;
+        internal float Wait;
+    }
+
+    public class Component
+    {
+        internal Script Owner;
+        internal ulong Id;
+        public string Kind;
+    }
+    public class Collider : Component { }
+    public class Rigidbody : Component { }
+    public class Renderer : Component { }
+    public class AudioSource : Component { }
+    public class SceneCamera : Component { }
+    public class Animator : Component { }
 }

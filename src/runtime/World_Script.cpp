@@ -7,6 +7,7 @@
 #include "runtime/World.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -428,6 +429,78 @@ namespace runtime {
 std::uint32_t World::script_buttons(int slot) const {
   if (slot < 0 || slot >= kMaxPlayers) return 0;
   return input_.slot(slot).buttons;
+}
+
+bool World::script_pose(std::uint64_t id, float* out18) const {
+  const Actor* a = live(id);
+  if (!a || !out18) return false;
+  return ScriptWorld::script_pose(id, out18);
+}
+
+void World::script_move_by(std::uint64_t id, float x, float y, float) {
+  if (Actor* a = live(id)) {
+    a->data.x += x;
+    a->data.y += y;
+  }
+}
+
+void World::script_rotate_by(std::uint64_t id, float, float, float ez) {
+  if (Actor* a = live(id)) a->data.rotation += ez;
+}
+
+void World::script_set_local_euler(std::uint64_t id, float, float, float ez) {
+  if (Actor* a = live(id)) a->data.rotation = ez;
+}
+
+void World::script_set_position(std::uint64_t id, float x, float y, float) {
+  if (Actor* a = live(id)) {
+    a->data.x = x;
+    a->data.y = y;
+  }
+}
+
+namespace {
+
+bool axis_name(const char* a, const char* b) {
+  if (!a || !b) return false;
+  while (*a && *b) {
+    const unsigned char ca = static_cast<unsigned char>(*a++);
+    const unsigned char cb = static_cast<unsigned char>(*b++);
+    if (std::tolower(ca) != std::tolower(cb)) return false;
+  }
+  return *a == 0 && *b == 0;
+}
+
+std::uint32_t button_bit(const char* name) {
+  if (axis_name(name, "Jump") || axis_name(name, "Action")) return kButtonAction;
+  if (axis_name(name, "Alt")) return kButtonAlt;
+  if (axis_name(name, "Start")) return kButtonStart;
+  if (axis_name(name, "Use")) return kButtonUse;
+  if (axis_name(name, "Place")) return kButtonPlace;
+  if (axis_name(name, "Fire")) return kButtonFire;
+  if (axis_name(name, "Next")) return kButtonNext;
+  if (axis_name(name, "Prev")) return kButtonPrev;
+  return 0;
+}
+
+}  // namespace
+
+float World::script_axis(int slot, const char* name) const {
+  if (slot < 0 || slot >= kMaxPlayers || !name) return 0.0f;
+  const PlayerInput& in = input_.slot(slot);
+  if (axis_name(name, "Horizontal")) return in.move_x;
+  // 2D y grows down; Vertical positive is up the screen, matching a stick.
+  if (axis_name(name, "Vertical")) return -in.move_y;
+  return 0.0f;
+}
+
+bool World::script_button_down(int slot, const char* name) const {
+  if (slot < 0 || slot >= kMaxPlayers) return false;
+  const std::uint32_t bit = button_bit(name);
+  if (!bit) return false;
+  const std::uint32_t now = input_.slot(slot).buttons;
+  const std::uint32_t was = prev_buttons_[static_cast<std::size_t>(slot)];
+  return (now & bit) != 0 && (was & bit) == 0;
 }
 
 }  // namespace runtime

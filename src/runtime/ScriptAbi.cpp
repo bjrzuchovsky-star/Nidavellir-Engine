@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -182,6 +183,42 @@ int a_translate(void*, const char* key, const char* args, char* out, int cap) {
 }
 int a_lang_set(void*, const char* lang) { return loc::set_language(lang ? lang : "") ? 1 : 0; }
 int a_lang_get(void*, char* out, int cap) { return copy_out(loc::language(), out, cap); }
+
+std::string script_file_rel(const char* file) {
+  if (!file || !*file) return {};
+  std::string s = file;
+  for (char& c : s)
+    if (c == '\\') c = '/';
+  const std::size_t p = s.rfind("scripts/");
+  if (p != std::string::npos) return s.substr(p);
+  return s;
+}
+
+int a_pose(void* w, uint64_t id, float* out) { return W(w)->script_pose(id, out) ? 1 : 0; }
+void a_move_by(void* w, uint64_t id, float x, float y, float z) { W(w)->script_move_by(id, x, y, z); }
+void a_rotate_by(void* w, uint64_t id, float x, float y, float z) { W(w)->script_rotate_by(id, x, y, z); }
+void a_local_euler(void* w, uint64_t id, float x, float y, float z) {
+  W(w)->script_set_local_euler(id, x, y, z);
+}
+void a_set_pos(void* w, uint64_t id, float x, float y, float z) { W(w)->script_set_position(id, x, y, z); }
+float a_axis(void* w, int slot, const char* name) { return W(w)->script_axis(slot, name ? name : ""); }
+int a_button_down(void* w, int slot, const char* name) {
+  return W(w)->script_button_down(slot, name ? name : "") ? 1 : 0;
+}
+void a_log_at(void* w, int level, const char* t, uint64_t entity, const char* file, int line) {
+  LogEntry e;
+  e.level = level == TS_LOG_ERROR ? LogLevel::Error : level == TS_LOG_WARN ? LogLevel::Warn : LogLevel::Info;
+  e.channel = "script";
+  e.text = t ? t : "";
+  e.file = script_file_rel(file);
+  e.line = line > 0 ? line : 0;
+  e.entity = entity;
+  e.tick = W(w)->script_tick();
+  W(w)->script_log(std::move(e));
+}
+int a_query(void* w, const char* op, const char* args, char* out, int cap) {
+  return W(w)->script_query(op ? op : "", args ? args : "", out, cap);
+}
 }  // namespace
 
 TsScriptApi make_script_api(ScriptWorld* world) {
@@ -213,8 +250,56 @@ TsScriptApi make_script_api(ScriptWorld* world) {
   a.translate = a_translate;
   a.lang_set = a_lang_set;
   a.lang_get = a_lang_get;
+  a.pose = a_pose;
+  a.move_by = a_move_by;
+  a.rotate_by = a_rotate_by;
+  a.set_local_euler = a_local_euler;
+  a.set_position = a_set_pos;
+  a.axis = a_axis;
+  a.button_down = a_button_down;
+  a.log_at = a_log_at;
+  a.query = a_query;
   return a;
 }
+
+namespace {
+
+void pose_from_2d(const Entity2D& e, float* o) {
+  if (!o) return;
+  for (int i = 0; i < 18; ++i) o[i] = 0.0f;
+  o[0] = e.x;
+  o[1] = e.y;
+  o[5] = e.rotation;
+  o[6] = e.w;
+  o[7] = e.h;
+  o[8] = 1.0f;
+  const float r = e.rotation * 3.14159265f / 180.0f;
+  o[9] = std::sin(r);
+  o[10] = -std::cos(r);
+  o[12] = std::cos(r);
+  o[13] = std::sin(r);
+  o[16] = 1.0f;
+}
+
+}  // namespace
+
+bool ScriptWorld::script_pose(std::uint64_t id, float* out18) const {
+  const Entity2D* e = script_entity(id);
+  if (!e || !out18) return false;
+  pose_from_2d(*e, out18);
+  return true;
+}
+void ScriptWorld::script_move_by(std::uint64_t id, float x, float y, float /*z*/) {
+  const Entity2D* e = script_entity(id);
+  if (!e) return;
+  script_move(id, e->x + x, e->y + y);
+}
+void ScriptWorld::script_rotate_by(std::uint64_t, float, float, float) {}
+void ScriptWorld::script_set_local_euler(std::uint64_t, float, float, float) {}
+void ScriptWorld::script_set_position(std::uint64_t id, float x, float y, float /*z*/) { script_move(id, x, y); }
+float ScriptWorld::script_axis(int, const char*) const { return 0.0f; }
+bool ScriptWorld::script_button_down(int, const char*) const { return false; }
+int ScriptWorld::script_query(const char*, const char*, char*, int) { return -1; }
 
 std::string encode_script_props(const std::vector<ScriptProp>& props) {
   std::string out;

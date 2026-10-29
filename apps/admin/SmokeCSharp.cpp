@@ -4,19 +4,24 @@
 #include "SmokeGraph.h"
 #include "editor/launch/GameLauncher.h"
 #include "export/Exporter.h"
+#include "render3d/Scene3D.h"
 #include "runtime/CSharpScript.h"
 #include "runtime/GraphScript.h"
 #include "runtime/NativeScript.h"
 #include "runtime/ScriptAbi.h"
+#include "runtime/ScriptHost.h"
 #include "runtime/World.h"
 #include "scene/SceneJson.h"
+#include "world3d/World3D.h"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -187,6 +192,403 @@ TS_SCRIPT(Clerk, "clerk")
   return 0;
 }
 
+#ifndef TS_REPO_DIR
+#define TS_REPO_DIR "."
+#endif
+
+std::string read_text(const fs::path& p) {
+  std::ifstream in(p, std::ios::binary);
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+std::string dump3(const world3d::World3D& w) {
+  std::string d;
+  for (const LogEntry& e : w.log()) d += "\n  " + e.file + ":" + std::to_string(e.line) + " " + e.text;
+  return d.size() > 3000 ? d.substr(0, 3000) : d;
+}
+
+// The developer's character_movement.cs, unchanged, plus the 2D coin.
+// No Player component and no Rider plugin: the script walks the body.
+int check_character_movement() {
+  const fs::path sample =
+      fs::path(TS_REPO_DIR) / "samples" / "scripting" / "fps-cs" / "scripts" / "character_movement.cs";
+  const std::string text = read_text(sample);
+  if (text.find("public override void OnUpdate(float deltaTime)") == std::string::npos ||
+      text.find("Input.GetAxis(\"Horizontal\")") == std::string::npos ||
+      text.find("mainCam.SetLocalRotation") == std::string::npos) {
+    return fail("samples/scripting/fps-cs/scripts/character_movement.cs is missing or was edited");
+  }
+  const std::vector<ScriptProp> declared = describe_compiled_props(text, true);
+  bool speed = false, grav = false;
+  for (const ScriptProp& p : declared) {
+    if (p.name == "moveSpeed" && std::fabs(p.value.number - 6.0) < 1e-4) speed = true;
+    if (p.name == "gravity" && std::fabs(p.value.number - (-9.81)) < 1e-3) grav = true;
+  }
+  if (!speed || !grav) return fail("Inspector props should include moveSpeed 6 and gravity -9.81");
+
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cs_fps";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "character_movement.cs", text);
+  write(proj / "scripts" / "coin.cs",
+        read_text(fs::path(TS_REPO_DIR) / "samples" / "scripting" / "2d" / "scripts" / "coin.cs"));
+
+  scene3d::Scene3D scene;
+  scene.version = scene3d::kScene3DVersion;
+  scene3d::Entity3D body;
+  body.id = 1;
+  body.name = "Wanderer";
+  body.transform.position = {0.0f, 0.05f, 0.0f};
+  scene3d::Collider3D cap;
+  cap.shape = scene3d::Collider3D::Shape::Capsule;
+  cap.size = {0.4f, 1.8f, 0.4f};
+  cap.offset = {0.0f, 0.9f, 0.0f};
+  body.collider = cap;
+  body.script = ScriptData{};
+  body.script->path = "scripts/character_movement.cs";
+  body.script->set("moveSpeed", ScriptValue::of_number(12));
+  scene3d::Entity3D cam;
+  cam.id = 2;
+  cam.name = "MainCamera";
+  cam.parent = 1;
+  cam.transform.position = {0.0f, 1.6f, 0.0f};
+  scene3d::PlayCamera3D pc;
+  pc.rig = scene3d::PlayCamera3D::Rig::Fixed;
+  pc.fov = 75.0f;
+  pc.active = true;
+  pc.priority = 1;
+  cam.camera = pc;
+  scene3d::Entity3D ground;
+  ground.id = 3;
+  ground.name = "Ground";
+  ground.transform.position = {0.0f, -0.25f, 0.0f};
+  ground.transform.scale = {40.0f, 0.5f, 40.0f};
+  scene3d::Collider3D box;
+  box.shape = scene3d::Collider3D::Shape::Box;
+  box.size = {1, 1, 1};
+  ground.collider = box;
+  scene.entities = {body, cam, ground};
+
+  world3d::World3D world;
+  std::string err;
+  if (!world.start(scene, proj.string(), &err)) return fail("fps start: " + err + dump3(world));
+  if (world.player_id() != 0) return fail("the C# sample must run with no Rider / Player component");
+  world3d::Input3D walk;
+  walk.move_forward = 1.0f;
+  for (int i = 0; i < 30; ++i) world.step(walk);
+  const scene3d::Entity3D* walked = world.find(1);
+  if (!walked || !(walked->transform.position.z < -4.5f)) {
+    const float z = walked ? walked->transform.position.z : 0;
+    return fail("C# controller did not walk with Prop moveSpeed 12 (z " + std::to_string(z) + ")" + dump3(world));
+  }
+  bool spawned = false, toasted = false;
+  for (const LogEntry& e : world.log()) {
+    spawned = spawned || e.text.find("Player spawned at initial position:") != std::string::npos;
+    toasted = toasted || e.text.find("Character Movement Initialized") != std::string::npos;
+  }
+  if (!spawned || !toasted) return fail("OnStart Log / Toast:" + dump3(world));
+
+  world3d::Input3D look;
+  look.mouse_dx = 10.0f;
+  world.step(look);
+  const render3d::Vec3 fwd = world.find(1)->transform.rotation.rotate({0, 0, -1});
+  if (fwd.x <= 0.05f)
+    return fail("mouse right should yaw the body right (forward.x " + std::to_string(fwd.x) + ")");
+  look = {};
+  look.mouse_dy = -10.0f;
+  world.step(look);
+  const render3d::Vec3 eyes = world.find(2)->transform.rotation.rotate({0, 0, -1});
+  if (eyes.y <= 0.05f)
+    return fail("mouse up should pitch MainCamera up (forward.y " + std::to_string(eyes.y) + ")");
+
+  std::string edited = text;
+  const std::size_t brace = edited.rfind('}');
+  if (brace == std::string::npos) return fail("sample has no class close");
+  edited.insert(brace, "\n    public override void OnReload() { Log(\"character reloaded y=\" + velocity.Y); }\n");
+  write(proj / "scripts" / "character_movement.cs", edited);
+  if (world.reload_scripts() != 1) return fail("C# hot reload of the controller" + dump3(world));
+  bool kept = false, wiped = false;
+  for (const LogEntry& e : world.log()) {
+    if (e.text.find("character reloaded") == std::string::npos) continue;
+    kept = true;
+    wiped = wiped || e.text.find("y=0") != std::string::npos;
+  }
+  if (!kept || wiped) return fail("hot reload should keep velocity" + dump3(world));
+
+  World flat;
+  Entity2D coin_e = scripted(2, "Coin", "scripts/coin.cs");
+  coin_e.script->set("worth", ScriptValue::of_number(5));
+  if (!flat.build({coin_e}, proj.string(), &err)) return fail("2D coin build: " + err + dump(flat.take_logs()));
+  std::vector<LogEntry> logs = flat.take_logs();
+  for (LogEntry& e : ride(flat, 2)) logs.push_back(std::move(e));
+  if (!has(logs, "coin worth 5")) return fail("2D coin OnStart / Prop:" + dump(logs));
+  world.stop();
+  return 0;
+}
+
+int check_components() {
+  const char* src = R"(using TombStone;
+public class Marker : Script {
+    public override void OnStart() { Log("marker up"); }
+}
+[Script("spawner")]
+public class Spawner : Script {
+    ulong born;
+    bool said;
+    public override void OnStart() {
+        SetTag("loot");
+        if (!HasComponent("collider")) AddComponent("collider");
+        var me = FindWithTag("loot");
+        Log(me != null && (ulong)me == Self ? "found tag" : "missed tag");
+        Log(GetComponent<Collider>() != null ? "has collider" : "no collider");
+        var m = AddComponent<Marker>();
+        Log(m != null && GetComponent<Marker>() != null ? "script component" : "no script component");
+        var e = Instantiate("Crate", new Vector3(3, 4, 0));
+        born = e == null ? 0 : (ulong)e;
+        Log("born " + born);
+        if (born != 0) Destroy(born, 0.05f);
+        var prefab = Instantiate("prefabs/box.prefab.json", new Vector3(8, 8, 0));
+        Log(prefab != null ? "prefab " + (ulong)prefab : "prefab 0");
+    }
+    public override void OnUpdate(float dt) {
+        if (!said && Tick >= 6) { said = true; Log(Alive(born) ? "still here" : "destroyed"); }
+    }
+}
+)";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cs_components";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "spawner.cs", src);
+  write(proj / "prefabs" / "box.prefab.json",
+        R"({"prefab":1,"dimension":"2d","name":"Box","entities":[{"id":1,"name":"Box","x":0,"y":0,"w":16,"h":16}]})");
+  World w;
+  Entity2D spawner = scripted(2, "Spawner", "scripts/spawner.cs");
+  Entity2D crate;
+  crate.id = 3;
+  crate.name = "Crate";
+  crate.x = 10;
+  crate.y = 10;
+  std::string err;
+  if (!w.build({spawner, crate}, proj.string(), &err)) return fail("components build: " + err + dump(w.take_logs()));
+  std::vector<LogEntry> logs = w.take_logs();
+  for (LogEntry& e : ride(w, 8)) logs.push_back(std::move(e));
+  if (!has(logs, "found tag") || !has(logs, "has collider") || !has(logs, "script component") ||
+      !has(logs, "marker up") || !has(logs, "destroyed")) {
+    return fail("components / tag / instantiate / destroy delay:" + dump(logs));
+  }
+  if (!has(logs, "prefab ")) return fail("prefab instantiate:" + dump(logs));
+  for (const LogEntry& e : logs) {
+    if (e.text.find("prefab 0") != std::string::npos) return fail("prefab id was 0:" + dump(logs));
+    if (e.text.find("born 0") != std::string::npos) return fail("named instantiate failed:" + dump(logs));
+  }
+  return 0;
+}
+
+int check_lifecycle() {
+  const char* src = R"(using TombStone;
+[Script("life")]
+public class Life : Script {
+    bool gone;
+    public override void Awake() { Log("life awake"); }
+    public override void OnEnable() { Log("life enable"); }
+    public override void OnStart() { Log("life start"); }
+    public override void OnFixedUpdate(float dt) { if (Tick <= 1) Log("life fixed"); }
+    public override void OnUpdate(float dt) {
+        if (Tick <= 1) Log("life update");
+        if (!gone && Tick >= 2) { gone = true; Destroy(Self); }
+    }
+    public override void OnLateUpdate(float dt) { if (Tick <= 1) Log("life late"); }
+    public override void OnDisable() { Log("life disable"); }
+    public override void OnDestroy() { Log("life destroy"); }
+}
+)";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cs_life";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "life.cs", src);
+  World w;
+  std::string err;
+  if (!w.build({scripted(2, "Life", "scripts/life.cs")}, proj.string(), &err))
+    return fail("lifecycle build: " + err + dump(w.take_logs()));
+  std::vector<LogEntry> logs = w.take_logs();
+  for (LogEntry& e : ride(w, 4)) logs.push_back(std::move(e));
+  auto at = [&](const char* s) {
+    for (std::size_t i = 0; i < logs.size(); ++i)
+      if (logs[i].text.find(s) != std::string::npos) return static_cast<int>(i);
+    return -1;
+  };
+  const int awake = at("life awake"), enable = at("life enable"), start = at("life start");
+  const int fixedu = at("life fixed"), update = at("life update"), late = at("life late");
+  const int disable = at("life disable"), destroy = at("life destroy");
+  if (awake < 0 || enable < awake || start < enable || fixedu < start || update < fixedu || late < update ||
+      disable < late || destroy < disable) {
+    return fail("lifecycle order awake/enable/start/fixed/update/late/disable/destroy:" + dump(logs));
+  }
+  return 0;
+}
+
+int check_collision() {
+  const char* src = R"(using TombStone;
+[Script("bumper")]
+public class Bumper : Script {
+    public override void OnCollisionEnter(ulong other) { Log("hit enter"); }
+    public override void OnCollisionStay(ulong other) { if (Tick <= 2) Log("hit stay"); }
+    public override void OnCollisionExit(ulong other) { Log("hit exit"); }
+    public override void OnUpdate(float dt) {
+        if (Tick == 3) { var p = Position; p.X += 400; Position = p; }
+    }
+}
+)";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cs_hit";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "bumper.cs", src);
+  Entity2D a = scripted(2, "Bumper", "scripts/bumper.cs");
+  a.w = 32;
+  a.h = 32;
+  a.collider = ColliderData{};
+  a.collider->w = 32;
+  a.collider->h = 32;
+  Entity2D b;
+  b.id = 3;
+  b.name = "Wall";
+  b.w = 32;
+  b.h = 32;
+  b.collider = ColliderData{};
+  b.collider->w = 32;
+  b.collider->h = 32;
+  World w;
+  std::string err;
+  if (!w.build({a, b}, proj.string(), &err)) return fail("collision build: " + err);
+  std::vector<LogEntry> logs;
+  for (LogEntry& e : ride(w, 6)) logs.push_back(std::move(e));
+  if (!has(logs, "hit enter") || !has(logs, "hit stay") || !has(logs, "hit exit"))
+    return fail("2D collision enter/stay/exit:" + dump(logs));
+  return 0;
+}
+
+int check_ray() {
+  const char* src = R"(using TombStone;
+[Script("looker")]
+public class Looker : Script {
+    public override void OnStart() {
+        Physics.RayHit hit;
+        bool ok = Physics.Raycast(new Vector3(0, 16, 0), new Vector3(1, 0, 0), out hit, 200);
+        Log(ok ? "ray " + hit.Entity : "ray miss");
+        Log(Physics.Overlap(new Vector3(100, 16, 0), 2) != 0 ? "overlap yes" : "overlap no");
+    }
+}
+)";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cs_ray";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "looker.cs", src);
+  Entity2D looker = scripted(2, "Looker", "scripts/looker.cs");
+  Entity2D wall;
+  wall.id = 3;
+  wall.name = "Wall";
+  wall.x = 100;
+  wall.y = 0;
+  wall.w = 32;
+  wall.h = 32;
+  wall.collider = ColliderData{};
+  wall.collider->w = 32;
+  wall.collider->h = 32;
+  World w;
+  std::string err;
+  if (!w.build({looker, wall}, proj.string(), &err)) return fail("ray build: " + err);
+  std::vector<LogEntry> logs = w.take_logs();
+  for (LogEntry& e : ride(w, 2)) logs.push_back(std::move(e));
+  if (!has(logs, "ray 3") || !has(logs, "overlap yes")) return fail("ray / overlap:" + dump(logs));
+  return 0;
+}
+
+int check_fields() {
+  const char* cs = R"(using TombStone;
+enum Mood { Calm, Cross }
+public class Tune : Script {
+    [Header("Pace")]
+    [Range(0, 12)]
+    [Tooltip("Metres per second.")]
+    public float pace = 4.5f;
+    [SerializeField] string note = "howdy";
+    public Mood mood = Mood.Calm;
+    public Vector3 offset = new Vector3(1, 2, 3);
+    public Entity target;
+}
+)";
+  const char* cpp = R"(#include <tombstone/script_sdk.h>
+enum Mood { Calm, Cross };
+struct Tune : ts::Script {
+  // [Header("Pace")]
+  // [Range(0, 12)]
+  // [Tooltip("Metres per second.")]
+  float pace = 4.5f;
+  std::string note = "howdy";
+  Mood mood = Calm;
+  ts::Vector3 offset = ts::Vector3{1, 2, 3};
+  ts::Entity target = 0;
+};
+)";
+  auto findp = [](const std::vector<ScriptProp>& ps, const char* name) -> const ScriptProp* {
+    for (const ScriptProp& p : ps)
+      if (p.name == name) return &p;
+    return nullptr;
+  };
+  const std::vector<ScriptProp> a = describe_compiled_props(cs, true);
+  const ScriptProp* pace = findp(a, "pace");
+  const ScriptProp* note = findp(a, "note");
+  const ScriptProp* mood = findp(a, "mood");
+  const ScriptProp* offset = findp(a, "offset");
+  const ScriptProp* target = findp(a, "target");
+  if (!pace || !pace->has_range || pace->header != "Pace" || pace->tooltip.find("Metres") == std::string::npos ||
+      std::fabs(pace->value.number - 4.5) > 1e-3)
+    return fail("C# field pace / header / range / tooltip");
+  if (!note || note->value.text != "howdy") return fail("C# SerializeField string");
+  if (!mood || mood->widget != "enum" || mood->value.text != "Calm" || mood->options.find("Cross") == std::string::npos)
+    return fail("C# enum field");
+  if (!offset || offset->value.text.find("1") == std::string::npos) return fail("C# vector field");
+  if (!target || target->widget != "ref") return fail("C# object reference field");
+  const std::vector<ScriptProp> b = describe_compiled_props(cpp, false);
+  const ScriptProp* cp = findp(b, "pace");
+  if (!cp || !cp->has_range || cp->header != "Pace" || std::fabs(cp->value.number - 4.5) > 1e-3)
+    return fail("C++ field pace / header / range");
+  return 0;
+}
+
+int check_async() {
+  const char* src = R"(using System.Collections;
+using TombStone;
+[Script("waiter")]
+public class Waiter : Script {
+    public override void OnStart() {
+        var ping = new ScriptEvent();
+        ping.Add(() => Log("pinged"));
+        ping.Invoke();
+        StartCoroutine(Later());
+    }
+    IEnumerator Later() {
+        yield return new WaitForSeconds(0.05f);
+        Log("coroutine done");
+    }
+}
+)";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cs_async";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "waiter.cs", src);
+  World w;
+  std::string err;
+  if (!w.build({scripted(2, "Waiter", "scripts/waiter.cs")}, proj.string(), &err))
+    return fail("async build: " + err + dump(w.take_logs()));
+  std::vector<LogEntry> logs = w.take_logs();
+  for (LogEntry& e : ride(w, 8)) logs.push_back(std::move(e));
+  if (!has(logs, "pinged") || !has(logs, "coroutine done")) return fail("event / coroutine:" + dump(logs));
+  return 0;
+}
+
 // A prebuilt assembly (what exports ship) needs only the .NET 8+ runtime:
 // TS_SMOKE_CS_PREBUILT=<folder with ProjectScripts.dll + TombStone.Scripting.*>
 // rides it in a project with no SDK on the machine.
@@ -209,6 +611,67 @@ int check_prebuilt(const fs::path& from, std::string* said) {
   const ScriptValue* opened = w.script_get(2, "opened");
   if (!opened || opened->number != 1) return fail("prebuilt OnTick" + dump(logs));
   *said = "prebuilt assembly hosted on the .NET " + csharp_scripts::dotnet_info().runtime + " runtime";
+  return 0;
+}
+
+// A user copy of the fps-cs sample, plus generated folders a recursive glob
+// would compile again, must produce one Compile item and a successful build.
+// Two real files with the same class are named, instead of a CS0111 wall.
+int check_compile_list() {
+  const fs::path sample =
+      fs::path(TS_REPO_DIR) / "samples" / "scripting" / "fps-cs" / "scripts" / "character_movement.cs";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cs_user_copy";
+  fs::remove_all(proj, ec);
+  const fs::path dest = proj / "scripts" / "character_movement.cs";
+  fs::create_directories(dest.parent_path(), ec);
+  fs::copy_file(sample, dest, ec);
+  if (ec) return fail("copy fps-cs sample: " + ec.message());
+  for (const char* sub : {"obj/Debug", "bin", "cache", "build", "Library", "meta"}) {
+    const fs::path junk = proj / "scripts" / sub / "character_movement.cs";
+    fs::create_directories(junk.parent_path(), ec);
+    fs::copy_file(sample, junk, fs::copy_options::overwrite_existing, ec);
+    if (ec) return fail(std::string("copy stray ") + sub + ": " + ec.message());
+  }
+  ScriptBuildResult built = csharp_scripts::build(proj.string(), true);
+  if (!built.ok) return fail("user copy of fps-cs should compile once: " + built.error + "\n" + built.output);
+  const std::string csproj = read_text(proj / ".tombstone" / "dotnet" / "scripts" / "ProjectScripts.csproj");
+  if (csproj.find("<EnableDefaultCompileItems>false</EnableDefaultCompileItems>") == std::string::npos) {
+    return fail("EnableDefaultCompileItems should be false");
+  }
+  if (csproj.find("**/*.cs") != std::string::npos) return fail("csproj still globs **/*.cs");
+  int hits = 0;
+  const std::string needle = "character_movement.cs";
+  for (std::size_t p = 0; (p = csproj.find(needle, p)) != std::string::npos; p += needle.size()) ++hits;
+  if (hits != 1) {
+    return fail("expected one Compile of character_movement.cs, found " + std::to_string(hits) + "\n" + csproj);
+  }
+  for (const char* bad : {"/scripts/obj/", "/scripts/bin/", "/scripts/cache/", "/scripts/build/", "/scripts/Library/",
+                          "/scripts/meta/"}) {
+    if (csproj.find(bad) != std::string::npos) return fail(std::string("csproj lists a generated copy under ") + bad);
+  }
+  fs::copy_file(sample, proj / "scripts" / "movement.cs", ec);
+  if (ec) return fail("copy movement.cs: " + ec.message());
+  built = csharp_scripts::build(proj.string(), true);
+  if (built.ok) return fail("two CharacterMovement files should not compile");
+  std::string blob = built.error + "\n" + built.output;
+  for (const LogEntry& e : built.problems) blob += e.text + "\n";
+  if (blob.find("scripts/character_movement.cs") == std::string::npos ||
+      blob.find("scripts/movement.cs") == std::string::npos) {
+    return fail("duplicate class should name both files:\n" + blob);
+  }
+  if (blob.find("Rename one") == std::string::npos) return fail("duplicate class should say to rename one:\n" + blob);
+  if (blob.find("CS0111") != std::string::npos || blob.find("CS0101") != std::string::npos) {
+    return fail("duplicate class should not dump compiler errors:\n" + blob);
+  }
+  fs::remove(proj / "scripts" / "movement.cs", ec);
+  fs::remove(proj / "scripts" / "character_movement.cs", ec);
+  write(proj / "scripts" / "widget_a.cs",
+        "using TombStone;\npublic partial class Widget : Script {\n"
+        "  public override void OnStart() { Log(\"widget\"); }\n}\n");
+  write(proj / "scripts" / "widget_b.cs", "using TombStone;\npublic partial class Widget {\n  int extra;\n}\n");
+  built = csharp_scripts::build(proj.string(), true);
+  if (!built.ok) return fail("partial class across two files should compile: " + built.error + "\n" + built.output);
   return 0;
 }
 
@@ -293,11 +756,21 @@ int run_csharp_smoke() {
   std::string cwhy;
   const bool cpp = native_scripts::toolchain_available(&cwhy);
   if (int r = check_mixed(proj, cpp)) return r;
+  if (int r = check_character_movement()) return r;
+  if (int r = check_compile_list()) return r;
+  if (int r = check_components()) return r;
+  if (int r = check_lifecycle()) return r;
+  if (int r = check_collision()) return r;
+  if (int r = check_ray()) return r;
+  if (int r = check_fields()) return r;
+  if (int r = check_async()) return r;
   if (int r = check_export()) return r;
   std::cout << "[smoke] C# scripts OK (.NET SDK " << csharp_scripts::dotnet_info().sdk << ", assembly built in "
             << static_cast<int>(build_s) << " s, hooks + props + state + plugin bridge, hot reload kept state "
             << "and unloaded the old AssemblyLoadContext, compile error at scripts/door.cs:line kept the old "
             << "assembly, background rebuild swapped in after " << bg_ticks << " live ticks, mixed Lua + C#"
-            << (cpp ? " + C++" : "") << ", exported game ran the shipped assembly)\n";
+            << (cpp ? " + C++" : "") << ", character_movement.cs walked and hot-reloaded with no Rider, "
+            << "fps-cs copied into scripts/ compiled once (obj/bin/cache/build ignored), "
+            << "2D coin Prop round-trip, exported game ran the shipped assembly)\n";
   return 0;
 }

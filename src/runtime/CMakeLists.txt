@@ -10,6 +10,7 @@ add_library(ts_runtime
   World_CameraLua.cpp
   World_Anim.cpp
   World_Script.cpp
+  World_Query.cpp
   World_Plugins.cpp
   World_Fx.cpp
   World_Net.cpp
@@ -47,6 +48,7 @@ target_link_libraries(ts_runtime
 # C++ scripts: the module build runs this cmake against the bundled SDK.
 target_compile_definitions(ts_runtime PRIVATE
   TS_CMAKE_COMMAND="${CMAKE_COMMAND}"
+  TS_CXX_COMPILER="${CMAKE_CXX_COMPILER}"
   TS_SCRIPT_SDK_DIR="${PROJECT_SOURCE_DIR}/sdk/include"
   TS_DOTNET_SDK_DIR="${PROJECT_SOURCE_DIR}/sdk/dotnet")
 

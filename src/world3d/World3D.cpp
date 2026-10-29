@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <iterator>
 
 namespace ts {
 namespace tombstone {
@@ -130,15 +131,41 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
   }
   if (vr_) vr_start();
   if (player_ == 0) {
-    post(LogLevel::Warn, "play",
-         "No rider in this scene (give an entity a Player component); the camera stays put");
+    const bool cam = std::any_of(ents_.begin(), ents_.end(),
+                                 [](const Entity3D& e) { return e.camera.has_value(); });
+    if (cam) {
+      post(LogLevel::Info, "play",
+           "No Player component. The scene camera is in charge, and a script can drive a body "
+           "itself. Rider 3D is not required.");
+    } else {
+      post(LogLevel::Warn, "play",
+           "No rider in this scene (give an entity a Player component); the camera stays put");
+    }
   }
   if (const Entity3D* p = find(player_)) spawn_ = p->transform.position;
   rider_ctrl_ = RiderControllers3D::instance().get(kRider3DPluginId);
   if (!vr_ && player_ != 0 && !rider_ctrl_) {
     post(LogLevel::Warn, "play",
          "No movement plugin is on: the rider stands still. Switch on Rider 3D "
-         "(ts.move.rider3d) in the Trading Post to walk and look.");
+         "(ts.move.rider3d) in the Trading Post to walk and look, or drive the body from a script.");
+  }
+  auto compiled_on = [](const Entity3D& e) {
+    auto hit = [](const std::string& path) {
+      return path.size() >= 3 && (path.ends_with(".cs") || path.ends_with(".cpp"));
+    };
+    if (e.script && hit(e.script->path)) return true;
+    for (const auto& s : e.extra_scripts)
+      if (hit(s.path)) return true;
+    return false;
+  };
+  script_look_ = player_ == 0 && std::any_of(ents_.begin(), ents_.end(), compiled_on);
+  if (!vr_ && player_ != 0 && rider_ctrl_) {
+    if (const Entity3D* p = find(player_); p && compiled_on(*p)) {
+      post(LogLevel::Warn, "play",
+           p->name + " has a C# or C++ script and the Rider 3D plugin. Both will try to move it. "
+                     "Take the Player component off, or switch Rider 3D off in the Trading Post, "
+                     "if the script should drive the body.");
+    }
   }
   rebuild_statics();
   phys_build();
@@ -353,13 +380,18 @@ void World3D::follow_camera(bool snap) {
 }
 
 bool World3D::mouse_look() const {
-  if (vr_ || !running_ || !rider_ctrl_) return false;
+  if (vr_ || !running_) return false;
+  if (script_look_ && !rider_ctrl_) return true;
+  if (!rider_ctrl_) return false;
   const Entity3D* p = find(player_);
   return p && p->player && rider_ctrl_->mouse_look(*p->player);
 }
 
 bool World3D::wants_cursor_capture() const {
-  return mouse_look() && find(player_)->player->capture_cursor;
+  if (!mouse_look()) return false;
+  if (script_look_ && player_ == 0) return true;
+  const Entity3D* p = find(player_);
+  return p && p->player && p->player->capture_cursor;
 }
 
 void World3D::apply_mouse_look(float dx, float dy) {
@@ -452,6 +484,39 @@ void World3D::move_player(const Input3D& in) {
   }
 }
 
+void World3D::update_collisions() {
+  std::vector<std::pair<std::uint64_t, std::uint64_t>> now;
+  for (std::size_t i = 0; i < ents_.size(); ++i) {
+    const Entity3D& a = ents_[i];
+    if (dead_.count(a.id) || !a.collider || a.collider->trigger) continue;
+    const Aabb ab = collider_box(a);
+    for (std::size_t j = i + 1; j < ents_.size(); ++j) {
+      const Entity3D& b = ents_[j];
+      if (dead_.count(b.id) || !b.collider || b.collider->trigger) continue;
+      const Aabb bb = collider_box(b);
+      const bool hit = ab.min.x < bb.max.x && ab.max.x > bb.min.x && ab.min.y < bb.max.y && ab.max.y > bb.min.y &&
+                       ab.min.z < bb.max.z && ab.max.z > bb.min.z;
+      if (!hit) continue;
+      now.emplace_back(std::min(a.id, b.id), std::max(a.id, b.id));
+    }
+  }
+  std::sort(now.begin(), now.end());
+  now.erase(std::unique(now.begin(), now.end()), now.end());
+  auto tell = [&](std::uint64_t x, std::uint64_t y, int phase) {
+    if (!host_) return;
+    host_->collide(x, y, phase);
+    host_->collide(y, x, phase);
+  };
+  std::vector<std::pair<std::uint64_t, std::uint64_t>> left, entered, stayed;
+  std::set_difference(solid_hits_.begin(), solid_hits_.end(), now.begin(), now.end(), std::back_inserter(left));
+  std::set_difference(now.begin(), now.end(), solid_hits_.begin(), solid_hits_.end(), std::back_inserter(entered));
+  std::set_intersection(now.begin(), now.end(), solid_hits_.begin(), solid_hits_.end(), std::back_inserter(stayed));
+  for (const auto& p : left) tell(p.first, p.second, 2);
+  for (const auto& p : entered) tell(p.first, p.second, 0);
+  for (const auto& p : stayed) tell(p.first, p.second, 1);
+  solid_hits_ = std::move(now);
+}
+
 void World3D::update_triggers() {
   const Entity3D* p = find(player_);
   if (!p || dead_.count(player_)) return;
@@ -530,8 +595,10 @@ void World3D::follow_parents(const std::vector<std::pair<std::uint64_t, Transfor
 
 void World3D::step(const Input3D& input0) {
   if (!running_) return;
+  flush_delayed();
   TS_PROFILE_SCOPE("world3d.step");
   Input3D input = input0;
+  note_script_input(input);
   // Direct steps (tests, F10) carry their own mouse / scroll.
   apply_mouse_look(input.mouse_dx, input.mouse_dy);
   apply_zoom(input.zoom);
@@ -546,6 +613,10 @@ void World3D::step(const Input3D& input0) {
     for (const Entity3D& e : ents_) before.emplace_back(e.id, e.transform);
   }
   const float dt = static_cast<float>(kTickSeconds);
+  if (host_) {
+    host_->start_pending();
+    host_->fixed_tick(kTickSeconds);
+  }
   {
     TS_PROFILE_SCOPE("world3d.physics");
     phys_pre(dt);
@@ -558,6 +629,7 @@ void World3D::step(const Input3D& input0) {
     phys_step(dt);
     phys_post();
     if (!vr_) update_triggers();
+    update_collisions();
   }
   if (host_) {
     TS_PROFILE_SCOPE("world3d.scripts");
@@ -565,6 +637,7 @@ void World3D::step(const Input3D& input0) {
     if (input.action && !jump_held_) interact();
     host_->run_timers(script_tick());
     host_->tick(kTickSeconds);
+    host_->late_tick(kTickSeconds);
   }
   for (const auto& x : exts_) {
     TS_PROFILE_SCOPE(x->name());
@@ -578,6 +651,7 @@ void World3D::step(const Input3D& input0) {
   ++tick_;
   in_step_ = false;
   if (has_parents_) follow_parents(before);
+  apply_script_locals();
   apply_attachments();
   {
     TS_PROFILE_SCOPE("world3d.fx");
@@ -604,18 +678,29 @@ void World3D::apply_zoom(float steps) {
 
 int World3D::update(double real_seconds, const Input3D& input0) {
   if (!running_ || paused_) return 0;
-  // Mouse and scroll are per frame: apply once, however many ticks run.
-  apply_mouse_look(input0.mouse_dx, input0.mouse_dy);
-  apply_zoom(input0.zoom);
-  Input3D input = input0;
-  input.mouse_dx = input.mouse_dy = input.zoom = 0.0f;
+  // Mouse and scroll are per frame. Hold them until a tick runs so a frame
+  // with no tick does not drop the look, and scripts see the delta once.
+  pending_mouse_x_ += input0.mouse_dx;
+  pending_mouse_y_ += input0.mouse_dy;
+  pending_zoom_ += input0.zoom;
+  Input3D held = input0;
+  held.mouse_dx = held.mouse_dy = held.zoom = 0.0f;
   accumulator_ += std::min(real_seconds, 0.25);
   int n = 0;
-  jump_latched_ = jump_latched_ || input.jump;
-  action_latched_ = action_latched_ || input.action;
+  jump_latched_ = jump_latched_ || input0.jump;
+  action_latched_ = action_latched_ || input0.action;
+  bool first = true;
   while (accumulator_ >= kTickSeconds && n < kMaxCatchUpTicks) {
     accumulator_ -= kTickSeconds;
-    step(input);
+    Input3D tick = held;
+    if (first) {
+      tick.mouse_dx = pending_mouse_x_;
+      tick.mouse_dy = pending_mouse_y_;
+      tick.zoom = pending_zoom_;
+      pending_mouse_x_ = pending_mouse_y_ = pending_zoom_ = 0.0f;
+      first = false;
+    }
+    step(tick);
     ++n;
   }
   if (n == kMaxCatchUpTicks) accumulator_ = 0.0;

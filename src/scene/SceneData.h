@@ -219,6 +219,15 @@ std::string describe(const ScriptValue& value);
 struct ScriptProp {
   std::string name;
   ScriptValue value;
+  // Optional Inspector hints from [Header] / [Range] / [Tooltip] (and the
+  // C++ comment form of the same attributes).
+  std::string header;
+  std::string tooltip;
+  bool has_range = false;
+  float range_min = 0.0f;
+  float range_max = 0.0f;
+  std::string widget;   // "", "color", "enum", "ref"
+  std::string options;  // enum names, comma separated
 
   bool operator==(const ScriptProp& o) const = default;
 };
@@ -250,6 +259,7 @@ struct ScriptData {
 struct Entity2D {
   std::uint64_t id = 0;
   std::string name;
+  std::string tag;  // optional label for FindWithTag (scene.json "tag")
   float x = 0.0f;
   float y = 0.0f;
   float w = 64.0f;

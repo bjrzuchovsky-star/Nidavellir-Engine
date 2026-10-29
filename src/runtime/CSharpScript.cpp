@@ -4,11 +4,15 @@
 #include "runtime/ScriptAbi.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <sstream>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 #if !defined(TS_DOTNET_SDK_DIR)
 #define TS_DOTNET_SDK_DIR ""
@@ -148,6 +152,429 @@ fs::path binding_sources() {
 
 std::string xml_path(const fs::path& p) { return p.lexically_normal().generic_string(); }
 
+std::string xml_escape(const std::string& s) {
+  std::string o;
+  o.reserve(s.size());
+  for (char c : s) {
+    if (c == '&') o += "&amp;";
+    else if (c == '<') o += "&lt;";
+    else if (c == '"') o += "&quot;";
+    else o += c;
+  }
+  return o;
+}
+
+// Canonical path used to drop the same file listed twice (a relative path
+// and an absolute one, a symlink, or Scripts vs scripts on Windows).
+std::string path_key(const fs::path& p) {
+  std::error_code ec;
+  fs::path c = fs::weakly_canonical(p, ec);
+  if (ec) c = fs::absolute(p, ec).lexically_normal();
+  std::string s = c.generic_string();
+#if defined(_WIN32)
+  for (char& ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+#endif
+  return s;
+}
+
+bool is_cs(const fs::path& p) {
+  std::string ext = p.extension().string();
+  for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return ext == ".cs";
+}
+
+struct TypeDecl {
+  std::string qname;
+  std::string file;
+  int line = 0;
+  bool partial = false;
+};
+
+void skip_trivia(const std::string& s, std::size_t& i, int& line) {
+  while (i < s.size()) {
+    const char c = s[i];
+    if (c == ' ' || c == '\t' || c == '\r') {
+      ++i;
+      continue;
+    }
+    if (c == '\n') {
+      ++line;
+      ++i;
+      continue;
+    }
+    if (c == '/' && i + 1 < s.size() && s[i + 1] == '/') {
+      while (i < s.size() && s[i] != '\n') ++i;
+      continue;
+    }
+    if (c == '/' && i + 1 < s.size() && s[i + 1] == '*') {
+      i += 2;
+      while (i + 1 < s.size() && !(s[i] == '*' && s[i + 1] == '/')) {
+        if (s[i] == '\n') ++line;
+        ++i;
+      }
+      if (i + 1 < s.size()) i += 2;
+      continue;
+    }
+    break;
+  }
+}
+
+bool ident_start(char c) { return std::isalpha(static_cast<unsigned char>(c)) || c == '_' || c == '@'; }
+bool ident_cont(char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; }
+
+// Reads an identifier at i, or returns false and leaves i unchanged.
+bool read_ident(const std::string& s, std::size_t& i, int& line, std::string* out) {
+  skip_trivia(s, i, line);
+  if (i >= s.size() || !ident_start(s[i])) return false;
+  std::size_t j = i;
+  if (s[j] == '@') ++j;
+  if (j >= s.size() || !(std::isalpha(static_cast<unsigned char>(s[j])) || s[j] == '_')) return false;
+  ++j;
+  while (j < s.size() && ident_cont(s[j])) ++j;
+  *out = s.substr(i + (s[i] == '@' ? 1 : 0), j - (i + (s[i] == '@' ? 1 : 0)));
+  i = j;
+  return true;
+}
+
+void skip_string(const std::string& s, std::size_t& i, int& line) {
+  const bool verbatim = i > 0 && s[i - 1] == '@' && s[i] == '"';
+  if (i >= s.size() || (s[i] != '"' && s[i] != '\'')) return;
+  const char q = s[i];
+  ++i;
+  if (verbatim && q == '"') {
+    while (i < s.size()) {
+      if (s[i] == '\n') ++line;
+      if (s[i] == '"') {
+        if (i + 1 < s.size() && s[i + 1] == '"') {
+          i += 2;
+          continue;
+        }
+        ++i;
+        return;
+      }
+      ++i;
+    }
+    return;
+  }
+  while (i < s.size()) {
+    if (s[i] == '\n') {
+      ++line;
+      ++i;
+      if (q == '"') return;  // a regular string cannot span a line
+      continue;
+    }
+    if (s[i] == '\\' && i + 1 < s.size()) {
+      i += 2;
+      continue;
+    }
+    if (s[i] == q) {
+      ++i;
+      return;
+    }
+    ++i;
+  }
+}
+
+// [Script("stem")] and other attributes. Returns the Script stem, if any.
+std::string scan_attribute(const std::string& s, std::size_t& i, int& line) {
+  std::string stem;
+  if (i >= s.size() || s[i] != '[') return stem;
+  ++i;
+  int depth = 1;
+  while (i < s.size() && depth > 0) {
+    skip_trivia(s, i, line);
+    if (i >= s.size()) break;
+    if (s[i] == '[') {
+      ++depth;
+      ++i;
+      continue;
+    }
+    if (s[i] == ']') {
+      --depth;
+      ++i;
+      continue;
+    }
+    if (s[i] == '"' || s[i] == '\'') {
+      skip_string(s, i, line);
+      continue;
+    }
+    std::string id;
+    if (read_ident(s, i, line, &id)) {
+      if (depth == 1 && id == "Script") {
+        skip_trivia(s, i, line);
+        if (i < s.size() && s[i] == '(') {
+          ++i;
+          skip_trivia(s, i, line);
+          if (i < s.size() && s[i] == '"') {
+            const std::size_t start = i + 1;
+            skip_string(s, i, line);
+            if (i > start) stem = s.substr(start, i - start - 1);
+          }
+        }
+      }
+      continue;
+    }
+    ++i;
+  }
+  return stem;
+}
+
+std::string qualify(const std::vector<std::string>& ns, const std::string& name) {
+  std::string q;
+  for (const std::string& p : ns) {
+    if (!q.empty()) q += '.';
+    q += p;
+  }
+  if (!q.empty()) q += '.';
+  q += name;
+  return q;
+}
+
+bool is_modifier(const std::string& id) {
+  return id == "public" || id == "private" || id == "protected" || id == "internal" || id == "static" ||
+         id == "abstract" || id == "sealed" || id == "unsafe" || id == "new" || id == "readonly" || id == "ref" ||
+         id == "file" || id == "async" || id == "virtual" || id == "override" || id == "extern" || id == "volatile";
+}
+
+std::vector<TypeDecl> scan_types(const std::string& src, const std::string& file) {
+  std::vector<TypeDecl> out;
+  std::vector<std::string> ns;
+  struct Frame {
+    int brace;
+    int count;
+  };
+  std::vector<Frame> frames;
+  int brace = 0;
+  bool pending_partial = false;
+  std::string pending_script;
+  std::vector<std::string> pending_ns;
+  bool open_ns = false;
+  std::size_t i = 0;
+  int line = 1;
+  auto ns_brace = [&]() { return frames.empty() ? 0 : frames.back().brace; };
+  auto clear_flags = [&]() {
+    pending_partial = false;
+    pending_script.clear();
+  };
+  while (i < src.size()) {
+    skip_trivia(src, i, line);
+    if (i >= src.size()) break;
+    if (src[i] == '"' || src[i] == '\'') {
+      skip_string(src, i, line);
+      continue;
+    }
+    // @"..." or $@"..." / @$"..." — the @ is an ident start, handled below
+    // when it is not a keyword. A verbatim string starts with @".
+    if (src[i] == '@' && i + 1 < src.size() && src[i + 1] == '"') {
+      ++i;
+      skip_string(src, i, line);
+      continue;
+    }
+    if ((src[i] == '$') && i + 1 < src.size() && (src[i + 1] == '"' || (src[i + 1] == '@' && i + 2 < src.size() && src[i + 2] == '"'))) {
+      // Interpolated strings can contain braces. Skip the holes coarsely:
+      // walk until the closing quote, counting { } that are not doubled.
+      const bool verb = src[i + 1] == '@';
+      i += verb ? 3 : 2;
+      int hole = 0;
+      while (i < src.size()) {
+        if (src[i] == '\n' && !verb) break;
+        if (src[i] == '\n') ++line;
+        if (!verb && src[i] == '\\' && i + 1 < src.size()) {
+          i += 2;
+          continue;
+        }
+        if (src[i] == '{') {
+          if (i + 1 < src.size() && src[i + 1] == '{') {
+            i += 2;
+            continue;
+          }
+          ++hole;
+          ++i;
+          continue;
+        }
+        if (src[i] == '}' && hole > 0) {
+          if (i + 1 < src.size() && src[i + 1] == '}') {
+            i += 2;
+            continue;
+          }
+          --hole;
+          ++i;
+          continue;
+        }
+        if (hole == 0 && src[i] == '"') {
+          if (verb && i + 1 < src.size() && src[i + 1] == '"') {
+            i += 2;
+            continue;
+          }
+          ++i;
+          break;
+        }
+        ++i;
+      }
+      continue;
+    }
+    if (src[i] == '[') {
+      const std::string stem = scan_attribute(src, i, line);
+      if (!stem.empty()) pending_script = stem;
+      continue;
+    }
+    if (src[i] == '{') {
+      ++brace;
+      if (open_ns) {
+        frames.push_back(Frame{brace, static_cast<int>(pending_ns.size())});
+        for (const std::string& p : pending_ns) ns.push_back(p);
+        pending_ns.clear();
+        open_ns = false;
+      }
+      ++i;
+      continue;
+    }
+    if (src[i] == '}') {
+      if (!frames.empty() && frames.back().brace == brace) {
+        for (int n = 0; n < frames.back().count && !ns.empty(); ++n) ns.pop_back();
+        frames.pop_back();
+      }
+      if (brace > 0) --brace;
+      ++i;
+      continue;
+    }
+    if (src[i] == ';') {
+      pending_partial = false;
+      ++i;
+      continue;
+    }
+    std::string id;
+    const int id_line = line;
+    if (!read_ident(src, i, line, &id)) {
+      ++i;
+      continue;
+    }
+    if (id == "namespace" && brace == ns_brace()) {
+      std::vector<std::string> parts;
+      std::string part;
+      if (read_ident(src, i, line, &part)) {
+        parts.push_back(part);
+        for (;;) {
+          skip_trivia(src, i, line);
+          if (i < src.size() && src[i] == '.') {
+            ++i;
+            if (!read_ident(src, i, line, &part)) break;
+            parts.push_back(part);
+            continue;
+          }
+          break;
+        }
+        skip_trivia(src, i, line);
+        if (i < src.size() && src[i] == ';') {
+          ns = parts;
+          frames.clear();
+          ++i;
+        } else if (i < src.size() && src[i] == '{') {
+          pending_ns = parts;
+          open_ns = true;
+        }
+      }
+      continue;
+    }
+    if (id == "partial") {
+      pending_partial = true;
+      continue;
+    }
+    if (id == "struct" || id == "enum" || id == "interface" || id == "delegate") {
+      clear_flags();
+      continue;
+    }
+    if (id == "class" || id == "record") {
+      std::string name;
+      std::size_t save_i = i;
+      int save_line = line;
+      std::string next;
+      if (!read_ident(src, i, line, &next)) {
+        i = save_i;
+        line = save_line;
+        clear_flags();
+        continue;
+      }
+      if (id == "record" && next == "struct") {
+        clear_flags();
+        continue;
+      }
+      if (id == "record" && next == "class") {
+        if (!read_ident(src, i, line, &name)) {
+          clear_flags();
+          continue;
+        }
+      } else if (next == "struct" || next == "class" || next == "interface" || next == "enum" || next == "where") {
+        clear_flags();
+        continue;
+      } else {
+        name = next;
+      }
+      if (brace == ns_brace() && !name.empty()) {
+        TypeDecl d;
+        d.qname = qualify(ns, name);
+        d.file = file;
+        d.line = id_line;
+        d.partial = pending_partial;
+        (void)pending_script;
+        out.push_back(std::move(d));
+      }
+      clear_flags();
+      continue;
+    }
+    if (!is_modifier(id) && brace == ns_brace()) pending_partial = false;
+  }
+  return out;
+}
+
+std::string join_and(const std::vector<std::string>& xs) {
+  if (xs.empty()) return {};
+  if (xs.size() == 1) return xs[0];
+  if (xs.size() == 2) return xs[0] + " and " + xs[1];
+  std::string s;
+  for (std::size_t n = 0; n < xs.size(); ++n) {
+    if (n) s += (n + 1 == xs.size()) ? " and " : ", ";
+    s += xs[n];
+  }
+  return s;
+}
+
+// Two different files declaring the same class. CSC reports CS0101 / CS0111
+// only on the later file, so the earlier copy is invisible in the console.
+std::vector<LogEntry> duplicate_classes(const std::string& project, const std::vector<std::string>& files) {
+  std::vector<TypeDecl> decls;
+  for (const std::string& rel : files) {
+    const std::string src = read_all(fs::path(project) / rel);
+    for (TypeDecl& d : scan_types(src, rel)) decls.push_back(std::move(d));
+  }
+  std::vector<LogEntry> problems;
+  std::vector<std::string> names;
+  for (const TypeDecl& d : decls) names.push_back(d.qname);
+  std::sort(names.begin(), names.end());
+  names.erase(std::unique(names.begin(), names.end()), names.end());
+  for (const std::string& qname : names) {
+    std::vector<const TypeDecl*> group;
+    for (const TypeDecl& d : decls)
+      if (d.qname == qname) group.push_back(&d);
+    std::vector<std::string> where;
+    bool all_partial = true;
+    for (const TypeDecl* d : group) {
+      all_partial = all_partial && d->partial;
+      if (std::find(where.begin(), where.end(), d->file) == where.end()) where.push_back(d->file);
+    }
+    if (where.size() < 2 || all_partial) continue;
+    LogEntry e;
+    e.level = LogLevel::Error;
+    e.channel = "script";
+    e.file = where.back();
+    e.line = group.back()->line;
+    e.text = "C# script class " + qname + " is defined in " + join_and(where) +
+             ". Rename one so each script class has its own name.";
+    problems.push_back(std::move(e));
+  }
+  return problems;
+}
+
 }  // namespace
 
 const DotnetInfo& dotnet_info() {
@@ -175,24 +602,49 @@ std::string disabled_reason(bool prebuilt) {
   return {};
 }
 
-bool has_sources(const std::string& project) {
+std::vector<std::string> compile_files(const std::string& project) {
+  std::vector<std::string> out;
   std::error_code ec;
-  for (const auto& e : fs::directory_iterator(fs::path(project) / "scripts", ec)) {
-    if (e.path().extension() == ".cs") return true;
+  const fs::path root = fs::path(project) / "scripts";
+  if (!fs::is_directory(root, ec)) return out;
+  const std::string root_key = path_key(root);
+  std::unordered_set<std::string> seen;
+  std::vector<std::pair<std::string, std::string>> items;
+  fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec);
+  for (; !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+    std::error_code fec;
+    if (it->is_directory(fec)) {
+      if (generated_script_directory(it->path().filename().string())) it.disable_recursion_pending();
+      continue;
+    }
+    if (!it->is_regular_file(fec) || !is_cs(it->path())) continue;
+    const std::string key = path_key(it->path());
+    if (key != root_key && key.rfind(root_key + "/", 0) != 0) continue;
+    if (!seen.insert(key).second) continue;
+    const fs::path rel = fs::relative(it->path(), fs::path(project), fec);
+    if (fec) continue;
+    items.emplace_back(rel.generic_string(), key);
   }
-  return false;
+  std::sort(items.begin(), items.end(),
+            [](const std::pair<std::string, std::string>& a, const std::pair<std::string, std::string>& b) {
+              return a.first < b.first;
+            });
+  out.reserve(items.size());
+  for (auto& item : items) out.push_back(std::move(item.first));
+  return out;
 }
+
+bool has_sources(const std::string& project) { return !compile_files(project).empty(); }
 
 std::int64_t sources_stamp(const std::string& project) {
   std::error_code ec;
   std::vector<std::string> names;
-  for (const auto& e : fs::recursive_directory_iterator(fs::path(project) / "scripts", ec)) {
-    if (e.path().extension() != ".cs") continue;
-    names.push_back(e.path().generic_string() + "|" +
-                    std::to_string(static_cast<long long>(e.last_write_time(ec).time_since_epoch().count())) +
-                    "|" + std::to_string(e.file_size(ec)));
+  for (const std::string& rel : compile_files(project)) {
+    const fs::path p = fs::path(project) / rel;
+    names.push_back(rel + "|" +
+                    std::to_string(static_cast<long long>(fs::last_write_time(p, ec).time_since_epoch().count())) +
+                    "|" + std::to_string(fs::file_size(p, ec)));
   }
-  std::sort(names.begin(), names.end());
   std::uint64_t h = 1469598103934665603ULL;
   for (const std::string& n : names) {
     for (unsigned char c : n) h = (h ^ c) * 1099511628211ULL;
@@ -245,15 +697,48 @@ ScriptBuildResult build(const std::string& project, bool force) {
     const std::string ext = e.path().extension().string();
     if (ext == ".cs" || ext == ".csproj") write_if_changed(dir / "binding" / e.path().filename(), read_all(e.path()));
   }
-  const std::string scripts = xml_path(fs::absolute(fs::path(project) / "scripts", ec));
+  // One Compile item per file. A recursive scripts/**/*.cs glob also picks up
+  // copies under obj/bin/cache/build, and on Windows an absolute forward-slash
+  // wildcard can hand the compiler the same path twice. CSC then reports
+  // CS0101 / CS0111 only against the later file.
+  const std::vector<std::string> sources = compile_files(project);
+  if (const std::vector<LogEntry> dups = duplicate_classes(project, sources); !dups.empty()) {
+    r.problems = dups;
+    for (const LogEntry& p : dups) {
+      r.output += p.file + ":" + std::to_string(p.line) + ": error: " + p.text + "\n";
+    }
+    r.error = "C# scripts did not compile";
+    return r;
+  }
+  std::string includes;
+  for (const std::string& rel : sources) {
+    const fs::path abs = fs::absolute(fs::path(project) / rel, ec);
+    includes += "    <Compile Include=\"" + xml_escape(xml_path(abs)) + "\" />\n";
+  }
+  const std::string props =
+      "<Project>\n"
+      "  <!-- Generated by TombStone. Keeps a claim Directory.Build.props from\n"
+      "       adding a second Compile glob on top of the file list. -->\n"
+      "  <PropertyGroup>\n"
+      "    <EnableDefaultItems>false</EnableDefaultItems>\n"
+      "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n"
+      "    <EnableDefaultNoneItems>false</EnableDefaultNoneItems>\n"
+      "    <ImportDirectoryBuildTargets>false</ImportDirectoryBuildTargets>\n"
+      "  </PropertyGroup>\n"
+      "</Project>\n";
+  write_if_changed(dir / "scripts" / "Directory.Build.props", props);
   const std::string csproj =
       "<!-- Generated by TombStone for this project's C# scripts. Do not edit:\n"
-      "     the editor rewrites it. Every scripts/*.cs joins one assembly. -->\n"
+      "     the editor rewrites it. Every scripts/*.cs joins one assembly.\n"
+      "     Each file is listed once; obj, bin, cache and build are left out. -->\n"
       "<Project Sdk=\"Microsoft.NET.Sdk\">\n"
       "  <PropertyGroup>\n"
       "    <TargetFramework>net8.0</TargetFramework>\n"
       "    <AssemblyName>ProjectScripts</AssemblyName>\n"
+      "    <EnableDefaultItems>false</EnableDefaultItems>\n"
       "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n"
+      "    <EnableDefaultNoneItems>false</EnableDefaultNoneItems>\n"
+      "    <ImportDirectoryBuildTargets>false</ImportDirectoryBuildTargets>\n"
       "    <ImplicitUsings>disable</ImplicitUsings>\n"
       "    <Nullable>disable</Nullable>\n"
       "    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>\n"
@@ -263,8 +748,8 @@ ScriptBuildResult build(const std::string& project, bool force) {
       "    <DebugType>portable</DebugType>\n"
       "    <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>\n"
       "  </PropertyGroup>\n"
-      "  <ItemGroup>\n"
-      "    <Compile Include=\"" + scripts + "/**/*.cs\" />\n"
+      "  <ItemGroup>\n" +
+      includes +
       "  </ItemGroup>\n"
       "  <ItemGroup>\n"
       "    <ProjectReference Include=\"../binding/TombStone.Scripting.csproj\">\n"

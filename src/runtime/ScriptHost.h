@@ -78,6 +78,7 @@ class ScriptHost {
 
   void start_pending();
   void trigger(bool enter, std::uint64_t trigger, std::uint64_t other);
+  void collide(std::uint64_t self, std::uint64_t other, int phase);
   void interact(std::uint64_t target, std::uint64_t rider);
   void ui_event(const std::string& widget, bool change, double value, const std::string& text);
   void hand_event(std::uint64_t target, const char* hook, const std::string& text,
@@ -86,6 +87,8 @@ class ScriptHost {
   // hook(text, number) on every running script that has it, every language.
   void broadcast(const char* hook, const std::string& text, double number);
   void tick(double dt);
+  void fixed_tick(double dt);
+  void late_tick(double dt);
   int reload_changed();
   bool reload(const std::string& rel);
 
