@@ -442,9 +442,10 @@ void World::step(const InputFrame& input) {
   events_.clear();
   input_ = input;
   in_step_ = true;
-  // Scripts that joined since the last tick start before anybody moves.
+  // OnStart, then OnFixedUpdate, then the physics step, then OnUpdate / OnLateUpdate.
   if (scripts_) {
     scripts_->start_pending();
+    scripts_->fixed_tick(kTickSeconds);
   }
   apply_changes();
   {
@@ -460,6 +461,7 @@ void World::step(const InputFrame& input) {
   {
     TS_PROFILE_SCOPE("world.scripts");
     step_scripts(input);
+    if (scripts_) scripts_->late_tick(kTickSeconds);
   }
   {
     TS_PROFILE_SCOPE("world.plugins");

@@ -154,8 +154,9 @@ namespace TombStone
 
         // Hooks. OnTick's default runs OnUpdate, so a script overrides one of them.
         // A script that overrides OnTick and does not call the base skips OnUpdate.
-        public virtual void OnStart() { }
+        public virtual void Awake() { }
         public virtual void OnEnable() { }
+        public virtual void OnStart() { }
         public virtual void OnDisable() { }
         public virtual void OnUpdate(float deltaTime) { }
         public virtual void OnFixedUpdate(float deltaTime) { }

@@ -319,6 +319,20 @@ void CompiledScriptHost::tick(double dt, int slot) {
   }
 }
 
+void CompiledScriptHost::fixed_tick(double dt, int slot) {
+  for (std::size_t i = 0; i < m_->insts.size(); ++i) {
+    Inst& in = *m_->insts[i];
+    if (in.slot == slot && in.started) m_->call(in, TS_HOOK_FIXED, 0, dt, "");
+  }
+}
+
+void CompiledScriptHost::late_tick(double dt, int slot) {
+  for (std::size_t i = 0; i < m_->insts.size(); ++i) {
+    Inst& in = *m_->insts[i];
+    if (in.slot == slot && in.started) m_->call(in, TS_HOOK_LATE, 0, dt, "");
+  }
+}
+
 bool CompiledScriptHost::uses(const std::string& rel) const {
   for (const auto& i : m_->insts) if (i->path == rel) return true;
   return false;

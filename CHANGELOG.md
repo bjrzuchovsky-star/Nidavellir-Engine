@@ -25,6 +25,7 @@ C# and C++ gameplay scripts can actually drive a game. The acceptance script is 
 - `--smoke-cs` and `--smoke-cpp` compile, load, tick, round-trip a Prop, walk the sample controller and hot-reload it. They no longer skip when the SDK and a compiler are present. CI installs the .NET 8 SDK and requires both.
 
 - Scripts can `GetComponent` / `AddComponent` / `RemoveComponent` (built-in components and other scripts), `Instantiate` a named entity or a `.prefab.json`, `Destroy` after a delay, and `FindWithTag` / `SetTag`.
+- Lifecycle on both languages, in order: `Awake`, `OnEnable`, `OnStart`, `OnFixedUpdate` (before physics), `OnUpdate`, `OnLateUpdate`, then `OnDisable` and `OnDestroy`.
 
 Not in this patch yet (see the parity list in docs/scripting.md): collision callbacks beyond triggers, attribute Inspector, coroutines, debugger attach, and editor scripting.
 

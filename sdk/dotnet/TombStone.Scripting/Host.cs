@@ -43,7 +43,9 @@ namespace TombStone
         static readonly Dictionary<int, Generation> gens = new Dictionary<int, Generation>();
         static readonly Dictionary<ulong, List<Script>> byEntity = new Dictionary<ulong, List<Script>>();
         static readonly List<Script> runtimeAdded = new List<Script>();
+        static readonly HashSet<Script> runtimeStarted = new HashSet<Script>();
         static int pumpedFrame = -1;
+        static int pumpedMask;
 
         internal static IEnumerable<Script> ScriptsOn(ulong id)
         {
@@ -58,7 +60,7 @@ namespace TombStone
             runtimeAdded.Add(s);
             Script prev = Script.Active;
             Script.Active = s;
-            try { s.OnEnable(); s.OnStart(); }
+            try { s.Awake(); s.OnEnable(); }
             catch (Exception e) { s.Error(s.GetType().Name + ": " + e.Message); }
             finally { Script.Active = prev; }
         }
@@ -68,10 +70,12 @@ namespace TombStone
             try { s.OnDisable(); s.OnDestroy(); }
             catch (Exception e) { s.Error("remove: " + e.Message); }
         }
-        internal static void PumpRuntime(float dt)
+        internal static void PumpRuntime(int phase, float dt)
         {
-            if (pumpedFrame == Time.Frame) return;
-            pumpedFrame = Time.Frame;
+            int bit = 1 << phase;
+            if (pumpedFrame != Time.Frame) { pumpedFrame = Time.Frame; pumpedMask = 0; }
+            if ((pumpedMask & bit) != 0) return;
+            pumpedMask |= bit;
             Script[] copy = runtimeAdded.ToArray();
             foreach (Script s in copy)
             {
@@ -79,9 +83,13 @@ namespace TombStone
                 Script.Active = s;
                 try
                 {
-                    s.OnFixedUpdate(dt);
-                    s.OnTick(dt);
-                    s.OnLateUpdate(dt);
+                    if (phase == 0) s.OnFixedUpdate(dt);
+                    else if (phase == 1)
+                    {
+                        if (runtimeStarted.Add(s)) s.OnStart();
+                        s.OnTick(dt);
+                    }
+                    else s.OnLateUpdate(dt);
                 }
                 catch (Exception e) { s.Error(s.GetType().Name + ": " + e.Message); }
                 finally { Script.Active = prev; }
@@ -184,6 +192,11 @@ namespace TombStone
                 List<Script> list;
                 if (!byEntity.TryGetValue(self, out list)) byEntity[self] = list = new List<Script>();
                 list.Add(s);
+                Script prev = Script.Active;
+                Script.Active = s;
+                try { s.Awake(); s.OnEnable(); }
+                catch (Exception e) { s.Error(s.GetType().Name + " awake: " + e.Message); }
+                finally { Script.Active = prev; }
                 return GCHandle.ToIntPtr(GCHandle.Alloc(new Instance { Script = s, Gen = g }));
             }
             catch (Exception e)
@@ -218,15 +231,22 @@ namespace TombStone
             {
                 switch (hook)
                 {
-                    case 0: s.OnEnable(); s.OnStart(); break;
+                    case 0: s.OnStart(); break;
                     case 1:
                         Time.DeltaTime = (float)number;
                         Time.Elapsed += (float)number;
-                        Time.Frame++;
-                        PumpRuntime((float)number);
-                        // The ride is fixed-step, so FixedUpdate and Update share the tick.
-                        s.OnFixedUpdate((float)number);
+                        PumpRuntime(1, (float)number);
                         s.OnTick(number);
+                        break;
+                    case 10:
+                        Time.DeltaTime = (float)number;
+                        Time.Frame++;
+                        PumpRuntime(0, (float)number);
+                        s.OnFixedUpdate((float)number);
+                        break;
+                    case 11:
+                        Time.DeltaTime = (float)number;
+                        PumpRuntime(2, (float)number);
                         s.OnLateUpdate((float)number);
                         break;
                     case 2: s.OnTriggerEnter(entity); break;

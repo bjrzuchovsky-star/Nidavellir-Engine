@@ -219,12 +219,13 @@ Both languages sit on one native API (`TsScriptApi`, ABI 4). Names match. C++ us
 
 | C# | C++ | What it does |
 |---|---|---|
-| `OnStart()` | `OnStart()` | First tick. `on_start()` still works in C++. |
-| `OnEnable` / `OnDisable` | — | C# only, with start and destroy. |
-| `OnUpdate(float dt)` | `OnUpdate(float dt)` | Every tick (the ride is fixed at 1/60). `OnTick` / `on_tick` still run; the default `OnTick` calls `OnUpdate`. |
-| `OnFixedUpdate(float dt)` | — | Same tick as `OnUpdate` (there is no separate physics clock yet). |
-| `OnLateUpdate(float dt)` | — | After `OnUpdate` on the same tick. |
-| `OnDestroy()` | `on_destroy()` | The instance is going away. |
+| `Awake()` | `Awake()` | When the instance is created, before `OnEnable`. |
+| `OnEnable()` / `OnDisable()` | `OnEnable()` / `OnDisable()` | Enabled at creation; disabled just before destroy. |
+| `OnStart()` | `OnStart()` | First tick, before `OnFixedUpdate`. `on_start()` still works in C++. |
+| `OnFixedUpdate(float dt)` | `OnFixedUpdate(float)` | Before the physics step. |
+| `OnUpdate(float dt)` | `OnUpdate(float dt)` | After physics. `OnTick` / `on_tick` still run; the default calls `OnUpdate`. |
+| `OnLateUpdate(float dt)` | `OnLateUpdate(float)` | After `OnUpdate`. |
+| `OnDestroy()` | `on_destroy()` | The instance is going away. `OnDisable` runs first. |
 | `Prop("n", 6.0f)` | `Prop("n", 6.0f)` | Typed default. Float, int, bool, string and `Vector3` (`"x,y,z"` in the scene). Shows in the Inspector. |
 | `Position` / `Position.Y` | `Position()` | World position. Y is up in 3D. |
 | `Transform.Right` / `Forward` / `Up` | `Transform().Right` / `Forward` / `Up` | World axes from the body's rotation. Forward is -Z. |
@@ -248,7 +249,7 @@ Grounding in the sample is `Position.Y <= 0.01` plus `Move`, which will not push
 
 Designed on the ABI 4 `query` slot, not finished in this patch:
 
-- `OnCollisionEnter` / `Stay` / `Exit` (triggers already fire `OnTriggerEnter` / `Exit` in 2D and 3D).
+- Collision callbacks beyond triggers are the next piece (`OnTriggerEnter` / `Exit` already run in 2D and 3D).
 - `GetComponent` / `AddComponent` / `RemoveComponent` for collider, rigidbody, renderer, audio, camera and animator, and for other scripts in the same language. `Instantiate` clones a named entity or a `.prefab.json`. `Destroy(id, seconds)` waits, then removes it. `FindWithTag` / `SetTag` use the optional scene `tag` field. Layers and parenting from script are not yet.
 - Attribute Inspector (`[SerializeField]`, `[Header]`, `[Range]`, `[Tooltip]`), object references, colours and enums. `Prop()` and public numeric / bool / string fields' defaults that the scanner sees are what the Inspector shows today. Vectors are a `"x,y,z"` string.
 - Raycast is available to the native host (`query` op `raycast` against static boxes) but not yet wrapped as `Physics.Raycast` in C# or C++.

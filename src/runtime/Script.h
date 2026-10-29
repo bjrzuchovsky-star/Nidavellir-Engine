@@ -198,6 +198,10 @@ class ScriptLanguageHost {
   virtual void broadcast(int /*slot*/, const char* /*hook*/, const std::string& /*text*/,
                          double /*number*/) {}
   virtual void tick(double dt, int slot) = 0;
+  // Physics step (before tick) and the pass after tick. Default: nothing,
+  // so Lua and graphs are unchanged.
+  virtual void fixed_tick(double /*dt*/, int /*slot*/) {}
+  virtual void late_tick(double /*dt*/, int /*slot*/) {}
   virtual int reload_changed() = 0;
   virtual bool reload(const std::string& /*rel*/) { return false; }
   // Some running instance uses this file.

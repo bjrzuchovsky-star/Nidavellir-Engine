@@ -110,8 +110,13 @@ class Script {
   // Hooks. OnStart / OnUpdate match the C# sample. on_start / on_tick stay
   // for older scripts: their defaults call the new names, and a script that
   // overrides the old name does not run the new one.
+  virtual void Awake() {}
+  virtual void OnEnable() {}
+  virtual void OnDisable() {}
   virtual void OnStart() {}
+  virtual void OnFixedUpdate(float /*deltaTime*/) {}
   virtual void OnUpdate(float /*deltaTime*/) {}
+  virtual void OnLateUpdate(float /*deltaTime*/) {}
   virtual void on_start() { OnStart(); }
   virtual void on_tick(double dt) { OnUpdate(static_cast<float>(dt)); }
   virtual void on_trigger_enter(Entity /*other*/) {}
@@ -387,10 +392,13 @@ struct ScriptLive {
   Entity id = 0;
   Script* script = nullptr;
   bool runtime = false;
+  bool started = false;
 };
 struct ScriptLiveStore {
   std::vector<ScriptLive> items;
   std::uint64_t pumped = 0;
+  std::uint64_t pumped_fixed = 0;
+  std::uint64_t pumped_late = 0;
   ~ScriptLiveStore() {
     for (ScriptLive& L : items)
       if (L.runtime) delete L.script;
@@ -429,8 +437,9 @@ template <class T>
 T* Script::AddComponent() {
   T* t = new T();
   t->ts_bind(api_, self_, "");
-  script_lives().items.push_back({self_, t, true});
-  t->on_start();
+  t->Awake();
+  t->OnEnable();
+  script_lives().items.push_back({self_, t, true, false});
   return t;
 }
 
@@ -502,6 +511,8 @@ TS_SCRIPT_EXPORT void* ts_script_create(const char* cls, const TsScriptApi* api,
   ::ts::Script* s = it->second();
   s->ts_bind(api, self, props);
   ::ts::script_lives().items.push_back({self, s, false});
+  s->Awake();
+  s->OnEnable();
   return s;
 }
 TS_SCRIPT_EXPORT void ts_script_destroy(void* sp) {
@@ -527,6 +538,28 @@ TS_SCRIPT_EXPORT void ts_script_call(void* sp, int hook, uint64_t e, double n, c
   try {
   switch (hook) {
     case TS_HOOK_START: s->on_start(); break;
+    case TS_HOOK_FIXED: {
+      s->OnFixedUpdate(static_cast<float>(n));
+      ::ts::ScriptLiveStore& store = ::ts::script_lives();
+      const std::uint64_t now = s->tick();
+      if (store.pumped_fixed != now) {
+        store.pumped_fixed = now;
+        for (::ts::ScriptLive& L : store.items)
+          if (L.runtime && L.script && L.script != s) L.script->OnFixedUpdate(static_cast<float>(n));
+      }
+      break;
+    }
+    case TS_HOOK_LATE: {
+      s->OnLateUpdate(static_cast<float>(n));
+      ::ts::ScriptLiveStore& store = ::ts::script_lives();
+      const std::uint64_t now = s->tick();
+      if (store.pumped_late != now) {
+        store.pumped_late = now;
+        for (::ts::ScriptLive& L : store.items)
+          if (L.runtime && L.script && L.script != s) L.script->OnLateUpdate(static_cast<float>(n));
+      }
+      break;
+    }
     case TS_HOOK_TICK: {
       s->on_tick(n);
       ::ts::ScriptLiveStore& store = ::ts::script_lives();
@@ -534,8 +567,14 @@ TS_SCRIPT_EXPORT void ts_script_call(void* sp, int hook, uint64_t e, double n, c
       if (store.pumped != now) {
         store.pumped = now;
         std::vector<::ts::Script*> extra;
-        for (const ::ts::ScriptLive& L : store.items)
-          if (L.runtime && L.script && L.script != s) extra.push_back(L.script);
+        for (::ts::ScriptLive& L : store.items) {
+          if (!L.runtime || !L.script || L.script == s) continue;
+          if (!L.started) {
+            L.started = true;
+            L.script->on_start();
+          }
+          extra.push_back(L.script);
+        }
         for (::ts::Script* r : extra) r->on_tick(n);
       }
       break;
@@ -544,7 +583,7 @@ TS_SCRIPT_EXPORT void ts_script_call(void* sp, int hook, uint64_t e, double n, c
     case TS_HOOK_TRIGGER_EXIT: s->on_trigger_exit(e); break;
     case TS_HOOK_INTERACT: s->on_interact(e); break;
     case TS_HOOK_RELOAD: s->on_reload(); break;
-    case TS_HOOK_DESTROY: s->on_destroy(); break;
+    case TS_HOOK_DESTROY: s->OnDisable(); s->on_destroy(); break;
     case TS_HOOK_HAND: s->on_hand(t.substr(0, tab), tab == std::string::npos ? "" : t.substr(tab + 1), n); break;
     case TS_HOOK_UI: s->on_ui(t.substr(0, tab), e != 0, n, tab == std::string::npos ? "" : t.substr(tab + 1)); break;
     case TS_HOOK_EVENT: s->on_event(t.substr(0, tab), tab == std::string::npos ? "" : t.substr(tab + 1), n); break;

@@ -254,6 +254,18 @@ void ScriptHost::tick(double dt) {
   }
 }
 
+void ScriptHost::fixed_tick(double dt) {
+  for (int k = 0; k < depth_; ++k)
+    for (auto& h : hosts_)
+      if (h) h->fixed_tick(dt, k);
+}
+
+void ScriptHost::late_tick(double dt) {
+  for (int k = 0; k < depth_; ++k)
+    for (auto& h : hosts_)
+      if (h) h->late_tick(dt, k);
+}
+
 int ScriptHost::reload_changed() {
   // Lua + graphs read through the shared library: refresh it once and hand
   // each changed file to its language. Compiled languages watch their own.

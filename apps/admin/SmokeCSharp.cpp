@@ -386,6 +386,49 @@ public class Spawner : Script {
   return 0;
 }
 
+int check_lifecycle() {
+  const char* src = R"(using TombStone;
+[Script("life")]
+public class Life : Script {
+    bool gone;
+    public override void Awake() { Log("life awake"); }
+    public override void OnEnable() { Log("life enable"); }
+    public override void OnStart() { Log("life start"); }
+    public override void OnFixedUpdate(float dt) { if (Tick <= 1) Log("life fixed"); }
+    public override void OnUpdate(float dt) {
+        if (Tick <= 1) Log("life update");
+        if (!gone && Tick >= 2) { gone = true; Destroy(Self); }
+    }
+    public override void OnLateUpdate(float dt) { if (Tick <= 1) Log("life late"); }
+    public override void OnDisable() { Log("life disable"); }
+    public override void OnDestroy() { Log("life destroy"); }
+}
+)";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cs_life";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "life.cs", src);
+  World w;
+  std::string err;
+  if (!w.build({scripted(2, "Life", "scripts/life.cs")}, proj.string(), &err))
+    return fail("lifecycle build: " + err + dump(w.take_logs()));
+  std::vector<LogEntry> logs = w.take_logs();
+  for (LogEntry& e : ride(w, 4)) logs.push_back(std::move(e));
+  auto at = [&](const char* s) {
+    for (std::size_t i = 0; i < logs.size(); ++i)
+      if (logs[i].text.find(s) != std::string::npos) return static_cast<int>(i);
+    return -1;
+  };
+  const int awake = at("life awake"), enable = at("life enable"), start = at("life start");
+  const int fixedu = at("life fixed"), update = at("life update"), late = at("life late");
+  const int disable = at("life disable"), destroy = at("life destroy");
+  if (awake < 0 || enable < awake || start < enable || fixedu < start || update < fixedu || late < update ||
+      disable < late || destroy < disable) {
+    return fail("lifecycle order awake/enable/start/fixed/update/late/disable/destroy:" + dump(logs));
+  }
+  return 0;
+}
+
 // A prebuilt assembly (what exports ship) needs only the .NET 8+ runtime:
 // TS_SMOKE_CS_PREBUILT=<folder with ProjectScripts.dll + TombStone.Scripting.*>
 // rides it in a project with no SDK on the machine.
@@ -494,6 +537,7 @@ int run_csharp_smoke() {
   if (int r = check_mixed(proj, cpp)) return r;
   if (int r = check_character_movement()) return r;
   if (int r = check_components()) return r;
+  if (int r = check_lifecycle()) return r;
   if (int r = check_export()) return r;
   std::cout << "[smoke] C# scripts OK (.NET SDK " << csharp_scripts::dotnet_info().sdk << ", assembly built in "
             << static_cast<int>(build_s) << " s, hooks + props + state + plugin bridge, hot reload kept state "

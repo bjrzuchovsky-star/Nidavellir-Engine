@@ -579,6 +579,10 @@ void World3D::step(const Input3D& input0) {
     for (const Entity3D& e : ents_) before.emplace_back(e.id, e.transform);
   }
   const float dt = static_cast<float>(kTickSeconds);
+  if (host_) {
+    host_->start_pending();
+    host_->fixed_tick(kTickSeconds);
+  }
   {
     TS_PROFILE_SCOPE("world3d.physics");
     phys_pre(dt);
@@ -598,6 +602,7 @@ void World3D::step(const Input3D& input0) {
     if (input.action && !jump_held_) interact();
     host_->run_timers(script_tick());
     host_->tick(kTickSeconds);
+    host_->late_tick(kTickSeconds);
   }
   for (const auto& x : exts_) {
     TS_PROFILE_SCOPE(x->name());

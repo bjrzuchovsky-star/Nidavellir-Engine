@@ -311,6 +311,54 @@ TS_SCRIPT(Spawner, "spawner")
   return 0;
 }
 
+int check_lifecycle() {
+  const char* src = R"(#include <tombstone/script_sdk.h>
+#include <string>
+struct Life : ts::Script {
+  bool gone = false;
+  void Awake() override { Log("life awake"); }
+  void OnEnable() override { Log("life enable"); }
+  void OnStart() override { Log("life start"); }
+  void OnFixedUpdate(float) override { if (tick() <= 1) Log("life fixed"); }
+  void OnUpdate(float) override {
+    if (tick() <= 1) Log("life update");
+    if (!gone && tick() >= 2) { gone = true; destroy(self()); }
+  }
+  void OnLateUpdate(float) override { if (tick() <= 1) Log("life late"); }
+  void OnDisable() override { Log("life disable"); }
+  void on_destroy() override { Log("life destroy"); }
+};
+TS_SCRIPT(Life, "life")
+)";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cpp_life";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "life.cpp", src);
+  World w;
+  Entity2D life;
+  life.id = 2;
+  life.name = "Life";
+  life.script = ScriptData{};
+  life.script->path = "scripts/life.cpp";
+  std::string err;
+  if (!w.build({life}, proj.string(), &err)) return fail("lifecycle build: " + err + dump(w.take_logs()));
+  std::vector<LogEntry> logs = w.take_logs();
+  for (LogEntry& ev : ride(w, 4)) logs.push_back(std::move(ev));
+  auto at = [&](const char* s) {
+    for (std::size_t i = 0; i < logs.size(); ++i)
+      if (logs[i].text.find(s) != std::string::npos) return static_cast<int>(i);
+    return -1;
+  };
+  const int awake = at("life awake"), enable = at("life enable"), start = at("life start");
+  const int fixedu = at("life fixed"), update = at("life update"), late = at("life late");
+  const int disable = at("life disable"), destroy = at("life destroy");
+  if (awake < 0 || enable < awake || start < enable || fixedu < start || update < fixedu || late < update ||
+      disable < late || destroy < disable) {
+    return fail("C++ lifecycle order:" + dump(logs));
+  }
+  return 0;
+}
+
 }  // namespace
 
 // Compiler output -> Telegraph file:line, whatever spelling the compiler
@@ -462,6 +510,7 @@ int run_native_smoke() {
   native_scripts::set_blocking_builds(true);
   if (int r = check_character_movement()) return r;
   if (int r = check_components()) return r;
+  if (int r = check_lifecycle()) return r;
   if (int r = check_export()) return r;
   std::cout << "[smoke] C++ scripts OK (module built in " << static_cast<int>(build_s)
             << " s, hooks + props + state + plugin bridge, hot reload kept state, compile error at "
