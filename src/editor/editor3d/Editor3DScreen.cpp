@@ -17,7 +17,9 @@
 #include "world3d/VrOverlay.h"
 
 #include "render3d/GlRenderer3D.h"
+#include "editor/assets/ModelSplit.h"
 #include "render3d/ColliderFit.h"
+#include "render3d/HullFit.h"
 #include "render3d/ModelImport.h"
 
 #include <GLFW/glfw3.h>
@@ -26,6 +28,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 
 namespace ts {
@@ -234,11 +237,37 @@ void Editor3DScreen::clear_selection() { scene_.selection.clear(); }
 
 // ---- Undo ---------------------------------------------------------------------
 
-void Editor3DScreen::push_undo(const std::string& label, const scene3d::Scene3D& before) {
-  undo_.push_back({label, before, {}});
+void Editor3DScreen::push_undo(const std::string& label, const scene3d::Scene3D& before,
+                               std::vector<FileBlob> files) {
+  undo_.push_back({label, before, {}, std::move(files)});
   if (undo_.size() > 200) undo_.erase(undo_.begin());
   redo_.clear();
   autosave();
+}
+
+void Editor3DScreen::push_undo(const std::string& label, const scene3d::Scene3D& before) {
+  push_undo(label, before, {});
+}
+
+void Editor3DScreen::erase_created(const std::vector<FileBlob>& files) {
+  if (files.empty()) return;
+  std::error_code ec;
+  for (const FileBlob& f : files) fs::remove(fs::u8path(project_.path) / fs::u8path(f.rel), ec);
+  asset_browser_.db().scan();
+  if (view_) view_->clear();
+}
+
+void Editor3DScreen::restore_created(const std::vector<FileBlob>& files) {
+  if (files.empty()) return;
+  std::error_code ec;
+  for (const FileBlob& f : files) {
+    const fs::path p = fs::u8path(project_.path) / fs::u8path(f.rel);
+    fs::create_directories(p.parent_path(), ec);
+    std::ofstream out(p, std::ios::binary | std::ios::trunc);
+    out.write(f.bytes.data(), static_cast<std::streamsize>(f.bytes.size()));
+  }
+  asset_browser_.db().scan();
+  if (view_) view_->clear();
 }
 
 void Editor3DScreen::report_save_failure(const std::string& err) {
@@ -282,8 +311,10 @@ bool Editor3DScreen::undo() {
   prefabs_.on_undo(undo_.size(), undo_.back().label);
   Step s = std::move(undo_.back());
   undo_.pop_back();
-  redo_.push_back({s.label, scene_, swap_terrains(std::move(s.terrains))});
+  Step redo_step{s.label, scene_, swap_terrains(std::move(s.terrains)), s.files};
   scene_ = std::move(s.scene);
+  erase_created(redo_step.files);
+  redo_.push_back(std::move(redo_step));
   autosave();
   note("Undo " + redo_.back().label);
   return true;
@@ -294,7 +325,8 @@ bool Editor3DScreen::redo() {
   gizmo_cancel();
   Step s = std::move(redo_.back());
   redo_.pop_back();
-  undo_.push_back({s.label, scene_, swap_terrains(std::move(s.terrains))});
+  restore_created(s.files);
+  undo_.push_back({s.label, scene_, swap_terrains(std::move(s.terrains)), s.files});
   prefabs_.on_redo(undo_.size(), s.label);
   scene_ = std::move(s.scene);
   autosave();
@@ -521,6 +553,116 @@ std::uint64_t Editor3DScreen::drop_asset(const std::string& rel, const Vec3& pos
   note("Can't place " + rel + " (models: glTF, .mdl, FBX, OBJ, DAE..., sounds, or images onto an entity)",
        LogLevel::Warn);
   return 0;
+}
+
+bool Editor3DScreen::split_model_asset(const std::string& rel, bool recentre, bool fit) {
+  if (playing()) return false;
+  ModelSplitOptions opt;
+  opt.recentre = recentre;
+  opt.fit_collider = fit;
+  ModelSplitResult result;
+  const scene3d::Scene3D before = scene_;
+  if (!editor::split_model_asset(asset_browser_.db(), rel, opt, &result)) {
+    note(result.error.empty() ? "Could not split " + rel : result.error, LogLevel::Warn);
+    return false;
+  }
+  std::vector<FileBlob> files;
+  files.reserve(result.files.size());
+  for (const ModelSplitFile& f : result.files) files.push_back({f.rel, f.bytes});
+  if (view_) view_->clear();
+  push_undo("Split into assets", before, std::move(files));
+  note("Split " + rel + " into " + std::to_string(result.rels.size()) +
+       (recentre ? " parts, pivots recentred" : " parts, original positions kept"));
+  return true;
+}
+
+std::uint64_t Editor3DScreen::place_model_parts(const std::string& rel, const Vec3& pos, bool recentre,
+                                                bool fit) {
+  if (playing()) return 0;
+  const scene3d::Scene3D before = scene_;
+  std::vector<FileBlob> created;
+  struct Part {
+    std::string rel;
+    std::string name;
+    Vec3 origin;
+    float scale = 1.0f;
+    render3d::ColliderFit mode = render3d::ColliderFit::Auto;
+    render3d::FitParams params;
+  };
+  auto read_part = [&](const assetdb::AssetDb::Entry& e) {
+    Part p;
+    p.rel = e.rel;
+    p.name = fs::path(e.rel).stem().string();
+    float o[3] = {};
+    if (e.meta.settings.floats("origin", o, 3)) p.origin = {o[0], o[1], o[2]};
+    p.scale = std::max(0.001f, e.meta.settings.flt("scale", 1.0f));
+    p.mode = render3d::collider_fit_from(e.meta.settings.str("collider", "auto"));
+    if (!fit || !e.meta.settings.flag("generate_collider", true)) p.mode = render3d::ColliderFit::None;
+    p.params = render3d::fit_params_from_settings(e.meta.settings);
+    return p;
+  };
+  std::vector<Part> parts;
+  const std::string pivot = recentre ? "recenter" : "keep";
+  for (const assetdb::AssetDb::Entry& e : asset_browser_.db().entries()) {
+    if (e.meta.kind != assetdb::Kind::Model) continue;
+    if (e.meta.settings.str("split_from") != rel || e.meta.settings.str("pivot") != pivot) continue;
+    parts.push_back(read_part(e));
+  }
+  if (parts.size() < 2) {
+    parts.clear();
+    ModelSplitOptions opt;
+    opt.recentre = recentre;
+    opt.fit_collider = fit;
+    ModelSplitResult result;
+    if (!editor::split_model_asset(asset_browser_.db(), rel, opt, &result)) {
+      note(result.error.empty() ? "Could not split " + rel : result.error, LogLevel::Warn);
+      return 0;
+    }
+    for (const ModelSplitFile& f : result.files) created.push_back({f.rel, f.bytes});
+    for (const std::string& part_rel : result.rels) {
+      if (const assetdb::AssetDb::Entry* e = asset_browser_.db().by_path(part_rel)) parts.push_back(read_part(*e));
+    }
+  }
+  if (parts.size() < 2) {
+    note(rel + " is one piece already", LogLevel::Warn);
+    return 0;
+  }
+  auto unique = [&](std::string base) {
+    if (base.empty()) base = "Part";
+    std::string name = base;
+    for (int n = 2; scene_.find_named(name); ++n) name = base + " " + std::to_string(n);
+    return name;
+  };
+  Entity3D parent;
+  parent.id = scene_.next_id();
+  parent.name = unique(fs::path(rel).stem().string());
+  parent.transform.position = pos;
+  scene_.entities.push_back(parent);
+  const std::uint64_t pid = parent.id;
+  for (const Part& p : parts) {
+    Entity3D child;
+    child.id = scene_.next_id();
+    child.name = unique(p.name);
+    child.parent = pid;
+    child.transform.position = pos + (recentre ? p.origin : Vec3{});
+    child.transform.scale = {p.scale, p.scale, p.scale};
+    child.mesh = scene3d::MeshRef{p.rel, true};
+    if (p.mode != render3d::ColliderFit::None) {
+      render3d::Model m;
+      std::string err;
+      const std::string path = (fs::u8path(project_.path) / fs::u8path(p.rel)).string();
+      if (render3d::load_model(path, &m, &err)) {
+        scene3d::Collider3D col;
+        if (render3d::fit_collider(m, p.mode, &col, p.params)) child.collider = col;
+      }
+    }
+    scene_.entities.push_back(std::move(child));
+  }
+  scene_.selection.assign(1, pid);
+  if (view_) view_->clear();
+  push_undo("Place parts", before, std::move(created));
+  note("Placed " + scene_.find(pid)->name + " as " + std::to_string(parts.size()) + " parts");
+  return pid;
 }
 
 std::size_t Editor3DScreen::duplicate_selected() {

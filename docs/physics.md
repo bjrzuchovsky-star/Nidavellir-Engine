@@ -23,7 +23,13 @@ The engine, the editor, scripting (Lua, graphs, C++ and C# hooks such as `on_tri
 
 The implementations live with their plugins: `src/plugins/physics_jolt` (`JoltWorld`), `src/plugins/physics_box2d` (`Box2DWorld`), `src/plugins/rider3d` and `src/plugins/movement2d`. Registration, the needs scan and the migration are in `src/plugins/split`.
 
-Scene formats are unchanged (Scene3D v16, 2D v11): the Player, Rigid Body, Collider, Joint, Grabbable and VR Rig components and their inspector settings are exactly as before.
+Scene formats stay compatible. A 3D collider may now carry `"rotation"` (degrees) for an oriented box, and `"fit": "obb"` or `"decompose"`. A 2D collider may set `"shape": "polygon"` with `"polygons"` (convex outlines in entity pixels, traced from a sprite). Older files load as they did.
+
+## Mesh-fitted colliders
+
+**Fit to mesh** on a 3D collider, and the asset's *Collider* setting, can build an oriented box, a simplified convex hull, several convex pieces, or a triangle mesh. The pieces are cached in the model's `.meta` and rebuilt when the mesh is reimported. **View > Colliders + joints** draws the wireframe. Jolt simulates them: a triangle mesh is static only, and convex pieces are what you want on a dynamic concave prop. See [model import](model-import.md#bounds-colliders-and-hitboxes).
+
+In 2D, **Fit to sprite** traces a polygon from the sprite's opaque pixels and cuts a concave shape into convex pieces Box2D can use (at most 8 corners each). The platformer still blocks on the polygon's bounding box; the Box2D body uses the polygon. A hole in the sprite is not traced.
 
 ## Without the plugins
 

@@ -14,6 +14,7 @@
 #include <iterator>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ts {
@@ -114,8 +115,12 @@ struct ColliderData {
   bool dynamic = false;  // false = static
   // v10: the shape inside the box (circle: the largest that fits; capsule:
   // round ends on the long side). Colliders turn with the entity rotation.
-  enum class Shape : std::uint8_t { Box, Circle, Capsule };
+  enum class Shape : std::uint8_t { Box, Circle, Capsule, Polygon };
   Shape shape = Shape::Box;
+  // Polygon pieces traced from a sprite, in entity pixels (origin at the
+  // entity's top-left, y down). Each piece is convex. Empty for the other
+  // shapes. The box (x, y, w, h) stays the bounds the platformer uses.
+  std::vector<std::vector<std::pair<float, float>>> polygons;
 
   bool operator==(const ColliderData& o) const = default;
 };

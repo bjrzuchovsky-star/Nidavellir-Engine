@@ -9,6 +9,8 @@ add_library(ts_render3d
   GltfSkinned.cpp
   ModelImport.cpp
   ColliderFit.cpp
+  HullFit.cpp
+  MeshSplit.cpp
   import/SourceMdl.cpp
   import/SourceVtf.cpp
   import/SourceMaterials.cpp

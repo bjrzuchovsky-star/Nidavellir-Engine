@@ -1,4 +1,5 @@
 #include "editor/assets/AssetBrowser.h"
+#include "editor/assets/ModelSplit.h"
 #include "editor/launch/OpenWithOs.h"
 
 #include <cstdio>
@@ -103,6 +104,14 @@ importsort::Result AssetBrowser::import_files(const std::vector<std::string>& al
   if (sources.empty()) return r;
   importsort::import_files(db_.project_dir(), sources, dest_folder, import_settings_, &r);
   rescan();
+  if (split_on_import_) {
+    for (const std::string& rel : r.mains) {
+      const assetdb::AssetDb::Entry* e = db_.by_path(rel);
+      if (!e || e->meta.kind != assetdb::Kind::Model) continue;
+      if (host_.split_model) host_.split_model(rel, split_recenter_, split_fit_parts_);
+      else split_here(rel, split_recenter_, split_fit_parts_);
+    }
+  }
   if (host_.note) {
     std::string where = dest_folder.empty() ? (import_settings_.sort_imports ? "sorted into type folders" : "into assets/")
                                             : "into " + dest_folder;
@@ -152,6 +161,15 @@ void AssetBrowser::draw_import_popup() {
     ImGui::TextDisabled("Destination: %s", folder_.empty() ? (import_settings_.sort_imports ? "sorted by type" : "assets/")
                                                            : folder_.c_str());
     ImGui::TextDisabled("(or drop files from Explorer onto this panel / a folder)");
+    ImGui::Separator();
+    ImGui::Checkbox("Split into separate assets", &split_on_import_);
+    if (ImGui::IsItemHovered()) {
+      ux::SetTooltip("A model with several meshes becomes one asset per part, named from the nodes.");
+    }
+    if (split_on_import_) {
+      ImGui::Checkbox("Recentre each pivot", &split_recenter_);
+      ImGui::Checkbox("Fit a collider to each part", &split_fit_parts_);
+    }
     ImGui::EndPopup();
   }
   if (import_picker_.draw(import_pick_folder_ ? "Import folder##assets" : "Import file##assets")) {
@@ -259,6 +277,53 @@ void AssetBrowser::reimport(const std::string& rel) {
   if (host_.on_assets_changed) host_.on_assets_changed({rel});
 }
 
+bool AssetBrowser::split_here(const std::string& rel, bool recentre, bool fit) {
+  ModelSplitOptions opt;
+  opt.recentre = recentre;
+  opt.fit_collider = fit;
+  ModelSplitResult result;
+  if (!split_model_asset(db_, rel, opt, &result)) {
+    const std::string why = result.error.empty() ? "Could not split " + rel : result.error;
+    if (host_.note) host_.note(why);
+    return false;
+  }
+  if (host_.note) {
+    host_.note("Split " + rel + " into " + std::to_string(result.rels.size()) +
+               (recentre ? " parts (pivots recentred)" : " parts (original positions kept)"));
+  }
+  if (host_.on_assets_changed) host_.on_assets_changed(result.rels);
+  return true;
+}
+
+void AssetBrowser::draw_split_popup() {
+  if (split_open_) {
+    ImGui::OpenPopup("##splitmodel");
+    split_open_ = false;
+  }
+  if (split_target_.empty()) return;
+  if (ImGui::BeginPopup("##splitmodel")) {
+    ImGui::TextUnformatted(split_ask_ == 2 ? "Place as parts" : "Split into separate assets");
+    ImGui::TextDisabled("%s", split_target_.c_str());
+    if (ImGui::RadioButton("Keep original position", !split_recenter_)) split_recenter_ = false;
+    if (ImGui::RadioButton("Recentre pivot", split_recenter_)) split_recenter_ = true;
+    ImGui::Checkbox("Fit a collider to each part", &split_fit_parts_);
+    const char* go = split_ask_ == 2 ? "Place" : "Split";
+    if (ImGui::Button(go)) {
+      const std::string rel = split_target_;
+      const bool recentre = split_recenter_;
+      const bool fit = split_fit_parts_;
+      const int ask = split_ask_;
+      ImGui::CloseCurrentPopup();
+      if (ask == 2 && host_.place_parts) host_.place_parts(rel, recentre, fit);
+      else if (host_.split_model) host_.split_model(rel, recentre, fit);
+      else split_here(rel, recentre, fit);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+  }
+}
+
 void AssetBrowser::draw() {
   thumbs_.poll_changes(ImGui::GetTime());
   // Toolbar.
@@ -289,6 +354,7 @@ void AssetBrowser::draw() {
   ImGui::SameLine();
   if (ImGui::Button("Import...")) ImGui::OpenPopup("##importmenu");
   draw_import_popup();
+  draw_split_popup();
   ImGui::SameLine();
   if (ImGui::Button("Options")) ImGui::OpenPopup("##importopts");
   if (ImGui::BeginPopup("##importopts")) {
@@ -577,6 +643,19 @@ void AssetBrowser::draw_asset_context_items(const AssetDb::Entry& e) {
   }
   ImGui::Separator();
   if (ux::MenuItem("Reimport")) reimport(e.rel);
+  if (e.meta.kind == assetdb::Kind::Model &&
+      e.meta.info.num("parts", e.meta.info.num("primitives", 1)) > 1) {
+    if (ux::MenuItem("Split into separate assets...")) {
+      split_target_ = e.rel;
+      split_ask_ = 1;
+      split_open_ = true;
+    }
+    if (host_.place_parts && ux::MenuItem("Place as parts in the scene...")) {
+      split_target_ = e.rel;
+      split_ask_ = 2;
+      split_open_ = true;
+    }
+  }
   if (ux::MenuItem("Find references")) {
     refs_for_ = e.rel;
     refs_shown_ = db_.find_references(e.rel);
@@ -803,23 +882,38 @@ void AssetBrowser::draw_settings(const AssetDb::Entry& e) {
       {
         // Collider a placed model gets (render3d/ColliderFit.h). "None"
         // also skips the file's own collision (.phy / UCX_ meshes).
-        static const char* keys[] = {"auto", "box", "capsule", "convex", "mesh", "none"};
+        static const char* keys[] = {"auto", "box", "obb", "capsule", "convex", "decompose", "mesh", "none"};
         const bool hulls = e.meta.info.num("hulls", 0) > 0;
-        const char* labels = hulls ? "Auto (model hulls)\0Tight box\0Capsule\0Convex hull\0Mesh\0None\0"
-                                   : (e.meta.info.flag("skinned", false)
-                                          ? "Auto (capsule)\0Tight box\0Capsule\0Convex hull\0Mesh\0None\0"
-                                          : "Auto (tight box)\0Tight box\0Capsule\0Convex hull\0Mesh\0None\0");
+        const char* labels =
+            hulls ? "Auto (model hulls)\0Tight box\0Oriented box\0Capsule\0Convex hull\0Convex pieces\0Mesh\0None\0"
+                  : (e.meta.info.flag("skinned", false)
+                         ? "Auto (capsule)\0Tight box\0Oriented box\0Capsule\0Convex hull\0Convex pieces\0Mesh\0None\0"
+                         : "Auto (oriented box)\0Tight box\0Oriented box\0Capsule\0Convex hull\0Convex pieces\0Mesh\0None\0");
         int ci = 0;
         const std::string cur = s.flag("generate_collider", true) ? s.str("collider", "auto") : "none";
-        for (int k = 0; k < 6; ++k) {
+        for (int k = 0; k < 8; ++k) {
           if (cur == keys[k]) ci = k;
         }
         ImGui::SetNextItemWidth(140);
         if (ImGui::Combo("Collider", &ci, labels)) {
           s.set("collider", Value::string(keys[ci]));
-          s.set("generate_collider", Value::boolean(ci != 5));
+          s.set("generate_collider", Value::boolean(ci != 7));
           changed = true;
         }
+        int hv = static_cast<int>(s.num("hull_vertices", 64));
+        ImGui::SetNextItemWidth(140);
+        if (ImGui::SliderInt("Hull vertices", &hv, 4, 256)) s.set("hull_vertices", Value::number(hv));
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+        if (ImGui::IsItemHovered()) ux::SetTooltip("How many corners a generated convex hull may keep.");
+        int dp = static_cast<int>(s.num("decompose_max", 8));
+        ImGui::SetNextItemWidth(140);
+        if (ImGui::SliderInt("Convex pieces", &dp, 1, 32)) s.set("decompose_max", Value::number(dp));
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+        if (ImGui::IsItemHovered()) {
+          ux::SetTooltip("Convex pieces cuts a concave mesh into this many hulls, for a dynamic prop.");
+        }
+        const int part_n = static_cast<int>(e.meta.info.num("parts", 0));
+        if (part_n > 1) ImGui::TextDisabled("%d parts — right-click to split them apart", part_n);
       }
       ImGui::SameLine();
       flag("import_animations", "Animations");

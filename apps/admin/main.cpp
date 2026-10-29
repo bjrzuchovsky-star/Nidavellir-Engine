@@ -31,6 +31,7 @@
 #include "SmokeBounds.h"
 #include "SmokeMeta.h"
 #include "SmokeModels.h"
+#include "SmokeMeshParts.h"
 #include "SmokeGmod.h"
 #include "GmodCli.h"
 
@@ -1323,6 +1324,10 @@ int run_console_smoke() {
   }
   // Model import: Source .mdl + Assimp formats + .blend (see SmokeModels.cpp).
   if (run_models_smoke() != 0) {
+    return 1;
+  }
+  // Split meshes and fitted colliders (see SmokeMeshParts.cpp).
+  if (run_mesh_parts_smoke() != 0) {
     return 1;
   }
   // Source engine formats: .gma / .vtf / .vmt, search order, rights (see SmokeGmod.cpp).
@@ -3199,6 +3204,10 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-models") == 0) {
       // Every model format: Source .mdl, OBJ, FBX, DAE, PLY, STL, X, .blend.
       return run_models_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-mesh-parts") == 0) {
+      // Split multi-part models and mesh-fitted colliders.
+      return run_mesh_parts_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-assets") == 0) {
       // Just the asset pipeline checks (database, importers, browser ops).

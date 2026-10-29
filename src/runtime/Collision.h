@@ -71,6 +71,8 @@ struct OverlayBox {
   float rotation = 0.0f;
   bool body = false;  // a Box2D rigid body
   ColliderData::Shape shape = ColliderData::Shape::Box;
+  // World-space polygon (already turned). When set, overlay_outline returns it.
+  std::vector<std::pair<float, float>> poly;
 };
 
 // The overlay shape's outline in world space, closed (box: 4 corners;

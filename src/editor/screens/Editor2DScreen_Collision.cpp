@@ -5,8 +5,12 @@
 #include "editor/ux/Tooltip.h"
 
 #include "editor/ui/Theme.h"
+#include "gfx/TextureCache.h"
 #include "runtime/Collision.h"
+#include "runtime/SpritePoly.h"
 #include "runtime/World.h"
+
+#include <filesystem>
 
 #include <imgui.h>
 
@@ -288,7 +292,7 @@ void Editor2DScreen::draw_inspector_collider(std::uint64_t id) {
   {
     int shape = static_cast<int>(c.shape);
     ImGui::SetNextItemWidth(140.0f);
-    if (ImGui::Combo("Shape", &shape, "Box\0Circle\0Capsule\0")) {
+    if (ImGui::Combo("Shape", &shape, "Box\0Circle\0Capsule\0Polygon\0")) {
       c.shape = static_cast<ColliderData::Shape>(shape);
       set_collider(id, c, "Collider shape");
     }
@@ -359,6 +363,51 @@ void Editor2DScreen::draw_inspector_collider(std::uint64_t id) {
     fit.w = e->w;
     fit.h = e->h;
     set_collider(id, fit, "Fit Collider");
+  }
+  if (e->sprite && !e->sprite->path.empty() && theme::SecondaryButton("Fit to sprite", ImVec2(120, 0))) {
+    const std::string path =
+        (std::filesystem::path(project_.path) / std::filesystem::u8path(e->sprite->path)).string();
+    std::vector<unsigned char> rgba;
+    int iw = 0, ih = 0;
+    std::string err;
+    ColliderData fit = now;
+    if (!gfx::TextureCache::decode_file(path, &rgba, &iw, &ih, &err) || iw <= 0 || ih <= 0) {
+      note(err.empty() ? "Could not read " + e->sprite->path : err);
+    } else {
+      int x0 = 0, y0 = 0, cw = iw, ch = ih;
+      if (e->sprite->use_src_rect) {
+        x0 = std::clamp(e->sprite->src_x, 0, iw - 1);
+        y0 = std::clamp(e->sprite->src_y, 0, ih - 1);
+        cw = e->sprite->src_w > 0 ? std::min(e->sprite->src_w, iw - x0) : iw - x0;
+        ch = e->sprite->src_h > 0 ? std::min(e->sprite->src_h, ih - y0) : ih - y0;
+      }
+      std::vector<unsigned char> crop(static_cast<std::size_t>(cw) * ch * 4);
+      for (int y = 0; y < ch; ++y) {
+        const unsigned char* row = rgba.data() + (static_cast<std::size_t>(y0 + y) * iw + x0) * 4;
+        std::copy(row, row + static_cast<std::size_t>(cw) * 4,
+                  crop.data() + static_cast<std::size_t>(y) * cw * 4);
+      }
+      const auto pieces = runtime::trace_sprite_polygon(crop.data(), cw, ch);
+      if (pieces.empty()) {
+        note("No opaque pixels to trace in " + e->sprite->path);
+      } else {
+        const float sx = cw > 0 ? e->w / static_cast<float>(cw) : 1.0f;
+        const float sy = ch > 0 ? e->h / static_cast<float>(ch) : 1.0f;
+        fit.shape = ColliderData::Shape::Polygon;
+        fit.offset_x = 0.0f;
+        fit.offset_y = 0.0f;
+        fit.w = e->w;
+        fit.h = e->h;
+        fit.polygons.clear();
+        for (const auto& piece : pieces) {
+          std::vector<std::pair<float, float>> scaled;
+          scaled.reserve(piece.size());
+          for (const auto& [px, py] : piece) scaled.emplace_back(px * sx, py * sy);
+          fit.polygons.push_back(std::move(scaled));
+        }
+        set_collider(id, fit, "Fit collider to sprite");
+      }
+    }
   }
   ImGui::SameLine();
   if (theme::DangerButton("Remove Collider", ImVec2(130, 0))) {

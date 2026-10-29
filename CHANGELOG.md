@@ -2,6 +2,15 @@
 
 All notable changes to TombStone Engine. The version number lives in the `VERSION` file at the repo root.
 
+## Unreleased (0.2.2)
+
+### Split meshes and mesh-fitted colliders
+- **Split into separate assets.** A model with several meshes (glTF / GLB, FBX, OBJ, DAE, `.blend`, Source `.mdl`, and the other formats the universal importer reads) can be separated into one asset per part. Offer it on **Import...** before you pick the file, or right-click a model in the Asset Browser. Each part keeps its materials and textures, takes its name from the node, and gets its own `.meta` in `.tombstone/meta`. **Keep original position** leaves the pivot at the model's origin; **Recentre pivot** moves it to the part's centre and remembers where to put it back. The original file is left alone, and an existing name is not overwritten.
+- **Place as parts in the scene** makes a parent object and one child per part, so the parts can be moved on their own. **Fit a collider to each part** gives every child a collider fitted to its mesh. Placing, and a split from the right-click menu, are one undo step each (the new files go away with the undo). The new assets travel with the Vault and a posse like any other asset.
+- **Mesh-fitted colliders.** Besides the tight box and the capsule: an **oriented box** (only when it is tighter than the plain box; a crate stays square), a **convex hull** with a vertex limit, **convex pieces** for a concave dynamic prop (our own approximate convex decomposition), and a **triangle mesh** for static geometry. **Fit to mesh** is on the collider. **View > Colliders + joints** draws the hull or the triangles. Generated hulls are saved in the model's `.meta` and rebuilt when the mesh is reimported. Jolt uses them; a triangle mesh on a dynamic body falls back to the convex hull.
+- **Fit to sprite** (2D) traces a polygon collider from the sprite's opaque pixels and cuts a concave shape into convex pieces for Box2D. The platformer still uses the bounding box.
+- `ts_admin --smoke-mesh-parts` (also in `--smoke`). Docs: [docs/model-import.md](docs/model-import.md), [docs/physics.md](docs/physics.md).
+
 ## 0.2.1 — 2026-10-26
 
 A patch for team claims: riders now see the claim's files when they ride in and can place their own. Run `TombStone-0.2.1-update.exe` over 0.2.0; it keeps your claims, settings and the Vault.

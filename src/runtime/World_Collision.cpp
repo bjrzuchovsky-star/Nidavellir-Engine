@@ -97,6 +97,7 @@ bool overlaps(const Aabb& a, const Obb& b) {
 }
 
 std::vector<std::pair<float, float>> overlay_outline(const OverlayBox& b) {
+  if (!b.poly.empty()) return b.poly;
   std::vector<std::pair<float, float>> pts;
   const float cx = (b.x0 + b.x1) * 0.5f, cy = (b.y0 + b.y1) * 0.5f;
   const float hx = (b.x1 - b.x0) * 0.5f, hy = (b.y1 - b.y0) * 0.5f;
@@ -197,7 +198,34 @@ void append_overlay(const Entity2D& e, float x, float y,
       }
     }
   }
-  if (e.collider || e.body) {
+  if (e.collider && e.collider->shape == ColliderData::Shape::Polygon && !e.collider->polygons.empty()) {
+    const float rad = turned(e) ? e.rotation * 3.14159265f / 180.0f : 0.0f;
+    const float cs = std::cos(rad), sn = std::sin(rad);
+    const float cx = x + e.w * 0.5f, cy = y + e.h * 0.5f;
+    for (const auto& piece : e.collider->polygons) {
+      OverlayBox b;
+      b.shape = ColliderData::Shape::Polygon;
+      b.kind = kind_of(*e.collider);
+      b.body = e.body.has_value();
+      b.entity = e.id;
+      float minx = 1.0e30f, miny = 1.0e30f, maxx = -1.0e30f, maxy = -1.0e30f;
+      for (const auto& [px, py] : piece) {
+        const float lx = px - e.w * 0.5f, ly = py - e.h * 0.5f;
+        const float wx = cx + lx * cs - ly * sn;
+        const float wy = cy + lx * sn + ly * cs;
+        b.poly.emplace_back(wx, wy);
+        minx = std::min(minx, wx);
+        miny = std::min(miny, wy);
+        maxx = std::max(maxx, wx);
+        maxy = std::max(maxy, wy);
+      }
+      b.x0 = minx;
+      b.y0 = miny;
+      b.x1 = maxx;
+      b.y1 = maxy;
+      if (in_view({minx, miny, maxx, maxy}, view)) out->push_back(std::move(b));
+    }
+  } else if (e.collider || e.body) {
     const Aabb a = collider_box(e, x, y);
     const Obb o = collider_obb(e, x, y);
     if (in_view(bounds(o), view)) {

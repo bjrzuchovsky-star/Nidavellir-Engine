@@ -9,6 +9,7 @@
 #include "render3d/Mesh.h"
 #include "render3d/Skeleton.h"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -60,6 +61,24 @@ struct MaterialSource {
   std::string searched;  // where it was looked for (missing ones)
 };
 
+// Generated collision (render3d/HullFit.h), cached in the model's .meta.
+// Empty until ensure_fitted or a matching cache is applied.
+struct FittedCollision {
+  std::uint64_t fingerprint = 0;
+  int vertex_limit = 64;
+  int decompose_max = 8;
+  bool has_obb = false;
+  Vec3 obb_center;
+  Vec3 obb_extents{1, 1, 1};
+  Quat obb_rotation;
+  std::vector<std::vector<Vec3>> convex;
+  std::vector<std::vector<Vec3>> pieces;
+  bool valid() const { return fingerprint != 0 && !convex.empty(); }
+  bool matches(std::uint64_t fp, int verts, int pieces_max) const {
+    return valid() && fingerprint == fp && vertex_limit == verts && decompose_max == pieces_max;
+  }
+};
+
 struct Model {
   std::string source;  // path it came from
   std::string format;  // "gltf", "source-mdl", "fbx", "obj", "blend"...
@@ -71,6 +90,9 @@ struct Model {
   int skin = 0;
   int lods = 1;
   std::vector<std::vector<Vec3>> collision_hulls;
+  // Generated hulls (oriented box, convex, decomposition). Filled from the
+  // .meta cache or by ensure_fitted. Not part of the file format itself.
+  FittedCollision fitted;
   // Source hitbox set 0 ($hbox), when the file has one.
   std::string hitbox_set;
   std::vector<ModelHitbox> hitboxes;
