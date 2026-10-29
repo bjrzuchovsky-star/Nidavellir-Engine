@@ -2,8 +2,9 @@
 
 All notable changes to TombStone Engine. The version number lives in the `VERSION` file at the repo root.
 
-## Unreleased (0.2.3)
+## 0.2.3 — 2026-10-29
 
+- Fix: scripted characters (C#/C++ Move with gravity) no longer fall through terrain heightfields or mesh colliders, with or without the Rider plugin or physics.
 - Scripted `Move` (the fps C# and C++ samples, unchanged) stands and walks on terrain and on mesh colliders. Previously it only pushed out of box colliders, so gravity fell straight through the heightfield.
 
 ## 0.2.2 — 2026-10-29
