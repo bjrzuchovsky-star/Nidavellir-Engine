@@ -4,18 +4,22 @@
 #include "ExportCli.h"
 #include "editor/launch/GameLauncher.h"
 #include "export/Exporter.h"
+#include "render3d/Scene3D.h"
 #include "runtime/NativeScript.h"
 #include "runtime/ScriptAbi.h"
 #include "scene/SceneJson.h"
 #include "runtime/World.h"
+#include "world3d/World3D.h"
 
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -128,6 +132,121 @@ int check_export() {
     return fail("exported game with a C++ script (rc " + std::to_string(rc) + "):\n" +
                 (out.size() > 2500 ? out.substr(out.size() - 2500) : out));
   }
+  return 0;
+}
+
+#ifndef TS_REPO_DIR
+#define TS_REPO_DIR "."
+#endif
+
+std::string read_text(const fs::path& p) {
+  std::ifstream in(p, std::ios::binary);
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+std::string dump3(const world3d::World3D& w) {
+  std::string d;
+  for (const LogEntry& e : w.log()) d += "\n  " + e.text;
+  return d.size() > 2500 ? d.substr(0, 2500) : d;
+}
+
+int check_character_movement() {
+  const fs::path sample =
+      fs::path(TS_REPO_DIR) / "samples" / "scripting" / "fps-cpp" / "scripts" / "character_movement.cpp";
+  const std::string text = read_text(sample);
+  if (text.find("void OnUpdate") == std::string::npos || text.find("GetAxis(\"Horizontal\")") == std::string::npos)
+    return fail("samples/scripting/fps-cpp/scripts/character_movement.cpp is missing");
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cpp_fps";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "character_movement.cpp", text);
+  const std::string coin =
+      read_text(fs::path(TS_REPO_DIR) / "samples" / "scripting" / "2d" / "scripts" / "coin.cpp");
+  write(proj / "scripts" / "coin.cpp", coin);
+
+  scene3d::Scene3D scene;
+  scene.version = scene3d::kScene3DVersion;
+  scene3d::Entity3D body;
+  body.id = 1;
+  body.name = "Wanderer";
+  body.transform.position = {0.0f, 0.05f, 0.0f};
+  scene3d::Collider3D cap;
+  cap.shape = scene3d::Collider3D::Shape::Capsule;
+  cap.size = {0.4f, 1.8f, 0.4f};
+  cap.offset = {0.0f, 0.9f, 0.0f};
+  body.collider = cap;
+  body.script = ScriptData{};
+  body.script->path = "scripts/character_movement.cpp";
+  body.script->set("moveSpeed", ScriptValue::of_number(12));
+  scene3d::Entity3D cam;
+  cam.id = 2;
+  cam.name = "MainCamera";
+  cam.parent = 1;
+  cam.transform.position = {0.0f, 1.6f, 0.0f};
+  scene3d::PlayCamera3D pc;
+  pc.rig = scene3d::PlayCamera3D::Rig::Fixed;
+  pc.active = true;
+  cam.camera = pc;
+  scene3d::Entity3D ground;
+  ground.id = 3;
+  ground.name = "Ground";
+  ground.transform.position = {0.0f, -0.25f, 0.0f};
+  ground.transform.scale = {40.0f, 0.5f, 40.0f};
+  scene3d::Collider3D box;
+  box.shape = scene3d::Collider3D::Shape::Box;
+  box.size = {1, 1, 1};
+  ground.collider = box;
+  scene.entities = {body, cam, ground};
+
+  world3d::World3D world;
+  std::string err;
+  if (!world.start(scene, proj.string(), &err)) return fail("fps start: " + err + dump3(world));
+  if (world.player_id() != 0) return fail("the C++ sample must run with no Rider / Player component");
+  world3d::Input3D walk;
+  walk.move_forward = 1.0f;
+  for (int i = 0; i < 30; ++i) world.step(walk);
+  const scene3d::Entity3D* walked = world.find(1);
+  if (!walked || !(walked->transform.position.z < -4.5f)) {
+    const float z = walked ? walked->transform.position.z : 0;
+    return fail("C++ controller did not walk with Prop moveSpeed 12 (z " + std::to_string(z) + ")" + dump3(world));
+  }
+  world3d::Input3D look;
+  look.mouse_dx = 10.0f;
+  world.step(look);
+  if (world.find(1)->transform.rotation.rotate({0, 0, -1}).x <= 0.05f)
+    return fail("C++ mouse right should yaw right");
+  look = {};
+  look.mouse_dy = -10.0f;
+  world.step(look);
+  if (world.find(2)->transform.rotation.rotate({0, 0, -1}).y <= 0.05f)
+    return fail("C++ mouse up should pitch MainCamera up");
+
+  write(proj / "scripts" / "character_movement.cpp", text + "\n// reload\n");
+  if (world.reload_scripts() != 1) return fail("C++ hot reload of the controller" + dump3(world));
+  bool kept = false, wiped = false;
+  for (const LogEntry& e : world.log()) {
+    if (e.text.find("character reloaded") == std::string::npos) continue;
+    kept = true;
+    wiped = wiped || e.text.find("y=0") != std::string::npos;
+  }
+  if (!kept || wiped) return fail("C++ hot reload should keep velocity" + dump3(world));
+
+  World flat;
+  Entity2D coin_e;
+  coin_e.id = 2;
+  coin_e.name = "Coin";
+  coin_e.script = ScriptData{};
+  coin_e.script->path = "scripts/coin.cpp";
+  coin_e.script->set("worth", ScriptValue::of_number(5));
+  if (!flat.build({coin_e}, proj.string(), &err)) return fail("2D coin build: " + err);
+  std::vector<LogEntry> logs = flat.take_logs();
+  for (LogEntry& e : ride(flat, 2)) logs.push_back(std::move(e));
+  if (!has(logs, "coin worth 5")) return fail("2D C++ coin:" + dump(logs));
+  // Leave the fps module out of the door project's later export.
+  fs::remove(proj / "scripts" / "coin.cpp", ec);
+  world.stop();
   return 0;
 }
 
@@ -280,10 +399,12 @@ int run_native_smoke() {
   if (bg_ticks < 2) return fail("the game should tick while the module builds");
   if (!w.scripts()->running(2)) return fail("running after the background swap");
   native_scripts::set_blocking_builds(true);
+  if (int r = check_character_movement()) return r;
   if (int r = check_export()) return r;
   std::cout << "[smoke] C++ scripts OK (module built in " << static_cast<int>(build_s)
             << " s, hooks + props + state + plugin bridge, hot reload kept state, compile error at "
                "scripts/door.cpp:line kept the old module, background rebuild swapped in after " << bg_ticks
-            << " live ticks, exported game ran the module from its pak, compiler paths: " << path_note << ")\n";
+            << " live ticks, character_movement.cpp walked and hot-reloaded with no Rider, "
+            << "exported game ran the module from its pak, compiler paths: " << path_note << ")\n";
   return 0;
 }

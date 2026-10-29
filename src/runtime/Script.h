@@ -138,6 +138,18 @@ class ScriptWorld {
   // graphs' Key event and compiled scripts read it. Default: none.
   virtual std::uint32_t script_buttons(int /*slot*/) const { return 0; }
 
+  // ABI 4. Defaults keep a world that only implements the 2D calls usable:
+  // pose reads script_entity, move_by adds to that x/y, the rest no-op.
+  // out18: px,py,pz, ex,ey,ez, sx,sy,sz, fx,fy,fz, rx,ry,rz, ux,uy,uz.
+  virtual bool script_pose(std::uint64_t id, float* out18) const;
+  virtual void script_move_by(std::uint64_t id, float x, float y, float z);
+  virtual void script_rotate_by(std::uint64_t id, float ex, float ey, float ez);
+  virtual void script_set_local_euler(std::uint64_t id, float ex, float ey, float ez);
+  virtual void script_set_position(std::uint64_t id, float x, float y, float z);
+  virtual float script_axis(int slot, const char* name) const;
+  virtual bool script_button_down(int slot, const char* name) const;
+  virtual int script_query(const char* op, const char* args, char* out, int cap);
+
   // Plugin call bridge: table.fn(args...) on a plugin's Lua table (the ones
   // script_open_extensions hands Lua scripts), for graphs, C++ and C#. One
   // value back (nil = false). False + *error when there is no such table /

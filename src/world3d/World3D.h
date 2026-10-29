@@ -277,6 +277,14 @@ class World3D final : public runtime::ScriptWorld {
   void script_sound(runtime::SoundEvent event) override;
   void script_ui(runtime::UiCommand command) override;
   void script_fx(runtime::FxEvent event) override;
+  bool script_pose(std::uint64_t id, float* out18) const override;
+  void script_move_by(std::uint64_t id, float x, float y, float z) override;
+  void script_rotate_by(std::uint64_t id, float ex, float ey, float ez) override;
+  void script_set_local_euler(std::uint64_t id, float ex, float ey, float ez) override;
+  void script_set_position(std::uint64_t id, float x, float y, float z) override;
+  float script_axis(int slot, const char* name) const override;
+  bool script_button_down(int slot, const char* name) const override;
+  int script_query(const char* op, const char* args, char* out, int cap) override;
   // Particles (metres, y up): entity "particles" emitters plus bursts from
   // Lua particles.* / gameplay (VR grab sparkle). fx() takes x, y, z.
   void fx(runtime::FxEvent event);
@@ -506,6 +514,19 @@ class World3D final : public runtime::ScriptWorld {
   bool jump_held_ = false;
   bool action_latched_ = false;
   bool jump_latched_ = false;
+  // Script input for this tick (ABI 4). Mouse is the raw count; axes negate
+  // X so the sample's Rotate(Up * mouseX) turns right in this right-handed world.
+  float script_mouse_x_ = 0.0f, script_mouse_y_ = 0.0f;
+  float script_move_right_ = 0.0f, script_move_forward_ = 0.0f;
+  bool script_jump_down_ = false, script_jump_held_ = false;
+  bool script_action_down_ = false, script_action_held_ = false;
+  bool script_look_ = false;  // a C# / C++ script drives look; no Rider required
+  float pending_mouse_x_ = 0.0f, pending_mouse_y_ = 0.0f, pending_zoom_ = 0.0f;
+  std::map<std::uint64_t, Vec3> local_euler_;
+  void note_script_input(const Input3D& in);
+  void separate_from_statics(Entity3D& e);
+  void apply_one_local(Entity3D& e, const Vec3& euler);
+  void apply_script_locals();
   float cam_yaw_ = 0.0f;
   float cam_pitch_ = 0.0f;  // degrees, + up (see the pitch limits)
   float want_yaw_ = 0.0f;   // look targets: input lands here, smoothing eases

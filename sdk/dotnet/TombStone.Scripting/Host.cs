@@ -53,7 +53,7 @@ namespace TombStone
         }
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-        public static int Abi() => 3;
+        public static int Abi() => 4;
 
         // Loads the project's script assembly from bytes (the file stays
         // free for the next build). Generation id, 0 on error (text in err).
@@ -161,17 +161,27 @@ namespace TombStone
             Instance i = Get(h);
             if (i == null) return;
             Script s = i.Script;
+            Script prev = Script.Active;
+            Script.Active = s;
             try
             {
                 switch (hook)
                 {
-                    case 0: s.OnStart(); break;
-                    case 1: s.OnTick(number); break;
+                    case 0: s.OnEnable(); s.OnStart(); break;
+                    case 1:
+                        Time.DeltaTime = (float)number;
+                        Time.Elapsed += (float)number;
+                        Time.Frame++;
+                        // The ride is fixed-step, so FixedUpdate and Update share the tick.
+                        s.OnFixedUpdate((float)number);
+                        s.OnTick(number);
+                        s.OnLateUpdate((float)number);
+                        break;
                     case 2: s.OnTriggerEnter(entity); break;
                     case 3: s.OnTriggerExit(entity); break;
                     case 4: s.OnInteract(entity); break;
                     case 5: s.OnReload(); break;
-                    case 6: s.OnDestroy(); break;
+                    case 6: s.OnDisable(); s.OnDestroy(); break;
                     case 7:
                     {
                         string[] f = Utf8.Read(text).Split('\t');
@@ -197,6 +207,10 @@ namespace TombStone
             catch (Exception e)
             {
                 s.Error(s.GetType().Name + ": " + e.GetType().Name + ": " + e.Message + Where(e));
+            }
+            finally
+            {
+                Script.Active = prev;
             }
         }
 

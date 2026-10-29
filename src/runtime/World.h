@@ -354,6 +354,13 @@ class World final : public ScriptWorld {
   void script_ui(UiCommand command) override;
   void script_fx(FxEvent event) override;
   std::uint32_t script_buttons(int slot) const override;
+  bool script_pose(std::uint64_t id, float* out18) const override;
+  void script_move_by(std::uint64_t id, float x, float y, float z) override;
+  void script_rotate_by(std::uint64_t id, float ex, float ey, float ez) override;
+  void script_set_local_euler(std::uint64_t id, float ex, float ey, float ez) override;
+  void script_set_position(std::uint64_t id, float x, float y, float z) override;
+  float script_axis(int slot, const char* name) const override;
+  bool script_button_down(int slot, const char* name) const override;
 
   // --- Particles + 2D lighting (World_Fx.cpp) --------------------------------
   // Entity emitters ("particles") run on the tick; fx() adds one-shot

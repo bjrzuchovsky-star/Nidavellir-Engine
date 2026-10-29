@@ -112,6 +112,32 @@ bool toolchain_available(std::string* why) {
     if (why) *why = "TombStone script SDK headers not found (set TS_SCRIPT_SDK)";
     return false;
   }
+#if defined(_WIN32)
+  // C++ scripts build with the user's MSVC toolchain (VS 2022). CMake on its
+  // own is not enough: without the C++ workload the module configure fails.
+  const char* pf86 = std::getenv("ProgramFiles(x86)");
+  const fs::path vswhere = fs::path(pf86 && *pf86 ? pf86 : "C:/Program Files (x86)") /
+                           "Microsoft Visual Studio" / "Installer" / "vswhere.exe";
+  std::error_code ec;
+  if (!fs::exists(vswhere, ec) ||
+      run_command(q(vswhere.string()) +
+                      " -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath",
+                  &out) != 0 ||
+      out.find_first_not_of(" \t\r\n") == std::string::npos) {
+    if (why) {
+      *why = "the Visual Studio 2022 C++ toolchain (MSVC) was not found. Install the "
+             "\"Desktop development with C++\" workload from https://visualstudio.microsoft.com/downloads/ "
+             "so CMake can build scripts/*.cpp";
+    }
+    return false;
+  }
+#else
+  if (run_command("c++ --version", &out) != 0 && run_command("g++ --version", &out) != 0 &&
+      run_command("clang++ --version", &out) != 0) {
+    if (why) *why = "no C++ compiler (c++, g++ or clang++) is on PATH. C++ scripts need one, plus CMake";
+    return false;
+  }
+#endif
   return true;
 }
 

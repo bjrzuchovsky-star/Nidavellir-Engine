@@ -4,19 +4,24 @@
 #include "SmokeGraph.h"
 #include "editor/launch/GameLauncher.h"
 #include "export/Exporter.h"
+#include "render3d/Scene3D.h"
 #include "runtime/CSharpScript.h"
 #include "runtime/GraphScript.h"
 #include "runtime/NativeScript.h"
 #include "runtime/ScriptAbi.h"
+#include "runtime/ScriptHost.h"
 #include "runtime/World.h"
 #include "scene/SceneJson.h"
+#include "world3d/World3D.h"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -187,6 +192,142 @@ TS_SCRIPT(Clerk, "clerk")
   return 0;
 }
 
+#ifndef TS_REPO_DIR
+#define TS_REPO_DIR "."
+#endif
+
+std::string read_text(const fs::path& p) {
+  std::ifstream in(p, std::ios::binary);
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+std::string dump3(const world3d::World3D& w) {
+  std::string d;
+  for (const LogEntry& e : w.log()) d += "\n  " + e.file + ":" + std::to_string(e.line) + " " + e.text;
+  return d.size() > 3000 ? d.substr(0, 3000) : d;
+}
+
+// The developer's character_movement.cs, unchanged, plus the 2D coin.
+// No Player component and no Rider plugin: the script walks the body.
+int check_character_movement() {
+  const fs::path sample =
+      fs::path(TS_REPO_DIR) / "samples" / "scripting" / "fps-cs" / "scripts" / "character_movement.cs";
+  const std::string text = read_text(sample);
+  if (text.find("public override void OnUpdate(float deltaTime)") == std::string::npos ||
+      text.find("Input.GetAxis(\"Horizontal\")") == std::string::npos ||
+      text.find("mainCam.SetLocalRotation") == std::string::npos) {
+    return fail("samples/scripting/fps-cs/scripts/character_movement.cs is missing or was edited");
+  }
+  const std::vector<ScriptProp> declared = describe_compiled_props(text, true);
+  bool speed = false, grav = false;
+  for (const ScriptProp& p : declared) {
+    if (p.name == "moveSpeed" && std::fabs(p.value.number - 6.0) < 1e-4) speed = true;
+    if (p.name == "gravity" && std::fabs(p.value.number - (-9.81)) < 1e-3) grav = true;
+  }
+  if (!speed || !grav) return fail("Inspector props should include moveSpeed 6 and gravity -9.81");
+
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cs_fps";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "character_movement.cs", text);
+  write(proj / "scripts" / "coin.cs",
+        read_text(fs::path(TS_REPO_DIR) / "samples" / "scripting" / "2d" / "scripts" / "coin.cs"));
+
+  scene3d::Scene3D scene;
+  scene.version = scene3d::kScene3DVersion;
+  scene3d::Entity3D body;
+  body.id = 1;
+  body.name = "Wanderer";
+  body.transform.position = {0.0f, 0.05f, 0.0f};
+  scene3d::Collider3D cap;
+  cap.shape = scene3d::Collider3D::Shape::Capsule;
+  cap.size = {0.4f, 1.8f, 0.4f};
+  cap.offset = {0.0f, 0.9f, 0.0f};
+  body.collider = cap;
+  body.script = ScriptData{};
+  body.script->path = "scripts/character_movement.cs";
+  body.script->set("moveSpeed", ScriptValue::of_number(12));
+  scene3d::Entity3D cam;
+  cam.id = 2;
+  cam.name = "MainCamera";
+  cam.parent = 1;
+  cam.transform.position = {0.0f, 1.6f, 0.0f};
+  scene3d::PlayCamera3D pc;
+  pc.rig = scene3d::PlayCamera3D::Rig::Fixed;
+  pc.fov = 75.0f;
+  pc.active = true;
+  pc.priority = 1;
+  cam.camera = pc;
+  scene3d::Entity3D ground;
+  ground.id = 3;
+  ground.name = "Ground";
+  ground.transform.position = {0.0f, -0.25f, 0.0f};
+  ground.transform.scale = {40.0f, 0.5f, 40.0f};
+  scene3d::Collider3D box;
+  box.shape = scene3d::Collider3D::Shape::Box;
+  box.size = {1, 1, 1};
+  ground.collider = box;
+  scene.entities = {body, cam, ground};
+
+  world3d::World3D world;
+  std::string err;
+  if (!world.start(scene, proj.string(), &err)) return fail("fps start: " + err + dump3(world));
+  if (world.player_id() != 0) return fail("the C# sample must run with no Rider / Player component");
+  world3d::Input3D walk;
+  walk.move_forward = 1.0f;
+  for (int i = 0; i < 30; ++i) world.step(walk);
+  const scene3d::Entity3D* walked = world.find(1);
+  if (!walked || !(walked->transform.position.z < -4.5f)) {
+    const float z = walked ? walked->transform.position.z : 0;
+    return fail("C# controller did not walk with Prop moveSpeed 12 (z " + std::to_string(z) + ")" + dump3(world));
+  }
+  bool spawned = false, toasted = false;
+  for (const LogEntry& e : world.log()) {
+    spawned = spawned || e.text.find("Player spawned at initial position:") != std::string::npos;
+    toasted = toasted || e.text.find("Character Movement Initialized") != std::string::npos;
+  }
+  if (!spawned || !toasted) return fail("OnStart Log / Toast:" + dump3(world));
+
+  world3d::Input3D look;
+  look.mouse_dx = 10.0f;
+  world.step(look);
+  const render3d::Vec3 fwd = world.find(1)->transform.rotation.rotate({0, 0, -1});
+  if (fwd.x <= 0.05f)
+    return fail("mouse right should yaw the body right (forward.x " + std::to_string(fwd.x) + ")");
+  look = {};
+  look.mouse_dy = -10.0f;
+  world.step(look);
+  const render3d::Vec3 eyes = world.find(2)->transform.rotation.rotate({0, 0, -1});
+  if (eyes.y <= 0.05f)
+    return fail("mouse up should pitch MainCamera up (forward.y " + std::to_string(eyes.y) + ")");
+
+  std::string edited = text;
+  const std::size_t brace = edited.rfind('}');
+  if (brace == std::string::npos) return fail("sample has no class close");
+  edited.insert(brace, "\n    public override void OnReload() { Log(\"character reloaded y=\" + velocity.Y); }\n");
+  write(proj / "scripts" / "character_movement.cs", edited);
+  if (world.reload_scripts() != 1) return fail("C# hot reload of the controller" + dump3(world));
+  bool kept = false, wiped = false;
+  for (const LogEntry& e : world.log()) {
+    if (e.text.find("character reloaded") == std::string::npos) continue;
+    kept = true;
+    wiped = wiped || e.text.find("y=0") != std::string::npos;
+  }
+  if (!kept || wiped) return fail("hot reload should keep velocity" + dump3(world));
+
+  World flat;
+  Entity2D coin_e = scripted(2, "Coin", "scripts/coin.cs");
+  coin_e.script->set("worth", ScriptValue::of_number(5));
+  if (!flat.build({coin_e}, proj.string(), &err)) return fail("2D coin build: " + err + dump(flat.take_logs()));
+  std::vector<LogEntry> logs = flat.take_logs();
+  for (LogEntry& e : ride(flat, 2)) logs.push_back(std::move(e));
+  if (!has(logs, "coin worth 5")) return fail("2D coin OnStart / Prop:" + dump(logs));
+  world.stop();
+  return 0;
+}
+
 // A prebuilt assembly (what exports ship) needs only the .NET 8+ runtime:
 // TS_SMOKE_CS_PREBUILT=<folder with ProjectScripts.dll + TombStone.Scripting.*>
 // rides it in a project with no SDK on the machine.
@@ -293,11 +434,13 @@ int run_csharp_smoke() {
   std::string cwhy;
   const bool cpp = native_scripts::toolchain_available(&cwhy);
   if (int r = check_mixed(proj, cpp)) return r;
+  if (int r = check_character_movement()) return r;
   if (int r = check_export()) return r;
   std::cout << "[smoke] C# scripts OK (.NET SDK " << csharp_scripts::dotnet_info().sdk << ", assembly built in "
             << static_cast<int>(build_s) << " s, hooks + props + state + plugin bridge, hot reload kept state "
             << "and unloaded the old AssemblyLoadContext, compile error at scripts/door.cs:line kept the old "
             << "assembly, background rebuild swapped in after " << bg_ticks << " live ticks, mixed Lua + C#"
-            << (cpp ? " + C++" : "") << ", exported game ran the shipped assembly)\n";
+            << (cpp ? " + C++" : "") << ", character_movement.cs walked and hot-reloaded with no Rider, "
+            << "2D coin Prop round-trip, exported game ran the shipped assembly)\n";
   return 0;
 }

@@ -35,6 +35,16 @@ namespace TombStone.Native
         public delegate* unmanaged[Cdecl]<IntPtr, byte*, byte*, byte*, int, int> Translate;
         public delegate* unmanaged[Cdecl]<IntPtr, byte*, int> LangSet;
         public delegate* unmanaged[Cdecl]<IntPtr, byte*, int, int> LangGet;
+        // ABI 4.
+        public delegate* unmanaged[Cdecl]<IntPtr, ulong, float*, int> Pose;
+        public delegate* unmanaged[Cdecl]<IntPtr, ulong, float, float, float, void> MoveBy;
+        public delegate* unmanaged[Cdecl]<IntPtr, ulong, float, float, float, void> RotateBy;
+        public delegate* unmanaged[Cdecl]<IntPtr, ulong, float, float, float, void> SetLocalEuler;
+        public delegate* unmanaged[Cdecl]<IntPtr, ulong, float, float, float, void> SetPosition;
+        public delegate* unmanaged[Cdecl]<IntPtr, int, byte*, float> Axis;
+        public delegate* unmanaged[Cdecl]<IntPtr, int, byte*, int> ButtonDown;
+        public delegate* unmanaged[Cdecl]<IntPtr, int, byte*, ulong, byte*, int, void> LogAt;
+        public delegate* unmanaged[Cdecl]<IntPtr, byte*, byte*, byte*, int, int> Query;
     }
 
     internal static unsafe class Utf8

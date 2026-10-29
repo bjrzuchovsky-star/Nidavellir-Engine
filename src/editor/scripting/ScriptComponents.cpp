@@ -1443,7 +1443,7 @@ void draw_scripts_panel_body(ScriptsPanelState& st, const ScriptsPanelHost& host
     if (cs_ok < 0) cs_ok = runtime::csharp_scripts::sdk_available(nullptr) ? 1 : 0;
     if (!cs_ok) {
       ImGui::PushStyleColor(ImGuiCol_Text, theme::Warning());
-      ImGui::TextWrapped("C# scripts are disabled here: install the .NET 8 SDK to enable C#.");
+      ImGui::TextWrapped("C# scripts are switched off on this machine. Install the .NET 8 SDK and they'll come good. Lua, graphs and C++ keep working.");
       ImGui::PopStyleColor();
       ImGui::TextDisabled("https://dotnet.microsoft.com/download/dotnet/8.0");
     }

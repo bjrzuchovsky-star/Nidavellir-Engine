@@ -25,12 +25,15 @@
 
 #include "tombstone/script_abi.h"
 
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <functional>
 #include <map>
+#include <source_location>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -60,13 +63,57 @@ inline PropValue arg(bool v) { PropValue p; p.type = 'b'; p.number = v ? 1 : 0; 
 inline PropValue arg(const std::string& v) { PropValue p; p.type = 't'; p.text = v; return p; }
 inline PropValue arg(const char* v) { return arg(std::string(v)); }
 
+// Same shape as the C# Vector3: public fields, Zero / Up, + and * float.
+struct Vector3 {
+  float X = 0, Y = 0, Z = 0;
+  static Vector3 Zero() { return {}; }
+  static Vector3 Up() { return {0, 1, 0}; }
+  static Vector3 Forward() { return {0, 0, -1}; }
+  static Vector3 Right() { return {1, 0, 0}; }
+  Vector3 operator+(Vector3 o) const { return {X + o.X, Y + o.Y, Z + o.Z}; }
+  Vector3 operator-(Vector3 o) const { return {X - o.X, Y - o.Y, Z - o.Z}; }
+  Vector3 operator*(float s) const { return {X * s, Y * s, Z * s}; }
+  friend Vector3 operator*(float s, Vector3 v) { return v * s; }
+  std::string ToString() const {
+    std::ostringstream o;
+    o.setf(std::ios::fixed);
+    o.precision(3);
+    o << "(" << X << ", " << Y << ", " << Z << ")";
+    return o.str();
+  }
+};
+
+struct Axes {
+  Vector3 Right, Forward, Up;
+};
+
+class Script;
+class EntityRef {
+ public:
+  EntityRef() = default;
+  EntityRef(Script* s, Entity id) : s_(s), id_(id) {}
+  explicit operator bool() const { return id_ != 0; }
+  operator Entity() const { return id_; }
+  Entity id() const { return id_; }
+  void SetLocalRotation(float x, float y, float z) const;
+  Vector3 Position() const;
+
+ private:
+  Script* s_ = nullptr;
+  Entity id_ = 0;
+};
+
 class Script {
  public:
   virtual ~Script() = default;
 
-  // Hooks (override what you need).
-  virtual void on_start() {}
-  virtual void on_tick(double /*dt*/) {}
+  // Hooks. OnStart / OnUpdate match the C# sample. on_start / on_tick stay
+  // for older scripts: their defaults call the new names, and a script that
+  // overrides the old name does not run the new one.
+  virtual void OnStart() {}
+  virtual void OnUpdate(float /*deltaTime*/) {}
+  virtual void on_start() { OnStart(); }
+  virtual void on_tick(double dt) { OnUpdate(static_cast<float>(dt)); }
   virtual void on_trigger_enter(Entity /*other*/) {}
   virtual void on_trigger_exit(Entity /*other*/) {}
   virtual void on_interact(Entity /*rider*/) {}
@@ -199,6 +246,37 @@ class Script {
     return std::string(b, static_cast<std::size_t>(n > 0 && n <= 64 ? n : 0));
   }
   bool held(Button b, int slot1 = 1) const { return (api_->buttons(api_->world, slot1 - 1) & b) != 0; }
+
+  // PascalCase API, the same names as C# (C++ returns values from methods).
+  float Prop(const std::string& name, float fallback) const { return static_cast<float>(prop(name, static_cast<double>(fallback))); }
+  int Prop(const std::string& name, int fallback) const { return static_cast<int>(prop(name, static_cast<double>(fallback))); }
+  double Prop(const std::string& name, double fallback) const { return prop(name, fallback); }
+  bool Prop(const std::string& name, bool fallback) const { return prop(name, fallback); }
+  std::string Prop(const std::string& name, const char* fallback) const { return prop(name, fallback); }
+  std::string Prop(const std::string& name, const std::string& fallback) const {
+    const auto it = props_.find(name);
+    return it == props_.end() ? fallback : it->second.text;
+  }
+  void Toast(const std::string& title, const std::string& message) {
+    toast(message.empty() ? title : title + " — " + message);
+  }
+  void Log(const std::string& text, const std::source_location& loc = std::source_location::current()) {
+    if (api_ && api_->log_at) api_->log_at(api_->world, TS_LOG_INFO, text.c_str(), self_, loc.file_name(), static_cast<int>(loc.line()));
+    else log(text);
+  }
+  Vector3 Position() const { return pose_at(self_, 0); }
+  void SetPosition(Vector3 p) { set_position(self_, p); }
+  Axes Transform() const {
+    Axes a;
+    a.Forward = pose_at(self_, 9);
+    a.Right = pose_at(self_, 12);
+    a.Up = pose_at(self_, 15);
+    return a;
+  }
+  void Move(Vector3 delta) { move_by(self_, delta); }
+  void Rotate(Vector3 eulerDegrees) { rotate_by(self_, eulerDegrees); }
+  EntityRef Find(const std::string& name) { return EntityRef(this, find(name)); }
+  EntityRef Player() { return EntityRef(this, player(1)); }
   // Props (scene overrides of the defaults you pass).
   double prop(const std::string& name, double fallback) const {
     const auto it = props_.find(name);
@@ -242,10 +320,64 @@ class Script {
     }
   }
 
+  Vector3 pose_at(Entity e, int at) const {
+    float o[18] = {};
+    if (api_ && api_->pose && api_->pose(api_->world, e, o)) return {o[at], o[at + 1], o[at + 2]};
+    if (at == 0 && api_ && api_->position) {
+      float x = 0, y = 0;
+      if (api_->position(api_->world, e, &x, &y)) return {x, y, 0};
+    }
+    if (at == 9) return {0, 0, -1};
+    if (at == 12) return {1, 0, 0};
+    if (at == 15) return {0, 1, 0};
+    return {};
+  }
+  void move_by(Entity e, Vector3 d) {
+    if (api_ && api_->move_by) api_->move_by(api_->world, e, d.X, d.Y, d.Z);
+  }
+  void rotate_by(Entity e, Vector3 d) {
+    if (api_ && api_->rotate_by) api_->rotate_by(api_->world, e, d.X, d.Y, d.Z);
+  }
+  void set_position(Entity e, Vector3 p) {
+    if (api_ && api_->set_position) api_->set_position(api_->world, e, p.X, p.Y, p.Z);
+    else if (api_) api_->move(api_->world, e, p.X, p.Y);
+  }
+  void set_local_euler(Entity e, float x, float y, float z) {
+    if (api_ && api_->set_local_euler) api_->set_local_euler(api_->world, e, x, y, z);
+  }
+  const TsScriptApi* api_ptr() const { return api_; }
+
  private:
   const TsScriptApi* api_ = nullptr;
   Entity self_ = 0;
   std::map<std::string, PropValue> props_;
+};
+
+inline Script*& script_active() {
+  static thread_local Script* cur = nullptr;
+  return cur;
+}
+
+inline void EntityRef::SetLocalRotation(float x, float y, float z) const {
+  if (s_) s_->set_local_euler(id_, x, y, z);
+}
+inline Vector3 EntityRef::Position() const { return s_ ? s_->pose_at(id_, 0) : Vector3{}; }
+
+struct Input {
+  static float GetAxis(const char* name) {
+    Script* s = script_active();
+    if (!s || !name) return 0.0f;
+    const TsScriptApi* api = s->api_ptr();
+    if (!api || !api->axis) return 0.0f;
+    return api->axis(api->world, 0, name);
+  }
+  static bool GetButtonDown(const char* name) {
+    Script* s = script_active();
+    if (!s || !name) return false;
+    const TsScriptApi* api = s->api_ptr();
+    if (!api || !api->button_down) return false;
+    return api->button_down(api->world, 0, name) != 0;
+  }
 };
 
 using ScriptFactory = Script* (*)();
@@ -289,6 +421,10 @@ TS_SCRIPT_EXPORT int ts_script_has(void* /*s*/, int hook) {
 }
 TS_SCRIPT_EXPORT void ts_script_call(void* sp, int hook, uint64_t e, double n, const char* text) {
   auto* s = static_cast<::ts::Script*>(sp);
+  struct Guard {
+    explicit Guard(::ts::Script* p) { ::ts::script_active() = p; }
+    ~Guard() { ::ts::script_active() = nullptr; }
+  } guard(s);
   const std::string t = text ? text : "";
   const std::size_t tab = t.find('\t');
   try {

@@ -2,6 +2,30 @@
 
 All notable changes to TombStone Engine. The version number lives in the `VERSION` file at the repo root.
 
+## Unreleased (0.2.2)
+
+C# and C++ gameplay scripts can actually drive a game. The acceptance script is `samples/scripting/fps-cs/scripts/character_movement.cs`: it compiles unchanged, and Play runs it with no Rider plugin. `samples/scripting/fps-cpp/` is the C++ twin. `samples/scripting/2d/` is a small coin in both languages.
+
+### C# (.NET 8)
+- Every `scripts/*.cs` builds into one `ProjectScripts.dll` (net8.0) and hot-reloads on save. Compile errors land in the Telegraph with file:line; a failed build keeps the last good assembly. Float, int, bool, string and vector fields survive a reload unless the script replaces `Save` / `Load`.
+- API matches the sample: `OnStart`, `OnUpdate(float)`, `Prop(name, default)` (typed), `Toast(title, message)`, `Position` (with `.Y` and a readable `ToString`), `Vector3`, `Transform.Right` / `Forward`, `Move(Vector3)`, `Rotate`, `Find` + `SetLocalRotation`, `Input.GetAxis` / `GetButtonDown`, `Log`, `Sound`.
+- `OnFixedUpdate` and `OnLateUpdate` run on the same fixed tick. `OnEnable` / `OnDisable` run with start and destroy.
+- Without the .NET 8 SDK the editor says C# is switched off, links the install page, and everything else keeps working. An exported game ships the compiled assembly and needs the .NET 8 **runtime** only when the claim uses C# scripts. See [docs/scripting.md](docs/scripting.md).
+
+### C++
+- The same names on `ts::Script` (`OnStart`, `OnUpdate`, `Prop`, `Move`, `Input::GetAxis`, …). Older `on_start` / `on_tick` scripts still run.
+- One module per claim, hot-reload on save, errors with file:line, last good module kept. `save()` / `load()` keep the fields you write out.
+- A missing MSVC toolchain (Windows) or C++ compiler (Linux) is reported in plain language instead of a raw CMake failure.
+
+### Play
+- A C# or C++ script can move, jump, fall and look with no Player component and no Rider 3D plugin. `Move` separates the body from static colliders. Mouse look is captured in Play for that kind of claim.
+- If Rider 3D is on **and** the player object also has a C# or C++ script, Play warns that the two will fight.
+
+### Smokes
+- `--smoke-cs` and `--smoke-cpp` compile, load, tick, round-trip a Prop, walk the sample controller and hot-reload it. They no longer skip when the SDK and a compiler are present. CI installs the .NET 8 SDK and requires both.
+
+Not in this patch (see the parity list in docs/scripting.md): collision callbacks beyond triggers, `GetComponent` / `Instantiate`, attribute Inspector, coroutines, debugger attach, editor scripting.
+
 ## 0.2.1 — 2026-10-26
 
 A patch for team claims: riders now see the claim's files when they ride in and can place their own. Run `TombStone-0.2.1-update.exe` over 0.2.0; it keeps your claims, settings and the Vault.

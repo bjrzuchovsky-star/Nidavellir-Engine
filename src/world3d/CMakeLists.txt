@@ -5,6 +5,7 @@
 add_library(ts_world3d
   World3D.cpp
   World3D_Lua.cpp
+  World3D_ScriptApi.cpp
   World3D_VR.cpp
   World3D_Anim.cpp
   World3D_Physics.cpp

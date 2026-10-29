@@ -1,0 +1,65 @@
+{
+  "version": 18,
+  "dimension": "3d",
+  "environment": {
+    "sky_top": [0.28, 0.45, 0.72],
+    "sky_horizon": [0.82, 0.8, 0.74],
+    "ground": [0.3, 0.27, 0.22],
+    "ambient": 0.4,
+    "sun_direction": [-0.45, -0.8, -0.35],
+    "sun_color": [1, 0.88, 0.7],
+    "sun_intensity": 2.6,
+    "shadows": true,
+    "shadow_distance": 40
+  },
+  "entities": [
+    {
+      "id": 1,
+      "name": "Wanderer",
+      "position": [0, 0.05, 0],
+      "rotation": [0, 0, 0, 1],
+      "scale": [1, 1, 1],
+      "mesh": { "source": "primitive:capsule" },
+      "material": { "albedo": [0.45, 0.32, 0.22, 1], "roughness": 0.8 },
+      "collider": { "shape": "capsule", "size": [0.4, 1.8, 0.4], "offset": [0, 0.9, 0] },
+      "script": { "path": "scripts/character_movement.cs" }
+    },
+    {
+      "id": 2,
+      "name": "MainCamera",
+      "position": [0, 1.6, 0],
+      "rotation": [0, 0, 0, 1],
+      "scale": [1, 1, 1],
+      "parent": 1,
+      "camera": { "fov": 75, "active": true, "priority": 1, "rig": "fixed" }
+    },
+    {
+      "id": 3,
+      "name": "Ground",
+      "position": [0, -0.25, 0],
+      "rotation": [0, 0, 0, 1],
+      "scale": [40, 0.5, 40],
+      "mesh": { "source": "primitive:cube" },
+      "material": { "albedo": [0.52, 0.47, 0.4, 1], "roughness": 0.95 },
+      "collider": { "shape": "box", "size": [1, 1, 1], "offset": [0, 0, 0] }
+    },
+    {
+      "id": 4,
+      "name": "Crate",
+      "position": [0, 0.5, -6],
+      "rotation": [0, 0, 0, 1],
+      "scale": [1, 1, 1],
+      "mesh": { "source": "primitive:cube" },
+      "material": { "albedo": [0.55, 0.28, 0.16, 1], "roughness": 0.7 },
+      "collider": { "shape": "box", "size": [1, 1, 1], "offset": [0, 0, 0] }
+    },
+    {
+      "id": 5,
+      "name": "Sun",
+      "position": [0, 10, 0],
+      "rotation": [-0.446, 0.23, 0.12, 0.857],
+      "scale": [1, 1, 1],
+      "light": { "type": "directional", "color": [1, 0.92, 0.8], "intensity": 2.6, "range": 8 }
+    }
+  ]
+}

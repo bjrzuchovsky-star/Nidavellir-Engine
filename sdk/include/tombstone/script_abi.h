@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 
-#define TS_SCRIPT_ABI 3
+#define TS_SCRIPT_ABI 4
 
 #ifdef __cplusplus
 extern "C" {
@@ -67,6 +67,20 @@ typedef struct TsScriptApi {
   int (*translate)(void* w, const char* key, const char* args, char* out, int cap);
   int (*lang_set)(void* w, const char* lang);              /* 1 = known language */
   int (*lang_get)(void* w, char* out, int cap);            /* bytes needed */
+  /* ABI 4: 3D pose, deltas, input. out18 is
+   * px,py,pz, ex,ey,ez (euler degrees), sx,sy,sz,
+   * fx,fy,fz (forward), rx,ry,rz (right), ux,uy,uz (up).
+   * 2D worlds use x, y and leave z at 0. Pointers are null on an older host. */
+  int (*pose)(void* w, uint64_t id, float* out18);
+  void (*move_by)(void* w, uint64_t id, float x, float y, float z);
+  void (*rotate_by)(void* w, uint64_t id, float x, float y, float z); /* euler degrees, added */
+  void (*set_local_euler)(void* w, uint64_t id, float x, float y, float z);
+  void (*set_position)(void* w, uint64_t id, float x, float y, float z);
+  float (*axis)(void* w, int slot, const char* name);      /* Horizontal, Vertical, Mouse X, Mouse Y */
+  int (*button_down)(void* w, int slot, const char* name); /* 1 = pressed this tick */
+  void (*log_at)(void* w, int level, const char* text, uint64_t entity, const char* file, int line);
+  /* Growth channel: "op" + "type\\tvalue\\n" args, result bytes into out (-1 error). */
+  int (*query)(void* w, const char* op, const char* args, char* out, int cap);
 } TsScriptApi;
 
 /* Module exports (one module per project holds every script class).
