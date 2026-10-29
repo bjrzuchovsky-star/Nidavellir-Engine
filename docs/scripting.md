@@ -227,12 +227,12 @@ Both languages sit on one native API (`TsScriptApi`, ABI 4). Names match. C++ us
 | `OnLateUpdate(float dt)` | `OnLateUpdate(float)` | After `OnUpdate`. |
 | `OnDestroy()` | `on_destroy()` | The instance is going away. `OnDisable` runs first. |
 | `Prop("n", 6.0f)` | `Prop("n", 6.0f)` | Typed default. Float, int, bool, string and `Vector3` (`"x,y,z"` in the scene). Shows in the Inspector. |
-| `Position` / `Position.Y` | `Position()` | World position. Y is up in 3D. |
+| `Position` / `Position.Y` | `Position()` | World position. Y is up in 3D. The older `Position(e, out x, out y)` is `TryPosition`. |
 | `Transform.Right` / `Forward` / `Up` | `Transform().Right` / `Forward` / `Up` | World axes from the body's rotation. Forward is -Z. |
 | `Move(Vector3)` | `Move(Vector3)` | Delta, in metres (3D) or pixels (2D). 3D movement separates from static colliders. |
 | `Rotate(Vector3 eulerDegrees)` | `Rotate(Vector3)` | Adds euler degrees. |
 | `Find("Name")` | `Find("Name")` | Null / empty when missing. `SetLocalRotation(x, y, z)` is local to the parent. |
-| `Player` | `Player()` | Slot 1's body, or null. |
+| `Player(slot)` / `PlayerId(slot)` | `player(slot)` | 1-based rider id. `Player(slot)` is the older C# call and still compiles. `PlayerEntity(slot)` is that body (null when empty). |
 | `Input.GetAxis("Horizontal" \| "Vertical" \| "Mouse X" \| "Mouse Y")` | `Input::GetAxis(...)` | WASD / arrows, and mouse counts this tick. |
 | `Input.GetButtonDown("Jump")` | `Input::GetButtonDown("Jump")` | Space. `"Action"` is the action key (E). |
 | `Toast(title, message)` | `Toast(title, message)` | Both strings, shown as one line. |

@@ -358,7 +358,8 @@ EditorInstall probe_vs() {
   if (pf86.empty()) pf86 = "C:\\Program Files (x86)";
   const fs::path vswhere = fs::path(pf86) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe";
   if (fs::exists(vswhere, ec)) {
-    const std::string dev = capture("\"" + vswhere.string() + "\" -latest -prerelease -property productPath");
+    const std::string dev = capture("\"" + vswhere.string() +
+                                    "\" -latest -prerelease -products * -property productPath");
     if (!dev.empty() && fs::exists(dev, ec)) {
       r.found = true;
       r.path = dev;

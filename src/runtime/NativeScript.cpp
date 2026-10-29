@@ -124,13 +124,13 @@ bool toolchain_available(std::string* why) {
   std::error_code ec;
   if (!fs::exists(vswhere, ec) ||
       run_command(q(vswhere.string()) +
-                      " -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath",
+                      " -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath",
                   &out) != 0 ||
       out.find_first_not_of(" \t\r\n") == std::string::npos) {
     if (why) {
-      *why = "the Visual Studio 2022 C++ toolchain (MSVC) was not found. Install the "
-             "\"Desktop development with C++\" workload from https://visualstudio.microsoft.com/downloads/ "
-             "so CMake can build scripts/*.cpp";
+      *why = "the Visual Studio 2022 C++ toolchain (MSVC) was not found. Install Build Tools for "
+             "Visual Studio, or the \"Desktop development with C++\" workload, from "
+             "https://visualstudio.microsoft.com/downloads/ so CMake can build scripts/*.cpp";
     }
     return false;
   }

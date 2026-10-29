@@ -165,7 +165,7 @@ public class {Class} : Script
 
     int SlotOf(ulong e)
     {
-        for (int s = 1; s <= 4; s++) if (Player(s) == e) return s;
+        for (int s = 1; s <= 4; s++) if (PlayerId(s) == e) return s;
         return 0;
     }
 
@@ -207,7 +207,7 @@ public class {Class} : Script
     public override void OnTriggerEnter(ulong other)
     {
         int slot = 0;
-        for (int s = 1; s <= 4; s++) if (Player(s) == other) slot = s;
+        for (int s = 1; s <= 4; s++) if (PlayerId(s) == other) slot = s;
         if (slot == 0) return;  // only riders pocket it
         double amount = Prop("amount", 10.0);
         double purse = Get("gold", 0, other) + amount;
@@ -228,7 +228,7 @@ public class {Class} : Script
     public override void OnInteract(ulong rider)
     {
         int slot = 0;
-        for (int s = 1; s <= 4; s++) if (Player(s) == rider) slot = s;
+        for (int s = 1; s <= 4; s++) if (PlayerId(s) == rider) slot = s;
         Toast(Prop("line", "Tombstone, 3 miles. Mind the rattlers."), slot, Prop("seconds", 3.0));
     }
 }
@@ -249,7 +249,7 @@ public class {Class} : Script
         timer += dt;
         if (timer < Prop("every", 2.0)) return;
         timer = 0;
-        if (!Position(Self, out float x, out float y)) return;
+        if (!TryPosition(Self, out float x, out float y)) return;
         float hop = (float)Prop("hop", 8.0);
         up = !up;
         Move(Self, x, up ? y - hop : y + hop);

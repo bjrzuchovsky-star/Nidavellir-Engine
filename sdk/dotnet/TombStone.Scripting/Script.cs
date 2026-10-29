@@ -217,16 +217,18 @@ namespace TombStone
             fixed (byte* p = Utf8.Z(name)) id = api->Find(W, p);
             return id == 0 ? null : new Entity { Owner = this, Id = id };
         }
-        public Entity Player => FindPlayer(1);
-        Entity FindPlayer(int slot1)
+        // Slot is 1-based. Player(slot) is the older call (an id) and still
+        // compiles. PlayerId is the same id. PlayerEntity is that body as an
+        // object (null when the slot is empty). There is no Player property:
+        // it would hide Player(slot).
+        public ulong Player(int slot1) => api->Player(W, slot1 - 1);
+        public ulong PlayerId(int slot1) => Player(slot1);
+        public Entity PlayerEntity(int slot1 = 1)
         {
-            ulong id = api->Player(W, slot1 - 1);
+            ulong id = Player(slot1);
             return id == 0 ? null : new Entity { Owner = this, Id = id };
         }
-        // Slot is 1-based. The Player property is slot 1. PlayerId stays a
-        // method so it does not clash with that property.
-        public ulong PlayerId(int slot1) => api->Player(W, slot1 - 1);
-        bool TryPosition(ulong e, out float x, out float y)
+        public bool TryPosition(ulong e, out float x, out float y)
         {
             float a = 0, b = 0;
             bool ok = api->Position(W, e, &a, &b) != 0;
