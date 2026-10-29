@@ -243,7 +243,7 @@ Both languages sit on one native API (`TsScriptApi`, ABI 4). Names match. C++ us
 
 `Vector3` has `.X` `.Y` `.Z` (settable), `Zero`, `Up`, `+` and `* float`, and a readable `ToString`.
 
-Grounding in the sample is `Position.Y <= 0.01` plus `Move`, which will not push the capsule through a static floor. It does not call the Rider plugin and does not read the Rider's grounded flag.
+Grounding in the sample is `Position.Y <= 0.01` plus `Move`. `Move` keeps the capsule on box colliders, on a terrain heightfield and on mesh / fitted convex colliders, including when the physics plugin is off. The sample does not call the Rider plugin.
 
 ### Not yet (parity with Unity / Unreal)
 

@@ -300,6 +300,9 @@ class World3D final : public runtime::ScriptWorld {
   // Terrain (World3D_Terrain.cpp): ground under world (x, z); false when no
   // terrain covers it. layer = dominant splat layer (0..3) and its weight.
   bool terrain_height(float x, float z, float* y, Vec3* normal = nullptr) const;
+  // Height of a terrain whose collider is on (script Move / raycasts). Hidden
+  // or collider-off terrains are not a floor.
+  bool terrain_solid_height(float x, float z, float* y, Vec3* normal = nullptr) const;
   int terrain_layer(float x, float z, float* weight = nullptr) const;
   void open_terrain_lua(lua_State* L, int sandbox);
   void billboards(std::vector<render3d::Renderer3D::Billboard>* out) const;
@@ -421,9 +424,15 @@ class World3D final : public runtime::ScriptWorld {
   std::unique_ptr<AnimSystem, AnimSystemDeleter> anim_;
   void anim_step();
   void anim_open_lua(lua_State* L, int sandbox);
+  // One triangle of a mesh or fitted convex collider, in world space.
+  struct SurfTri {
+    Vec3 a, b, c;
+  };
   struct Static {
-    std::uint64_t id;
+    std::uint64_t id = 0;
     Aabb box;
+    bool volume = true;  // box / capsule / sphere. False: stand on tris, not the bounds.
+    std::vector<SurfTri> tris;
   };
   void post(runtime::LogLevel level, const std::string& channel, const std::string& text,
             std::uint64_t entity = 0);
@@ -534,6 +543,9 @@ class World3D final : public runtime::ScriptWorld {
   std::vector<DelayedKill> delayed_;
   void note_script_input(const Input3D& in);
   void separate_from_statics(Entity3D& e);
+  // Keep the capsule from falling through a terrain heightfield or a mesh
+  // floor. Does not use Jolt, so it still holds with the physics plugin off.
+  void support_feet(Entity3D& e, const Vec3& from);
   void apply_one_local(Entity3D& e, const Vec3& euler);
   void apply_script_locals();
   float cam_yaw_ = 0.0f;

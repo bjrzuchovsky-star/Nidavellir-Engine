@@ -2,6 +2,10 @@
 
 All notable changes to TombStone Engine. The version number lives in the `VERSION` file at the repo root.
 
+## Unreleased (0.2.3)
+
+- Scripted `Move` (the fps C# and C++ samples, unchanged) stands and walks on terrain and on mesh colliders. Previously it only pushed out of box colliders, so gravity fell straight through the heightfield.
+
 ## 0.2.2 — 2026-10-29
 
 - C# templates compile again. `Player(slot)` is kept so older scripts still call it; `PlayerId(slot)` is the same id. `Position(e, out x, out y)` is now `TryPosition`, because `Position` is the vector the character sample reads.

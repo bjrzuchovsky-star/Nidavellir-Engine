@@ -109,6 +109,21 @@ bool World3D::terrain_height(float x, float z, float* y, Vec3* normal) const {
   return true;
 }
 
+bool World3D::terrain_solid_height(float x, float z, float* y, Vec3* normal) const {
+  for (const Entity3D& e : entities()) {
+    if (!e.terrain || !e.terrain->collider || dead_.count(e.id)) continue;
+    std::shared_ptr<terrain::TerrainData> t = terrain::acquire(project_dir_, *e.terrain);
+    if (!t || !t->valid()) continue;
+    const Vec3 o = e.transform.position;
+    if (!terrain::inside(*t, x - o.x, z - o.z)) continue;
+    const float lx = x - o.x, lz = z - o.z;
+    if (y) *y = terrain::height_at(*t, lx, lz) + o.y;
+    if (normal) *normal = terrain::normal_at(*t, lx, lz);
+    return true;
+  }
+  return false;
+}
+
 int World3D::terrain_layer(float x, float z, float* weight) const {
   Hit h;
   if (!terrain_under(*this, x, z, &h)) return -1;

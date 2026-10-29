@@ -9,6 +9,8 @@
 #include "runtime/ScriptAbi.h"
 #include "scene/SceneJson.h"
 #include "runtime/World.h"
+#include "terrain/Terrain.h"
+#include "terrain/TerrainView.h"
 #include "world3d/World3D.h"
 
 #include <algorithm>
@@ -500,6 +502,105 @@ TS_SCRIPT(Waiter, "waiter")
   return 0;
 }
 
+// The fps-cpp sample, unchanged, over a heightfield and over a fitted convex mesh.
+int check_terrain_floor() {
+  namespace tr = terrain;
+  const fs::path sample =
+      fs::path(TS_REPO_DIR) / "samples" / "scripting" / "fps-cpp" / "scripts" / "character_movement.cpp";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cpp_terrain";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "character_movement.cpp", read_text(sample));
+
+  tr::TerrainData td;
+  tr::reset(td, 33, 64.0f);
+  for (float& h : td.heights) h = 4.0f;
+  tr::Terrain3D comp;
+  comp.data = "terrain/pad.tsterrain";
+  comp.resolution = 33;
+  comp.size = 64.0f;
+  std::string err;
+  fs::create_directories(proj / "terrain", ec);
+  if (!tr::save_file((proj / comp.data).string(), td, &err)) return fail("save terrain: " + err);
+  tr::forget();
+
+  auto wanderer = [](float y) {
+    scene3d::Entity3D e;
+    e.id = 2;
+    e.name = "Wanderer";
+    e.transform.position = {0.0f, y, 0.0f};
+    scene3d::Collider3D cap;
+    cap.shape = scene3d::Collider3D::Shape::Capsule;
+    cap.size = {0.4f, 1.8f, 0.4f};
+    cap.offset = {0.0f, 0.9f, 0.0f};
+    e.collider = cap;
+    e.script = ScriptData{};
+    e.script->path = "scripts/character_movement.cpp";
+    return e;
+  };
+  auto camera = []() {
+    scene3d::Entity3D cam;
+    cam.id = 3;
+    cam.name = "MainCamera";
+    cam.parent = 2;
+    cam.transform.position = {0.0f, 1.6f, 0.0f};
+    return cam;
+  };
+
+  scene3d::Scene3D scene;
+  scene.version = scene3d::kScene3DVersion;
+  scene3d::Entity3D pad;
+  pad.id = 1;
+  pad.name = "Terrain";
+  pad.terrain = comp;
+  scene.entities = {pad, wanderer(6.0f), camera()};
+  world3d::World3D world;
+  if (!world.start(scene, proj.string(), &err)) return fail("terrain start: " + err);
+  for (int i = 0; i < 180; ++i) world.step({});
+  const scene3d::Entity3D* body = world.find(2);
+  float ground = 0.0f;
+  if (!body || !world.terrain_height(body->transform.position.x, body->transform.position.z, &ground))
+    return fail("no terrain under the C++ controller");
+  if (body->transform.position.y < ground - 0.05f) {
+    return fail("C++ controller fell through terrain (y " + std::to_string(body->transform.position.y) +
+                ", ground " + std::to_string(ground) + ")");
+  }
+  world3d::Input3D walk;
+  walk.move_forward = 1.0f;
+  for (int i = 0; i < 90; ++i) world.step(walk);
+  body = world.find(2);
+  if (!body || !world.terrain_height(body->transform.position.x, body->transform.position.z, &ground) ||
+      body->transform.position.y < ground - 0.05f) {
+    return fail("C++ controller walked through terrain (y " +
+                std::to_string(body ? body->transform.position.y : -1.0f) + ")");
+  }
+  world.stop();
+
+  scene3d::Scene3D mesh_scene;
+  mesh_scene.version = scene3d::kScene3DVersion;
+  scene3d::Entity3D deck;
+  deck.id = 1;
+  deck.name = "Deck";
+  deck.transform.position = {0.0f, 1.0f, 0.0f};
+  deck.transform.scale = {20.0f, 1.0f, 20.0f};
+  deck.mesh = scene3d::MeshRef{"primitive:cube", true};
+  scene3d::Collider3D hull;
+  hull.shape = scene3d::Collider3D::Shape::ConvexHull;
+  deck.collider = hull;
+  mesh_scene.entities = {deck, wanderer(4.0f), camera()};
+  world3d::World3D mesh_world;
+  if (!mesh_world.start(mesh_scene, proj.string(), &err)) return fail("mesh start: " + err);
+  for (int i = 0; i < 180; ++i) mesh_world.step({});
+  body = mesh_world.find(2);
+  if (!body || body->transform.position.y < 1.45f) {
+    return fail("C++ controller fell through the mesh collider (y " +
+                std::to_string(body ? body->transform.position.y : -1.0f) + ")");
+  }
+  mesh_world.stop();
+  tr::forget();
+  return 0;
+}
+
 }  // namespace
 
 // Compiler output -> Telegraph file:line, whatever spelling the compiler
@@ -650,6 +751,7 @@ int run_native_smoke() {
   if (!w.scripts()->running(2)) return fail("running after the background swap");
   native_scripts::set_blocking_builds(true);
   if (int r = check_character_movement()) return r;
+  if (int r = check_terrain_floor()) return r;
   if (int r = check_components()) return r;
   if (int r = check_lifecycle()) return r;
   if (int r = check_collision()) return r;
@@ -660,6 +762,7 @@ int run_native_smoke() {
             << " s, hooks + props + state + plugin bridge, hot reload kept state, compile error at "
                "scripts/door.cpp:line kept the old module, background rebuild swapped in after " << bg_ticks
             << " live ticks, character_movement.cpp walked and hot-reloaded with no Rider, "
+            << "stood on a terrain heightfield and a mesh collider, "
             << "exported game ran the module from its pak, compiler paths: " << path_note << ")\n";
   return 0;
 }
