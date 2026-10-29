@@ -361,6 +361,7 @@ class World final : public ScriptWorld {
   void script_set_position(std::uint64_t id, float x, float y, float z) override;
   float script_axis(int slot, const char* name) const override;
   bool script_button_down(int slot, const char* name) const override;
+  int script_query(const char* op, const char* args, char* out, int cap) override;
 
   // --- Particles + 2D lighting (World_Fx.cpp) --------------------------------
   // Entity emitters ("particles") run on the tick; fx() adds one-shot
@@ -606,6 +607,13 @@ class World final : public ScriptWorld {
   std::uint64_t log_total_ = 0;
   std::vector<Toast> toasts_;
   std::uint64_t next_id_ = 1;
+  struct DelayedKill {
+    std::uint64_t id = 0;
+    std::uint64_t tick = 0;
+  };
+  std::vector<DelayedKill> delayed_;
+  void flush_delayed();
+  std::uint64_t script_adopt(Entity2D data);
   std::array<std::uint32_t, kMaxPlayers> prev_buttons_{};
   InputFrame input_{};
   NetRole net_role_ = NetRole::Local;

@@ -277,6 +277,31 @@ class Script {
   void Rotate(Vector3 eulerDegrees) { rotate_by(self_, eulerDegrees); }
   EntityRef Find(const std::string& name) { return EntityRef(this, find(name)); }
   EntityRef Player() { return EntityRef(this, player(1)); }
+  std::string Query(const std::string& op, const std::string& args) const;
+  bool HasComponent(const std::string& name) const { return Query("has", std::to_string(self_) + "\t" + name) == "1"; }
+  bool AddComponent(const std::string& name) { return Query("add", std::to_string(self_) + "\t" + name) == "1"; }
+  bool RemoveComponent(const std::string& name) { return Query("remove", std::to_string(self_) + "\t" + name) == "1"; }
+  void SetTag(const std::string& tag) { Query("set_tag", std::to_string(self_) + "\t" + tag); }
+  std::string Tag() const { return Query("tag", std::to_string(self_)); }
+  bool Alive(Entity e) const { return Query("alive", std::to_string(e)) == "1"; }
+  EntityRef FindWithTag(const std::string& tag) {
+    const std::string id = Query("find_tag", tag);
+    return EntityRef(this, static_cast<Entity>(std::strtoull(id.c_str(), nullptr, 10)));
+  }
+  EntityRef Instantiate(const std::string& what, Vector3 at) {
+    const std::string args = what + "\t" + std::to_string(at.X) + "\t" + std::to_string(at.Y) + "\t" + std::to_string(at.Z);
+    const std::string id = Query("instantiate", args);
+    return EntityRef(this, static_cast<Entity>(std::strtoull(id.c_str(), nullptr, 10)));
+  }
+  void Destroy(Entity e, float delaySeconds) {
+    Query("destroy_in", std::to_string(e) + "\t" + std::to_string(delaySeconds));
+  }
+  template <class T>
+  T* GetComponent();
+  template <class T>
+  T* AddComponent();
+  template <class T>
+  void RemoveComponent();
   // Props (scene overrides of the defaults you pass).
   double prop(const std::string& name, double fallback) const {
     const auto it = props_.find(name);
@@ -358,6 +383,69 @@ inline Script*& script_active() {
   return cur;
 }
 
+struct ScriptLive {
+  Entity id = 0;
+  Script* script = nullptr;
+  bool runtime = false;
+};
+struct ScriptLiveStore {
+  std::vector<ScriptLive> items;
+  std::uint64_t pumped = 0;
+  ~ScriptLiveStore() {
+    for (ScriptLive& L : items)
+      if (L.runtime) delete L.script;
+  }
+};
+inline ScriptLiveStore& script_lives() {
+  static ScriptLiveStore store;
+  return store;
+}
+
+inline std::string Script::Query(const std::string& op, const std::string& args) const {
+  if (!api_ || !api_->query) return {};
+  std::string buf(128, '\0');
+  int n = api_->query(api_->world, op.c_str(), args.c_str(), buf.data(), static_cast<int>(buf.size()));
+  if (n < 0) return {};
+  if (n > static_cast<int>(buf.size())) {
+    buf.assign(static_cast<std::size_t>(n), '\0');
+    n = api_->query(api_->world, op.c_str(), args.c_str(), buf.data(), n);
+  }
+  if (n < 0) return {};
+  buf.resize(static_cast<std::size_t>(n > 0 ? n : 0));
+  return buf;
+}
+
+template <class T>
+T* Script::GetComponent() {
+  for (const ScriptLive& L : script_lives().items) {
+    if (L.id == self_ && L.script) {
+      if (T* t = dynamic_cast<T*>(L.script)) return t;
+    }
+  }
+  return nullptr;
+}
+
+template <class T>
+T* Script::AddComponent() {
+  T* t = new T();
+  t->ts_bind(api_, self_, "");
+  script_lives().items.push_back({self_, t, true});
+  t->on_start();
+  return t;
+}
+
+template <class T>
+void Script::RemoveComponent() {
+  auto& items = script_lives().items;
+  for (auto it = items.begin(); it != items.end(); ++it) {
+    if (it->runtime && it->id == self_ && dynamic_cast<T*>(it->script)) {
+      delete it->script;
+      items.erase(it);
+      return;
+    }
+  }
+}
+
 inline void EntityRef::SetLocalRotation(float x, float y, float z) const {
   if (s_) s_->set_local_euler(id_, x, y, z);
 }
@@ -413,9 +501,18 @@ TS_SCRIPT_EXPORT void* ts_script_create(const char* cls, const TsScriptApi* api,
   if (it == ::ts::script_registry().end() || !api || api->abi != TS_SCRIPT_ABI) return nullptr;
   ::ts::Script* s = it->second();
   s->ts_bind(api, self, props);
+  ::ts::script_lives().items.push_back({self, s, false});
   return s;
 }
-TS_SCRIPT_EXPORT void ts_script_destroy(void* s) { delete static_cast<::ts::Script*>(s); }
+TS_SCRIPT_EXPORT void ts_script_destroy(void* sp) {
+  auto* s = static_cast<::ts::Script*>(sp);
+  auto& items = ::ts::script_lives().items;
+  for (auto it = items.begin(); it != items.end();) {
+    if (it->script == s) it = items.erase(it);
+    else ++it;
+  }
+  delete s;
+}
 TS_SCRIPT_EXPORT int ts_script_has(void* /*s*/, int hook) {
   return hook >= 0 && hook < TS_HOOK_COUNT;  // every hook has a (default) body
 }
@@ -430,7 +527,19 @@ TS_SCRIPT_EXPORT void ts_script_call(void* sp, int hook, uint64_t e, double n, c
   try {
   switch (hook) {
     case TS_HOOK_START: s->on_start(); break;
-    case TS_HOOK_TICK: s->on_tick(n); break;
+    case TS_HOOK_TICK: {
+      s->on_tick(n);
+      ::ts::ScriptLiveStore& store = ::ts::script_lives();
+      const std::uint64_t now = s->tick();
+      if (store.pumped != now) {
+        store.pumped = now;
+        std::vector<::ts::Script*> extra;
+        for (const ::ts::ScriptLive& L : store.items)
+          if (L.runtime && L.script && L.script != s) extra.push_back(L.script);
+        for (::ts::Script* r : extra) r->on_tick(n);
+      }
+      break;
+    }
     case TS_HOOK_TRIGGER_ENTER: s->on_trigger_enter(e); break;
     case TS_HOOK_TRIGGER_EXIT: s->on_trigger_exit(e); break;
     case TS_HOOK_INTERACT: s->on_interact(e); break;

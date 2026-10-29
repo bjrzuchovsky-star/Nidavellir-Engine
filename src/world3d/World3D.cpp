@@ -561,6 +561,7 @@ void World3D::follow_parents(const std::vector<std::pair<std::uint64_t, Transfor
 
 void World3D::step(const Input3D& input0) {
   if (!running_) return;
+  flush_delayed();
   TS_PROFILE_SCOPE("world3d.step");
   Input3D input = input0;
   note_script_input(input);

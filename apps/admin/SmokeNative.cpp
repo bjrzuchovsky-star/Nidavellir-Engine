@@ -250,6 +250,67 @@ int check_character_movement() {
   return 0;
 }
 
+int check_components() {
+  const char* src = R"(#include <tombstone/script_sdk.h>
+#include <string>
+struct Marker : ts::Script {
+  void OnStart() override { Log("marker up"); }
+};
+TS_SCRIPT(Marker, "marker")
+struct Spawner : ts::Script {
+  ts::Entity born = 0;
+  bool said = false;
+  void OnStart() override {
+    SetTag("loot");
+    if (!HasComponent("collider")) AddComponent("collider");
+    auto me = FindWithTag("loot");
+    Log(me && me.id() == self() ? "found tag" : "missed tag");
+    Log(HasComponent("collider") ? "has collider" : "no collider");
+    auto* m = AddComponent<Marker>();
+    Log(m && GetComponent<Marker>() ? "script component" : "no script component");
+    auto e = Instantiate("Crate", ts::Vector3{3, 4, 0});
+    born = e.id();
+    Log("born " + std::to_string(born));
+    if (born) Destroy(born, 0.05f);
+    auto prefab = Instantiate("prefabs/box.prefab.json", ts::Vector3{8, 8, 0});
+    Log(std::string("prefab ") + std::to_string(prefab.id()));
+  }
+  void OnUpdate(float) override {
+    if (!said && tick() >= 6) { said = true; Log(Alive(born) ? "still here" : "destroyed"); }
+  }
+};
+TS_SCRIPT(Spawner, "spawner")
+)";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cpp_components";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "spawner.cpp", src);
+  write(proj / "prefabs" / "box.prefab.json",
+        R"({"prefab":1,"dimension":"2d","name":"Box","entities":[{"id":1,"name":"Box","x":0,"y":0,"w":16,"h":16}]})");
+  World w;
+  Entity2D spawner;
+  spawner.id = 2;
+  spawner.name = "Spawner";
+  spawner.script = ScriptData{};
+  spawner.script->path = "scripts/spawner.cpp";
+  Entity2D crate;
+  crate.id = 3;
+  crate.name = "Crate";
+  std::string err;
+  if (!w.build({spawner, crate}, proj.string(), &err)) return fail("components build: " + err + dump(w.take_logs()));
+  std::vector<LogEntry> logs = w.take_logs();
+  for (LogEntry& e : ride(w, 8)) logs.push_back(std::move(e));
+  if (!has(logs, "found tag") || !has(logs, "has collider") || !has(logs, "script component") ||
+      !has(logs, "marker up") || !has(logs, "destroyed") || !has(logs, "prefab ")) {
+    return fail("C++ components / tag / instantiate:" + dump(logs));
+  }
+  for (const LogEntry& e : logs) {
+    if (e.text.find("prefab 0") != std::string::npos || e.text.find("born 0") != std::string::npos)
+      return fail("instantiate returned 0:" + dump(logs));
+  }
+  return 0;
+}
+
 }  // namespace
 
 // Compiler output -> Telegraph file:line, whatever spelling the compiler
@@ -400,6 +461,7 @@ int run_native_smoke() {
   if (!w.scripts()->running(2)) return fail("running after the background swap");
   native_scripts::set_blocking_builds(true);
   if (int r = check_character_movement()) return r;
+  if (int r = check_components()) return r;
   if (int r = check_export()) return r;
   std::cout << "[smoke] C++ scripts OK (module built in " << static_cast<int>(build_s)
             << " s, hooks + props + state + plugin bridge, hot reload kept state, compile error at "

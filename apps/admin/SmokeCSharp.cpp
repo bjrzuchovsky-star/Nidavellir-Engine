@@ -328,6 +328,64 @@ int check_character_movement() {
   return 0;
 }
 
+int check_components() {
+  const char* src = R"(using TombStone;
+public class Marker : Script {
+    public override void OnStart() { Log("marker up"); }
+}
+[Script("spawner")]
+public class Spawner : Script {
+    ulong born;
+    bool said;
+    public override void OnStart() {
+        SetTag("loot");
+        if (!HasComponent("collider")) AddComponent("collider");
+        var me = FindWithTag("loot");
+        Log(me != null && (ulong)me == Self ? "found tag" : "missed tag");
+        Log(GetComponent<Collider>() != null ? "has collider" : "no collider");
+        var m = AddComponent<Marker>();
+        Log(m != null && GetComponent<Marker>() != null ? "script component" : "no script component");
+        var e = Instantiate("Crate", new Vector3(3, 4, 0));
+        born = e == null ? 0 : (ulong)e;
+        Log("born " + born);
+        if (born != 0) Destroy(born, 0.05f);
+        var prefab = Instantiate("prefabs/box.prefab.json", new Vector3(8, 8, 0));
+        Log(prefab != null ? "prefab " + (ulong)prefab : "prefab 0");
+    }
+    public override void OnUpdate(float dt) {
+        if (!said && Tick >= 6) { said = true; Log(Alive(born) ? "still here" : "destroyed"); }
+    }
+}
+)";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cs_components";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "spawner.cs", src);
+  write(proj / "prefabs" / "box.prefab.json",
+        R"({"prefab":1,"dimension":"2d","name":"Box","entities":[{"id":1,"name":"Box","x":0,"y":0,"w":16,"h":16}]})");
+  World w;
+  Entity2D spawner = scripted(2, "Spawner", "scripts/spawner.cs");
+  Entity2D crate;
+  crate.id = 3;
+  crate.name = "Crate";
+  crate.x = 10;
+  crate.y = 10;
+  std::string err;
+  if (!w.build({spawner, crate}, proj.string(), &err)) return fail("components build: " + err + dump(w.take_logs()));
+  std::vector<LogEntry> logs = w.take_logs();
+  for (LogEntry& e : ride(w, 8)) logs.push_back(std::move(e));
+  if (!has(logs, "found tag") || !has(logs, "has collider") || !has(logs, "script component") ||
+      !has(logs, "marker up") || !has(logs, "destroyed")) {
+    return fail("components / tag / instantiate / destroy delay:" + dump(logs));
+  }
+  if (!has(logs, "prefab ")) return fail("prefab instantiate:" + dump(logs));
+  for (const LogEntry& e : logs) {
+    if (e.text.find("prefab 0") != std::string::npos) return fail("prefab id was 0:" + dump(logs));
+    if (e.text.find("born 0") != std::string::npos) return fail("named instantiate failed:" + dump(logs));
+  }
+  return 0;
+}
+
 // A prebuilt assembly (what exports ship) needs only the .NET 8+ runtime:
 // TS_SMOKE_CS_PREBUILT=<folder with ProjectScripts.dll + TombStone.Scripting.*>
 // rides it in a project with no SDK on the machine.
@@ -435,6 +493,7 @@ int run_csharp_smoke() {
   const bool cpp = native_scripts::toolchain_available(&cwhy);
   if (int r = check_mixed(proj, cpp)) return r;
   if (int r = check_character_movement()) return r;
+  if (int r = check_components()) return r;
   if (int r = check_export()) return r;
   std::cout << "[smoke] C# scripts OK (.NET SDK " << csharp_scripts::dotnet_info().sdk << ", assembly built in "
             << static_cast<int>(build_s) << " s, hooks + props + state + plugin bridge, hot reload kept state "

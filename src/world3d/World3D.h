@@ -285,6 +285,8 @@ class World3D final : public runtime::ScriptWorld {
   float script_axis(int slot, const char* name) const override;
   bool script_button_down(int slot, const char* name) const override;
   int script_query(const char* op, const char* args, char* out, int cap) override;
+  void flush_delayed();
+  std::uint64_t script_adopt(Entity3D data);
   // Particles (metres, y up): entity "particles" emitters plus bursts from
   // Lua particles.* / gameplay (VR grab sparkle). fx() takes x, y, z.
   void fx(runtime::FxEvent event);
@@ -523,6 +525,11 @@ class World3D final : public runtime::ScriptWorld {
   bool script_look_ = false;  // a C# / C++ script drives look; no Rider required
   float pending_mouse_x_ = 0.0f, pending_mouse_y_ = 0.0f, pending_zoom_ = 0.0f;
   std::map<std::uint64_t, Vec3> local_euler_;
+  struct DelayedKill {
+    std::uint64_t id = 0;
+    std::uint64_t tick = 0;
+  };
+  std::vector<DelayedKill> delayed_;
   void note_script_input(const Input3D& in);
   void separate_from_statics(Entity3D& e);
   void apply_one_local(Entity3D& e, const Vec3& euler);

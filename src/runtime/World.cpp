@@ -432,6 +432,7 @@ void World::move_rider(Actor& a, const PlayerInput& in) {
 }
 
 void World::step(const InputFrame& input) {
+  flush_delayed();
   if (actors_.empty()) {
     input_ = input;
     ++tick_;

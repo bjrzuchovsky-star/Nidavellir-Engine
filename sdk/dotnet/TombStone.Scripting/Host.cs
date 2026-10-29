@@ -4,6 +4,7 @@
 // collectible AssemblyLoadContext; hot reload loads a new generation and
 // retires the old one, which unloads once its last script is destroyed.
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -40,6 +41,52 @@ namespace TombStone
         }
 
         static readonly Dictionary<int, Generation> gens = new Dictionary<int, Generation>();
+        static readonly Dictionary<ulong, List<Script>> byEntity = new Dictionary<ulong, List<Script>>();
+        static readonly List<Script> runtimeAdded = new List<Script>();
+        static int pumpedFrame = -1;
+
+        internal static IEnumerable<Script> ScriptsOn(ulong id)
+        {
+            List<Script> list;
+            if (byEntity.TryGetValue(id, out list))
+                foreach (Script s in list) yield return s;
+            foreach (Script s in runtimeAdded)
+                if (s.Self == id) yield return s;
+        }
+        internal static void AddRuntime(Script s)
+        {
+            runtimeAdded.Add(s);
+            Script prev = Script.Active;
+            Script.Active = s;
+            try { s.OnEnable(); s.OnStart(); }
+            catch (Exception e) { s.Error(s.GetType().Name + ": " + e.Message); }
+            finally { Script.Active = prev; }
+        }
+        internal static void RemoveRuntime(Script s)
+        {
+            if (!runtimeAdded.Remove(s)) return;
+            try { s.OnDisable(); s.OnDestroy(); }
+            catch (Exception e) { s.Error("remove: " + e.Message); }
+        }
+        internal static void PumpRuntime(float dt)
+        {
+            if (pumpedFrame == Time.Frame) return;
+            pumpedFrame = Time.Frame;
+            Script[] copy = runtimeAdded.ToArray();
+            foreach (Script s in copy)
+            {
+                Script prev = Script.Active;
+                Script.Active = s;
+                try
+                {
+                    s.OnFixedUpdate(dt);
+                    s.OnTick(dt);
+                    s.OnLateUpdate(dt);
+                }
+                catch (Exception e) { s.Error(s.GetType().Name + ": " + e.Message); }
+                finally { Script.Active = prev; }
+            }
+        }
         static readonly List<WeakReference> unloading = new List<WeakReference>();
         static int nextGen = 1;
 
@@ -134,6 +181,9 @@ namespace TombStone
                     s.props[f[0]] = v;
                 }
                 g.Live++;
+                List<Script> list;
+                if (!byEntity.TryGetValue(self, out list)) byEntity[self] = list = new List<Script>();
+                list.Add(s);
                 return GCHandle.ToIntPtr(GCHandle.Alloc(new Instance { Script = s, Gen = g }));
             }
             catch (Exception e)
@@ -150,6 +200,7 @@ namespace TombStone
         {
             Instance i = Get(h);
             if (i == null) return;
+            if (byEntity.TryGetValue(i.Script.Self, out List<Script> list)) list.Remove(i.Script);
             GCHandle.FromIntPtr(h).Free();
             i.Gen.Live--;
             MaybeUnload(i.Gen);
@@ -172,6 +223,7 @@ namespace TombStone
                         Time.DeltaTime = (float)number;
                         Time.Elapsed += (float)number;
                         Time.Frame++;
+                        PumpRuntime((float)number);
                         // The ride is fixed-step, so FixedUpdate and Update share the tick.
                         s.OnFixedUpdate((float)number);
                         s.OnTick(number);

@@ -250,6 +250,7 @@ struct ScriptData {
 struct Entity2D {
   std::uint64_t id = 0;
   std::string name;
+  std::string tag;  // optional label for FindWithTag (scene.json "tag")
   float x = 0.0f;
   float y = 0.0f;
   float w = 64.0f;

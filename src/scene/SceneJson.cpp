@@ -101,6 +101,7 @@ Entity2D entity_from_map(const FlatMap& map) {
   Entity2D e;
   e.id = map_u64(map, "id", 0);
   e.name = map_string(map, "name", "Entity");
+  e.tag = map_string(map, "tag", "");
   e.x = map_float(map, "x", 0.0f);
   e.y = map_float(map, "y", 0.0f);
   e.w = map_float(map, "w", 64.0f);
@@ -472,6 +473,7 @@ void write_entity(std::ostringstream& out, const Entity2D& e) {
   out << "    {\n";
   out << "      \"id\": " << static_cast<unsigned long long>(e.id) << ",\n";
   out << "      \"name\": \"" << escape_string(e.name) << "\",\n";
+  if (!e.tag.empty()) out << "      \"tag\": \"" << escape_string(e.tag) << "\",\n";
   out << "      \"x\": " << format_float(e.x) << ",\n";
   out << "      \"y\": " << format_float(e.y) << ",\n";
   out << "      \"w\": " << format_float(e.w) << ",\n";

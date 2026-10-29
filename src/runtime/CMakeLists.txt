@@ -10,6 +10,7 @@ add_library(ts_runtime
   World_CameraLua.cpp
   World_Anim.cpp
   World_Script.cpp
+  World_Query.cpp
   World_Plugins.cpp
   World_Fx.cpp
   World_Net.cpp

@@ -508,5 +508,117 @@ namespace TombStone
             }
             return new Vector3(x, y, z);
         }
+
+        string Query(string op, string args)
+        {
+            if (api == null || api->Query == null) return "";
+            byte[] buf = new byte[128];
+            int n;
+            fixed (byte* o = Utf8.Z(op)) fixed (byte* a = Utf8.Z(args ?? ""))
+            {
+                fixed (byte* bp = buf) n = api->Query(W, o, a, bp, buf.Length);
+                if (n > buf.Length)
+                {
+                    buf = new byte[n];
+                    fixed (byte* bp2 = buf) n = api->Query(W, o, a, bp2, buf.Length);
+                }
+            }
+            return n <= 0 ? "" : System.Text.Encoding.UTF8.GetString(buf, 0, n);
+        }
+        static string ComponentKey(Type t)
+        {
+            if (t == typeof(Collider)) return "collider";
+            if (t == typeof(Rigidbody)) return "rigidbody";
+            if (t == typeof(Renderer)) return "renderer";
+            if (t == typeof(AudioSource)) return "audio";
+            if (t == typeof(SceneCamera)) return "camera";
+            if (t == typeof(Animator)) return "animator";
+            return null;
+        }
+        public bool HasComponent(string name) => Query("has", Self + "\t" + (name ?? "")) == "1";
+        public bool AddComponent(string name) => Query("add", Self + "\t" + (name ?? "")) == "1";
+        public bool RemoveComponent(string name) => Query("remove", Self + "\t" + (name ?? "")) == "1";
+        public bool Alive(ulong id) => Query("alive", id.ToString(CultureInfo.InvariantCulture)) == "1";
+        public string Tag() => Query("tag", Self.ToString(CultureInfo.InvariantCulture));
+        public void SetTag(string tag) => Query("set_tag", Self.ToString(CultureInfo.InvariantCulture) + "\t" + (tag ?? ""));
+        public Entity FindWithTag(string tag)
+        {
+            string id = Query("find_tag", tag ?? "");
+            ulong n;
+            if (!ulong.TryParse(id, out n) || n == 0) return null;
+            return new Entity { Owner = this, Id = n };
+        }
+        public Entity Instantiate(string nameOrPrefab, Vector3 position)
+        {
+            string args = (nameOrPrefab ?? "") + "\t" +
+                position.X.ToString("R", CultureInfo.InvariantCulture) + "\t" +
+                position.Y.ToString("R", CultureInfo.InvariantCulture) + "\t" +
+                position.Z.ToString("R", CultureInfo.InvariantCulture);
+            string id = Query("instantiate", args);
+            ulong n;
+            if (!ulong.TryParse(id, out n) || n == 0) return null;
+            return new Entity { Owner = this, Id = n };
+        }
+        public Entity Instantiate(string nameOrPrefab) => Instantiate(nameOrPrefab, Vector3.Zero);
+        public void Destroy(ulong e, float delaySeconds) =>
+            Query("destroy_in", e.ToString(CultureInfo.InvariantCulture) + "\t" + delaySeconds.ToString("R", CultureInfo.InvariantCulture));
+        public T GetComponent<T>() where T : class
+        {
+            if (typeof(Script).IsAssignableFrom(typeof(T)))
+            {
+                if (this is T self) return self;
+                foreach (Script s in Host.ScriptsOn(Self))
+                    if (s is T found) return found;
+                return null;
+            }
+            string key = ComponentKey(typeof(T));
+            if (key == null || Query("has", Self + "\t" + key) != "1") return null;
+            var c = (Component)Activator.CreateInstance(typeof(T));
+            c.Owner = this;
+            c.Id = Self;
+            c.Kind = key;
+            return (T)(object)c;
+        }
+        public T AddComponent<T>() where T : class, new()
+        {
+            if (typeof(Script).IsAssignableFrom(typeof(T)) && typeof(T) != typeof(Script))
+            {
+                var s = new T() as Script;
+                if (s == null) return null;
+                s.api = api;
+                s.Self = Self;
+                Host.AddRuntime(s);
+                return (T)(object)s;
+            }
+            string key = ComponentKey(typeof(T));
+            if (key == null || Query("add", Self + "\t" + key) != "1") return null;
+            return GetComponent<T>();
+        }
+        public void RemoveComponent<T>() where T : class
+        {
+            if (typeof(Script).IsAssignableFrom(typeof(T)))
+            {
+                foreach (Script s in Host.ScriptsOn(Self))
+                {
+                    if (s is T && !ReferenceEquals(s, this)) { Host.RemoveRuntime(s); return; }
+                }
+                return;
+            }
+            string key = ComponentKey(typeof(T));
+            if (key != null) Query("remove", Self + "\t" + key);
+        }
     }
+
+    public class Component
+    {
+        internal Script Owner;
+        internal ulong Id;
+        public string Kind;
+    }
+    public class Collider : Component { }
+    public class Rigidbody : Component { }
+    public class Renderer : Component { }
+    public class AudioSource : Component { }
+    public class SceneCamera : Component { }
+    public class Animator : Component { }
 }

@@ -4,12 +4,17 @@
 
 #include "world3d/World3D.h"
 
+#include "scene/Prefab.h"
+#include "render3d/Scene3D.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <vector>
 
 namespace ts {
 namespace tombstone {
@@ -177,8 +182,177 @@ bool World3D::script_button_down(int slot, const char* name) const {
   return false;
 }
 
+int put_text(const std::string& s, char* out, int cap) {
+  const int n = static_cast<int>(s.size());
+  if (out && cap >= n) std::memcpy(out, s.data(), s.size());
+  return n;
+}
+
+std::vector<std::string> fields_of(const char* args) {
+  std::vector<std::string> f;
+  std::string cur;
+  for (const char* p = args ? args : ""; *p; ++p) {
+    if (*p == '\t') {
+      f.push_back(cur);
+      cur.clear();
+    } else {
+      cur.push_back(*p);
+    }
+  }
+  f.push_back(cur);
+  return f;
+}
+
+std::string lower_copy(std::string s) {
+  for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return s;
+}
+
+bool has_component3(const Entity3D& e, const std::string& name) {
+  if (name == "transform") return true;
+  if (name == "collider") return e.collider.has_value();
+  if (name == "rigidbody") return e.rigid_body.has_value();
+  if (name == "renderer") return e.mesh.has_value();
+  if (name == "audio") return e.audio.has_value();
+  if (name == "camera") return e.camera.has_value();
+  if (name == "animator") return e.animator.has_value();
+  if (name == "script") return e.script.has_value();
+  return false;
+}
+
+void World3D::flush_delayed() {
+  const std::uint64_t now = script_tick();
+  for (auto it = delayed_.begin(); it != delayed_.end();) {
+    if (it->tick <= now) {
+      const std::uint64_t id = it->id;
+      it = delayed_.erase(it);
+      script_destroy(id);
+    } else {
+      ++it;
+    }
+  }
+}
+
+std::uint64_t World3D::script_adopt(Entity3D data) {
+  if (ents_.size() >= 4096) return 0;
+  data.player.reset();
+  if (data.id == 0 || find(data.id)) {
+    std::uint64_t id = 1;
+    for (const Entity3D& e : ents_) id = std::max(id, e.id + 1);
+    data.id = id;
+  }
+  const std::uint64_t id = data.id;
+  const bool scripted = data.script.has_value();
+  ents_.push_back(std::move(data));
+  spawned_.insert(id);
+  if (host_ && scripted) host_->attach(*script_entity(id));
+  rebuild_statics();
+  return id;
+}
+
 int World3D::script_query(const char* op, const char* args, char* out, int cap) {
   if (!op) return -1;
+  const std::vector<std::string> f = fields_of(args);
+  auto id_of = [&](std::size_t i) -> std::uint64_t {
+    return i < f.size() ? static_cast<std::uint64_t>(std::strtoull(f[i].c_str(), nullptr, 10)) : 0;
+  };
+  if (ieq(op, "alive")) return put_text(live(id_of(0)) ? "1" : "0", out, cap);
+  if (ieq(op, "name")) {
+    const Entity3D* e = live(id_of(0));
+    return put_text(e ? e->name : "", out, cap);
+  }
+  if (ieq(op, "tag")) {
+    const Entity3D* e = live(id_of(0));
+    return put_text(e ? e->tag : "", out, cap);
+  }
+  if (ieq(op, "set_tag")) {
+    if (Entity3D* e = live(id_of(0))) e->tag = f.size() > 1 ? f[1] : "";
+    return put_text("1", out, cap);
+  }
+  if (ieq(op, "find_tag")) {
+    const std::string want = f.empty() ? "" : f[0];
+    for (const Entity3D& e : ents_) {
+      if (!dead_.count(e.id) && e.tag == want) return put_text(std::to_string(e.id), out, cap);
+    }
+    return put_text("0", out, cap);
+  }
+  if (ieq(op, "has") || ieq(op, "add") || ieq(op, "remove")) {
+    Entity3D* e = live(id_of(0));
+    const std::string name = lower_copy(f.size() > 1 ? f[1] : "");
+    if (!e) return put_text("0", out, cap);
+    if (ieq(op, "has")) return put_text(has_component3(*e, name) ? "1" : "0", out, cap);
+    if (ieq(op, "remove")) {
+      if (name == "collider") e->collider.reset();
+      else if (name == "rigidbody") e->rigid_body.reset();
+      else if (name == "renderer") e->mesh.reset();
+      else if (name == "audio") e->audio.reset();
+      else if (name == "camera") e->camera.reset();
+      else if (name == "animator") e->animator.reset();
+      else return put_text("0", out, cap);
+      rebuild_statics();
+      return put_text("1", out, cap);
+    }
+    if (name == "transform" || name == "script") return put_text("1", out, cap);
+    if (name == "collider" && !e->collider) {
+      scene3d::Collider3D c;
+      c.size = {1, 1, 1};
+      e->collider = c;
+    } else if (name == "rigidbody" && !e->rigid_body) {
+      e->rigid_body = scene3d::RigidBody3D{};
+    } else if (name == "renderer" && !e->mesh) {
+      e->mesh = scene3d::MeshRef{};
+    } else if (name == "audio" && !e->audio) {
+      e->audio = AudioSourceData{};
+    } else if (name == "camera" && !e->camera) {
+      e->camera = scene3d::PlayCamera3D{};
+    } else if (name == "animator" && !e->animator) {
+      e->animator = scene3d::Animator3D{};
+    } else if (name != "collider" && name != "rigidbody" && name != "renderer" && name != "audio" &&
+               name != "camera" && name != "animator") {
+      return put_text("0", out, cap);
+    }
+    rebuild_statics();
+    return put_text("1", out, cap);
+  }
+  if (ieq(op, "destroy_in")) {
+    const std::uint64_t id = id_of(0);
+    const double seconds = f.size() > 1 ? std::atof(f[1].c_str()) : 0.0;
+    if (!live(id)) return put_text("0", out, cap);
+    if (!(seconds > 0.0)) {
+      script_destroy(id);
+      return put_text("1", out, cap);
+    }
+    const auto ticks = static_cast<std::uint64_t>(std::ceil(seconds * static_cast<double>(kTickRate)));
+    delayed_.push_back({id, script_tick() + std::max<std::uint64_t>(ticks, 1)});
+    return put_text("1", out, cap);
+  }
+  if (ieq(op, "instantiate")) {
+    const std::string what = f.empty() ? "" : f[0];
+    const float x = f.size() > 1 ? static_cast<float>(std::atof(f[1].c_str())) : 0.0f;
+    const float y = f.size() > 2 ? static_cast<float>(std::atof(f[2].c_str())) : 0.0f;
+    const float z = f.size() > 3 ? static_cast<float>(std::atof(f[3].c_str())) : 0.0f;
+    if (what.size() > 12 && what.ends_with(".prefab.json")) {
+      prefab::Asset asset;
+      std::string err;
+      const std::filesystem::path path = std::filesystem::path(project_dir_) / what;
+      if (!prefab::load_asset(path.string(), &asset, &err) || asset.dim != prefab::Dim::D3) return put_text("0", out, cap);
+      std::uint64_t next = 1;
+      for (const Entity3D& e : ents_) next = std::max(next, e.id + 1);
+      const double pos[3] = {x, y, z};
+      const std::vector<json::Value> made = prefab::instantiate(asset, what, pos, 1, &next);
+      std::uint64_t root = 0;
+      for (const json::Value& j : made) {
+        Entity3D e;
+        if (!scene3d::entity_from_json(j, &e, &err)) continue;
+        const std::uint64_t id = script_adopt(std::move(e));
+        if (!root) root = id;
+      }
+      return put_text(std::to_string(root), out, cap);
+    }
+    const std::uint64_t id = script_spawn(what, x, z);
+    if (id) script_set_position(id, x, y, z);
+    return put_text(std::to_string(id), out, cap);
+  }
   if (!ieq(op, "raycast")) return -1;
   float x = 0, y = 0, z = 0, dx = 0, dy = 0, dz = 0, dist = 100.0f;
   if (!args || std::sscanf(args, "%f %f %f %f %f %f %f", &x, &y, &z, &dx, &dy, &dz, &dist) < 6) return -1;
