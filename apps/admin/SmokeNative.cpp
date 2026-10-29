@@ -359,6 +359,55 @@ TS_SCRIPT(Life, "life")
   return 0;
 }
 
+int check_collision() {
+  const char* src = R"(#include <tombstone/script_sdk.h>
+#include <string>
+struct Bumper : ts::Script {
+  void OnCollisionEnter(ts::Entity) override { Log("hit enter"); }
+  void OnCollisionStay(ts::Entity) override { if (tick() <= 2) Log("hit stay"); }
+  void OnCollisionExit(ts::Entity) override { Log("hit exit"); }
+  void OnUpdate(float) override {
+    if (tick() == 3) { ts::Vector3 p = Position(); p.X += 20; SetPosition(p); }
+  }
+};
+TS_SCRIPT(Bumper, "bumper")
+)";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cpp_hit";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "bumper.cpp", src);
+  scene3d::Scene3D scene;
+  scene3d::Entity3D a;
+  a.id = 1;
+  a.name = "Bumper";
+  a.collider = scene3d::Collider3D{};
+  a.collider->size = {1, 1, 1};
+  a.script = ScriptData{};
+  a.script->path = "scripts/bumper.cpp";
+  scene3d::Entity3D b;
+  b.id = 2;
+  b.name = "Wall";
+  b.collider = scene3d::Collider3D{};
+  b.collider->size = {1, 1, 1};
+  scene.entities = {a, b};
+  world3d::World3D world;
+  std::string err;
+  if (!world.start(scene, proj.string(), &err)) return fail("3D collision start: " + err);
+  for (int i = 0; i < 6; ++i) world.step({});
+  bool enter = false, stay = false, exit = false;
+  for (const LogEntry& e : world.log()) {
+    enter = enter || e.text.find("hit enter") != std::string::npos;
+    stay = stay || e.text.find("hit stay") != std::string::npos;
+    exit = exit || e.text.find("hit exit") != std::string::npos;
+  }
+  if (!enter || !stay || !exit) {
+    std::string d;
+    for (const LogEntry& e : world.log()) d += "\n  " + e.text;
+    return fail("3D collision enter/stay/exit missing:" + d);
+  }
+  return 0;
+}
+
 }  // namespace
 
 // Compiler output -> Telegraph file:line, whatever spelling the compiler
@@ -511,6 +560,7 @@ int run_native_smoke() {
   if (int r = check_character_movement()) return r;
   if (int r = check_components()) return r;
   if (int r = check_lifecycle()) return r;
+  if (int r = check_collision()) return r;
   if (int r = check_export()) return r;
   std::cout << "[smoke] C++ scripts OK (module built in " << static_cast<int>(build_s)
             << " s, hooks + props + state + plugin bridge, hot reload kept state, compile error at "

@@ -187,6 +187,16 @@ void ScriptHost::start_pending() {
 
 // Per-object events: the object's scripts in stack order. Copy the list
 // first: a hook may destroy the object (detach) mid-way.
+void ScriptHost::collide(std::uint64_t self, std::uint64_t other, int phase) {
+  const auto* list = slots(self);
+  if (!list) return;
+  const std::vector<Slot> order = *list;
+  for (const Slot& s : order) {
+    if (!owner_.count(self)) break;
+    if (ScriptLanguageHost* h = hosts_[s.lang].get()) h->collide(self, s.index, other, phase);
+  }
+}
+
 void ScriptHost::trigger(bool enter, std::uint64_t trigger, std::uint64_t other) {
   const auto* list = slots(trigger);
   if (!list) return;

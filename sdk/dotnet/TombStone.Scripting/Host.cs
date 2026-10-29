@@ -249,6 +249,14 @@ namespace TombStone
                         PumpRuntime(2, (float)number);
                         s.OnLateUpdate((float)number);
                         break;
+                    case 12:
+                    {
+                        string phase = Utf8.Read(text);
+                        if (phase == "enter") s.OnCollisionEnter(entity);
+                        else if (phase == "stay") s.OnCollisionStay(entity);
+                        else s.OnCollisionExit(entity);
+                        break;
+                    }
                     case 2: s.OnTriggerEnter(entity); break;
                     case 3: s.OnTriggerExit(entity); break;
                     case 4: s.OnInteract(entity); break;

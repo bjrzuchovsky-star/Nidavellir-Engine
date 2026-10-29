@@ -249,7 +249,7 @@ Grounding in the sample is `Position.Y <= 0.01` plus `Move`, which will not push
 
 Designed on the ABI 4 `query` slot, not finished in this patch:
 
-- Collision callbacks beyond triggers are the next piece (`OnTriggerEnter` / `Exit` already run in 2D and 3D).
+- `OnCollisionEnter` / `Stay` / `Exit` run in 2D and 3D when solid colliders overlap. Triggers still use `OnTriggerEnter` / `Exit`.
 - `GetComponent` / `AddComponent` / `RemoveComponent` for collider, rigidbody, renderer, audio, camera and animator, and for other scripts in the same language. `Instantiate` clones a named entity or a `.prefab.json`. `Destroy(id, seconds)` waits, then removes it. `FindWithTag` / `SetTag` use the optional scene `tag` field. Layers and parenting from script are not yet.
 - Attribute Inspector (`[SerializeField]`, `[Header]`, `[Range]`, `[Tooltip]`), object references, colours and enums. `Prop()` and public numeric / bool / string fields' defaults that the scanner sees are what the Inspector shows today. Vectors are a `"x,y,z"` string.
 - Raycast is available to the native host (`query` op `raycast` against static boxes) but not yet wrapped as `Physics.Raycast` in C# or C++.

@@ -117,6 +117,9 @@ class Script {
   virtual void OnFixedUpdate(float /*deltaTime*/) {}
   virtual void OnUpdate(float /*deltaTime*/) {}
   virtual void OnLateUpdate(float /*deltaTime*/) {}
+  virtual void OnCollisionEnter(Entity /*other*/) {}
+  virtual void OnCollisionStay(Entity /*other*/) {}
+  virtual void OnCollisionExit(Entity /*other*/) {}
   virtual void on_start() { OnStart(); }
   virtual void on_tick(double dt) { OnUpdate(static_cast<float>(dt)); }
   virtual void on_trigger_enter(Entity /*other*/) {}
@@ -579,6 +582,11 @@ TS_SCRIPT_EXPORT void ts_script_call(void* sp, int hook, uint64_t e, double n, c
       }
       break;
     }
+    case TS_HOOK_COLLISION:
+      if (t == "enter") s->OnCollisionEnter(e);
+      else if (t == "stay") s->OnCollisionStay(e);
+      else s->OnCollisionExit(e);
+      break;
     case TS_HOOK_TRIGGER_ENTER: s->on_trigger_enter(e); break;
     case TS_HOOK_TRIGGER_EXIT: s->on_trigger_exit(e); break;
     case TS_HOOK_INTERACT: s->on_interact(e); break;

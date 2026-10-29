@@ -495,6 +495,8 @@ class World3D final : public runtime::ScriptWorld {
   mutable std::map<std::uint64_t, Entity2D> proxies_;
   std::vector<Static> statics_;
   std::set<std::uint64_t> inside_;  // triggers the rider is in
+  std::vector<std::pair<std::uint64_t, std::uint64_t>> solid_hits_;
+  void update_collisions();
   std::string project_dir_;
   runtime::ScriptLibrary lib_;
   std::unique_ptr<runtime::ScriptHost> host_;

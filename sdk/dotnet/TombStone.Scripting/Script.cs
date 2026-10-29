@@ -162,6 +162,9 @@ namespace TombStone
         public virtual void OnFixedUpdate(float deltaTime) { }
         public virtual void OnLateUpdate(float deltaTime) { }
         public virtual void OnTick(double dt) { OnUpdate((float)dt); }
+        public virtual void OnCollisionEnter(ulong other) { }
+        public virtual void OnCollisionStay(ulong other) { }
+        public virtual void OnCollisionExit(ulong other) { }
         public virtual void OnTriggerEnter(ulong other) { }
         public virtual void OnTriggerExit(ulong other) { }
         public virtual void OnInteract(ulong rider) { }

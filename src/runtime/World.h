@@ -585,6 +585,8 @@ class World final : public ScriptWorld {
   float step_limit_ = 1.0e9f;
   // (trigger id, other id) pairs overlapping after the latest tick, sorted.
   std::vector<std::pair<std::uint64_t, std::uint64_t>> inside_;
+  std::vector<std::pair<std::uint64_t, std::uint64_t>> solid_hits_;
+  void update_collisions();
   std::vector<TriggerEvent> events_;
   std::optional<TriggerEvent> last_event_;
   std::uint64_t events_total_ = 0;

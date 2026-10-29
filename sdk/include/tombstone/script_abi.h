@@ -27,7 +27,8 @@ enum TsScriptHook {
   TS_HOOK_EVENT = 9,         /* plugin event: text = "hook\ttext", number (on_quest_completed, ...) */
   TS_HOOK_FIXED = 10,        /* physics step, before Update; number = dt */
   TS_HOOK_LATE = 11,         /* after Update; number = dt */
-  TS_HOOK_COUNT = 12
+  TS_HOOK_COLLISION = 12,    /* text = enter|stay|exit, entity = other */
+  TS_HOOK_COUNT = 13
 };
 
 enum TsUiKind { TS_UI_SHOW = 0, TS_UI_HIDE = 1, TS_UI_SET_TEXT = 2, TS_UI_SET_VALUE = 3 };

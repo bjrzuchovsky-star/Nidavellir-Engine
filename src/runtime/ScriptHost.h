@@ -78,6 +78,7 @@ class ScriptHost {
 
   void start_pending();
   void trigger(bool enter, std::uint64_t trigger, std::uint64_t other);
+  void collide(std::uint64_t self, std::uint64_t other, int phase);
   void interact(std::uint64_t target, std::uint64_t rider);
   void ui_event(const std::string& widget, bool change, double value, const std::string& text);
   void hand_event(std::uint64_t target, const char* hook, const std::string& text,

@@ -202,6 +202,8 @@ class ScriptLanguageHost {
   // so Lua and graphs are unchanged.
   virtual void fixed_tick(double /*dt*/, int /*slot*/) {}
   virtual void late_tick(double /*dt*/, int /*slot*/) {}
+  // Solid-collider overlap. phase 0 enter, 1 stay, 2 exit.
+  virtual void collide(std::uint64_t /*self*/, int /*slot*/, std::uint64_t /*other*/, int /*phase*/) {}
   virtual int reload_changed() = 0;
   virtual bool reload(const std::string& /*rel*/) { return false; }
   // Some running instance uses this file.

@@ -429,6 +429,46 @@ public class Life : Script {
   return 0;
 }
 
+int check_collision() {
+  const char* src = R"(using TombStone;
+[Script("bumper")]
+public class Bumper : Script {
+    public override void OnCollisionEnter(ulong other) { Log("hit enter"); }
+    public override void OnCollisionStay(ulong other) { if (Tick <= 2) Log("hit stay"); }
+    public override void OnCollisionExit(ulong other) { Log("hit exit"); }
+    public override void OnUpdate(float dt) {
+        if (Tick == 3) { var p = Position; p.X += 400; Position = p; }
+    }
+}
+)";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cs_hit";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "bumper.cs", src);
+  Entity2D a = scripted(2, "Bumper", "scripts/bumper.cs");
+  a.w = 32;
+  a.h = 32;
+  a.collider = ColliderData{};
+  a.collider->w = 32;
+  a.collider->h = 32;
+  Entity2D b;
+  b.id = 3;
+  b.name = "Wall";
+  b.w = 32;
+  b.h = 32;
+  b.collider = ColliderData{};
+  b.collider->w = 32;
+  b.collider->h = 32;
+  World w;
+  std::string err;
+  if (!w.build({a, b}, proj.string(), &err)) return fail("collision build: " + err);
+  std::vector<LogEntry> logs;
+  for (LogEntry& e : ride(w, 6)) logs.push_back(std::move(e));
+  if (!has(logs, "hit enter") || !has(logs, "hit stay") || !has(logs, "hit exit"))
+    return fail("2D collision enter/stay/exit:" + dump(logs));
+  return 0;
+}
+
 // A prebuilt assembly (what exports ship) needs only the .NET 8+ runtime:
 // TS_SMOKE_CS_PREBUILT=<folder with ProjectScripts.dll + TombStone.Scripting.*>
 // rides it in a project with no SDK on the machine.
@@ -538,6 +578,7 @@ int run_csharp_smoke() {
   if (int r = check_character_movement()) return r;
   if (int r = check_components()) return r;
   if (int r = check_lifecycle()) return r;
+  if (int r = check_collision()) return r;
   if (int r = check_export()) return r;
   std::cout << "[smoke] C# scripts OK (.NET SDK " << csharp_scripts::dotnet_info().sdk << ", assembly built in "
             << static_cast<int>(build_s) << " s, hooks + props + state + plugin bridge, hot reload kept state "

@@ -82,6 +82,7 @@ class CompiledScriptHost : public ScriptLanguageHost {
   void broadcast(int slot, const char* hook, const std::string& text, double number) override;
   void tick(double dt, int slot) override;
   void fixed_tick(double dt, int slot) override;
+  void collide(std::uint64_t self, int slot, std::uint64_t other, int phase) override;
   void late_tick(double dt, int slot) override;
   // Rebuilds + reloads when the sources changed (in the background unless
   // blocking). 1 when it swapped a new module in.

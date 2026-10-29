@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <iterator>
 
 namespace ts {
 namespace tombstone {
@@ -483,6 +484,39 @@ void World3D::move_player(const Input3D& in) {
   }
 }
 
+void World3D::update_collisions() {
+  std::vector<std::pair<std::uint64_t, std::uint64_t>> now;
+  for (std::size_t i = 0; i < ents_.size(); ++i) {
+    const Entity3D& a = ents_[i];
+    if (dead_.count(a.id) || !a.collider || a.collider->trigger) continue;
+    const Aabb ab = collider_box(a);
+    for (std::size_t j = i + 1; j < ents_.size(); ++j) {
+      const Entity3D& b = ents_[j];
+      if (dead_.count(b.id) || !b.collider || b.collider->trigger) continue;
+      const Aabb bb = collider_box(b);
+      const bool hit = ab.min.x < bb.max.x && ab.max.x > bb.min.x && ab.min.y < bb.max.y && ab.max.y > bb.min.y &&
+                       ab.min.z < bb.max.z && ab.max.z > bb.min.z;
+      if (!hit) continue;
+      now.emplace_back(std::min(a.id, b.id), std::max(a.id, b.id));
+    }
+  }
+  std::sort(now.begin(), now.end());
+  now.erase(std::unique(now.begin(), now.end()), now.end());
+  auto tell = [&](std::uint64_t x, std::uint64_t y, int phase) {
+    if (!host_) return;
+    host_->collide(x, y, phase);
+    host_->collide(y, x, phase);
+  };
+  std::vector<std::pair<std::uint64_t, std::uint64_t>> left, entered, stayed;
+  std::set_difference(solid_hits_.begin(), solid_hits_.end(), now.begin(), now.end(), std::back_inserter(left));
+  std::set_difference(now.begin(), now.end(), solid_hits_.begin(), solid_hits_.end(), std::back_inserter(entered));
+  std::set_intersection(now.begin(), now.end(), solid_hits_.begin(), solid_hits_.end(), std::back_inserter(stayed));
+  for (const auto& p : left) tell(p.first, p.second, 2);
+  for (const auto& p : entered) tell(p.first, p.second, 0);
+  for (const auto& p : stayed) tell(p.first, p.second, 1);
+  solid_hits_ = std::move(now);
+}
+
 void World3D::update_triggers() {
   const Entity3D* p = find(player_);
   if (!p || dead_.count(player_)) return;
@@ -595,6 +629,7 @@ void World3D::step(const Input3D& input0) {
     phys_step(dt);
     phys_post();
     if (!vr_) update_triggers();
+    update_collisions();
   }
   if (host_) {
     TS_PROFILE_SCOPE("world3d.scripts");
