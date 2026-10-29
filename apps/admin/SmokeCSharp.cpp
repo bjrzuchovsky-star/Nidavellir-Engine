@@ -614,6 +614,66 @@ int check_prebuilt(const fs::path& from, std::string* said) {
   return 0;
 }
 
+// A user copy of the fps-cs sample, plus generated folders a recursive glob
+// would compile again, must produce one Compile item and a successful build.
+// Two real files with the same class are named, instead of a CS0111 wall.
+int check_compile_list() {
+  const fs::path sample =
+      fs::path(TS_REPO_DIR) / "samples" / "scripting" / "fps-cs" / "scripts" / "character_movement.cs";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cs_user_copy";
+  fs::remove_all(proj, ec);
+  const fs::path dest = proj / "scripts" / "character_movement.cs";
+  fs::create_directories(dest.parent_path(), ec);
+  fs::copy_file(sample, dest, ec);
+  if (ec) return fail("copy fps-cs sample: " + ec.message());
+  for (const char* sub : {"obj/Debug", "bin", "cache", "build", "Library", "meta"}) {
+    const fs::path junk = proj / "scripts" / sub / "character_movement.cs";
+    fs::create_directories(junk.parent_path(), ec);
+    fs::copy_file(sample, junk, fs::copy_options::overwrite_existing, ec);
+    if (ec) return fail(std::string("copy stray ") + sub + ": " + ec.message());
+  }
+  ScriptBuildResult built = csharp_scripts::build(proj.string(), true);
+  if (!built.ok) return fail("user copy of fps-cs should compile once: " + built.error + "\n" + built.output);
+  const std::string csproj = read_text(proj / ".tombstone" / "dotnet" / "scripts" / "ProjectScripts.csproj");
+  if (csproj.find("<EnableDefaultCompileItems>false</EnableDefaultCompileItems>") == std::string::npos) {
+    return fail("EnableDefaultCompileItems should be false");
+  }
+  if (csproj.find("**/*.cs") != std::string::npos) return fail("csproj still globs **/*.cs");
+  int hits = 0;
+  const std::string needle = "character_movement.cs";
+  for (std::size_t p = 0; (p = csproj.find(needle, p)) != std::string::npos; p += needle.size()) ++hits;
+  if (hits != 1) {
+    return fail("expected one Compile of character_movement.cs, found " + std::to_string(hits) + "\n" + csproj);
+  }
+  for (const char* bad : {"/obj/", "/bin/", "/cache/", "/build/", "/Library/", "/meta/"}) {
+    if (csproj.find(bad) != std::string::npos) return fail(std::string("csproj lists a generated copy under ") + bad);
+  }
+  fs::copy_file(sample, proj / "scripts" / "movement.cs", ec);
+  if (ec) return fail("copy movement.cs: " + ec.message());
+  built = csharp_scripts::build(proj.string(), true);
+  if (built.ok) return fail("two CharacterMovement files should not compile");
+  std::string blob = built.error + "\n" + built.output;
+  for (const LogEntry& e : built.problems) blob += e.text + "\n";
+  if (blob.find("scripts/character_movement.cs") == std::string::npos ||
+      blob.find("scripts/movement.cs") == std::string::npos) {
+    return fail("duplicate class should name both files:\n" + blob);
+  }
+  if (blob.find("Rename one") == std::string::npos) return fail("duplicate class should say to rename one:\n" + blob);
+  if (blob.find("CS0111") != std::string::npos || blob.find("CS0101") != std::string::npos) {
+    return fail("duplicate class should not dump compiler errors:\n" + blob);
+  }
+  fs::remove(proj / "scripts" / "movement.cs", ec);
+  fs::remove(proj / "scripts" / "character_movement.cs", ec);
+  write(proj / "scripts" / "widget_a.cs",
+        "using TombStone;\npublic partial class Widget : Script {\n"
+        "  public override void OnStart() { Log(\"widget\"); }\n}\n");
+  write(proj / "scripts" / "widget_b.cs", "using TombStone;\npublic partial class Widget {\n  int extra;\n}\n");
+  built = csharp_scripts::build(proj.string(), true);
+  if (!built.ok) return fail("partial class across two files should compile: " + built.error + "\n" + built.output);
+  return 0;
+}
+
 }  // namespace
 
 int run_csharp_smoke() {
@@ -696,6 +756,7 @@ int run_csharp_smoke() {
   const bool cpp = native_scripts::toolchain_available(&cwhy);
   if (int r = check_mixed(proj, cpp)) return r;
   if (int r = check_character_movement()) return r;
+  if (int r = check_compile_list()) return r;
   if (int r = check_components()) return r;
   if (int r = check_lifecycle()) return r;
   if (int r = check_collision()) return r;
@@ -708,6 +769,7 @@ int run_csharp_smoke() {
             << "and unloaded the old AssemblyLoadContext, compile error at scripts/door.cs:line kept the old "
             << "assembly, background rebuild swapped in after " << bg_ticks << " live ticks, mixed Lua + C#"
             << (cpp ? " + C++" : "") << ", character_movement.cs walked and hot-reloaded with no Rider, "
+            << "fps-cs copied into scripts/ compiled once (obj/bin/cache/build ignored), "
             << "2D coin Prop round-trip, exported game ran the shipped assembly)\n";
   return 0;
 }

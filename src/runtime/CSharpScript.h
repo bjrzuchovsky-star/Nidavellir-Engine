@@ -40,6 +40,10 @@ std::string binding_sources_dir();
 std::string disabled_reason(bool prebuilt);
 
 bool has_sources(const std::string& project_dir);
+// scripts/*.cs compiled into the assembly, project-relative, sorted.
+// Skips generated folders and lists each canonical path once
+// (case-insensitive on Windows). No wildcard: a glob feeds some copies twice.
+std::vector<std::string> compile_files(const std::string& project_dir);
 std::int64_t sources_stamp(const std::string& project_dir);
 std::string prebuilt_assembly(const std::string& project_dir);  // <p>/dotnet/ProjectScripts.dll
 std::string dev_assembly(const std::string& project_dir);       // <p>/.tombstone/dotnet/bin/...

@@ -13,6 +13,7 @@ C# and C++ gameplay scripts can actually drive a game. The acceptance script is 
 
 ### C# (.NET 8)
 - Every `scripts/*.cs` builds into one `ProjectScripts.dll` (net8.0) and hot-reloads on save. Compile errors land in the Telegraph with file:line; a failed build keeps the last good assembly. Float, int, bool, string and vector fields survive a reload unless the script replaces `Save` / `Load`.
+- The C# build lists each source once and skips `obj`, `bin`, `cache` and `build` (a recursive `scripts/**/*.cs` glob was compiling a second copy, and every CS0101 / CS0111 then pointed at the later file only). Two different files that declare the same script class are named in the console, with a hint to rename one.
 - API matches the sample: `OnStart`, `OnUpdate(float)`, `Prop(name, default)` (typed), `Toast(title, message)`, `Position` (with `.Y` and a readable `ToString`), `Vector3`, `Transform.Right` / `Forward`, `Move(Vector3)`, `Rotate`, `Find` + `SetLocalRotation`, `Input.GetAxis` / `GetButtonDown`, `Log`, `Sound`.
 - `OnFixedUpdate` and `OnLateUpdate` run on the same fixed tick. `OnEnable` / `OnDisable` run with start and destroy.
 - Without the .NET 8 SDK the editor says C# is switched off, links the install page, and everything else keeps working. An exported game ships the compiled assembly and needs the .NET 8 **runtime** only when the claim uses C# scripts. See [docs/scripting.md](docs/scripting.md).

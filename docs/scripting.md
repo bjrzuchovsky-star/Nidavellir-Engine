@@ -193,7 +193,7 @@ public class Teller : Script {
 
 How C# scripts build and run:
 
-- **One assembly.** Every `scripts/*.cs` file builds into `ProjectScripts.dll`, targeting **.NET 8**. Save a file while the editor is running and the ride hot-reloads the assembly.
+- **One assembly.** Every `scripts/*.cs` file builds into `ProjectScripts.dll`, targeting **.NET 8**. Save a file while the editor is running and the ride hot-reloads the assembly. Each file is listed once. Folders named `obj`, `bin`, `cache`, `build`, `Library` or `meta` under `scripts/` are not compiled. If two different files declare the same script class, the console names both and asks you to rename one.
 - **Build.** `dotnet build` needs the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 - **Runtime.** .NET is loaded through `hostfxr` (the engine does not link nethost). Each build gets a collectible `AssemblyLoadContext`, so the previous assembly can unload.
 - **No SDK.** C# is optional. Without the .NET 8 SDK or a .NET 8+ runtime, the editor says C# scripts are switched off, names the install link, and keeps going. Lua, graphs and C++ are not affected. New Script still writes the `.cs` file; it runs once the SDK is installed.

@@ -52,6 +52,10 @@ inline constexpr int kScriptTickRate = 60;
 // "scripts/gate.lua"-style: relative, forward slashes, no "." / ".."
 // parts, ends in a script language's extension (see script_language).
 bool valid_script_path(const std::string& rel);
+// Build and tooling folders under scripts/ that must not be compiled:
+// obj, bin, cache, build, Library, meta, and dot-folders (.git, .vs).
+// The name is compared case-insensitively.
+bool generated_script_directory(const std::string& name);
 // Language a script file is written in, by extension: "lua" (.lua),
 // "graph" (.graph.json, visual scripts), "cpp" (.cpp, compiled into the
 // project's native module), "cs" (.cs, .NET); "" for anything else.
