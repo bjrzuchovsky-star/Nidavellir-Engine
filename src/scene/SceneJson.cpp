@@ -277,9 +277,50 @@ bool apply_components(Entity2D& e, const FlatMap& nested, std::string* why) {
     c.trigger = type == "trigger";
     c.dynamic = body == "dynamic";
     const std::string shape = map_string(*co, "shape", "box");
-    c.shape = shape == "circle"    ? ColliderData::Shape::Circle
-              : shape == "capsule" ? ColliderData::Shape::Capsule
-                                   : ColliderData::Shape::Box;
+    c.shape = shape == "circle"     ? ColliderData::Shape::Circle
+              : shape == "capsule"  ? ColliderData::Shape::Capsule
+              : shape == "polygon"  ? ColliderData::Shape::Polygon
+                                    : ColliderData::Shape::Box;
+    if (c.shape == ColliderData::Shape::Polygon) {
+      const auto raw = nested.find("collider");
+      if (raw != nested.end()) {
+        std::size_t j = 0;
+        FlatMap inner;
+        if (auto scalars = parse_flat_object(raw->second, j, &inner)) {
+          (void)scalars;
+          const auto poly = inner.find("polygons");
+          if (poly != inner.end()) {
+            // [[x,y,x,y,...],[...]]
+            std::string_view text = poly->second;
+            std::size_t i = 0;
+            if (match_char(text, i, '[')) {
+              skip_ws(text, i);
+              while (i < text.size() && text[i] != ']') {
+                if (!match_char(text, i, '[')) break;
+                std::vector<std::pair<float, float>> piece;
+                skip_ws(text, i);
+                while (i < text.size() && text[i] != ']') {
+                  auto x = parse_number(text, i);
+                  skip_ws(text, i);
+                  if (!match_char(text, i, ',')) break;
+                  auto y = parse_number(text, i);
+                  if (!x || !y) break;
+                  piece.emplace_back(static_cast<float>(*x), static_cast<float>(*y));
+                  skip_ws(text, i);
+                  match_char(text, i, ',');
+                  skip_ws(text, i);
+                }
+                match_char(text, i, ']');
+                if (piece.size() >= 3) c.polygons.push_back(std::move(piece));
+                skip_ws(text, i);
+                match_char(text, i, ',');
+                skip_ws(text, i);
+              }
+            }
+          }
+        }
+      }
+    }
     e.collider = c;
   } else if (nested.count("collider")) {
     return bad("bad collider object");
@@ -570,9 +611,21 @@ void write_entity(std::ostringstream& out, const Entity2D& e) {
         << ", \"h\": " << format_float(c.h) << ", \"type\": \""
         << (c.trigger ? "trigger" : "solid") << "\", \"body\": \""
         << (c.dynamic ? "dynamic" : "static") << "\"";
-    if (c.shape != ColliderData::Shape::Box) {
-      out << ", \"shape\": \"" << (c.shape == ColliderData::Shape::Circle ? "circle" : "capsule")
-          << "\"";
+    if (c.shape == ColliderData::Shape::Circle) out << ", \"shape\": \"circle\"";
+    else if (c.shape == ColliderData::Shape::Capsule) out << ", \"shape\": \"capsule\"";
+    else if (c.shape == ColliderData::Shape::Polygon) {
+      out << ", \"shape\": \"polygon\", \"polygons\": [";
+      for (std::size_t pi = 0; pi < c.polygons.size(); ++pi) {
+        if (pi) out << ", ";
+        out << "[";
+        const auto& piece = c.polygons[pi];
+        for (std::size_t k = 0; k < piece.size(); ++k) {
+          if (k) out << ", ";
+          out << format_float(piece[k].first) << ", " << format_float(piece[k].second);
+        }
+        out << "]";
+      }
+      out << "]";
     }
     out << "}";
   }

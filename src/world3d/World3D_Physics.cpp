@@ -5,6 +5,7 @@
 #include "world3d/World3D.h"
 
 #include "render3d/Gltf.h"
+#include "render3d/HullFit.h"
 #include "render3d/ModelImport.h"
 #include "render3d/Mesh.h"
 #include "runtime/ScriptHost.h"
@@ -54,6 +55,12 @@ p3::ShapeDesc prim_shape(scene3d::ColliderShape3D shape, const Vec3& size, const
       break;
   }
   return d;
+}
+
+void scale_points(const std::vector<Vec3>& src, const Vec3& scale, std::vector<Vec3>* out) {
+  out->clear();
+  out->reserve(src.size());
+  for (const Vec3& v : src) out->push_back(render3d::mul(v, scale));
 }
 
 // Velocity that closes the gap to the target in one tick (clamped).
@@ -112,6 +119,10 @@ const render3d::MeshData* World3D::phys_mesh(const std::string& source) {
     if (render3d::load_model(path, &model, &err)) {
       // Imported collision (Source .phy): convex pieces for hull colliders.
       if (!model.collision_hulls.empty()) phys_hulls_[source] = model.collision_hulls;
+      render3d::FitParams fp = render3d::fit_params_for_file(path);
+      render3d::ensure_fitted(&model, fp);
+      if (!model.fitted.convex.empty()) phys_convex_[source] = model.fitted.convex;
+      if (!model.fitted.pieces.empty()) phys_pieces_[source] = model.fitted.pieces;
       // What is drawn: skinned primitives in the rest pose (the raw bind
       // vertices can sit at another scale / place), no collision / LOD meshes.
       render3d::rest_pose_mesh(model, mesh.get());
@@ -206,33 +217,55 @@ void World3D::phys_add(const Entity3D& e) {
   const bool tri = c.shape == scene3d::ColliderShape3D::Mesh;
   if (hull || tri) {
     const render3d::MeshData* m = e.mesh ? phys_mesh(e.mesh->source) : nullptr;
-    p3::ShapeDesc s;
-    s.type = hull || d.motion == p3::Motion::Dynamic ? p3::ShapeType::ConvexHull : p3::ShapeType::Mesh;
-    if (tri && d.motion == p3::Motion::Dynamic) {
+    const std::string& src = e.mesh ? e.mesh->source : std::string();
+    const bool dynamic_mesh = tri && d.motion == p3::Motion::Dynamic;
+    if (dynamic_mesh) {
       post(LogLevel::Warn, "physics",
            e.name + ": a mesh collider can only be static; using its convex hull", e.id);
     }
-    auto hulls = hull && m ? phys_hulls_.find(e.mesh->source) : phys_hulls_.end();
-    if (hulls != phys_hulls_.end() && !hulls->second.empty()) {
-      // The model's own collision hulls (one convex shape per piece).
-      for (const auto& piece : hulls->second) {
+    const bool want_pieces = c.fit == "decompose";
+    const bool use_authored = !want_pieces && hull && (c.fit.empty() || c.fit == "auto");
+    auto authored = use_authored ? phys_hulls_.find(src) : phys_hulls_.end();
+    auto pieces = want_pieces ? phys_pieces_.find(src) : phys_pieces_.end();
+    auto generated = phys_convex_.find(src);
+    auto add_hulls = [&](const std::vector<std::vector<Vec3>>& hs) {
+      for (const auto& piece : hs) {
         p3::ShapeDesc ps;
         ps.type = p3::ShapeType::ConvexHull;
-        for (const Vec3& v : piece) ps.points.push_back(render3d::mul(v, scale));
+        scale_points(piece, scale, &ps.points);
         d.shapes.push_back(std::move(ps));
       }
-    } else if (m) {
+    };
+    if (authored != phys_hulls_.end() && !authored->second.empty()) {
+      add_hulls(authored->second);
+    } else if (pieces != phys_pieces_.end() && !pieces->second.empty()) {
+      add_hulls(pieces->second);
+    } else if ((hull || dynamic_mesh) && generated != phys_convex_.end() && !generated->second.empty()) {
+      add_hulls(generated->second);
+    } else if (m && !dynamic_mesh && tri) {
+      p3::ShapeDesc s;
+      s.type = p3::ShapeType::Mesh;
       s.points.reserve(m->vertices.size());
       for (const auto& v : m->vertices) {
         s.points.push_back(render3d::mul(Vec3{v.position.x, v.position.y, v.position.z}, scale));
       }
       s.indices = m->indices;
+      s.offset = render3d::mul(c.offset, scale);
+      d.shapes.push_back(std::move(s));
+    } else if (m) {
+      p3::ShapeDesc s;
+      s.type = p3::ShapeType::ConvexHull;
+      s.points.reserve(m->vertices.size());
+      for (const auto& v : m->vertices) {
+        s.points.push_back(render3d::mul(Vec3{v.position.x, v.position.y, v.position.z}, scale));
+      }
+      s.indices = m->indices;
+      d.shapes.push_back(std::move(s));
     }
-    s.offset = render3d::mul(c.offset, scale);
-    if (d.shapes.empty()) d.shapes.push_back(std::move(s));
   } else {
     p3::ShapeDesc s = prim_shape(c.shape, c.size, scale);
     s.offset = render3d::mul(c.offset, scale);
+    s.rotation = Quat::from_euler_deg(c.rotation_deg);
     d.shapes.push_back(std::move(s));
   }
   for (const scene3d::ColliderPart3D& part : c.parts) {

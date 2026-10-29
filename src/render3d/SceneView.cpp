@@ -1,4 +1,5 @@
 #include "render3d/SceneView.h"
+#include "render3d/HullFit.h"
 #include "render3d/ModelImport.h"
 #include "profiler/Profiler.h"
 
@@ -297,9 +298,42 @@ void SceneView::draw_collider(const Mat4& world, const scene3d::Entity3D& e) {
       }
       case S::ConvexHull:
       case S::Mesh: {
-        // The model's bounds stand in for the hull / triangles.
         const float hull[4] = {0.8f, 0.5f, 1.0f, 0.85f};
-        draw_box(m, local_bounds(e), hull, false);
+        std::vector<std::pair<Vec3, Vec3>> edges;
+        if (e.mesh && !e.mesh->is_primitive()) {
+          if (const Model* model = this->model(e.mesh->source)) {
+            const bool pieces = c.fit == "decompose" && !model->fitted.pieces.empty();
+            const auto& hulls = pieces ? model->fitted.pieces
+                                       : (!model->fitted.convex.empty() && shape == S::ConvexHull)
+                                             ? model->fitted.convex
+                                             : model->collision_hulls;
+            if (shape == S::ConvexHull && !hulls.empty()) {
+              for (const auto& h : hulls) hull_wire(h, &edges);
+            } else if (shape == S::Mesh) {
+              MeshData rest;
+              rest_pose_mesh(*model, &rest);
+              const std::size_t tris = rest.indices.size() / 3;
+              const std::size_t stride = std::max<std::size_t>(1, tris / 1500);
+              for (std::size_t t = 0; t < tris; t += stride) {
+                const std::uint32_t ia = rest.indices[t * 3], ib = rest.indices[t * 3 + 1],
+                                    ic = rest.indices[t * 3 + 2];
+                if (ia >= rest.vertices.size() || ib >= rest.vertices.size() || ic >= rest.vertices.size()) continue;
+                const Vec3 a = rest.vertices[ia].position, b = rest.vertices[ib].position,
+                           cv = rest.vertices[ic].position;
+                edges.push_back({a, b});
+                edges.push_back({b, cv});
+                edges.push_back({cv, a});
+              }
+            }
+          }
+        }
+        if (edges.empty()) {
+          draw_box(m, local_bounds(e), hull, false);
+        } else {
+          for (const auto& [a, b] : edges) {
+            r_->draw_line(m.transform_point(a), m.transform_point(b), hull, true);
+          }
+        }
         break;
       }
       default:
@@ -309,6 +343,7 @@ void SceneView::draw_collider(const Mat4& world, const scene3d::Entity3D& e) {
   };
   Transform t;
   t.position = c.offset;
+  t.rotation = Quat::from_euler_deg(c.rotation_deg);
   prim(world * t.matrix(), c.shape, c.size);
   for (const scene3d::ColliderPart3D& p : c.parts) {
     Transform pt;

@@ -580,6 +580,9 @@ class World3D final : public runtime::ScriptWorld {
   std::map<std::string, std::unique_ptr<render3d::MeshData>> phys_meshes_;
   // Imported convex collision pieces per model source (Source .phy).
   std::map<std::string, std::vector<std::vector<Vec3>>> phys_hulls_;
+  // Generated hulls (render3d/HullFit.h), model space, for this session.
+  std::map<std::string, std::vector<std::vector<Vec3>>> phys_convex_;
+  std::map<std::string, std::vector<std::vector<Vec3>>> phys_pieces_;
   ImpactStats impact_stats_;
   struct Carry {
     std::uint64_t id = 0;

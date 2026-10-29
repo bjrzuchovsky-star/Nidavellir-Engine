@@ -150,6 +150,12 @@ class Editor3DScreen final : public IScreen {
   void set_show_hitboxes(bool on) { show_hitboxes_ = on; }
   std::uint64_t drop_asset(const std::string& rel, const render3d::Vec3& pos,
                            std::uint64_t target = 0);
+  // One asset per mesh node, with its own .meta. Undo removes the new files.
+  bool split_model_asset(const std::string& rel, bool recentre, bool fit);
+  // Parent object plus a child per part (splits first when it has not been).
+  // One undo step, including any files that step created.
+  std::uint64_t place_model_parts(const std::string& rel, const render3d::Vec3& pos, bool recentre,
+                                  bool fit);
   std::size_t duplicate_selected();
   std::size_t delete_selected();
   bool set_transform(std::uint64_t id, const render3d::Transform& t,
@@ -438,10 +444,15 @@ class Editor3DScreen final : public IScreen {
     terrain::Terrain3D comp;
     terrain::TerrainData data;
   };
+  struct FileBlob {
+    std::string rel;  // project-relative
+    std::string bytes;
+  };
   struct Step {
     std::string label;
     scene3d::Scene3D scene;
     std::vector<TerrainSnap> terrains;  // heightfield data changed by this step
+    std::vector<FileBlob> files;        // files this step created (split / place)
   };
   struct Stroke {
     std::uint64_t id = 0;
@@ -464,6 +475,9 @@ class Editor3DScreen final : public IScreen {
   void push_terrain_undo(const std::string& label, const scene3d::Scene3D& before,
                          std::vector<TerrainSnap> data);
   void push_undo(const std::string& label, const scene3d::Scene3D& before);
+  void push_undo(const std::string& label, const scene3d::Scene3D& before, std::vector<FileBlob> files);
+  void erase_created(const std::vector<FileBlob>& files);
+  void restore_created(const std::vector<FileBlob>& files);
   void autosave();
   std::uint64_t add_entity(scene3d::Entity3D e, const std::string& label);
   void ensure_renderer();

@@ -267,21 +267,30 @@ void Editor3DScreen::draw_inspector() {
     }
     ImGui::DragFloat3("Offset", &c.offset.x, 0.02f);
     t.after("Collider offset");
+    if (c.shape == S::Box) {
+      ImGui::DragFloat3("Rotation", &c.rotation_deg.x, 0.5f, -180.0f, 180.0f, "%.1f deg");
+      t.after("Collider rotation");
+    }
     if (e.mesh && !e.mesh->is_primitive()) {
       // Fit to the model: what is drawn (rest pose, import scale), not the
       // raw file vertices. Fitted colliders follow model reimports.
-      static const char* fits[] = {"auto", "box", "capsule", "convex", "mesh"};
-      static const char* labels = "Auto\0Tight box\0Capsule\0Convex hull\0Mesh\0";
+      static const char* fits[] = {"auto", "box", "obb", "capsule", "convex", "decompose", "mesh"};
+      static const char* labels =
+          "Auto\0Tight box\0Oriented box\0Capsule\0Convex hull\0Convex pieces\0Mesh\0";
       int fi = 0;
-      for (int k = 0; k < 5; ++k) {
+      for (int k = 0; k < 7; ++k) {
         if (c.fit == fits[k]) fi = k;
       }
-      ImGui::SetNextItemWidth(120);
+      ImGui::SetNextItemWidth(140);
       ImGui::Combo("##fitmode", &fi, labels);
       ImGui::SameLine();
       if (ImGui::Button("Fit to mesh") && view_) {
+        render3d::FitParams fp;
+        if (const auto* a = asset_browser_.db().by_path(e.mesh->source)) {
+          fp = render3d::fit_params_from_settings(a->meta.settings);
+        }
         if (const render3d::Model* m = view_->model(e.mesh->source);
-            m && render3d::fit_collider(*m, render3d::collider_fit_from(fits[fi]), &c)) {
+            m && render3d::fit_collider(*m, render3d::collider_fit_from(fits[fi]), &c, fp)) {
           t.activated = true;
           t.commit = "Fit collider to mesh";
           fitted_now = true;
@@ -292,7 +301,8 @@ void Editor3DScreen::draw_inspector() {
     }
     // Hand edits make it a manual collider (reimports leave it alone).
     if (!fitted_now && !c.fit.empty() && c.fit == c_before.fit &&
-        (c.shape != c_before.shape || !(c.size == c_before.size) || !(c.offset == c_before.offset))) {
+        (c.shape != c_before.shape || !(c.size == c_before.size) || !(c.offset == c_before.offset) ||
+         !(c.rotation_deg == c_before.rotation_deg))) {
       c.fit.clear();
     }
     ImGui::Checkbox("Trigger", &c.trigger);

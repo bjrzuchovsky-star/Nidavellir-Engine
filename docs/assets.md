@@ -48,7 +48,7 @@ Claims from before the metadata folder kept a sidecar `foo.png.meta` next to eve
 - The migration is idempotent: opening the claim again does nothing. A sidecar that turns up later (an asset copied in from an older claim with its `.meta`) is adopted the same way on the next scan.
 - project.json has no format version field, so the layout version is `.tombstone/meta.json`. Old builds don't read the folder. Opening a migrated claim in an older ts_admin gives its assets fresh GUIDs (restore `.tombstone/meta_backup/` if you need to go back).
 
-Settings: texture `filter, mipmaps, srgb, max_size, pixels_per_unit`; model `scale, unit_scale, up_axis, material_path, lod, generate_collider, import_animations` (plus `skin` / `body_groups` for Source `.mdl` and `blender_path` for `.blend`; see [model import](model-import.md)); audio `bus, volume, loop, stream`; font `size, oversample`.
+Settings: texture `filter, mipmaps, srgb, max_size, pixels_per_unit`; model `scale, unit_scale, up_axis, material_path, lod, generate_collider, collider, hull_vertices, decompose_max, import_animations` (plus `skin` / `body_groups` for Source `.mdl` and `blender_path` for `.blend`; see [model import](model-import.md)); audio `bus, volume, loop, stream`; font `size, oversample`. A model with several meshes can be split into one asset per part (right-click, or the import option); each part is an ordinary asset with its own `.meta`.
 Applied today: all model settings (at load time, in the editor and the game), model scale/collider and audio bus/volume/loop (on drop). Texture filter/mipmaps/srgb/max_size are stored and validated, but the renderer doesn't use them yet.
 
 ## References and moves

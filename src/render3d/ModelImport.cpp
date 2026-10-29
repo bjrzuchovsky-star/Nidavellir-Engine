@@ -1,3 +1,4 @@
+#include "render3d/HullFit.h"
 #include "render3d/ModelImport.h"
 
 #include "core/AssetMeta.h"
@@ -144,6 +145,8 @@ json::Value default_model_settings(const std::string& path) {
   // Collider a placed model gets (render3d/ColliderFit.h): auto / box /
   // capsule / convex / mesh / none.
   s.set("collider", Value::string("auto"));
+  s.set("hull_vertices", Value::number(64));
+  s.set("decompose_max", Value::number(8));
   s.set("import_animations", Value::boolean(true));
   if (source) s.set("skin", Value::number(0));
   if (ext_of(path) == ".blend") s.set("blender_path", Value::string(""));
@@ -593,6 +596,7 @@ bool load_model(const std::string& path, const ModelImportOptions& opt, Model* o
     if (error) *error = path + ": no meshes";
     return false;
   }
+  apply_fitted_cache_file(path, out);
   if (error) *error = err;
   return true;
 }

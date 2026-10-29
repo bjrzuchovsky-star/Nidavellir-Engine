@@ -46,6 +46,20 @@ p2::ShapeDesc shape_of(const Entity2D& e) {
 
 float rot_of(const Entity2D& e) { return turned(e) ? e.rotation : 0.0f; }
 
+void append_shapes(const Entity2D& e, std::vector<p2::ShapeDesc>* out) {
+  if (e.collider && e.collider->shape == ColliderData::Shape::Polygon && !e.collider->polygons.empty()) {
+    for (const auto& piece : e.collider->polygons) {
+      p2::ShapeDesc s;
+      s.type = p2::ShapeType::Polygon;
+      s.points.reserve(piece.size());
+      for (const auto& [x, y] : piece) s.points.push_back({x - e.w * 0.5f, y - e.h * 0.5f});
+      out->push_back(std::move(s));
+    }
+    return;
+  }
+  out->push_back(shape_of(e));
+}
+
 }  // namespace
 
 std::uint32_t World::body2d_of(std::uint64_t entity) const {
@@ -242,7 +256,8 @@ void World::setup_physics2d() {
     p2::BodyDesc d;
     d.user = id;
     d.motion = w.motion;
-    d.shapes.push_back(shape_of(e));
+    append_shapes(e, &d.shapes);
+    if (d.shapes.empty()) d.shapes.push_back(shape_of(e));
     d.position = {e.x + e.w * 0.5f, e.y + e.h * 0.5f};
     d.angle = rot_of(e);
     if (e.body) {

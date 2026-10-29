@@ -33,6 +33,12 @@ void Editor3DScreen::open_asset_browser() {
   host.vault_origin = [this](const std::string& rel) { return vault_panel_.origin_label(rel); };
   host.on_vault_drop = [this](const std::string& item) { vault_panel_.pull_then(item, {}); };
   host.scripts = [this] { return scripts_; };
+  host.split_model = [this](const std::string& rel, bool recentre, bool fit) {
+    return split_model_asset(rel, recentre, fit);
+  };
+  host.place_parts = [this](const std::string& rel, bool recentre, bool fit) {
+    return place_model_parts(rel, {}, recentre, fit) != 0;
+  };
   host.open_script = [this](const std::string& rel, int which) {
     std::string msg;
     const ExternalEditor ed = which == 1 ? ExternalEditor::VSCode

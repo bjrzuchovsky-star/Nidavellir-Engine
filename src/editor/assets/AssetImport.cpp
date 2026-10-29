@@ -3,6 +3,8 @@
 #include "audio/Audio.h"
 #include "gfx/TextureCache.h"
 #include "render3d/Gltf.h"
+#include "render3d/HullFit.h"
+#include "render3d/MeshSplit.h"
 #include "render3d/ModelImport.h"
 #include "render3d/import/SourceFormats.h"
 
@@ -167,13 +169,21 @@ bool import_asset(const std::string& abs_path, Kind kind, const Value& settings,
         o.set("body_groups", groups);
       }
       if (!m.collision_hulls.empty()) o.set("hulls", Value::number(static_cast<double>(m.collision_hulls.size())));
+      o.set("parts", Value::number(render3d::model_part_count(m)));
+      // Fitted hulls travel in the .meta, so a load (and the posse) does not
+      // rebuild them. A later reimport changes the mesh fingerprint.
+      const render3d::FitParams fp = render3d::fit_params_from_settings(settings);
+      if (render3d::ensure_fitted(&m, fp) && m.fitted.valid()) {
+        o.set("fitted", render3d::fitted_to_json(m.fitted));
+      }
       if (!m.hitboxes.empty()) {
         o.set("hitboxes", Value::number(static_cast<double>(m.hitboxes.size())));
         o.set("hitbox_set", Value::string(m.hitbox_set));
       }
       // Bumped when what the importer reports changes (2: bounds of what
       // is drawn - rest pose, import scale, no collision / LOD meshes;
-      // 3: Source materials re-resolved through the content search order);
+      // 3: Source materials re-resolved through the content search order,
+      // 4: fitted collider cache);
       // older .meta info is reimported on the next scan.
       o.set("importer_version", Value::number(assetdb::kModelImporterVersion));
       if (!m.clips.empty()) {
@@ -236,11 +246,12 @@ std::string info_summary(const Value& info, Kind kind) {
                     info.flag("alpha", false) ? ", alpha" : "");
       return buf;
     case Kind::Model:
-      std::snprintf(buf, sizeof(buf), "%s%s%d prim, %d tris%s%s%s", info.str("format").c_str(),
+      std::snprintf(buf, sizeof(buf), "%s%s%d prim, %d tris%s%s%s%s", info.str("format").c_str(),
                     info.str("format").empty() ? "" : ": ", int(info.num("primitives", 0)),
                     int(info.num("triangles", 0)), info.flag("skinned", false) ? ", skinned" : "",
                     info.num("clips", 0) > 0 ? ", animated" : "",
-                    info.num("hulls", 0) > 0 ? ", hulls" : "");
+                    info.num("hulls", 0) > 0 ? ", hulls" : "",
+                    info.num("parts", 0) > 1 ? ", parts" : "");
       return buf;
     case Kind::Audio:
       std::snprintf(buf, sizeof(buf), "%.2f s %s", info.num("seconds", 0),

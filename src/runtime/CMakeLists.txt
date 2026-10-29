@@ -26,6 +26,7 @@ add_library(ts_runtime
   CSharpScript.cpp
   NativeScript.cpp
   Sound.cpp
+  SpritePoly.cpp
 )
 
 target_include_directories(ts_runtime

@@ -31,6 +31,7 @@ add_executable(ts_admin
   SmokeAssets.cpp
   SmokeMeta.cpp
   SmokeModels.cpp
+  SmokeMeshParts.cpp
   SmokeGmod.cpp
   GmodCli.cpp
   SmokeBounds.cpp

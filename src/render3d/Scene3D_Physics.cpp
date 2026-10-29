@@ -68,6 +68,7 @@ Value collider(const Collider3D& c) {
   o.set("shape", Value::string(collider_shape_name(c.shape)));
   o.set("size", vec3(c.size));
   o.set("offset", vec3(c.offset));
+  if (!(c.rotation_deg == Vec3{})) o.set("rotation", vec3(c.rotation_deg));
   if (c.trigger) o.set("trigger", Value::boolean(true));
   if (c.layer >= 0) o.set("layer", Value::number(c.layer));
   if (!c.fit.empty()) o.set("fit", Value::string(c.fit));
@@ -91,6 +92,7 @@ Collider3D read_collider(const Value& v) {
   c.shape = collider_shape_from(v.str("shape"));
   read_vec3(v, "size", &c.size);
   read_vec3(v, "offset", &c.offset);
+  read_vec3(v, "rotation", &c.rotation_deg);
   c.trigger = v.flag("trigger", false);
   c.layer = std::clamp(static_cast<int>(v.num("layer", -1)), -1, 7);
   c.fit = v.str("fit");

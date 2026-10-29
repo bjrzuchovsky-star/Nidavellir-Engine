@@ -49,6 +49,11 @@ struct AssetBrowserHost {
   // opens it (which: 0 default editor, 1 VS Code, 2 Visual Studio).
   std::function<std::vector<std::string>()> scripts;
   std::function<void(const std::string& rel, int which)> open_script;
+  // Split a model into one asset per part, and (3D) place those parts as
+  // children of one object. When unset, the browser writes the assets
+  // itself (no scene undo). recentre: pivot at each part's centre.
+  std::function<bool(const std::string& rel, bool recentre, bool fit)> split_model;
+  std::function<bool(const std::string& rel, bool recentre, bool fit)> place_parts;
 };
 
 class AssetBrowser {
@@ -96,6 +101,8 @@ class AssetBrowser {
   void accept_vault_drop();
   void take_os_drop(const std::string& folder);
   void draw_import_popup();
+  void draw_split_popup();
+  bool split_here(const std::string& rel, bool recentre, bool fit);
 
   assetdb::AssetDb db_;
   AssetBrowserHost host_;
@@ -130,6 +137,12 @@ class AssetBrowser {
   bool open_rename_popup_ = false;
   std::vector<assetdb::Ref> delete_refs_;
   gmaimport::Dialog gma_dialog_;
+  bool split_on_import_ = false;
+  bool split_recenter_ = false;
+  bool split_fit_parts_ = true;
+  int split_ask_ = 0;  // 1 = write assets, 2 = place as parts
+  bool split_open_ = false;
+  std::string split_target_;
   FolderBrowser relink_picker_;
   std::string relink_for_;  // "rel|material" while the relink picker is open
 };
