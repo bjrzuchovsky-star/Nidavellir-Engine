@@ -217,10 +217,10 @@ namespace TombStone
             ulong id = api->Player(W, slot1 - 1);
             return id == 0 ? null : new Entity { Owner = this, Id = id };
         }
-        // Slot is 1-based, as before. The Player property is slot 1.
+        // Slot is 1-based. The Player property is slot 1. PlayerId stays a
+        // method so it does not clash with that property.
         public ulong PlayerId(int slot1) => api->Player(W, slot1 - 1);
-        public ulong Player(int slot1) => api->Player(W, slot1 - 1);
-        public bool Position(ulong e, out float x, out float y)
+        bool TryPosition(ulong e, out float x, out float y)
         {
             float a = 0, b = 0;
             bool ok = api->Position(W, e, &a, &b) != 0;
@@ -391,7 +391,7 @@ namespace TombStone
             if (!ReadPose(id, o))
             {
                 float x, y;
-                if (Position(id, out x, out y)) return new Vector3(x, y, 0);
+                if (TryPosition(id, out x, out y)) return new Vector3(x, y, 0);
                 return Vector3.Zero;
             }
             return new Vector3(o[0], o[1], o[2]);

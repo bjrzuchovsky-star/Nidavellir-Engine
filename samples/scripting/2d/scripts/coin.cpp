@@ -5,7 +5,7 @@
 
 struct Coin : ts::Script {
   void OnStart() override { Log("coin worth " + std::to_string(Prop("worth", 1))); }
-  void on_trigger_enter(Entity) override {
+  void on_trigger_enter(ts::Entity) override {
     Toast("Coin", "Pocketed");
     set_visible(self(), false);
   }
