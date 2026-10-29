@@ -408,6 +408,51 @@ TS_SCRIPT(Bumper, "bumper")
   return 0;
 }
 
+int check_ray() {
+  const char* src = R"(#include <tombstone/script_sdk.h>
+#include <string>
+struct Looker : ts::Script {
+  void OnStart() override {
+    ts::RayHit hit = Raycast({0, 0, 0}, {0, 0, 1}, 20);
+    Log(hit ? "ray " + std::to_string(hit.entity) : "ray miss");
+    Log(Overlap({0, 0, 3}, 0.2f) ? "overlap yes" : "overlap no");
+  }
+};
+TS_SCRIPT(Looker, "looker")
+)";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cpp_ray";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "looker.cpp", src);
+  scene3d::Scene3D scene;
+  scene3d::Entity3D looker;
+  looker.id = 1;
+  looker.name = "Looker";
+  looker.transform.position = {0, 0, -2};
+  looker.script = ScriptData{};
+  looker.script->path = "scripts/looker.cpp";
+  scene3d::Entity3D wall;
+  wall.id = 2;
+  wall.name = "Wall";
+  wall.transform.position = {0, 0, 3};
+  wall.collider = scene3d::Collider3D{};
+  wall.collider->size = {1, 1, 1};
+  scene.entities = {looker, wall};
+  world3d::World3D world;
+  std::string err;
+  if (!world.start(scene, proj.string(), &err)) return fail("ray start: " + err);
+  world.step({});
+  bool ray = false, over = false;
+  std::string d;
+  for (const LogEntry& e : world.log()) {
+    ray = ray || e.text.find("ray 2") != std::string::npos;
+    over = over || e.text.find("overlap yes") != std::string::npos;
+    d += "\n  " + e.text;
+  }
+  if (!ray || !over) return fail("3D ray / overlap:" + d);
+  return 0;
+}
+
 }  // namespace
 
 // Compiler output -> Telegraph file:line, whatever spelling the compiler
@@ -561,6 +606,7 @@ int run_native_smoke() {
   if (int r = check_components()) return r;
   if (int r = check_lifecycle()) return r;
   if (int r = check_collision()) return r;
+  if (int r = check_ray()) return r;
   if (int r = check_export()) return r;
   std::cout << "[smoke] C++ scripts OK (module built in " << static_cast<int>(build_s)
             << " s, hooks + props + state + plugin bridge, hot reload kept state, compile error at "

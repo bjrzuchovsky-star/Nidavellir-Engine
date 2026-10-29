@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -178,6 +179,53 @@ int World::script_query(const char* op, const char* args, char* out, int cap) {
     const auto ticks = static_cast<std::uint64_t>(std::ceil(seconds * static_cast<double>(kTickRate)));
     delayed_.push_back({id, script_tick() + std::max<std::uint64_t>(ticks, 1)});
     return put_text("1", out, cap);
+  }
+  if (ieq(op, "raycast") || ieq(op, "overlap")) {
+    float x = 0, y = 0, z = 0, dx = 0, dy = 0, dz = 0, extra = ieq(op, "overlap") ? 0.5f : 100.0f;
+    const int nread = args ? std::sscanf(args, "%f %f %f %f %f %f %f", &x, &y, &z, &dx, &dy, &dz, &extra) : 0;
+    if (ieq(op, "overlap")) {
+      const float r = nread >= 4 ? dx : 0.5f;
+      for (const Actor& a : actors_) {
+        if (a.dead || !a.data.collider || a.data.collider->trigger) continue;
+        const Aabb box = collider_box(a.data);
+        const float cx = std::max(box.x0, std::min(x, box.x1));
+        const float cy = std::max(box.y0, std::min(y, box.y1));
+        const float ddx = x - cx, ddy = y - cy;
+        if (ddx * ddx + ddy * ddy <= r * r) return put_text(std::to_string(a.data.id), out, cap);
+      }
+      return put_text("0", out, cap);
+    }
+    if (nread < 6) return put_text("0", out, cap);
+    float len = std::sqrt(dx * dx + dy * dy);
+    if (len < 1e-8f) return put_text("0", out, cap);
+    dx /= len;
+    dy /= len;
+    const float max_t = extra > 0 ? extra : 100.0f;
+    float best = max_t;
+    std::uint64_t hit = 0;
+    for (const Actor& a : actors_) {
+      if (a.dead || !a.data.collider || a.data.collider->trigger) continue;
+      const Aabb box = collider_box(a.data);
+      float t0 = 0, t1 = max_t;
+      auto slab = [&](float o, float d, float mn, float mx) {
+        if (std::fabs(d) < 1e-8f) return o >= mn && o <= mx;
+        float ta = (mn - o) / d, tb = (mx - o) / d;
+        if (ta > tb) std::swap(ta, tb);
+        t0 = std::max(t0, ta);
+        t1 = std::min(t1, tb);
+        return t0 <= t1;
+      };
+      if (!slab(x, dx, box.x0, box.x1) || !slab(y, dy, box.y0, box.y1)) continue;
+      if (t0 >= 0 && t0 < best) {
+        best = t0;
+        hit = a.data.id;
+      }
+    }
+    if (!hit) return put_text("0", out, cap);
+    char buf[160];
+    std::snprintf(buf, sizeof(buf), "%llu %.6g %.6g %.6g %.6g", static_cast<unsigned long long>(hit), best, x + dx * best,
+                  y + dy * best, 0.0);
+    return put_text(buf, out, cap);
   }
   if (ieq(op, "instantiate")) {
     const std::string what = f.empty() ? "" : f[0];

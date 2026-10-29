@@ -26,6 +26,7 @@
 #include "tombstone/script_abi.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -85,6 +86,13 @@ struct Vector3 {
 
 struct Axes {
   Vector3 Right, Forward, Up;
+};
+
+struct RayHit {
+  Entity entity = 0;
+  Vector3 point;
+  float distance = 0;
+  explicit operator bool() const { return entity != 0; }
 };
 
 class Script;
@@ -303,6 +311,26 @@ class Script {
   }
   void Destroy(Entity e, float delaySeconds) {
     Query("destroy_in", std::to_string(e) + "\t" + std::to_string(delaySeconds));
+  }
+  RayHit Raycast(Vector3 origin, Vector3 direction, float maxDistance = 100.0f) const {
+    RayHit hit;
+    const std::string args = std::to_string(origin.X) + " " + std::to_string(origin.Y) + " " + std::to_string(origin.Z) +
+                             " " + std::to_string(direction.X) + " " + std::to_string(direction.Y) + " " +
+                             std::to_string(direction.Z) + " " + std::to_string(maxDistance);
+    const std::string res = Query("raycast", args);
+    unsigned long long id = 0;
+    float dist = 0, px = 0, py = 0, pz = 0;
+    if (std::sscanf(res.c_str(), "%llu %f %f %f %f", &id, &dist, &px, &py, &pz) == 5 && id != 0) {
+      hit.entity = static_cast<Entity>(id);
+      hit.distance = dist;
+      hit.point = {px, py, pz};
+    }
+    return hit;
+  }
+  Entity Overlap(Vector3 point, float radius) const {
+    const std::string args = std::to_string(point.X) + " " + std::to_string(point.Y) + " " + std::to_string(point.Z) +
+                             " " + std::to_string(radius);
+    return static_cast<Entity>(std::strtoull(Query("overlap", args).c_str(), nullptr, 10));
   }
   template <class T>
   T* GetComponent();

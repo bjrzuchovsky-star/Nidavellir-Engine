@@ -469,6 +469,42 @@ public class Bumper : Script {
   return 0;
 }
 
+int check_ray() {
+  const char* src = R"(using TombStone;
+[Script("looker")]
+public class Looker : Script {
+    public override void OnStart() {
+        Physics.RayHit hit;
+        bool ok = Physics.Raycast(new Vector3(0, 16, 0), new Vector3(1, 0, 0), out hit, 200);
+        Log(ok ? "ray " + hit.Entity : "ray miss");
+        Log(Physics.Overlap(new Vector3(100, 16, 0), 2) != 0 ? "overlap yes" : "overlap no");
+    }
+}
+)";
+  std::error_code ec;
+  const fs::path proj = fs::temp_directory_path(ec) / "ts_cs_ray";
+  fs::remove_all(proj, ec);
+  write(proj / "scripts" / "looker.cs", src);
+  Entity2D looker = scripted(2, "Looker", "scripts/looker.cs");
+  Entity2D wall;
+  wall.id = 3;
+  wall.name = "Wall";
+  wall.x = 100;
+  wall.y = 0;
+  wall.w = 32;
+  wall.h = 32;
+  wall.collider = ColliderData{};
+  wall.collider->w = 32;
+  wall.collider->h = 32;
+  World w;
+  std::string err;
+  if (!w.build({looker, wall}, proj.string(), &err)) return fail("ray build: " + err);
+  std::vector<LogEntry> logs = w.take_logs();
+  for (LogEntry& e : ride(w, 2)) logs.push_back(std::move(e));
+  if (!has(logs, "ray 3") || !has(logs, "overlap yes")) return fail("ray / overlap:" + dump(logs));
+  return 0;
+}
+
 // A prebuilt assembly (what exports ship) needs only the .NET 8+ runtime:
 // TS_SMOKE_CS_PREBUILT=<folder with ProjectScripts.dll + TombStone.Scripting.*>
 // rides it in a project with no SDK on the machine.
@@ -579,6 +615,7 @@ int run_csharp_smoke() {
   if (int r = check_components()) return r;
   if (int r = check_lifecycle()) return r;
   if (int r = check_collision()) return r;
+  if (int r = check_ray()) return r;
   if (int r = check_export()) return r;
   std::cout << "[smoke] C# scripts OK (.NET SDK " << csharp_scripts::dotnet_info().sdk << ", assembly built in "
             << static_cast<int>(build_s) << " s, hooks + props + state + plugin bridge, hot reload kept state "

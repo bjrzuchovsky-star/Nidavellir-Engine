@@ -353,6 +353,20 @@ int World3D::script_query(const char* op, const char* args, char* out, int cap) 
     if (id) script_set_position(id, x, y, z);
     return put_text(std::to_string(id), out, cap);
   }
+  if (ieq(op, "overlap")) {
+    float x = 0, y = 0, z = 0, r = 0.5f;
+    if (!args || std::sscanf(args, "%f %f %f %f", &x, &y, &z, &r) < 3) return put_text("0", out, cap);
+    for (const Entity3D& e : ents_) {
+      if (dead_.count(e.id) || !e.collider || e.collider->trigger) continue;
+      const Aabb box = collider_box(e);
+      const float cx = std::max(box.min.x, std::min(x, box.max.x));
+      const float cy = std::max(box.min.y, std::min(y, box.max.y));
+      const float cz = std::max(box.min.z, std::min(z, box.max.z));
+      const float dx = x - cx, dy = y - cy, dz = z - cz;
+      if (dx * dx + dy * dy + dz * dz <= r * r) return put_text(std::to_string(e.id), out, cap);
+    }
+    return put_text("0", out, cap);
+  }
   if (!ieq(op, "raycast")) return -1;
   float x = 0, y = 0, z = 0, dx = 0, dy = 0, dz = 0, dist = 100.0f;
   if (!args || std::sscanf(args, "%f %f %f %f %f %f %f", &x, &y, &z, &dx, &dy, &dz, &dist) < 6) return -1;

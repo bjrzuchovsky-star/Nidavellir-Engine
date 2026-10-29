@@ -513,6 +513,7 @@ namespace TombStone
             return new Vector3(x, y, z);
         }
 
+        internal string EngineQuery(string op, string args) => Query(op, args);
         string Query(string op, string args)
         {
             if (api == null || api->Query == null) return "";
