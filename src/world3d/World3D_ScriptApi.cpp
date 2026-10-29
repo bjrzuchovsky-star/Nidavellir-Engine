@@ -92,7 +92,7 @@ void World3D::separate_from_statics(Entity3D& e) {
   for (int iter = 0; iter < 4; ++iter) {
     bool moved = false;
     for (const Static& s : statics_) {
-      if (s.id == e.id) continue;
+      if (!s.volume || s.id == e.id) continue;
       const render3d::Vec3 c = e.transform.position + off;
       const render3d::Vec3 push =
           capsule_box_push(c - render3d::Vec3{0, half, 0}, c + render3d::Vec3{0, half, 0}, r, s.box);
@@ -129,18 +129,105 @@ bool World3D::script_pose(std::uint64_t id, float* out18) const {
   return true;
 }
 
+namespace {
+
+// Capsule bottom, as an offset from the entity origin. The fps sample's
+// capsule (radius 0.4, height 1.8, offset y 0.9) has its feet at the origin.
+void capsule_feet(const Entity3D& e, float* radius, float* bottom) {
+  float r = 0.4f, h = 1.0f;
+  render3d::Vec3 off;
+  if (e.collider->shape == scene3d::Collider3D::Shape::Capsule) {
+    r = e.collider->size.x;
+    h = std::max(e.collider->size.y, 2.0f * r);
+  } else {
+    r = 0.5f * std::max(e.collider->size.x, e.collider->size.z);
+    h = e.collider->size.y;
+  }
+  off = e.collider->offset;
+  const float half = std::max(0.0f, h * 0.5f - r);
+  *radius = r;
+  *bottom = off.y - half - r;
+}
+
+// Height of an upward face under (x, z). Vertical faces are not a floor.
+bool tri_floor(const render3d::Vec3& a, const render3d::Vec3& b, const render3d::Vec3& c, float x, float z,
+               float* y) {
+  const render3d::Vec3 ab = b - a, ac = c - a;
+  const render3d::Vec3 n = render3d::cross(ab, ac);
+  if (n.y <= 1e-4f) return false;
+  const float yy = a.y - (n.x * (x - a.x) + n.z * (z - a.z)) / n.y;
+  const render3d::Vec3 p{x - a.x, yy - a.y, z - a.z};
+  const float d00 = render3d::dot(ab, ab), d01 = render3d::dot(ab, ac), d11 = render3d::dot(ac, ac);
+  const float d20 = render3d::dot(p, ab), d21 = render3d::dot(p, ac);
+  const float den = d00 * d11 - d01 * d01;
+  if (std::fabs(den) < 1e-12f) return false;
+  const float v = (d11 * d20 - d01 * d21) / den;
+  const float w = (d00 * d21 - d01 * d20) / den;
+  const float u = 1.0f - v - w;
+  if (u < -1e-3f || v < -1e-3f || w < -1e-3f) return false;
+  *y = yy;
+  return true;
+}
+
+}  // namespace
+
+void World3D::support_feet(Entity3D& e, const Vec3& from) {
+  if (!e.collider || e.collider->trigger) return;
+  float radius = 0.4f, bottom = 0.0f;
+  capsule_feet(e, &radius, &bottom);
+  const float feet = e.transform.position.y + bottom;
+  const float start = from.y + bottom;
+  float support = -1.0e30f;
+  bool any = false;
+  // Feet ended below a floor. Count it when this move started above that
+  // floor (a fall, including one that tunnels) or the floor is only a short
+  // step above where the move started. A roof high overhead is neither.
+  auto take = [&](float y) {
+    if (!(feet < y - 1.0e-4f)) return;
+    if (start + 0.02f >= y || y <= start + 0.5f) {
+      if (y > support) support = y;
+      any = true;
+    }
+  };
+  auto sample = [&](float x, float z) {
+    float h = 0.0f;
+    if (terrain_solid_height(x, z, &h, nullptr)) take(h);
+    for (const Static& s : statics_) {
+      if (s.tris.empty()) continue;
+      if (x < s.box.min.x - 0.05f || x > s.box.max.x + 0.05f || z < s.box.min.z - 0.05f ||
+          z > s.box.max.z + 0.05f)
+        continue;
+      for (const SurfTri& t : s.tris) {
+        float ty = 0.0f;
+        if (tri_floor(t.a, t.b, t.c, x, z, &ty)) take(ty);
+      }
+    }
+  };
+  sample(e.transform.position.x, e.transform.position.z);
+  for (int k = 0; k < 4; ++k) {
+    const float a = static_cast<float>(k) * 1.5707963f;
+    sample(e.transform.position.x + std::cos(a) * radius * 0.85f,
+           e.transform.position.z + std::sin(a) * radius * 0.85f);
+  }
+  if (any && support > feet) e.transform.position.y += support - feet;
+}
+
 void World3D::script_move_by(std::uint64_t id, float x, float y, float z) {
   Entity3D* e = live(id);
   if (!e) return;
+  const render3d::Vec3 from = e->transform.position;
   e->transform.position += render3d::Vec3{x, y, z};
   separate_from_statics(*e);
+  support_feet(*e, from);
 }
 
 void World3D::script_set_position(std::uint64_t id, float x, float y, float z) {
   Entity3D* e = live(id);
   if (!e) return;
+  const render3d::Vec3 from = e->transform.position;
   e->transform.position = {x, y, z};
   separate_from_statics(*e);
+  support_feet(*e, from);
 }
 
 void World3D::script_rotate_by(std::uint64_t id, float ex, float ey, float ez) {

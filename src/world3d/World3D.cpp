@@ -1,5 +1,6 @@
 #include "core/Localization.h"
 #include "profiler/Profiler.h"
+#include "render3d/Mesh.h"
 #include "world3d/World3D.h"
 #include "world3d/RiderController3D.h"
 
@@ -313,7 +314,41 @@ void World3D::rebuild_statics() {
         collider_off_.count(e.id)) {
       continue;
     }
-    statics_.push_back({e.id, collider_box(e)});
+    Static s;
+    s.id = e.id;
+    const auto shape = e.collider->shape;
+    const bool surface = shape == scene3d::Collider3D::Shape::Mesh ||
+                         shape == scene3d::Collider3D::Shape::ConvexHull;
+    if (surface && e.mesh) {
+      if (const render3d::MeshData* m = phys_mesh(e.mesh->source)) {
+        const render3d::Mat4 M = e.transform.matrix();
+        const std::size_t nv = m->vertices.size();
+        s.tris.reserve(m->indices.size() / 3);
+        for (std::size_t i = 0; i + 2 < m->indices.size() && s.tris.size() < 20000; i += 3) {
+          const std::uint32_t ia = m->indices[i], ib = m->indices[i + 1], ic = m->indices[i + 2];
+          if (ia >= nv || ib >= nv || ic >= nv) continue;
+          SurfTri t;
+          t.a = M.transform_point(m->vertices[ia].position);
+          t.b = M.transform_point(m->vertices[ib].position);
+          t.c = M.transform_point(m->vertices[ic].position);
+          s.tris.push_back(t);
+        }
+      }
+    }
+    if (!s.tris.empty()) {
+      s.volume = false;
+      s.box = {s.tris[0].a, s.tris[0].a};
+      for (const SurfTri& t : s.tris) {
+        for (const Vec3& p : {t.a, t.b, t.c}) {
+          s.box.min = render3d::vmin(s.box.min, p);
+          s.box.max = render3d::vmax(s.box.max, p);
+        }
+      }
+    } else {
+      s.volume = true;
+      s.box = collider_box(e);
+    }
+    statics_.push_back(std::move(s));
   }
 }
 
@@ -419,6 +454,7 @@ void World3D::move_player(const Input3D& in) {
     vel_.z = 0.0f;
   }
   vel_.y -= kGravity * dt;
+  const Vec3 feet_from = p->transform.position;
   p->transform.position += vel_ * dt;
 
   // Rider capsule from its collider (default 0.4 x 2.0).
@@ -457,6 +493,7 @@ void World3D::move_player(const Input3D& in) {
   for (int iter = 0; iter < 4; ++iter) {
     bool moved = false;
     for (const Static& s : statics_) {
+      if (!s.volume) continue;
       const Vec3 c = p->transform.position + off;
       const Vec3 push = capsule_box_push(c - Vec3{0, half, 0}, c + Vec3{0, half, 0}, r, s.box);
       const float len = render3d::length(push);
@@ -477,6 +514,8 @@ void World3D::move_player(const Input3D& in) {
     }
     if (!moved) break;
   }
+  // No Jolt character: the same floor support scripts use (terrain, meshes).
+  support_feet(*p, feet_from);
   if (p->transform.position.y < kKillY) {
     p->transform.position = spawn_;
     vel_ = {};
