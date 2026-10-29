@@ -17,6 +17,9 @@
 #if !defined(TS_SCRIPT_SDK_DIR)
 #define TS_SCRIPT_SDK_DIR ""
 #endif
+#if !defined(TS_CXX_COMPILER)
+#define TS_CXX_COMPILER ""
+#endif
 
 namespace ts {
 namespace tombstone {
@@ -193,13 +196,19 @@ BuildResult build(const std::string& project, bool force) {
   const fs::path bdir = dir / "build";
   std::string out1, out2;
   if (!fs::exists(bdir / "CMakeCache.txt", ec)) {
-    const int rc = run_command(q(cmake_exe()) + " -S " + q(dir.string()) + " -B " + q(bdir.string()) +
-#if defined(_WIN32)
-                                   " -A x64"
+    // Use the compiler that built the engine. On some Linux machines `c++`
+    // is a clang that cannot link libstdc++, while the engine was built with g++.
+    std::string compiler;
+#if !defined(_WIN32)
+    if (std::string(TS_CXX_COMPILER).size() > 0)
+      compiler = " -DCMAKE_CXX_COMPILER=" + q(TS_CXX_COMPILER) + " -DCMAKE_BUILD_TYPE=Release";
+    else
+      compiler = " -DCMAKE_BUILD_TYPE=Release";
 #else
-                                   " -DCMAKE_BUILD_TYPE=Release"
+    compiler = " -A x64";
 #endif
-                               , &out1);
+    const int rc = run_command(q(cmake_exe()) + " -S " + q(dir.string()) + " -B " + q(bdir.string()) + compiler,
+                               &out1);
     if (rc != 0) {
       r.output = out1;
       r.error = "cmake could not configure the script module (" + std::to_string(rc) + ")";
