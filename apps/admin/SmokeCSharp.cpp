@@ -505,6 +505,59 @@ public class Looker : Script {
   return 0;
 }
 
+int check_fields() {
+  const char* cs = R"(using TombStone;
+enum Mood { Calm, Cross }
+public class Tune : Script {
+    [Header("Pace")]
+    [Range(0, 12)]
+    [Tooltip("Metres per second.")]
+    public float pace = 4.5f;
+    [SerializeField] string note = "howdy";
+    public Mood mood = Mood.Calm;
+    public Vector3 offset = new Vector3(1, 2, 3);
+    public Entity target;
+}
+)";
+  const char* cpp = R"(#include <tombstone/script_sdk.h>
+enum Mood { Calm, Cross };
+struct Tune : ts::Script {
+  // [Header("Pace")]
+  // [Range(0, 12)]
+  // [Tooltip("Metres per second.")]
+  float pace = 4.5f;
+  std::string note = "howdy";
+  Mood mood = Calm;
+  ts::Vector3 offset = ts::Vector3{1, 2, 3};
+  ts::Entity target = 0;
+};
+)";
+  auto findp = [](const std::vector<ScriptProp>& ps, const char* name) -> const ScriptProp* {
+    for (const ScriptProp& p : ps)
+      if (p.name == name) return &p;
+    return nullptr;
+  };
+  const std::vector<ScriptProp> a = describe_compiled_props(cs, true);
+  const ScriptProp* pace = findp(a, "pace");
+  const ScriptProp* note = findp(a, "note");
+  const ScriptProp* mood = findp(a, "mood");
+  const ScriptProp* offset = findp(a, "offset");
+  const ScriptProp* target = findp(a, "target");
+  if (!pace || !pace->has_range || pace->header != "Pace" || pace->tooltip.find("Metres") == std::string::npos ||
+      std::fabs(pace->value.number - 4.5) > 1e-3)
+    return fail("C# field pace / header / range / tooltip");
+  if (!note || note->value.text != "howdy") return fail("C# SerializeField string");
+  if (!mood || mood->widget != "enum" || mood->value.text != "Calm" || mood->options.find("Cross") == std::string::npos)
+    return fail("C# enum field");
+  if (!offset || offset->value.text.find("1") == std::string::npos) return fail("C# vector field");
+  if (!target || target->widget != "ref") return fail("C# object reference field");
+  const std::vector<ScriptProp> b = describe_compiled_props(cpp, false);
+  const ScriptProp* cp = findp(b, "pace");
+  if (!cp || !cp->has_range || cp->header != "Pace" || std::fabs(cp->value.number - 4.5) > 1e-3)
+    return fail("C++ field pace / header / range");
+  return 0;
+}
+
 // A prebuilt assembly (what exports ship) needs only the .NET 8+ runtime:
 // TS_SMOKE_CS_PREBUILT=<folder with ProjectScripts.dll + TombStone.Scripting.*>
 // rides it in a project with no SDK on the machine.
@@ -616,6 +669,7 @@ int run_csharp_smoke() {
   if (int r = check_lifecycle()) return r;
   if (int r = check_collision()) return r;
   if (int r = check_ray()) return r;
+  if (int r = check_fields()) return r;
   if (int r = check_export()) return r;
   std::cout << "[smoke] C# scripts OK (.NET SDK " << csharp_scripts::dotnet_info().sdk << ", assembly built in "
             << static_cast<int>(build_s) << " s, hooks + props + state + plugin bridge, hot reload kept state "

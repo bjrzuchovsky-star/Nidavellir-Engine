@@ -1184,7 +1184,44 @@ StackResult draw_script_stack(std::vector<ScriptData>& stack, const ScriptStackH
         const bool overridden = o && o->value.type == d.value.type;
         const ScriptValue v = overridden ? o->value : d.value;
         ImGui::PushID(d.name.c_str());
+        if (!d.header.empty()) {
+          ImGui::Spacing();
+          ImGui::TextDisabled("%s", d.header.c_str());
+        }
         if (overridden) ImGui::PushStyleColor(ImGuiCol_Text, theme::Accent());
+        if (d.widget == "color") {
+          float c[4] = {1, 1, 1, 1};
+          std::sscanf(v.text.c_str(), "%f,%f,%f,%f", &c[0], &c[1], &c[2], &c[3]);
+          if (ImGui::ColorEdit4(d.name.c_str(), c, ImGuiColorEditFlags_Float)) {
+            char buf[80];
+            std::snprintf(buf, sizeof(buf), "%.6g,%.6g,%.6g,%.6g", c[0], c[1], c[2], c[3]);
+            s.set(d.name, ScriptValue::of_text(buf));
+            if (r.change == StackChange::None) r.change = StackChange::Live;
+          }
+        } else if (d.widget == "enum" && !d.options.empty()) {
+          std::vector<std::string> opts;
+          std::string cur;
+          for (char ch : d.options + ",") {
+            if (ch == ',') {
+              if (!cur.empty()) opts.push_back(cur);
+              cur.clear();
+            } else {
+              cur.push_back(ch);
+            }
+          }
+          int cur_i = 0;
+          for (int i = 0; i < static_cast<int>(opts.size()); ++i)
+            if (opts[static_cast<std::size_t>(i)] == v.text) cur_i = i;
+          if (ImGui::BeginCombo(d.name.c_str(), opts.empty() ? "" : opts[static_cast<std::size_t>(cur_i)].c_str())) {
+            for (int i = 0; i < static_cast<int>(opts.size()); ++i) {
+              if (ImGui::Selectable(opts[static_cast<std::size_t>(i)].c_str(), i == cur_i)) {
+                s.set(d.name, ScriptValue::of_text(opts[static_cast<std::size_t>(i)]));
+                commit("Script Prop: " + d.name);
+              }
+            }
+            ImGui::EndCombo();
+          }
+        } else
         switch (d.value.type) {
           case ScriptValue::Type::Bool: {
             bool b = v.flag;
@@ -1196,7 +1233,10 @@ StackResult draw_script_stack(std::vector<ScriptData>& stack, const ScriptStackH
           }
           case ScriptValue::Type::Number: {
             double x = v.number;
-            if (ImGui::DragScalar(d.name.c_str(), ImGuiDataType_Double, &x, 0.1f, nullptr, nullptr, "%.6g")) {
+            const double rmin = d.range_min, rmax = d.range_max;
+            if (d.has_range) x = std::clamp(x, rmin, rmax);
+            if (ImGui::DragScalar(d.name.c_str(), ImGuiDataType_Double, &x, 0.1f, d.has_range ? &rmin : nullptr,
+                                  d.has_range ? &rmax : nullptr, "%.6g")) {
               s.set(d.name, ScriptValue::of_number(x));
               if (r.change == StackChange::None) r.change = StackChange::Live;
             }
@@ -1215,7 +1255,8 @@ StackResult draw_script_stack(std::vector<ScriptData>& stack, const ScriptStackH
           }
         }
         ux::TipText(d.name + ": a prop declared in " + s.path + " (file default " + describe(d.value) +
-                    ").\nTuned here per object; amber means changed from the file.");
+                    ").\nTuned here per object; amber means changed from the file." +
+                    (d.tooltip.empty() ? "" : "\n" + d.tooltip));
         if (overridden) {
           ImGui::PopStyleColor();
           ImGui::SameLine();

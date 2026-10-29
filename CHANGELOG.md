@@ -28,6 +28,7 @@ C# and C++ gameplay scripts can actually drive a game. The acceptance script is 
 - Lifecycle on both languages, in order: `Awake`, `OnEnable`, `OnStart`, `OnFixedUpdate` (before physics), `OnUpdate`, `OnLateUpdate`, then `OnDisable` and `OnDestroy`.
 - `OnCollisionEnter`, `OnCollisionStay` and `OnCollisionExit` fire in 2D and 3D when solid colliders overlap, separate from triggers.
 - `Physics.Raycast` / `Overlap` in C# and `Raycast` / `Overlap` in C++ query solid colliders directly, with no physics plugin required.
+- The Inspector lists public fields and `[SerializeField]` members, with `[Header]`, `[Range]` and `[Tooltip]`. C++ uses the same tags in comments above the field. Vectors, colours, enums and entity references are included.
 
 Not in this patch yet (see the parity list in docs/scripting.md): collision callbacks beyond triggers, attribute Inspector, coroutines, debugger attach, and editor scripting.
 
