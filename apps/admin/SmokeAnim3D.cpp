@@ -462,6 +462,34 @@ end
   if (!warnings.empty()) return fail("warnings: " + warnings.front());
   // Lua handle method play() (2D API) also works on 3D animators.
   if (!w.script_play(hank, "jump", false) || w.animator(hank)->state(0) != "jump") return fail("script_play");
+  // C# / C++ go through script_query (the same calls as PlayAnimation / SetAnimFloat).
+  auto ask = [&](const char* op, const std::string& args) {
+    char buf[160];
+    const int n = w.script_query(op, args.c_str(), buf, static_cast<int>(sizeof(buf)));
+    if (n < 0) return std::string();
+    return std::string(buf, buf + std::min(n, static_cast<int>(sizeof(buf))));
+  };
+  const std::string hid = std::to_string(hank);
+  if (ask("anim.set", hid + "\tspeed\t2.25") != "1") return fail("script anim.set");
+  if (!near(static_cast<float>(std::atof(ask("anim.param", hid + "\tspeed").c_str())), 2.25f)) {
+    return fail("script anim.param " + ask("anim.param", hid + "\tspeed"));
+  }
+  if (ask("anim.set", hid + "\tgrounded\tfalse") != "1" || w.animator(hank)->param("grounded") > 0.5f) {
+    return fail("script anim.set bool");
+  }
+  if (ask("anim.trigger", hid + "\tjump") != "1" || w.animator(hank)->param("jump") < 0.5f) {
+    return fail("script anim.trigger");
+  }
+  if (ask("anim.play", hid + "\twave\t0.2\t1") != "1" || ask("anim.state", hid + "\t2") != "clip:wave") {
+    return fail("script anim.play/state " + ask("anim.state", hid + "\t2"));
+  }
+  if (ask("anim.crossfade", hid + "\tlocomotion\t0.3") != "1" || w.animator(hank)->state(0) != "locomotion") {
+    return fail("script anim.crossfade " + w.animator(hank)->state(0));
+  }
+  if (ask("anim.stop", hid + "\t2\t0.05") != "1") return fail("script anim.stop");
+  if (ask("anim", hid + "\tjump") != "1" || w.animator(hank)->state(0) != "jump") return fail("script anim legacy");
+  const std::string frame = ask("anim.frame", hid);
+  if (frame.rfind("jump", 0) != 0) return fail("script anim.frame " + frame);
   std::cout << "[smoke] anim3d world OK (2 animators, rider speed " << run_speed
             << " m/s ran, " << steps->number << " footsteps via on_anim_event, jump + landing, "
             << "Lua anim.play/set_param/param/state, graph bridge set_param)\n";

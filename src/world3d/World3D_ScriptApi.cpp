@@ -440,10 +440,60 @@ int World3D::script_query(const char* op, const char* args, char* out, int cap) 
     if (id) script_set_position(id, x, y, z);
     return put_text(std::to_string(id), out, cap);
   }
-  if (ieq(op, "anim")) {
+  // Skeletal animator (C# / C++). "anim" stays the old play-a-clip call.
+  // Layers are 1-based, matching the Lua anim table. 2D worlds answer the
+  // same names with the sprite clip (see World_Query).
+  if (ieq(op, "anim") || ieq(op, "anim.play") || ieq(op, "anim.crossfade")) {
     const std::uint64_t id = id_of(0);
-    const std::string clip = f.size() > 1 ? f[1] : "";
-    return put_text(anim_play(id, clip, 0.1f, false) ? "1" : "0", out, cap);
+    const std::string name = f.size() > 1 ? f[1] : "";
+    float fade = 0.1f;
+    bool hold = false;
+    if (ieq(op, "anim.play")) {
+      fade = f.size() > 2 ? static_cast<float>(std::atof(f[2].c_str())) : -1.0f;
+      hold = f.size() > 3 && f[3] != "0" && !f[3].empty();
+    } else if (ieq(op, "anim.crossfade")) {
+      fade = f.size() > 2 ? static_cast<float>(std::atof(f[2].c_str())) : 0.25f;
+    }
+    return put_text(anim_play(id, name, fade, hold) ? "1" : "0", out, cap);
+  }
+  if (ieq(op, "anim.set")) {
+    render3d::AnimatorRuntime* rt = animator(id_of(0));
+    if (!rt || f.size() < 3 || f[1].empty()) return put_text("0", out, cap);
+    if (f[2] == "true" || f[2] == "false") rt->set_bool(f[1], f[2] == "true");
+    else rt->set_param(f[1], static_cast<float>(std::atof(f[2].c_str())));
+    return put_text("1", out, cap);
+  }
+  if (ieq(op, "anim.trigger")) {
+    render3d::AnimatorRuntime* rt = animator(id_of(0));
+    if (!rt || f.size() < 2 || f[1].empty()) return put_text("0", out, cap);
+    rt->trigger(f[1]);
+    return put_text("1", out, cap);
+  }
+  if (ieq(op, "anim.param")) {
+    render3d::AnimatorRuntime* rt = animator(id_of(0));
+    if (!rt || f.size() < 2) return put_text("0", out, cap);
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%.9g", rt->param(f[1]));
+    return put_text(buf, out, cap);
+  }
+  if (ieq(op, "anim.state")) {
+    render3d::AnimatorRuntime* rt = animator(id_of(0));
+    const int layer = (f.size() > 1 ? std::atoi(f[1].c_str()) : 1) - 1;
+    return put_text(rt ? rt->state(layer) : "", out, cap);
+  }
+  if (ieq(op, "anim.stop")) {
+    render3d::AnimatorRuntime* rt = animator(id_of(0));
+    const int layer = (f.size() > 1 ? std::atoi(f[1].c_str()) : 1) - 1;
+    const float fade = f.size() > 2 ? static_cast<float>(std::atof(f[2].c_str())) : 0.2f;
+    if (rt) rt->stop_layer(layer, fade);
+    return put_text(rt ? "1" : "0", out, cap);
+  }
+  if (ieq(op, "anim.frame")) {
+    render3d::AnimatorRuntime* rt = animator(id_of(0));
+    if (!rt) return put_text("", out, cap);
+    char buf[160];
+    std::snprintf(buf, sizeof(buf), "%s\t%.6g", rt->state(0).c_str(), static_cast<double>(rt->state_phase(0)));
+    return put_text(buf, out, cap);
   }
   if (ieq(op, "fov")) {
     const float deg = f.size() > 1 ? static_cast<float>(std::atof(f[1].c_str())) : 60.0f;

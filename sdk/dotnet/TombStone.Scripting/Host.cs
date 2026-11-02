@@ -267,6 +267,7 @@ namespace TombStone
                     {
                         string[] f = Utf8.Read(text).Split('\t');
                         s.OnHand(f[0], f.Length > 1 ? f[1] : "", number);
+                        if (f[0] == "on_anim_event") s.OnAnimEvent(f.Length > 1 ? f[1] : "", (float)number);
                         break;
                     }
                     case 8:

@@ -173,6 +173,8 @@ namespace TombStone
         public virtual void OnReload() { }
         public virtual void OnDestroy() { }
         public virtual void OnHand(string hook, string hand, double n) { }
+        // Clip events. The host calls this as well as OnHand("on_anim_event", ...).
+        public virtual void OnAnimEvent(string name, float time) { }
         public virtual void OnUi(string widget, bool change, double value, string text) { }
 
         // Plugin events (ts.quests / ts.dialogue / ts.saves, ...). The default
@@ -248,6 +250,32 @@ namespace TombStone
         public void SetCollider(ulong e, bool on) => api->SetCollider(W, e, on ? 1 : 0);
         public bool Play(ulong e, string clip, bool hold = false) { fixed (byte* p = Utf8.Z(clip)) return api->Play(W, e, p, hold ? 1 : 0) != 0; }
         public bool PlayAnimation(string clip) => EngineQuery("anim", Self.ToString(CultureInfo.InvariantCulture) + "\t" + (clip ?? "")) == "1";
+        // 3D: an animator state or clip. 2D: a sprite clip (hold keeps walk/idle from taking over).
+        // fade is the crossfade in seconds (3D). Layers are 1-based, as in Lua.
+        public bool PlayAnimation(string clip, float fade, bool hold = false) =>
+            EngineQuery("anim.play", Self.ToString(CultureInfo.InvariantCulture) + "\t" + (clip ?? "") + "\t" +
+                fade.ToString("R", CultureInfo.InvariantCulture) + "\t" + (hold ? "1" : "0")) == "1";
+        public bool CrossfadeAnimation(string stateOrClip, float fade = 0.25f) =>
+            EngineQuery("anim.crossfade", Self.ToString(CultureInfo.InvariantCulture) + "\t" + (stateOrClip ?? "") + "\t" +
+                fade.ToString("R", CultureInfo.InvariantCulture)) == "1";
+        public bool SetAnimFloat(string name, float value) =>
+            EngineQuery("anim.set", Self.ToString(CultureInfo.InvariantCulture) + "\t" + (name ?? "") + "\t" +
+                value.ToString("R", CultureInfo.InvariantCulture)) == "1";
+        public bool SetAnimBool(string name, bool value) =>
+            EngineQuery("anim.set", Self.ToString(CultureInfo.InvariantCulture) + "\t" + (name ?? "") + "\t" +
+                (value ? "true" : "false")) == "1";
+        public bool SetAnimTrigger(string name) =>
+            EngineQuery("anim.trigger", Self.ToString(CultureInfo.InvariantCulture) + "\t" + (name ?? "")) == "1";
+        public float AnimFloat(string name)
+        {
+            string s = EngineQuery("anim.param", Self.ToString(CultureInfo.InvariantCulture) + "\t" + (name ?? ""));
+            return float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out float v) ? v : 0f;
+        }
+        public string AnimState(int layer1 = 1) =>
+            EngineQuery("anim.state", Self.ToString(CultureInfo.InvariantCulture) + "\t" + layer1.ToString(CultureInfo.InvariantCulture));
+        public bool StopAnimation(int layer1 = 1, float fade = 0.2f) =>
+            EngineQuery("anim.stop", Self.ToString(CultureInfo.InvariantCulture) + "\t" +
+                layer1.ToString(CultureInfo.InvariantCulture) + "\t" + fade.ToString("R", CultureInfo.InvariantCulture)) == "1";
         public bool SetFov(ulong camera, float degrees) =>
             EngineQuery("fov", camera.ToString(CultureInfo.InvariantCulture) + "\t" + degrees.ToString("R", CultureInfo.InvariantCulture)) == "1";
         public ulong Spawn(string tmpl, float x, float y) { fixed (byte* p = Utf8.Z(tmpl)) return api->Spawn(W, p, x, y); }

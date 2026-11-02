@@ -252,10 +252,27 @@ int World::script_query(const char* op, const char* args, char* out, int cap) {
     const std::uint64_t id = script_spawn(what, x, y);
     return put_text(std::to_string(id), out, cap);
   }
-  if (ieq(op, "anim")) {
+  // Sprite clips. The skeletal names (set / trigger / param / stop) have
+  // no 2D state machine; play / crossfade start a clip, state / frame read it.
+  if (ieq(op, "anim") || ieq(op, "anim.play") || ieq(op, "anim.crossfade")) {
     const std::uint64_t id = id_of(0);
     const std::string clip = f.size() > 1 ? f[1] : "";
-    return put_text(script_play(id, clip, false) ? "1" : "0", out, cap);
+    const bool hold = ieq(op, "anim.play") && f.size() > 3 && f[3] != "0" && !f[3].empty();
+    return put_text(script_play(id, clip, hold) ? "1" : "0", out, cap);
+  }
+  if (ieq(op, "anim.state")) {
+    const Actor* a = live(id_of(0));
+    return put_text(a ? a->anim.clip : "", out, cap);
+  }
+  if (ieq(op, "anim.frame")) {
+    const Actor* a = live(id_of(0));
+    if (!a) return put_text("", out, cap);
+    char buf[160];
+    std::snprintf(buf, sizeof(buf), "%s\t%d\t%.6g", a->anim.clip.c_str(), a->anim.frame, a->anim.time);
+    return put_text(buf, out, cap);
+  }
+  if (ieq(op, "anim.set") || ieq(op, "anim.trigger") || ieq(op, "anim.param") || ieq(op, "anim.stop")) {
+    return put_text("0", out, cap);
   }
   if (ieq(op, "fov")) {
     Actor* a = live(id_of(0));
