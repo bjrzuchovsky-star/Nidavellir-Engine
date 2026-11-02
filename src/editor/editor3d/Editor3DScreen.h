@@ -45,6 +45,7 @@
 #include "editor/screens/IScreen.h"
 #include "editor/ui/PlayUi.h"
 #include "render3d/Renderer3D.h"
+#include "render3d/Skeleton.h"
 #include "render3d/Attach3D.h"
 #include "render3d/Scene3D.h"
 #include "render3d/SceneView.h"
@@ -411,6 +412,24 @@ class Editor3DScreen final : public IScreen {
   };
   AnimPreview& anim_preview() { return anim_preview_; }
   void anim_preview_tick(float dt);
+  // In-engine clip authoring (Editor3DScreen_Timeline.cpp). Edits live in
+  // memory until timeline_save writes <model>.anim3d.json. The preview
+  // poses an authored clip of the same name over the imported one.
+  bool timeline_open() const { return timeline_.open; }
+  void set_timeline_open(bool on) { timeline_.open = on; }
+  bool timeline_bind(std::uint64_t entity);
+  bool timeline_new_clip(const std::string& name, const std::string& copy_from = {});
+  bool timeline_key(const std::string& clip, int joint, float time, const render3d::JointPose& pose);
+  bool timeline_key_path(const std::string& clip, int joint, float time, render3d::ChannelPath path,
+                         const float* value);
+  bool timeline_erase_key(const std::string& clip, int joint, render3d::ChannelPath path, int index);
+  bool timeline_move_key(const std::string& clip, int joint, render3d::ChannelPath path, int index,
+                         float time);
+  bool timeline_set_interp(const std::string& clip, int joint, render3d::ChannelPath path,
+                           render3d::Interp interp);
+  bool timeline_save(std::string* error = nullptr);
+  const render3d::Clip* authored_clip(const std::string& name) const;
+  const std::vector<render3d::Clip>& timeline_clips() const { return timeline_.clips; }
   // The selected entity posed at the preview time (sets skin_palette);
   // false when nothing to preview.
   bool anim_preview_pose(scene3d::Entity3D* e);
@@ -512,6 +531,7 @@ class Editor3DScreen final : public IScreen {
   void draw_assets();
   void draw_environment();
   void draw_anim_preview();
+  void draw_anim_timeline();
   void draw_telegraph();
   void handle_shortcuts();
   world3d::Input3D poll_play_input() const;
@@ -621,6 +641,18 @@ class Editor3DScreen final : public IScreen {
   std::vector<std::string> sounds_;  // project sounds (Audio Source picker)
   bool show_mixer_ = false;
   AnimPreview anim_preview_;
+  struct AnimTimeline {
+    bool open = false;
+    bool loaded = false;
+    bool dirty = false;
+    std::string model_rel;
+    std::vector<render3d::Clip> clips;
+    int path = 0;       // ChannelPath
+    int drag_key = -1;  // index being dragged on the dopesheet (-1 = none)
+  };
+  AnimTimeline timeline_;
+  render3d::Clip* timeline_find(const std::string& name);
+  std::string entity_model_rel(const scene3d::Entity3D& e) const;
   // Sound while riding (Play or VR preview); null otherwise.
   std::unique_ptr<audio::SoundStage> sound_stage_;
   std::unique_ptr<audio::SoundStage3D> sound3d_;

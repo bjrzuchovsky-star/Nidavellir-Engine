@@ -886,7 +886,7 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
     opt.highlight = scene_.selection;
     const bool any_hidden = std::any_of(scene_.entities.begin(), scene_.entities.end(),
                                         [](const Entity3D& e) { return e.editor_hidden; });
-    const bool posing = anim_preview_.open && find(primary()) != nullptr;
+    const bool posing = (anim_preview_.open || timeline_.open) && find(primary()) != nullptr;
     if (any_hidden || posing) {
       // Eye toggled off in the hierarchy: not drawn in the editor only.
       // The animation preview poses the selection in this copy only.

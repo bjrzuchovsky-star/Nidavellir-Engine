@@ -204,6 +204,11 @@ void Editor3DScreen::draw_ui() {
     if (ImGui::Begin("Animation Preview", &anim_preview_.open)) draw_anim_preview();
     ImGui::End();
   }
+  if (timeline_.open) {
+    ImGui::SetNextWindowSize(ImVec2(420, 460), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Animation Timeline", &timeline_.open)) draw_anim_timeline();
+    ImGui::End();
+  }
   ui_preview_.draw(&show_ui_preview_, project_.path);
   draw_vr_mirror();
   FreightOffice::get().draw();
@@ -320,6 +325,7 @@ void Editor3DScreen::draw_menus() {
     ux::MenuItem("Saloon Band (Mixer)", nullptr, &show_mixer_);
     ux::MenuItem("UI Preview", nullptr, &show_ui_preview_);
     ux::MenuItem("Animation Preview", nullptr, &anim_preview_.open);
+    ux::MenuItem("Animation Timeline", nullptr, &timeline_.open);
     ux::MenuItem("Prefabs", nullptr, &show_prefabs_);
     ux::MenuItem("Asset Browser", nullptr, &show_asset_browser_);
     ux::MenuItem("Vault", nullptr, &show_vault_);

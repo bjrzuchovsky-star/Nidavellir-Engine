@@ -785,6 +785,37 @@ int editor_preview(const fs::path& dir) {
   if (hand < 0 || near3(posed[static_cast<std::size_t>(hand)], rest[static_cast<std::size_t>(hand)], 1e-3f)) {
     return fail("editor: preview bones did not follow the wave");
   }
+  // Key a new clip, save it beside the rig, and pose the forearm from it.
+  const int shoulder = m->skeleton.find("upper_arm.R");
+  const int forearm = m->skeleton.find("lower_arm.R");
+  if (shoulder < 0 || forearm < 0) return fail("editor: arm bones");
+  if (!e.timeline_bind(hank->id) || !e.timeline_new_clip("nod") || e.timeline_clips().size() != 1) {
+    return fail("editor: timeline clip");
+  }
+  const r3::Pose rest_pose = r3::rest_pose(m->skeleton);
+  r3::JointPose jp = rest_pose[static_cast<std::size_t>(shoulder)];
+  if (!e.timeline_key("nod", shoulder, 0.0f, jp)) return fail("editor: key rest");
+  jp.r = r3::Quat::axis_angle({1, 0, 0}, r3::radians(40.0f));
+  if (!e.timeline_key("nod", shoulder, 0.4f, jp)) return fail("editor: key bend");
+  if (!e.timeline_set_interp("nod", shoulder, r3::ChannelPath::Rotation, r3::Interp::Step)) {
+    return fail("editor: key interp");
+  }
+  if (!e.timeline_move_key("nod", shoulder, r3::ChannelPath::Rotation, 1, 0.5f)) return fail("editor: move key");
+  std::string terr;
+  if (!e.timeline_save(&terr)) return fail("editor: save clips " + terr);
+  const r3::Model* again = e.entity_model(*e.scene().find(hank->id));
+  if (!again || again->find_clip("nod") < 0) return fail("editor: sidecar did not merge on reload");
+  e.anim_preview().clip = "nod";
+  e.anim_preview().time = 0.5f;
+  e.anim_preview().playing = false;
+  s3::Entity3D keyed = *e.scene().find(hank->id);
+  if (!e.anim_preview_pose(&keyed) || !keyed.skin_palette) return fail("editor: keyed pose");
+  const std::vector<r3::Vec3> bent = r3::joint_positions(again->skeleton, *keyed.skin_palette);
+  const std::vector<r3::Vec3> straight = r3::joint_positions(again->skeleton, r3::rest_pose(again->skeleton));
+  if (near3(bent[static_cast<std::size_t>(forearm)], straight[static_cast<std::size_t>(forearm)], 1e-3f)) {
+    return fail("editor: keyed rotation did not move the forearm");
+  }
+  if (!e.timeline_erase_key("nod", shoulder, r3::ChannelPath::Rotation, 1)) return fail("editor: erase key");
   e.on_exit();
   std::cout << "[smoke] anim3d editor preview OK (wave at 0.25 s, " << st.skinned << " skinned draws)\n";
   return 0;

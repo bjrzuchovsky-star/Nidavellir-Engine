@@ -370,7 +370,9 @@ void Editor3DScreen::anim_preview_tick(float dt) {
 
 bool Editor3DScreen::anim_preview_pose(scene3d::Entity3D* e) {
   const render3d::Model* m = entity_model(*e);
-  const render3d::Clip* c = preview_clip(m, &anim_preview_.clip);
+  // An unsaved (or saved-but-still-open) authored clip wins over the file.
+  const render3d::Clip* c = authored_clip(anim_preview_.clip);
+  if (!c) c = preview_clip(m, &anim_preview_.clip);
   if (!c) return false;
   render3d::Pose pose = render3d::rest_pose(m->skeleton);
   render3d::sample_clip(*c, anim_preview_.time, true, &pose);
@@ -405,6 +407,15 @@ void Editor3DScreen::draw_anim_preview() {
     for (const render3d::Clip& c : m->clips) {
       char label[160];
       std::snprintf(label, sizeof(label), "%s  (%.2f s, %zu ch)", c.name.c_str(), c.duration, c.channels.size());
+      if (ImGui::Selectable(label, c.name == p.clip)) {
+        p.clip = c.name;
+        p.time = 0.0f;
+      }
+    }
+    for (const render3d::Clip& c : timeline_.clips) {
+      if (m->find_clip(c.name) >= 0) continue;
+      char label[160];
+      std::snprintf(label, sizeof(label), "%s  (authored, %.2f s)", c.name.c_str(), c.duration);
       if (ImGui::Selectable(label, c.name == p.clip)) {
         p.clip = c.name;
         p.time = 0.0f;

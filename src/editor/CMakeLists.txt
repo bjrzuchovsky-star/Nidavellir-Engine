@@ -77,6 +77,7 @@ add_library(ts_editor
   editor3d/Editor3DScreen_Scripts.cpp
   editor3d/Editor3DScreen_VR.cpp
   editor3d/Editor3DScreen_Anim.cpp
+  editor3d/Editor3DScreen_Timeline.cpp
   editor3d/Editor3DScreen_Tools.cpp
   editor3d/Editor3DScreen_Camera.cpp
   editor3d/Editor3DScreen_Attach.cpp
