@@ -148,6 +148,11 @@ class Editor3DScreen final : public IScreen {
   bool fit_collider_to_mesh(std::uint64_t id, const std::string& fit);
   bool show_hitboxes() const { return show_hitboxes_; }
   void set_show_hitboxes(bool on) { show_hitboxes_ = on; }
+  // View > Bones. The overlay follows the animation preview or, in Play, the animator.
+  bool show_bones() const { return show_bones_; }
+  void set_show_bones(bool on) { show_bones_ = on; }
+  int bone_joint() const { return bone_joint_; }
+  void set_bone_joint(int joint) { bone_joint_ = joint; }
   std::uint64_t drop_asset(const std::string& rel, const render3d::Vec3& pos,
                            std::uint64_t target = 0);
   // One asset per mesh node, with its own .meta. Undo removes the new files.
@@ -640,6 +645,8 @@ class Editor3DScreen final : public IScreen {
   bool viewport_focused_ = false;
   bool show_colliders_ = true;
   bool show_hitboxes_ = false;  // View > Hitboxes (Source $hbox)
+  bool show_bones_ = true;      // View > Bones (skeleton overlay)
+  int bone_joint_ = -1;         // highlighted joint on the selection (-1 = none)
   bool show_physics_ = false;  // Physics Settings window
   void draw_physics_settings();
   float viewport_w_ = 1280.0f, viewport_h_ = 720.0f;

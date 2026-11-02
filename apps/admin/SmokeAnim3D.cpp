@@ -745,6 +745,18 @@ int editor_preview(const fs::path& dir) {
   if (!(e.scene().entities == before.entities) || e.scene().find(hank->id)->skin_palette) {
     return fail("editor: preview changed the authored scene");
   }
+  // Bones follow the preview palette (the overlay draws these positions).
+  const int hand = m->skeleton.find("hand.R");
+  e.set_show_bones(true);
+  e.set_bone_joint(hand);
+  if (!e.show_bones() || e.bone_joint() != hand) return fail("editor: bone overlay toggle");
+  const r3::FrameStats boned = e.render_frame(160, 120);
+  if (boned.skinned < 10) return fail("editor: bones overlay skinned draws");
+  const std::vector<r3::Vec3> posed = r3::joint_positions(m->skeleton, *copy.skin_palette);
+  const std::vector<r3::Vec3> rest = r3::joint_positions(m->skeleton, r3::rest_pose(m->skeleton));
+  if (hand < 0 || near3(posed[static_cast<std::size_t>(hand)], rest[static_cast<std::size_t>(hand)], 1e-3f)) {
+    return fail("editor: preview bones did not follow the wave");
+  }
   e.on_exit();
   std::cout << "[smoke] anim3d editor preview OK (wave at 0.25 s, " << st.skinned << " skinned draws)\n";
   return 0;

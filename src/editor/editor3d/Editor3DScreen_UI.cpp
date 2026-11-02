@@ -309,6 +309,7 @@ void Editor3DScreen::draw_menus() {
     ux::MenuItem("Grid", "'", &scene_.show_grid);
     ux::MenuItem("Colliders + joints", nullptr, &show_colliders_);
     ux::MenuItem("Hitboxes (model $hbox)", nullptr, &show_hitboxes_);
+    ux::MenuItem("Bones", nullptr, &show_bones_);
     ux::MenuItem("Physics Settings", nullptr, &show_physics_);
     ux::MenuItem("Terrain + Foliage", nullptr, &show_terrain_);
     if (ux::MenuItem("Physics debug draw (Play)", nullptr, scene_.physics.debug_draw, !playing())) {

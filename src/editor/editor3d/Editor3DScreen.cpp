@@ -853,6 +853,9 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
     cam = free_camera_in_play_ ? editor_camera() : world_.camera();
     opt.colliders = world_.authored().physics.debug_draw;  // Physics Settings
     opt.hitboxes = show_hitboxes_;
+    opt.bones = show_bones_;
+    opt.bone_entity = primary();
+    opt.bone_joint = bone_joint_;
     if (world_.vr()) {
       // VR preview: the head's view plus the hands, lasers and menu.
       std::vector<scene3d::Entity3D> ents = world_.entities();
@@ -876,6 +879,9 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
     opt.grid = scene_.show_grid;
     opt.colliders = show_colliders_;
     opt.hitboxes = show_hitboxes_;
+    opt.bones = show_bones_;
+    opt.bone_entity = primary();
+    opt.bone_joint = bone_joint_;
     opt.light_gizmos = true;
     opt.highlight = scene_.selection;
     const bool any_hidden = std::any_of(scene_.entities.begin(), scene_.entities.end(),

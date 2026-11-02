@@ -1,4 +1,5 @@
 #include "render3d/SceneView.h"
+#include "render3d/ClipFile.h"
 #include "render3d/HullFit.h"
 #include "render3d/ModelImport.h"
 #include "profiler/Profiler.h"
@@ -250,6 +251,32 @@ void SceneView::draw_hitboxes(const scene3d::Entity3D& e) {
   }
 }
 
+void SceneView::draw_bones(const scene3d::Entity3D& e, int highlight) {
+  if (!r_ || !e.mesh || e.mesh->is_primitive()) return;
+  const Model* m = model(e.mesh->source);
+  if (!m || !m->skinned()) return;
+  const bool posed = e.skin_palette && e.skin_palette->size() == m->skeleton.joints.size();
+  const std::vector<Vec3> at =
+      posed ? joint_positions(m->skeleton, *e.skin_palette) : joint_positions(m->skeleton, rest_pose(m->skeleton));
+  const Mat4 world = e.transform.matrix();
+  const float bone[4] = {0.96f, 0.84f, 0.42f, 1.0f};
+  const float hot[4] = {1.0f, 0.42f, 0.16f, 1.0f};
+  const float mark[4] = {0.98f, 0.96f, 0.90f, 1.0f};
+  for (std::size_t i = 0; i < m->skeleton.joints.size() && i < at.size(); ++i) {
+    const Vec3 w = world.transform_point(at[i]);
+    const bool sel = highlight == static_cast<int>(i);
+    const int parent = m->skeleton.joints[i].parent;
+    if (parent >= 0 && static_cast<std::size_t>(parent) < at.size()) {
+      r_->draw_line(world.transform_point(at[static_cast<std::size_t>(parent)]), w, sel ? hot : bone, false);
+    }
+    const float s = sel ? 0.055f : 0.028f;
+    const float* col = sel ? hot : mark;
+    r_->draw_line(w - Vec3{s, 0, 0}, w + Vec3{s, 0, 0}, col, false);
+    r_->draw_line(w - Vec3{0, s, 0}, w + Vec3{0, s, 0}, col, false);
+    r_->draw_line(w - Vec3{0, 0, s}, w + Vec3{0, 0, s}, col, false);
+  }
+}
+
 void SceneView::draw_circle(const Mat4& world, const Vec3& c, float r, int plane, const float* rgba) {
   constexpr int kSeg = 20;
   Vec3 prev;
@@ -477,6 +504,9 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
     }
     if (opt.colliders && e.collider) draw_collider(world, e);
     if (opt.hitboxes && e.mesh && !e.mesh->is_primitive()) draw_hitboxes(e);
+    if (opt.bones && e.mesh && !e.mesh->is_primitive()) {
+      draw_bones(e, opt.bone_entity == e.id ? opt.bone_joint : -1);
+    }
     if (opt.colliders && e.joint) draw_joint(world, e, entities);
     if (opt.light_gizmos && e.light) {
       const float col[4] = {1.0f, 0.85f, 0.35f, 0.9f};

@@ -30,6 +30,9 @@ struct SceneViewOptions {
   bool colliders = false;       // wire boxes for colliders
   bool light_gizmos = false;    // small crosses at point lights
   bool hitboxes = false;        // per-bone hit boxes (Source $hbox) of models
+  bool bones = false;            // skeleton overlay (rest pose, or the skin palette)
+  std::uint64_t bone_entity = 0; // which entity's bone_joint is highlighted
+  int bone_joint = -1;
   std::vector<std::uint64_t> highlight;  // selection outlines
 };
 
@@ -81,6 +84,9 @@ class SceneView {
   void draw_box(const Mat4& world, const Aabb& local, const float* rgba, bool on_top);
   // An entity model's hit boxes (posed by its skin palette when it has one).
   void draw_hitboxes(const scene3d::Entity3D& e);
+  // Skeleton lines. `highlight` is a joint index on this entity (-1 = none).
+  // A skin palette poses the bones; otherwise the rest pose is drawn.
+  void draw_bones(const scene3d::Entity3D& e, int highlight);
   void draw_circle(const Mat4& world, const Vec3& c, float r, int plane, const float* rgba);
   // Physics gizmos: collider shapes (compound parts included) coloured by
   // body motion, and joints (anchor -> target, hinge / slider axis).
