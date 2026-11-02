@@ -11,6 +11,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -428,6 +429,19 @@ bool Editor2DScreen::stable_set_timing(int index, float fps, AnimMode mode) {
   AnimClip& c = set.clips[static_cast<std::size_t>(index)];
   c.fps = fps;
   c.mode = mode;
+  return stable_apply(std::move(set), "");
+}
+
+bool Editor2DScreen::stable_set_frame_ms(int index, int frame, int ms) {
+  if (index < 0 || index >= static_cast<int>(stable_set_.clips.size())) return false;
+  AnimSet set = stable_set_;
+  AnimClip& c = set.clips[static_cast<std::size_t>(index)];
+  const int n = c.frame_count();
+  if (frame < 0 || frame >= n) return false;
+  const int fallback = std::clamp(static_cast<int>(std::lround(1000.0 / std::max(c.fps, AnimClip::kMinFps))), 1,
+                                  AnimClip::kMaxFrameMs);
+  if (static_cast<int>(c.ms.size()) < n) c.ms.resize(static_cast<std::size_t>(n), fallback);
+  c.ms[static_cast<std::size_t>(frame)] = std::clamp(ms, 1, AnimClip::kMaxFrameMs);
   return stable_apply(std::move(set), "");
 }
 
