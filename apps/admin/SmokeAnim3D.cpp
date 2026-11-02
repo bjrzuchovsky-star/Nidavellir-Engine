@@ -2,6 +2,7 @@
 
 #include "editor/editor3d/Editor3DScreen.h"
 #include "render3d/Animator.h"
+#include "render3d/ClipFile.h"
 #include "render3d/GlRenderer3D.h"
 #include "render3d/Gltf.h"
 #include "render3d/HiddenGl.h"
@@ -15,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -574,6 +576,141 @@ int gpu_render(const fs::path& dir) {
   return 0;
 }
 
+// Authored clips (.anim3d.json) merge onto a rigged import, and bone lines
+// follow the same palette the GPU skins with.
+int sidecar_and_bones(const fs::path& dir) {
+  const r3::Skeleton sk = two_bones();
+  const std::vector<r3::BoneSegment> rest = r3::bone_segments(sk, r3::rest_pose(sk));
+  if (rest.size() != 2 || rest[1].parent != 0 || !near3(rest[1].from, {0, 0, 0}) ||
+      !near3(rest[1].to, {0, 1, 0})) {
+    return fail("rest bone line");
+  }
+  r3::Pose lifted = r3::rest_pose(sk);
+  lifted[1].t = {0, 2, 0};
+  const std::vector<r3::Vec3> up = r3::joint_positions(sk, lifted);
+  if (!near3(up[1], {0, 2, 0})) return fail("lifted joint " + str(up[1]));
+  std::vector<r3::Mat4> pal;
+  r3::skin_palette(sk, lifted, &pal);
+  const std::vector<r3::Vec3> from_pal = r3::joint_positions(sk, pal);
+  if (!near3(from_pal[0], up[0]) || !near3(from_pal[1], up[1])) return fail("palette joint origin");
+
+  r3::Clip bend;
+  bend.name = "bend";
+  r3::Channel rot;
+  rot.joint = 1;
+  rot.path = r3::ChannelPath::Rotation;
+  rot.interp = r3::Interp::Linear;
+  const r3::Quat q90 = r3::Quat::axis_angle({0, 0, 1}, r3::radians(90.0f));
+  const float ident[4] = {0, 0, 0, 1};
+  const float bent[4] = {q90.x, q90.y, q90.z, q90.w};
+  if (r3::upsert_key(&rot, 0.0f, ident) != 0 || r3::upsert_key(&rot, 1.0f, bent) != 1) return fail("upsert");
+  r3::set_channel_interp(&rot, r3::Interp::Step);
+  float held[4];
+  r3::sample_channel(rot, 0.9f, held);
+  if (!near(held[3], 1.0f) || !near(held[2], 0.0f)) return fail("step holds the first key");
+  r3::set_channel_interp(&rot, r3::Interp::Linear);
+  if (r3::move_key(&rot, 1, 0.5f) != 1) return fail("move key");
+  if (!r3::erase_key(&rot, 1) || rot.times.size() != 1) return fail("erase key");
+  r3::upsert_key(&rot, 1.0f, bent);
+  bend.channels.push_back(rot);
+  r3::clip_duration(&bend);
+  if (!near(bend.duration, 1.0f)) return fail("clip duration");
+
+  const std::string json = r3::clips_to_json(sk, {bend});
+  std::vector<r3::Clip> back;
+  std::string err;
+  if (!r3::clips_from_json(json, sk, &back, &err) || back.size() != 1 || back[0].channels.size() != 1) {
+    return fail("clip json round trip: " + err);
+  }
+  r3::Pose pose = r3::rest_pose(sk);
+  r3::sample_clip(back[0], 1.0f, false, &pose);
+  if (!near(pose[1].r.z, q90.z, 1e-4f) || !near(pose[1].r.w, q90.w, 1e-4f)) return fail("sampled bend");
+
+  // A rigged glTF plus a sidecar: "bend" overrides the file, "extra" is new,
+  // and an unknown joint is reported without dropping the good channel.
+  r3::GltfPart part;
+  part.mesh = r3::make_cube(1.0f);
+  part.mesh.name = "bar";
+  part.material.name = "red";
+  part.material.base_color[0] = 0.9f;
+  part.material.base_color[1] = 0.08f;
+  part.material.base_color[2] = 0.06f;
+  for (r3::Vertex3D& v : part.mesh.vertices) v.position = r3::mul(v.position, {0.3f, 2.0f, 0.3f}) + r3::Vec3{0, 1, 0};
+  part.mesh.skin.resize(part.mesh.vertices.size());
+  for (std::size_t i = 0; i < part.mesh.vertices.size(); ++i) {
+    const bool top = part.mesh.vertices[i].position.y > 1.5f;
+    part.mesh.skin[i].joints[0] = top ? 1.0f : 0.0f;
+    part.mesh.skin[i].weights[0] = 1.0f;
+  }
+  r3::Clip keep;
+  keep.name = "keep";
+  r3::Channel hold;
+  hold.joint = 1;
+  hold.path = r3::ChannelPath::Translation;
+  hold.times = {0.0f, 1.0f};
+  hold.values = {0, 1, 0, 0, 1, 0};
+  keep.channels = {hold};
+  keep.duration = 1.0f;
+  r3::Clip file_bend = bend;
+  file_bend.channels[0].values = {0, 0, 0, 1, 0, 0, 0, 1};  // stays identity
+  const fs::path gltf = dir / "bar.gltf";
+  if (!r3::write_skinned_gltf(gltf.string(), {part}, sk, {keep, file_bend}, &err)) return fail(err);
+  r3::Clip extra;
+  extra.name = "extra";
+  r3::Channel slide = hold;
+  slide.values = {0, 1, 0, 0, 1, 1};
+  extra.channels = {slide};
+  extra.duration = 1.0f;
+  r3::Clip side_bend = bend;
+  const char* ghost_json =
+      R"({"version":1,"clips":[{"name":"nod","channels":[{"joint":"ghost","path":"scale","interp":"linear","keys":[{"t":0,"v":[2,2,2]}]},{"joint":"arm","path":"translation","interp":"linear","keys":[{"t":0,"v":[0,1,0]},{"t":1,"v":[0,2,0]}]}]}]})";
+  std::vector<r3::Clip> ghost_clips;
+  if (!r3::clips_from_json(ghost_json, sk, &ghost_clips, &err) || ghost_clips.size() != 1 ||
+      ghost_clips[0].channels.size() != 1 || err.find("ghost") == std::string::npos) {
+    return fail("unknown joint should be dropped and named: " + err);
+  }
+  pose = r3::rest_pose(sk);
+  r3::sample_clip(ghost_clips[0], 1.0f, false, &pose);
+  if (!near3(pose[1].t, {0, 2, 0})) return fail("kept channel after an unknown joint");
+  if (!r3::save_clip_file(r3::clip_sidecar_path(gltf.string()), sk, {side_bend, extra}, &err)) {
+    return fail("save sidecar: " + err);
+  }
+  r3::Model loaded;
+  err.clear();
+  if (!r3::load_model(gltf.string(), &loaded, &err)) return fail("load sidecar model: " + err);
+  if (!err.empty()) return fail("clean sidecar warned: " + err);
+  if (loaded.find_clip("keep") < 0 || loaded.find_clip("extra") < 0 || loaded.find_clip("bend") < 0) {
+    return fail("merged clip names");
+  }
+  pose = r3::rest_pose(loaded.skeleton);
+  r3::sample_clip(loaded.clips[static_cast<std::size_t>(loaded.find_clip("bend"))], 1.0f, false, &pose);
+  r3::skin_palette(loaded.skeleton, pose, &pal);
+  const float j1[4] = {1, 0, 0, 0}, w1[4] = {1, 0, 0, 0};
+  const r3::Vec3 tip = r3::skin_point(pal, j1, w1, {0, 2, 0});
+  if (!near3(tip, {-1, 1, 0}, 1e-3f)) return fail("sidecar bend skin " + str(tip));
+  // The file's own "keep" clip is still the imported one (arm stays at y=1).
+  pose = r3::rest_pose(loaded.skeleton);
+  r3::sample_clip(loaded.clips[static_cast<std::size_t>(loaded.find_clip("keep"))], 1.0f, false, &pose);
+  if (!near3(pose[1].t, {0, 1, 0})) return fail("imported clip was replaced");
+
+  // A sidecar that does not parse leaves the imported clips alone.
+  {
+    std::ofstream out(r3::clip_sidecar_path(gltf.string()), std::ios::binary);
+    out << "{ not json";
+  }
+  r3::Model broken;
+  err.clear();
+  if (!r3::load_model(gltf.string(), &broken, &err)) return fail("bad sidecar should still import: " + err);
+  if (broken.find_clip("keep") < 0 || broken.find_clip("bend") < 0 || broken.find_clip("extra") >= 0) {
+    return fail("bad sidecar changed the imported clips");
+  }
+  if (err.empty()) return fail("bad sidecar should warn");
+
+  std::cout << "[smoke] anim3d rigged sidecar OK (bone lines, palette origins, "
+               "clip round trip, import merge, GPU skinning palette)\n";
+  return 0;
+}
+
 // The editor's animation preview poses the selection in the edit view (null
 // renderer: counts skinned draws) without touching the authored scene.
 int editor_preview(const fs::path& dir) {
@@ -621,6 +758,7 @@ int run_anim3d_smoke() {
   fs::remove_all(dir, ec);
   fs::create_directories(dir, ec);
   if (skin_math() != 0 || sampling() != 0 || blend_weights() != 0) return 1;
+  if (sidecar_and_bones(dir) != 0) return 1;
   r3::Model drifter;
   if (assets(dir, &drifter) != 0) return 1;
   if (animator(drifter) != 0) return 1;

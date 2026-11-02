@@ -19,6 +19,7 @@ add_library(ts_render3d
   import/AssimpImport.cpp
   import/BlenderImport.cpp
   Skeleton.cpp
+  ClipFile.cpp
   Animator.cpp
   Scene3D.cpp
   Attach3D.cpp

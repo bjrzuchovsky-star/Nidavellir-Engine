@@ -1,3 +1,4 @@
+#include "render3d/ClipFile.h"
 #include "render3d/HullFit.h"
 #include "render3d/ModelImport.h"
 
@@ -592,6 +593,19 @@ bool load_model(const std::string& path, const ModelImportOptions& opt, Model* o
   bake_import_transform(out, opt.unit_scale, z_up);
   limit_skin_joints(out);
   update_bounds(out);
+  // Authored clips sit beside the file (hero.gltf -> hero.anim3d.json).
+  // They replace a clip of the same name and append the rest, then skin
+  // through the same palette as anything the file imported.
+  if (opt.animations && out->skinned()) {
+    std::string clip_warn;
+    if (!merge_clip_sidecar(out, &clip_warn)) {
+      if (!err.empty()) err += "; ";
+      err += clip_warn.empty() ? "anim3d sidecar failed" : clip_warn;
+    } else if (!clip_warn.empty()) {
+      if (!err.empty()) err += "; ";
+      err += clip_warn;
+    }
+  }
   if (out->primitives.empty()) {
     if (error) *error = path + ": no meshes";
     return false;
