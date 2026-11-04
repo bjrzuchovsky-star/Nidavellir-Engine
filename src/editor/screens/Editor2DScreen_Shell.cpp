@@ -10,6 +10,7 @@
 #include "editor/scripting/BrandBook.h"
 
 #include "editor/audio/EditorAudio.h"
+#include "editor/ui/About.h"
 #include "editor/ui/Brand.h"
 #include "editor/ui/Theme.h"
 #include "plugins/Builtins.h"
@@ -99,7 +100,7 @@ constexpr double kNudgeCoalesceSeconds = 0.6;
 
 void Editor2DScreen::draw_help_menu_contents() {
   ImGui::PushStyleColor(ImGuiCol_Text, theme::Accent());
-  ImGui::TextUnformatted("TombStone Admin -- 2D field kit");
+  ImGui::TextUnformatted("Nidavellir Engine -- 2D");
   ImGui::PopStyleColor();
   ImGui::Separator();
   theme::KeyHint("Ctrl+Z", "Undo");
@@ -384,6 +385,7 @@ void Editor2DScreen::draw_menus() {
   ux_.draw_window_menu();
 
   if (ux::BeginMenu("Help")) {
+    about::draw_menu_item();
     if (ux::MenuItem("Command Palette...", "Ctrl+Shift+P")) ux_.palette().open();
     ux_.draw_walkthrough_menu_item();
     ImGui::Separator();

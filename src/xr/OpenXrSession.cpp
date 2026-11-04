@@ -180,7 +180,7 @@ void OpenXrSession::probe() {
   copy_name(ci.applicationInfo.applicationName, XR_MAX_APPLICATION_NAME_SIZE,
             cfg_.app_name.empty() ? "TombStone" : cfg_.app_name.c_str());
   ci.applicationInfo.applicationVersion = 1;
-  copy_name(ci.applicationInfo.engineName, XR_MAX_ENGINE_NAME_SIZE, "TombStone Engine");
+  copy_name(ci.applicationInfo.engineName, XR_MAX_ENGINE_NAME_SIZE, "Nidavellir Engine");
   ci.applicationInfo.engineVersion = 1;
   ci.applicationInfo.apiVersion = XR_API_VERSION_1_0;
   ci.enabledExtensionCount = static_cast<std::uint32_t>(enable.size());

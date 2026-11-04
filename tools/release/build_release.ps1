@@ -66,7 +66,7 @@ $bin = @{
 }
 foreach ($k in $bin.Keys) { if (-not (Test-Path $bin[$k])) { throw "missing $($bin[$k]); build Release first" } }
 $built = (Native { & $bin.admin --version } | Out-String).Trim()
-if ($built -ne "TombStone Engine $version") { throw "ts_admin reports '$built', VERSION says $version (re-run CMake)" }
+if ($built -ne "Nidavellir Engine $version") { throw "ts_admin reports '$built', VERSION says $version (re-run CMake)" }
 
 # --- 2. Smoke -----------------------------------------------------------------
 $env:TS_AUDIO = "null"
@@ -190,7 +190,7 @@ if ($TestInstall) {
   Push-Location $work
   try {
     $v = (Native { & "$app\ts_admin.exe" --version } | Out-String).Trim(); "installed ts_admin --version: $v"
-    if ($v -ne "TombStone Engine $version") { throw "installed version '$v'" }
+    if ($v -ne "Nidavellir Engine $version") { throw "installed version '$v'" }
     Native { & "$app\ts_admin.exe" --smoke *> "$t\installed_smoke.log" }; $rc = $LASTEXITCODE
   } finally { Pop-Location }
   Get-Content "$t\installed_smoke.log" -Tail 2

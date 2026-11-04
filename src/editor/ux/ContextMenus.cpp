@@ -1,5 +1,7 @@
 #include "editor/ux/ContextMenus.h"
 
+#include "core/Brand.h"
+
 #include "editor/update/UpdateService.h"
 #include "editor/ux/Actions.h"
 #include "editor/ux/FriendlyError.h"
@@ -37,7 +39,7 @@ std::string docs_file_for(const std::string& component) {
 }
 
 std::string docs_url(const std::string& file) {
-  return "https://github.com/bjrzuchovsky-star/TombStone_Engine/blob/main/docs/" + file;
+  return std::string(ts::tombstone::brand::kDocsBlobPrefix) + file;
 }
 
 void open_docs(const std::string& component) {

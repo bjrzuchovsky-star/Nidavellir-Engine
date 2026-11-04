@@ -50,13 +50,13 @@ struct UpdateService::Shared {
 namespace {
 
 vault::Headers api_headers(const ServiceOptions& o) {
-  return {{"User-Agent", std::string("TombStone-Engine/") + o.current_version + " (update-check)"},
+  return {{"User-Agent", std::string("Nidavellir-Engine/") + o.current_version + " (update-check)"},
           {"Accept", "application/vnd.github+json"},
           {"X-GitHub-Api-Version", "2022-11-28"}};
 }
 
 vault::Headers dl_headers(const ServiceOptions& o) {
-  return {{"User-Agent", std::string("TombStone-Engine/") + o.current_version + " (updater)"},
+  return {{"User-Agent", std::string("Nidavellir-Engine/") + o.current_version + " (updater)"},
           {"Accept", "application/octet-stream"}};
 }
 

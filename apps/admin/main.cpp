@@ -3050,7 +3050,7 @@ int main(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     if (std::strcmp(argv[i], "--version") == 0) {
       // The repo's VERSION file, baked in at configure time.
-      std::printf("TombStone Engine %s\n", TS_ENGINE_VERSION);
+      std::printf("%s %s\n", ts::tombstone::brand::kProduct, TS_ENGINE_VERSION);
       return 0;
     }
     if (std::strcmp(argv[i], "--export") == 0) {

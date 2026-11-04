@@ -15,6 +15,7 @@
 
 #include "ui/UiScript.h"
 #include "editor/audio/EditorAudio.h"
+#include "editor/ui/About.h"
 #include "editor/ui/Theme.h"
 
 #include <imgui.h>
@@ -336,6 +337,7 @@ void Editor3DScreen::draw_menus() {
   }
   ux_.draw_window_menu();
   if (ux::BeginMenu("Help")) {
+    about::draw_menu_item();
     if (ux::MenuItem("Command Palette...", "Ctrl+Shift+P")) ux_.palette().open();
     ux_.draw_walkthrough_menu_item();
     ImGui::Separator();

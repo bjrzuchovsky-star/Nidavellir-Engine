@@ -1,9 +1,11 @@
-# Tombstone Engine
+# Nidavellir Engine
 
-Tombstone Engine is a fully custom C++ game engine built for high performance, low-level control, and a streamlined development workflow.  
+Nidavellir Engine is a fully custom C++ game engine built for high performance, low-level control, and a streamlined development workflow.  
 It is designed around a modular architecture, a custom build system, and a custom rendering backend to ensure predictable behavior and maximum efficiency across all engine operations.
 
-This repository contains the core engine source code, internal tools, and supporting systems used to build and run Tombstone Engine.
+Published by **BORENJO Studios**. Tagline: where games are forged. Names used in the editor (Realm, Clan, Market, Wanderer) are in [docs/glossary.md](docs/glossary.md).
+
+This repository contains the core engine source code, internal tools, and supporting systems used to build and run Nidavellir Engine.
 
 ---
 
@@ -25,13 +27,13 @@ Core systems are separated into clean, independent modules, allowing for:
 - High scalability for future features  
 
 ### Admin / Client / Game Builds
-Tombstone Engine is structured into three distinct build types:
+Nidavellir Engine is structured into three distinct build types:
 
 - **Admin Build**  
   Full engine + editor tools. Used internally for development, debugging, and engine management.
 
 - **Client Build**  
-  Lightweight engine runtime for developers building games on top of Tombstone Engine. `ts_client` is the multiplayer client (connects to a `ts_server`).
+  Lightweight engine runtime for developers building games on top of Nidavellir Engine. `ts_client` is the multiplayer client (connects to a `ts_server`).
 
 - **Server Build**  
   `ts_server`: the headless, authoritative multiplayer server (no window, no GL). See [Multiplayer](#multiplayer-the-posse).

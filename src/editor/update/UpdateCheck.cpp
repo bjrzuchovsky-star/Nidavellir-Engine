@@ -153,21 +153,31 @@ bool parse_release_json(const std::string& text, ReleaseInfo* out, std::string* 
   return true;
 }
 
+const ReleaseAsset* find_named(const ReleaseInfo& r, const std::string& want) {
+  for (const ReleaseAsset& a : r.assets) {
+    if (lower(a.name) == want) return &a;
+  }
+  return nullptr;
+}
+
 const ReleaseAsset* select_update_asset(const ReleaseInfo& r, AssetKind* kind) {
   const std::string ver = strip_v(r.tag.empty() ? r.version : r.tag);
-  const std::string want_update = lower("TombStone-" + ver + "-update.exe");
-  const std::string want_setup = lower("TombStone-" + ver + "-setup.exe");
-  const ReleaseAsset* setup = nullptr;
-  for (const ReleaseAsset& a : r.assets) {
-    const std::string n = lower(a.name);
-    if (n == want_update) {
+  // New installer names first, then the 0.2.x TombStone- assets.
+  const char* prefixes[] = {"Nidavellir-", "TombStone-"};
+  for (const char* prefix : prefixes) {
+    if (const ReleaseAsset* a = find_named(r, lower(std::string(prefix) + ver + "-update.exe"))) {
       if (kind) *kind = AssetKind::Update;
-      return &a;
+      return a;
     }
-    if (n == want_setup && !setup) setup = &a;
   }
-  if (kind) *kind = setup ? AssetKind::Setup : AssetKind::None;
-  return setup;
+  for (const char* prefix : prefixes) {
+    if (const ReleaseAsset* a = find_named(r, lower(std::string(prefix) + ver + "-setup.exe"))) {
+      if (kind) *kind = AssetKind::Setup;
+      return a;
+    }
+  }
+  if (kind) *kind = AssetKind::None;
+  return nullptr;
 }
 
 const ReleaseAsset* find_sums_asset(const ReleaseInfo& r) {
