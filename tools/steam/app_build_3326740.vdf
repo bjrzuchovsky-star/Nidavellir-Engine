@@ -1,0 +1,14 @@
+"appbuild"
+{
+	"appid"		"3326740"
+	"desc"		"Nidavellir Engine"
+	"buildoutput"	"output/"
+	"contentroot"	"content/"
+	"setlive"	"beta"
+	"preview"	"0"
+	"local"		""
+	"depots"
+	{
+		"3326741"	"depot_build_3326741.vdf"
+	}
+}

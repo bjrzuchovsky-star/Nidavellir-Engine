@@ -1,0 +1,44 @@
+#pragma once
+
+// Thin Steamworks wrapper (SDK 1.65). Built only when CMake NIDAVELLIR_STEAM
+// is ON and STEAMWORKS_SDK_DIR points at the SDK. That SDK is licensed and
+// must not be committed. With the option OFF every method is a no-op and
+// the editor behaves as before.
+//
+// TODO(clans): friends, invites and lobbies replace the IP "Join clan" flow.
+// After a successful init, call ISteamFriends / ISteamMatchmaking from here
+// and drive it from editor/team/TeamPanel.cpp (the "Join clan..." menu).
+// Not implemented yet.
+
+namespace ts {
+namespace tombstone {
+namespace steam {
+
+class SteamService {
+ public:
+  static SteamService& instance();
+
+  // True only in a NIDAVELLIR_STEAM build.
+  bool enabled() const;
+
+  // SteamAPI_RestartAppIfNecessary(3326740), then SteamAPI_Init.
+  // Writes steam_appid.txt next to the exe when it is missing (dev runs).
+  // Returns false when Steam is relaunching this process: the caller exits 0.
+  // Init failure (Steam not running) logs and returns true so the editor still opens.
+  bool init();
+
+  void shutdown();
+  void run_callbacks();
+
+  // Persona name, or "" when Steam is off or not signed in.
+  const char* persona() const;
+
+ private:
+  SteamService() = default;
+  bool inited_ = false;
+  void write_appid_file() const;
+};
+
+}  // namespace steam
+}  // namespace tombstone
+}  // namespace ts
