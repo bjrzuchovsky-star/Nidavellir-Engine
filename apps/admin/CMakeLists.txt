@@ -59,7 +59,6 @@ add_executable(ts_admin
   TerrainShot.cpp
 )
 ts_win_resources(ts_admin "Nidavellir Engine editor and Project Manager")
-nidavellir_attach_steam(ts_admin)
 
 
 target_link_libraries(ts_admin

@@ -71,8 +71,3 @@ _deps/
 
 # Engine release tooling (not a build output folder)
 !tools/release/
-
-# Steamworks SDK is never committed. Local dev app id and upload staging neither.
-steam_appid.txt
-tools/steam/content/
-tools/steam/output/

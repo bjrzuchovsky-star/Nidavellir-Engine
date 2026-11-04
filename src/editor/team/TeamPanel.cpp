@@ -90,8 +90,6 @@ void draw_menu(TeamSession& t, bool* show_panel) {
     t.ui.mode = 1;
     *show_panel = true;
   }
-    // TODO(clans): Steam friends, invites and lobbies replace this address
-  // join. SteamService (src/platform/SteamService.h) is the boot point.
   if (ux::MenuItem("Join clan...", nullptr, false, !active)) {
     t.ui.mode = 0;
     *show_panel = true;
