@@ -12,4 +12,6 @@ User-facing names as of the Nidavellir rebrand. Code identifiers, plugin ids (`t
 | Rider (player controller) | Wanderer | Plugin ids stay `ts.move.rider3d`, `ts.move.topdown`, `ts.move.platformer` |
 | Vault | Vault | Kept. "Hoard" is less obvious for the shared asset library |
 
+Editor theme **Forge** (iron grey, molten orange `#E8792B`) is the default. **Dusk** is the old look (`"theme": "dusk"`, and a saved `"dark"` still opens as Dusk). **Parchment** is `"light"`.
+
 The installer AppId `{6F1D3B0A-7C52-4E1B-9A3D-5B2C8E4F7A10}` is the 0.2.x id, so `Nidavellir-<ver>-update.exe` upgrades that install in place. Shortcuts still start in `Documents\TombStone`, where settings and projects already live.

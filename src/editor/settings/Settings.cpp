@@ -30,7 +30,7 @@ Settings SettingsStore::make_defaults() {
   s.projects_root = default_projects_root();
   s.username.clear();
   s.auto_login_dev = false;
-  s.theme = "dark";
+  s.theme = "forge";
   s.last_project_path.clear();
   return s;
 }
