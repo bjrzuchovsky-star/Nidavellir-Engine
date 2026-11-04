@@ -526,7 +526,7 @@ void ProjectManagerScreen::draw_kind_picker() {
                 theme::U32(theme::Success()), c.line2);
     if (hovered) {
       ux::SetTooltip("%s", c.kind == ProjectKind::TwoD
-                                  ? "The full 2D editor: tiles, sprites, Play, clan.";
+                                  ? "The full 2D editor: tiles, sprites, Play, clan."
                               : c.kind == ProjectKind::ThreeD
                                   ? "The 3D editor: glTF, PBR, Lua, Play."
                                   : "The 3D editor with a VR rig: grab, throw, teleport. "

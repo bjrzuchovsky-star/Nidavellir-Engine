@@ -1,6 +1,7 @@
 #include "platform/ClanDirectory.h"
 
 #include "core/Brand.h"
+#include "platform/SteamService.h"
 
 #if defined(NIDAVELLIR_STEAM)
 
