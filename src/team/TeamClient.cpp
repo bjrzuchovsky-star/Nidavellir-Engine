@@ -46,7 +46,9 @@ bool TeamClient::join(const JoinOptions& opt, std::string* error) {
   opt_ = opt;
   error_.clear();
   warn_.clear();
-  std::unique_ptr<net::Transport> t = net::make_enet_transport();
+  std::unique_ptr<net::Transport> t =
+      opt_.make_transport ? opt_.make_transport() : net::make_enet_transport();
+  if (!t) t = net::make_enet_transport();
   if (opt_.wrap_transport) t = opt_.wrap_transport(std::move(t));
   std::string err;
   server_ = t->connect(opt_.host, opt_.port, &err);

@@ -1,5 +1,7 @@
 #include "editor/team/TeamSession.h"
 
+#include "platform/ClanDirectory.h"
+
 #include "editor/settings/Settings.h"
 #include "editor/team/TeamFiles.h"
 
@@ -265,7 +267,179 @@ bool TeamSession::join(const TeamJoinSettings& s, std::string* error) {
   return client_.join(o, error);
 }
 
+bool TeamSession::host_clan(bool invite_only, std::string* error) {
+  if (!steam::clan_backend().available()) {
+    if (error) *error = "Steam is not running. Host by address instead.";
+    return false;
+  }
+  if (active() || via_clan_) leave();
+  steam::ClanMeta meta;
+  meta.engine = TS_ENGINE_VERSION;
+  meta.claim = project_.id;
+  meta.claim_name = project_.name;
+  meta.dim = dim_of(project_);
+  if (!steam::clan_backend().host_clan(invite_only, meta, error)) return false;
+  via_clan_ = true;
+  if (steam::clan_backend().lobby_id().empty()) {
+    clan_host_pending_ = true;
+    return true;
+  }
+  return open_clan_server(error);
+}
+
+bool TeamSession::join_clan(const std::string& lobby_id, std::string* error) {
+  if (!steam::clan_backend().available()) {
+    if (error) *error = "Steam is not running. Join by address instead.";
+    return false;
+  }
+  if (active() || via_clan_) leave();
+  if (!steam::clan_backend().join_clan(lobby_id, error)) return false;
+  via_clan_ = true;
+  if (steam::clan_backend().host_id().empty()) {
+    clan_join_pending_ = true;
+    return true;
+  }
+  return open_clan_client(error);
+}
+
+bool TeamSession::kick_clan_member(const std::string& steam_id, std::string* error) {
+  return steam::clan_backend().kick(steam_id, error);
+}
+
+bool TeamSession::open_clan_server(std::string* error) {
+  const bool p2p = static_cast<bool>(steam::make_clan_transport());
+  server_ = std::make_unique<team::TeamServer>();
+  team::ServerOptions so;
+  so.port = p2p ? 0 : kDefaultPort;
+  so.only_claim = project_.id;
+  so.passcode = ui.pass;
+  so.engine = TS_ENGINE_VERSION;
+  if (p2p) so.make_transport = [] { return steam::make_clan_transport(); };
+  if (!team_dir().empty()) so.state_dir = (std::filesystem::u8path(team_dir()) / "host").string();
+  if (ui.vault_url[0]) {
+    so.files = team::Value::object();
+    so.files.set("via", team::Value::string("vault"));
+    so.files.set("url", team::Value::string(ui.vault_url));
+  } else if (!so.state_dir.empty()) {
+    so.files = team::Value::object();
+    so.files.set("via", team::Value::string("session"));
+    blob_store_ = std::make_shared<SessionBlobStore>(
+        (std::filesystem::u8path(so.state_dir) / "blobs").string());
+    std::shared_ptr<SessionBlobStore> store = blob_store_;
+    so.blobs = [store](const std::string&, bool can_write, const team::Value& req) {
+      return store->handle(can_write, req);
+    };
+  }
+  if (!server_->start(so, error)) {
+    server_.reset();
+    return false;
+  }
+  team::JoinOptions o = base_join();
+  if (p2p) {
+    o.host = steam::clan_backend().my_id();
+    o.port = 1;
+    o.make_transport = [] { return steam::make_clan_transport(); };
+  } else {
+    o.host = "127.0.0.1";
+    o.port = server_->port();
+  }
+  const std::string persona = steam::clan_backend().persona();
+  o.user = ui.user[0] ? ui.user : persona;
+  if (client_.seq() > 0) o.seed = client_.confirmed();
+  else o.seed[binding_->scene_key()] = binding_->capture();
+  o.rejoin = saved_rejoin_;
+  loaded_ = client_.seq() == 0 ? false : loaded_;
+  clan_host_id_ = steam::clan_backend().my_id();
+  last_join_ = o;
+  last_join_host_ = true;
+  if (!client_.join(o, error)) {
+    server_->stop();
+    server_.reset();
+    return false;
+  }
+  return true;
+}
+
+bool TeamSession::open_clan_client(std::string* error) {
+  const std::string mismatch =
+      steam::clan_version_error(TS_ENGINE_VERSION, steam::clan_backend().meta_value("engine"));
+  if (!mismatch.empty()) {
+    steam::clan_backend().leave();
+    via_clan_ = false;
+    clan_join_pending_ = false;
+    if (error) *error = mismatch;
+    ui.last_error = mismatch;
+    return false;
+  }
+  if (!steam::make_clan_transport()) {
+    if (error) *error = "This build has no Steam relay. Join by address instead.";
+    via_clan_ = false;
+    return false;
+  }
+  team::JoinOptions o = base_join();
+  o.host = steam::clan_backend().host_id();
+  o.port = 1;
+  o.make_transport = [] { return steam::make_clan_transport(); };
+  o.user = ui.user[0] ? ui.user : steam::clan_backend().persona();
+  const std::string claim = steam::clan_backend().meta_value("claim");
+  o.claim = claim.empty() ? "*" : claim;
+  o.rejoin = saved_rejoin_;
+  loaded_ = false;
+  clan_host_id_ = o.host;
+  last_join_ = o;
+  last_join_host_ = false;
+  return client_.join(o, error);
+}
+
+void TeamSession::tick_clan() {
+  steam::ClanBackend& clan = steam::clan_backend();
+  clan.poll();
+  if (!via_clan_ && !active() && clan.available()) {
+    const std::string req = clan.take_join_request();
+    if (!req.empty()) {
+      std::string err;
+      if (!join_clan(req, &err) && !err.empty()) ui.last_error = err;
+    }
+  }
+  if (clan_host_pending_ && !clan.lobby_id().empty()) {
+    clan_host_pending_ = false;
+    std::string err;
+    if (!open_clan_server(&err)) ui.last_error = err;
+  }
+  if (!clan.last_error().empty() && (clan_host_pending_ || clan_join_pending_)) {
+    ui.last_error = clan.last_error();
+    clan_host_pending_ = false;
+    clan_join_pending_ = false;
+    via_clan_ = false;
+  }
+  if (clan_join_pending_ && !clan.host_id().empty()) {
+    clan_join_pending_ = false;
+    std::string err;
+    if (!open_clan_client(&err)) ui.last_error = err;
+  }
+  if (via_clan_ && !server_ && !clan_host_pending_ && clan.i_am_host() &&
+      client_.state() != team::TeamClient::State::Connecting) {
+    std::string err;
+    if (!open_clan_server(&err)) ui.last_error = err;
+  } else if (via_clan_ && !clan.i_am_host()) {
+    const std::string host = clan.host_id();
+    if (!host.empty() && host != clan_host_id_ && !clan_join_pending_) {
+      clan_host_id_ = host;
+      client_.leave();
+      std::string err;
+      if (!open_clan_client(&err)) ui.last_error = err;
+    }
+  }
+}
+
 void TeamSession::leave() {
+  if (via_clan_) {
+    std::string next;
+    steam::clan_backend().migrate(&next, nullptr);
+    via_clan_ = false;
+    clan_host_pending_ = false;
+    clan_join_pending_ = false;
+  }
   was_joined_ = false;
   reconnecting_ = false;
   rejoin_pending_ = false;
@@ -464,12 +638,14 @@ void TeamSession::send_presence(bool force) {
 }
 
 void TeamSession::tick(double dt) {
+  tick_clan();
   if (server_) server_->poll();
   client_.poll();
   if (!client_.joined()) {
     // Lost (not left, not refused): ride back in. The host's own editor
     // never loses its in-process server, so only joiners retry.
-    if (was_joined_ && !server_ && client_.state() == team::TeamClient::State::Closed) start_reconnect();
+    if (was_joined_ && !server_ && !via_clan_ && client_.state() == team::TeamClient::State::Closed)
+      start_reconnect();
     was_joined_ = false;
     if (reconnecting_) tick_reconnect(dt);
     if (server_ && !active()) {

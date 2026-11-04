@@ -39,6 +39,8 @@ struct JoinOptions {
   Docs seed;               // used only if the session is new
   std::string rejoin;      // token from an earlier welcome: ride back in as yourself
   std::function<std::unique_ptr<net::Transport>(std::unique_ptr<net::Transport>)> wrap_transport;
+  // When set, used instead of ENet (Steam P2P). wrap_transport still applies.
+  std::function<std::unique_ptr<net::Transport>()> make_transport;
 };
 
 struct RemoteMember {

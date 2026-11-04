@@ -1,5 +1,7 @@
 #include "editor/team/TeamPanel.h"
 
+#include "platform/ClanDirectory.h"
+
 #include "editor/ux/Actions.h"
 
 #include "editor/editor3d/Editor3DScreen.h"
@@ -28,9 +30,40 @@ ImVec4 colour_vec(const std::string& hex) {
 
 void default_user(TeamUiState& ui) {
   if (ui.user[0]) return;
+  const std::string persona = steam::clan_backend().persona();
+  if (!persona.empty()) {
+    std::snprintf(ui.user, sizeof(ui.user), "%s", persona.c_str());
+    return;
+  }
   const char* u = std::getenv("USERNAME");
   if (!u || !*u) u = std::getenv("USER");
-  std::snprintf(ui.user, sizeof(ui.user), "%s", u && *u ? u : "Rider");
+  std::snprintf(ui.user, sizeof(ui.user), "%s", u && *u ? u : "Wanderer");
+}
+
+void draw_avatar(const std::string& id) {
+  std::vector<std::uint8_t> px;
+  int w = 0, h = 0;
+  if (!steam::clan_backend().avatar(id, &px, &w, &h) || w < 1 || h < 1) return;
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  const ImVec2 p = ImGui::GetCursorScreenPos();
+  const float side = 16.0f;
+  const int step_x = std::max(1, w / 8);
+  const int step_y = std::max(1, h / 8);
+  const int cols = (w + step_x - 1) / step_x;
+  const int rows = (h + step_y - 1) / step_y;
+  for (int y = 0; y < rows; ++y) {
+    for (int x = 0; x < cols; ++x) {
+      const int sx = std::min(w - 1, x * step_x);
+      const int sy = std::min(h - 1, y * step_y);
+      const std::size_t i = static_cast<std::size_t>((sy * w + sx) * 4);
+      if (i + 3 >= px.size()) continue;
+      const ImU32 col = IM_COL32(px[i], px[i + 1], px[i + 2], px[i + 3]);
+      dl->AddRectFilled(ImVec2(p.x + side * x / cols, p.y + side * y / rows),
+                        ImVec2(p.x + side * (x + 1) / cols, p.y + side * (y + 1) / rows), col);
+    }
+  }
+  ImGui::Dummy(ImVec2(side, side));
+  ImGui::SameLine();
 }
 
 void swatch(const std::string& hex) {
@@ -90,9 +123,7 @@ void draw_menu(TeamSession& t, bool* show_panel) {
     t.ui.mode = 1;
     *show_panel = true;
   }
-    // TODO(clans): Steam friends, invites and lobbies replace this address
-  // join. SteamService (src/platform/SteamService.h) is the boot point.
-  if (ux::MenuItem("Join clan...", nullptr, false, !active)) {
+    if (ux::MenuItem("Join clan...", nullptr, false, !active)) {
     t.ui.mode = 0;
     *show_panel = true;
   }
@@ -123,6 +154,36 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
     ImGui::SameLine();
     ImGui::RadioButton("Host from my editor", &t.ui.mode, 1);
     ImGui::InputText("Your name", t.ui.user, sizeof(t.ui.user));
+    steam::ClanBackend& clan = steam::clan_backend();
+    if (clan.available()) {
+      ImGui::Checkbox("Invite only", &t.ui.clan_invite_only);
+      if (ImGui::Button("Host clan")) {
+        std::string err;
+        t.ui.last_error.clear();
+        if (!t.host_clan(t.ui.clan_invite_only, &err)) t.ui.last_error = err;
+      }
+      ImGui::SameLine();
+      ImGui::TextDisabled(t.ui.clan_invite_only ? "only invited Wanderers" : "friends only");
+      const std::vector<steam::ClanFriend> clans = clan.friend_clans();
+      if (!clans.empty()) {
+        ImGui::TextDisabled("Friends' clans");
+        for (const steam::ClanFriend& f : clans) {
+          ImGui::PushID(f.lobby_id.c_str());
+          draw_avatar(f.id);
+          const std::string label = f.name + (f.claim_name.empty() ? "" : " - " + f.claim_name);
+          if (ImGui::SmallButton("Join")) {
+            std::string err;
+            t.ui.last_error.clear();
+            if (!t.join_clan(f.lobby_id, &err)) t.ui.last_error = err;
+          }
+          ImGui::SameLine();
+          ImGui::TextUnformatted(label.c_str());
+          ImGui::PopID();
+        }
+      }
+      ImGui::Separator();
+      ImGui::TextDisabled("Or join by address");
+    }
     if (t.ui.mode == 0) {
       ImGui::InputText("Address", t.ui.host_addr, sizeof(t.ui.host_addr));
       ImGui::InputInt("Port (UDP)", &t.ui.join_port);
@@ -185,8 +246,38 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
         ImGui::TextDisabled("Checking the freight%s%s", p.current.empty() ? "" : ": ", p.current.c_str());
       }
     }
+    if (t.via_clan()) {
+      steam::ClanBackend& clan = steam::clan_backend();
+      ImGui::Spacing();
+      theme::SectionHeader("On Steam");
+      if (ImGui::SmallButton("Invite overlay")) clan.open_invite_overlay();
+      for (const steam::ClanFriend& f : clan.friends()) {
+        ImGui::PushID(f.id.c_str());
+        draw_avatar(f.id);
+        if (ImGui::SmallButton("Invite")) {
+          std::string err;
+          if (!clan.invite(f.id, &err)) t.ui.last_error = err;
+        }
+        ImGui::SameLine();
+        ImGui::TextUnformatted(f.name.c_str());
+        ImGui::PopID();
+      }
+      for (const steam::ClanMember& m : clan.members()) {
+        ImGui::PushID(("m" + m.id).c_str());
+        draw_avatar(m.id);
+        ImGui::Text("%s%s", m.name.c_str(), m.host ? " (host)" : "");
+        if (clan.i_am_host() && !m.host) {
+          ImGui::SameLine();
+          if (ImGui::SmallButton("Kick")) {
+            std::string err;
+            if (!t.kick_clan_member(m.id, &err)) t.ui.last_error = err;
+          }
+        }
+        ImGui::PopID();
+      }
+    }
     ImGui::Spacing();
-    theme::SectionHeader("Posse");
+    theme::SectionHeader("Clan");
     // Me first.
     swatch(c.my_colour());
     ImGui::Text("%s (you)", c.my_name().c_str());

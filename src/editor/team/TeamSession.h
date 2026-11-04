@@ -101,6 +101,7 @@ struct TeamUiState {
   char user[64] = "";
   char vault_url[160] = "";  // optional: files travel through this Vault
   int mode = 0;  // 0 = join, 1 = host
+  bool clan_invite_only = false;
   std::string last_error;
 };
 
@@ -114,6 +115,11 @@ class TeamSession {
 
   bool host(const TeamHostSettings& s, std::string* error);
   bool join(const TeamJoinSettings& s, std::string* error);
+  // Steam clan. False when Steam is off or not running (use host/join).
+  bool host_clan(bool invite_only, std::string* error);
+  bool join_clan(const std::string& lobby_id, std::string* error);
+  bool kick_clan_member(const std::string& steam_id, std::string* error);
+  bool via_clan() const { return via_clan_; }
   void leave();
   // Tests: vanish without saying goodbye (a crashed editor).
   void drop_now();
@@ -256,6 +262,13 @@ class TeamSession {
   std::uint64_t rejoins_ = 0;
   std::string saved_rejoin_;     // token from last.json (editor restart)
   bool has_last_ride_ = false, last_ride_host_ = false;
+  bool via_clan_ = false;
+  bool clan_host_pending_ = false;
+  bool clan_join_pending_ = false;
+  std::string clan_host_id_;
+  bool open_clan_server(std::string* error);
+  bool open_clan_client(std::string* error);
+  void tick_clan();
   TeamAssetSync asset_sync_;  // last member: joined before the rest go
 };
 

@@ -24,6 +24,24 @@ When the option is on, the editor calls `SteamAPI_RestartAppIfNecessary(3326740)
 
 `app_build_3326740.vdf` sets `setlive` to `beta`, so the build goes to the **beta** branch and not the public default. Change that string if the branch has another name. Leave it blank and set the build live on the partner site if you would rather choose there.
 
-## Clans over Steam (not this change)
+## Clans
 
-Friends, invites and lobbies should replace the IP "Join clan" box. `SteamService` is where the Steam API is already up. The menu hook is `editor/team/TeamPanel.cpp` ("Join clan...").
+With `-DNIDAVELLIR_STEAM=ON` and Steam running, Team > Join clan... can host a friends-only hall (tick **Invite only** for a private one). The session still uses the same locks, presence and asset sync; the wire is Steam's relay (`ISteamNetworkingMessages`), not a forwarded UDP port. If Steam is not running, that button is absent and the address fields work as before.
+
+The in-editor friend list is friends currently in app 3326740 (Steam does not tell the game which offline friends own it). **Invite overlay** is Steam's own dialog, which only offers friends who own the app.
+
+`+connect_lobby <id>` on the exe command line, or accepting an overlay invite, joins that clan once a realm is open.
+
+## Test with two Steam accounts
+
+1. Install the Steam client twice is not required: one account on this PC, the second on another PC or a second Windows user. Both must own app 3326740 and have `STEAMWORKS_SDK_DIR` pointing at `D:\Dev\SteamworksSDK`.
+2. Configure and build: `cmake -S . -B build -DNIDAVELLIR_STEAM=ON` then build `ts_admin` Release.
+3. Start account A normally. Start account B with Steam's "start another account" or a second machine. Launch `ts_admin.exe` from each (the editor writes `steam_appid.txt` beside itself if it is missing).
+4. On A, open a realm, Team > Join clan..., leave **Invite only** unticked, **Host clan**.
+5. On B, open a realm with the same editor version. Team > Join clan... lists A's clan if A is in the app. **Join**. B should see A's persona. Realm edits, locks and presence match an address session.
+6. On A, **Invite** next to B, or **Invite overlay**, and accept on B if you did not join from the list.
+7. Close A. B should become host (the lobby is handed on). If A was alone, the clan closes.
+8. Kick: A clicks **Kick** on B. B should see "The host asked you to leave this clan."
+9. Version: join from an editor whose `ts_admin --version` differs. The panel should say which version forged the clan and which one this editor is.
+
+`ts_admin --smoke-clan` checks the same rules with an in-memory stand-in and does not need the SDK.
