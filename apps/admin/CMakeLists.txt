@@ -53,6 +53,7 @@ add_executable(ts_admin
   SmokeUx.cpp
   SmokeUpdate.cpp
   SmokeTeam.cpp
+  SmokeClan.cpp
   SmokeMouseLook.cpp
   SmokePluginSplit.cpp
   VaultCli.cpp

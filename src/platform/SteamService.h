@@ -5,10 +5,8 @@
 // must not be committed. With the option OFF every method is a no-op and
 // the editor behaves as before.
 //
-// TODO(clans): friends, invites and lobbies replace the IP "Join clan" flow.
-// After a successful init, call ISteamFriends / ISteamMatchmaking from here
-// and drive it from editor/team/TeamPanel.cpp (the "Join clan..." menu).
-// Not implemented yet.
+// Clans (lobbies, invites, P2P) live in ClanDirectory.h. This class only
+// boots the Steam API. The address join in the Team panel stays the fallback.
 
 namespace ts {
 namespace tombstone {
@@ -20,6 +18,8 @@ class SteamService {
 
   // True only in a NIDAVELLIR_STEAM build.
   bool enabled() const;
+  // True after SteamAPI_Init succeeded this process.
+  bool ready() const;
 
   // SteamAPI_RestartAppIfNecessary(3326740), then SteamAPI_Init.
   // Writes steam_appid.txt next to the exe when it is missing (dev runs).

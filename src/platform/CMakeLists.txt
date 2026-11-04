@@ -1,6 +1,9 @@
 add_library(ts_platform
   Window.cpp
   SteamService.cpp
+  ClanDirectory.cpp
+  ClanSteam.cpp
+  SteamTransport.cpp
 )
 
 target_include_directories(ts_platform
@@ -11,6 +14,7 @@ target_include_directories(ts_platform
 target_link_libraries(ts_platform
   PUBLIC
     ts_core
+    ts_net
 )
 
 target_compile_features(ts_platform PUBLIC cxx_std_20)

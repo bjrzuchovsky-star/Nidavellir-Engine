@@ -2,6 +2,7 @@
 #include "plugins/split/Split.h"
 #include "core/Engine.h"
 #include "platform/SteamService.h"
+#include "platform/ClanDirectory.h"
 #include "profiler/Profiler.h"
 #include "editor/ux/FriendlyError.h"
 #include "editor/ux/Walkthrough.h"
@@ -73,6 +74,7 @@
 #include "SmokeTerrain.h"
 #include "VaultCli.h"
 #include "SmokeUpdate.h"
+#include "SmokeClan.h"
 #include "SmokeTeam.h"
 #include "SmokeMouseLook.h"
 #include "SmokePluginSplit.h"
@@ -1369,6 +1371,9 @@ int run_console_smoke() {
   }
   // Update notifier: canned GitHub JSON + loopback (see SmokeUpdate.cpp).
   if (ts::tombstone::run_update_smoke() != 0) {
+    return 1;
+  }
+  if (ts::tombstone::run_clan_smoke() != 0) {
     return 1;
   }
   if (ts::tombstone::run_team_smoke() != 0) {
@@ -3032,6 +3037,12 @@ ts::tombstone::plugins::ProviderHold& smoke_provider_hold() {
 }
 
 int main(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (std::strcmp(argv[i], "+connect_lobby") == 0 && i + 1 < argc) {
+      ts::tombstone::steam::note_connect_lobby(argv[++i]);
+    }
+  }
+
   bool smoke = false;
   // The 3D halves of the physics / movement plugins (2D ones come with the
   // built-in catalog). Offered only; claims switch them on.
@@ -3104,6 +3115,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-vault") == 0) {
       return ts::tombstone::run_vault_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-clan") == 0) {
+      return ts::tombstone::run_clan_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-team") == 0) {
       // Live Team Claims: server + headless editors, convergence, locks.

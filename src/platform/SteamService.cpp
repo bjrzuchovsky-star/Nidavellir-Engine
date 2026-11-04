@@ -30,6 +30,8 @@ bool SteamService::enabled() const {
 #endif
 }
 
+bool SteamService::ready() const { return inited_; }
+
 void SteamService::write_appid_file() const {
 #if defined(NIDAVELLIR_STEAM)
   const std::string dir = core::executable_dir();
