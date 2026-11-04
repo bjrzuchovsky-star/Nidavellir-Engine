@@ -13,6 +13,8 @@ namespace theme {
 namespace {
 
 bool g_light = false;
+enum class Look { Forge, Dusk, Parchment };
+Look g_look = Look::Forge;
 
 constexpr float kPi = 3.14159265358979f;
 
@@ -134,6 +136,28 @@ void apply_colors(const Palette& p) {
   c[ImGuiCol_ModalWindowDimBg] = rgba(8, 6, 4, 170);
 }
 
+// Forge: iron greys, molten orange #E8792B as the accent.
+void apply_forge() {
+  ImGui::StyleColorsDark();
+  apply_metrics(ImGui::GetStyle());
+  Palette p{};
+  p.deep = rgba(16, 17, 19);
+  p.bg = rgba(26, 28, 31);
+  p.bg2 = rgba(34, 36, 40);
+  p.bg3 = rgba(44, 47, 52);
+  p.frame = rgba(38, 40, 45);
+  p.frame_h = rgba(52, 50, 48);
+  p.frame_a = rgba(72, 56, 42);
+  p.border = rgba(72, 74, 80);
+  p.border_soft = rgba(54, 56, 62);
+  p.text = rgba(232, 230, 224);
+  p.text_dis = rgba(154, 152, 146);
+  p.button = rgba(46, 48, 53);
+  p.button_h = rgba(84, 62, 44);
+  p.button_a = rgba(168, 84, 32);
+  apply_colors(p);
+}
+
 // Dusk: deep charcoal with warm stone, amber/gold primary, copper secondary.
 void apply_dark() {
   ImGui::StyleColorsDark();
@@ -181,44 +205,108 @@ void apply_light() {
 }  // namespace
 
 void Apply(const std::string& theme_name) {
-  g_light = (theme_name == "light");
-  if (g_light) {
+  if (theme_name == "light" || theme_name == "parchment") {
+    g_look = Look::Parchment;
+    g_light = true;
     apply_light();
-  } else {
+  } else if (theme_name == "dusk" || theme_name == "dark") {
+    g_look = Look::Dusk;
+    g_light = false;
     apply_dark();
+  } else {
+    g_look = Look::Forge;
+    g_light = false;
+    apply_forge();
   }
 }
 
 bool IsLight() { return g_light; }
 
-ImVec4 Accent() { return g_light ? rgba(170, 106, 16) : rgba(222, 160, 52); }
+ImVec4 Accent() {
+  if (g_look == Look::Parchment) return rgba(170, 106, 16);
+  if (g_look == Look::Dusk) return rgba(222, 160, 52);
+  return rgba(232, 121, 43);  // #E8792B
+}
 ImVec4 AccentHover() {
-  return g_light ? rgba(194, 128, 28) : rgba(240, 186, 88);
+  if (g_look == Look::Parchment) return rgba(194, 128, 28);
+  if (g_look == Look::Dusk) return rgba(240, 186, 88);
+  return rgba(244, 154, 84);
 }
 ImVec4 AccentActive() {
-  return g_light ? rgba(144, 88, 10) : rgba(190, 128, 34);
+  if (g_look == Look::Parchment) return rgba(144, 88, 10);
+  if (g_look == Look::Dusk) return rgba(190, 128, 34);
+  return rgba(196, 90, 24);
 }
 ImVec4 AccentMuted() { return with_alpha(Accent(), 0.55f); }
-ImVec4 Copper() { return g_light ? rgba(150, 70, 34) : rgba(184, 98, 56); }
+ImVec4 Copper() {
+  if (g_look == Look::Parchment) return rgba(150, 70, 34);
+  if (g_look == Look::Dusk) return rgba(184, 98, 56);
+  return rgba(176, 84, 36);
+}
 ImVec4 CopperMuted() { return with_alpha(Copper(), 0.55f); }
-ImVec4 Sand() { return g_light ? rgba(150, 126, 90) : rgba(201, 180, 140); }
-ImVec4 Charcoal() { return g_light ? rgba(58, 48, 40) : rgba(14, 13, 12); }
-ImVec4 Danger() { return g_light ? rgba(160, 36, 32) : rgba(206, 74, 64); }
-ImVec4 Success() { return g_light ? rgba(70, 112, 52) : rgba(138, 176, 104); }
-ImVec4 Warning() { return g_light ? rgba(176, 100, 20) : rgba(236, 176, 86); }
-ImVec4 PanelBg() { return g_light ? rgba(246, 241, 230) : rgba(27, 24, 22); }
-ImVec4 HeaderBg() { return g_light ? rgba(226, 214, 192) : rgba(33, 29, 26); }
-ImVec4 Text() { return g_light ? rgba(40, 32, 26) : rgba(234, 224, 204); }
+ImVec4 Sand() {
+  if (g_look == Look::Parchment) return rgba(150, 126, 90);
+  if (g_look == Look::Dusk) return rgba(201, 180, 140);
+  return rgba(180, 176, 168);
+}
+ImVec4 Charcoal() {
+  if (g_look == Look::Parchment) return rgba(58, 48, 40);
+  if (g_look == Look::Dusk) return rgba(14, 13, 12);
+  return rgba(16, 17, 19);
+}
+ImVec4 Danger() {
+  if (g_look == Look::Parchment) return rgba(160, 36, 32);
+  return rgba(206, 74, 64);
+}
+ImVec4 Success() {
+  if (g_look == Look::Parchment) return rgba(70, 112, 52);
+  if (g_look == Look::Dusk) return rgba(138, 176, 104);
+  return rgba(120, 168, 112);
+}
+ImVec4 Warning() {
+  if (g_look == Look::Parchment) return rgba(176, 100, 20);
+  if (g_look == Look::Dusk) return rgba(236, 176, 86);
+  return rgba(232, 160, 72);
+}
+ImVec4 PanelBg() {
+  if (g_look == Look::Parchment) return rgba(246, 241, 230);
+  if (g_look == Look::Dusk) return rgba(27, 24, 22);
+  return rgba(30, 32, 36);
+}
+ImVec4 HeaderBg() {
+  if (g_look == Look::Parchment) return rgba(226, 214, 192);
+  if (g_look == Look::Dusk) return rgba(33, 29, 26);
+  return rgba(38, 40, 45);
+}
+ImVec4 Text() {
+  if (g_look == Look::Parchment) return rgba(40, 32, 26);
+  if (g_look == Look::Dusk) return rgba(234, 224, 204);
+  return rgba(232, 230, 224);
+}
 ImVec4 TextMuted() {
-  return g_light ? rgba(118, 102, 84) : rgba(148, 136, 116);
+  if (g_look == Look::Parchment) return rgba(118, 102, 84);
+  if (g_look == Look::Dusk) return rgba(148, 136, 116);
+  return rgba(154, 152, 146);
 }
 ImVec4 TextOnAccent() {
-  return g_light ? rgba(255, 249, 238) : rgba(26, 20, 14);
+  if (g_look == Look::Parchment) return rgba(255, 249, 238);
+  if (g_look == Look::Dusk) return rgba(26, 20, 14);
+  return rgba(28, 18, 12);
 }
-ImVec4 Border() { return g_light ? rgba(170, 148, 116) : rgba(74, 62, 50); }
-ImVec4 CanvasBg() { return g_light ? rgba(222, 211, 190) : rgba(17, 16, 15); }
+ImVec4 Border() {
+  if (g_look == Look::Parchment) return rgba(170, 148, 116);
+  if (g_look == Look::Dusk) return rgba(74, 62, 50);
+  return rgba(72, 74, 80);
+}
+ImVec4 CanvasBg() {
+  if (g_look == Look::Parchment) return rgba(222, 211, 190);
+  if (g_look == Look::Dusk) return rgba(17, 16, 15);
+  return rgba(20, 21, 24);
+}
 ImVec4 GridLine() {
-  return g_light ? rgba(150, 130, 100, 90) : rgba(120, 100, 78, 70);
+  if (g_look == Look::Parchment) return rgba(150, 130, 100, 90);
+  if (g_look == Look::Dusk) return rgba(120, 100, 78, 70);
+  return rgba(96, 98, 104, 80);
 }
 
 ImU32 U32(const ImVec4& c, float alpha_mul) {

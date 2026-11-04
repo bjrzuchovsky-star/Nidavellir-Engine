@@ -98,7 +98,7 @@ std::vector<std::string> EditorPlugins::follow_needs(const std::vector<std::stri
       on.push_back(id);
       const plugin::CatalogEntry* e = catalog_->find(id);
       say(LogLevel::Info, "Switched on " + (e ? e->info.name : id) + " (" + id +
-                              "): the scene uses it now. Turn it off in the Trading Post if you "
+                              "): the scene uses it now. Turn it off in the Market if you "
                               "don't want it.");
     } else if (!err.empty()) {
       say(LogLevel::Warn, "Couldn't switch on " + id + ": " + err);
