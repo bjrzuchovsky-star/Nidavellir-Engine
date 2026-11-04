@@ -1,17 +1,17 @@
 # Security and trusting your download
 
-## What TombStone is
+## What Nidavellir Engine is
 
-TombStone Engine is a 2D / 3D / VR game engine and editor for Windows, with Dusk frontier styling. It's built and published by **TombStone Team** from the source at <https://github.com/bjrzuchovsky-star/TombStone_Engine>. Official downloads live on that repository's **Releases** page and nowhere else:
+Nidavellir Engine is a 2D / 3D / VR game engine and editor for Windows, published by **BORENJO Studios** from <https://github.com/bjrzuchovsky-star/Nidavellir-Engine>. Official downloads live on that repository's **Releases** page and nowhere else:
 
 | File | What it is |
 |---|---|
-| `TombStone-<version>-setup.exe` | The full installer (per user, no admin needed) |
-| `TombStone-<version>-update.exe` | Upgrades an existing install in place and keeps your claims, settings and the Vault |
-| `TombStone-<version>-win64.zip` | The same files without an installer |
+| `Nidavellir-<version>-setup.exe` | The full installer (per user, no admin needed) |
+| `Nidavellir-<version>-update.exe` | Upgrades an existing install in place. The installer AppId is unchanged from 0.2.x, so a TombStone install is replaced in the same folder |
+| `Nidavellir-<version>-win64.zip` | The same files without an installer |
 | `SHA256SUMS.txt` | SHA-256 hashes of the three files above |
 
-Every program it installs (`ts_admin.exe`, `ts_client.exe`, `ts_server.exe`, `ts_vault.exe`, `ts_game.exe`) and both installers carry Windows version information: **Company: TombStone Team**, **Product: TombStone Engine**, the version number and a description. Right-click the file, open **Properties > Details** to see them. The programs run as the signed-in user (`asInvoker`) and never ask for administrator rights.
+Every program it installs (`ts_admin.exe`, `ts_client.exe`, `ts_server.exe`, `ts_vault.exe`, `ts_game.exe`) and both installers carry Windows version information: **Company: BORENJO Studios**, **Product: Nidavellir Engine**, the version number and a description. Right-click the file, open **Properties > Details** to see them. The programs run as the signed-in user (`asInvoker`) and never ask for administrator rights.
 
 ## Check a download with SHA256SUMS
 
