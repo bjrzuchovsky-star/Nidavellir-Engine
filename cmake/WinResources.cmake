@@ -1,4 +1,4 @@
-# Windows resources for the shipped executables: VERSIONINFO (TombStone Team,
+# Windows resources for the shipped executables: VERSIONINFO (BORENJO Studios,
 # version from VERSION), the app icon and an application manifest (asInvoker,
 # per-monitor DPI aware, Windows 10/11). No-op off MSVC.
 #   ts_win_resources(<target> "<file description>" [ICON <file.ico> | NO_ICON])

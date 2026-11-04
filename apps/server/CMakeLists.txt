@@ -3,7 +3,7 @@
 add_executable(ts_server
   main.cpp
 )
-ts_win_resources(ts_server "TombStone dedicated game server")
+ts_win_resources(ts_server "Nidavellir Engine dedicated server")
 
 
 target_link_libraries(ts_server

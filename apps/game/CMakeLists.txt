@@ -52,7 +52,7 @@ target_link_libraries(ts_game
 
 target_compile_features(ts_game PRIVATE cxx_std_20)
 # Version info + manifest; the exporter stamps each game's own icon into its copy.
-ts_win_resources(ts_game "TombStone game runtime" NO_ICON)
+ts_win_resources(ts_game "Nidavellir Engine game runtime" NO_ICON)
 
 if(MSVC)
   target_compile_definitions(ts_game PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)

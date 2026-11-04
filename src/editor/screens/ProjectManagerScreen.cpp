@@ -242,7 +242,7 @@ void ProjectManagerScreen::draw_ui() {
     return;
   }
 
-  theme::TitleStrip("Project Manager", "Your claims on the frontier");
+  theme::TitleStrip("Project Manager", "Where games are forged");
   draw_update_banner();
   ux::draw_error_modal();
 

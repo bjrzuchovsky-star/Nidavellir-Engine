@@ -1,10 +1,10 @@
-# Builds a TombStone Engine release for Windows x64:
+# Builds a Nidavellir Engine release for Windows x64:
 #   tools\release\build_release.ps1 [-Out <dir>] [-BuildDir build] [-SkipBuild] [-SkipSmoke] [-TestInstall]
 # 1. Release build (VS 2022 x64), 2. ts_admin --smoke (TS_AUDIO=null),
 # 3. stages the engine (ts_admin, ts_game, ts_server, ts_client, C++ runtime
 #    DLLs, plugins, templates, samples, fonts, docs, script SDK, licences),
-# 4. writes TombStone-<VERSION>-win64.zip, TombStone-<VERSION>-setup.exe (the
-#    full installer) and TombStone-<VERSION>-update.exe (same AppId, upgrades
+# 4. writes Nidavellir-<VERSION>-win64.zip, Nidavellir-<VERSION>-setup.exe (the
+#    full installer) and Nidavellir-<VERSION>-update.exe (same AppId, upgrades
 #    an install in place with a minimal wizard; the editor's update notifier
 #    prefers it), both from tools\release\tombstone.iss, plus SHA256SUMS.txt.
 # -TestInstall then installs the setup silently per-user into a temp folder,
@@ -27,7 +27,7 @@ if (-not $Out) { $Out = Join-Path $root "release\$version" }
 New-Item -ItemType Directory -Force $Out | Out-Null
 $Out = (Resolve-Path $Out).Path
 $build = if ([IO.Path]::IsPathRooted($BuildDir)) { $BuildDir } else { Join-Path $root $BuildDir }
-"TombStone Engine $version -> $Out"
+"Nidavellir Engine $version -> $Out"
 
 function Step($name) { "`n== $name ==" }
 # Native tools write progress to stderr; under "Stop" Windows PowerShell 5
@@ -81,7 +81,7 @@ if (-not $SkipSmoke) {
 
 # --- 3. Stage -----------------------------------------------------------------
 Step "Stage"
-$name = "TombStone-$version-win64"
+$name = "Nidavellir-$version-win64"
 $stageRoot = Join-Path $Out "stage"
 $stage = Join-Path $stageRoot $name
 if (Test-Path $stageRoot) { Remove-Item -Recurse -Force $stageRoot }   # our own previous output
@@ -145,12 +145,12 @@ Step "Installer"
 Native { & (Join-Path $root "tools\installer\install_inno.ps1") | Out-Host }
 $iscc = Find-Iscc
 if (-not $iscc) { throw "ISCC.exe not found (tools\installer\install_inno.ps1 or TS_ISCC)" }
-$setup = Join-Path $Out "TombStone-$version-setup.exe"
+$setup = Join-Path $Out "Nidavellir-$version-setup.exe"
 if (Test-Path $setup) { Remove-Item -Force $setup }
 Native { & $iscc /Q "/DAppVersion=$version" "/DStageDir=$stage" "/DOutDir=$Out" (Join-Path $PSScriptRoot "tombstone.iss") }
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $setup)) { throw "ISCC failed ($LASTEXITCODE)" }
 "setup: $setup"
-$update = Join-Path $Out "TombStone-$version-update.exe"
+$update = Join-Path $Out "Nidavellir-$version-update.exe"
 if (Test-Path $update) { Remove-Item -Force $update }
 Native { & $iscc /Q "/DAppVersion=$version" "/DStageDir=$stage" "/DOutDir=$Out" "/DUpdate=1" (Join-Path $PSScriptRoot "tombstone.iss") }
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $update)) { throw "ISCC (update) failed ($LASTEXITCODE)" }
@@ -174,12 +174,12 @@ if ($TestInstall) {
   $p = Start-Process $setup -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
     "/CURRENTUSER", "/DIR=`"$app`"", "/MERGETASKS=`"desktopicon`"", "/LOG=`"$t\install.log`""
   if ($p.ExitCode -ne 0) { throw "silent install exit code $($p.ExitCode)" }
-  $menu = Join-Path ([Environment]::GetFolderPath("Programs")) "TombStone Engine"
-  $desk = Join-Path ([Environment]::GetFolderPath("Desktop")) "TombStone Editor.lnk"
+  $menu = Join-Path ([Environment]::GetFolderPath("Programs")) "Nidavellir Engine"
+  $desk = Join-Path ([Environment]::GetFolderPath("Desktop")) "Nidavellir Editor.lnk"
   foreach ($f in "$app\ts_admin.exe", "$app\ts_game.exe", "$app\ts_server.exe", "$app\ts_client.exe",
                  "$app\vcruntime140.dll", "$app\templates", "$app\samples", "$app\plugins", "$app\fonts",
                  "$app\docs\README.md", "$app\sdk\include\tombstone\script_sdk.h", "$app\unins000.exe",
-                 "$menu\TombStone Editor.lnk", $desk) {
+                 "$menu\Nidavellir Editor.lnk", $desk) {
     if (-not (Test-Path $f)) { throw "after install, missing $f" }
   }
   $gpu = Select-String -Path "$t\install.log" -Pattern "GPU check" | Select -Last 1
@@ -211,7 +211,7 @@ if ($TestInstall) {
   # The uninstaller hands over to a temp copy; wait for it to finish.
   for ($i = 0; $i -lt 120 -and (Test-Path "$app\ts_admin.exe"); $i++) { Start-Sleep 1 }
   Start-Sleep 2
-  foreach ($f in "$app\ts_admin.exe", "$app\templates", "$menu\TombStone Editor.lnk", $desk) {
+  foreach ($f in "$app\ts_admin.exe", "$app\templates", "$menu\Nidavellir Editor.lnk", $desk) {
     if (Test-Path $f) { throw "after uninstall, still there: $f" }
   }
   $reg = Get-ChildItem HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall |

@@ -1,10 +1,10 @@
-; TombStone Engine + editor: Windows setup (Inno Setup 6).
+; Nidavellir Engine + editor: Windows setup (Inno Setup 6).
 ; Built by tools/release/build_release.ps1, which stages the files and
 ; passes /DAppVersion=<VERSION> /DStageDir=<stage> /DOutDir=<out>.
 ; Per-user by default (no admin); "Install for all users" is offered on the
 ; first page or with /ALLUSERS.
 ;
-; /DUpdate=1 builds TombStone-<ver>-update.exe instead: the same AppId and
+; /DUpdate=1 builds Nidavellir-<ver>-update.exe instead: the same AppId and
 ; files, so it upgrades an existing install in place (same folder, tasks and
 ; privileges mode; Documents\TombStone with claims, settings and the Vault is
 ; never touched), with a minimal wizard: no welcome, licence, folder or task
@@ -20,11 +20,12 @@
   #define OutDir "."
 #endif
 
-#define AppName "TombStone Engine"
-#define AppPublisher "TombStone Team"
-#define AppUrl "https://github.com/bjrzuchovsky-star/TombStone_Engine"
+#define AppName "Nidavellir Engine"
+#define AppPublisher "BORENJO Studios"
+#define AppUrl "https://github.com/bjrzuchovsky-star/Nidavellir-Engine"
 
 [Setup]
+; Kept from TombStone 0.2.x so Nidavellir-<ver>-update.exe upgrades that install in place.
 AppId={{6F1D3B0A-7C52-4E1B-9A3D-5B2C8E4F7A10}
 AppName={#AppName}
 AppVersion={#AppVersion}
@@ -41,19 +42,19 @@ VersionInfoDescription={#AppName} {#AppVersion} setup
 #endif
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#AppVersion}
-VersionInfoCopyright=Copyright (c) 2026 Brenden Rzuchoveky / TombStone Engine. All rights reserved.
+VersionInfoCopyright=Copyright (c) 2026 BORENJO Studios / Nidavellir Engine. All rights reserved.
 ; The Dusk tombstone icon (resources\windows\make_icons.py), same as ts_admin.exe.
 SetupIconFile=..\..\resources\windows\tombstone.ico
-DefaultDirName={autopf}\TombStone Engine
+DefaultDirName={autopf}\Nidavellir Engine
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\ts_admin.exe,0
 UninstallDisplayName={#AppName} {#AppVersion}
 OutputDir={#OutDir}
 #ifdef Update
-OutputBaseFilename=TombStone-{#AppVersion}-update
+OutputBaseFilename=Nidavellir-{#AppVersion}-update
 #else
-OutputBaseFilename=TombStone-{#AppVersion}-setup
+OutputBaseFilename=Nidavellir-{#AppVersion}-setup
 #endif
 Compression=lzma2/max
 SolidCompression=yes
@@ -77,7 +78,7 @@ DisableWelcomePage=yes
 DisableDirPage=auto
 DisableReadyPage=yes
 ; The editor closes itself after starting this; Restart Manager handles
-; any other TombStone app still open.
+; any other Nidavellir Engine app still open.
 CloseApplications=yes
 RestartApplications=no
 #else
@@ -100,15 +101,15 @@ Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs c
 Name: "{userdocs}\TombStone"; Flags: uninsneveruninstall
 
 [Icons]
-Name: "{autoprograms}\{#AppName}\TombStone Editor"; Filename: "{app}\ts_admin.exe"; WorkingDir: "{userdocs}\TombStone"; Comment: "TombStone Engine editor (ts_admin)"
-Name: "{autoprograms}\{#AppName}\TombStone Client"; Filename: "{app}\ts_client.exe"; WorkingDir: "{userdocs}\TombStone"; Comment: "Multiplayer client (ts_client)"
+Name: "{autoprograms}\{#AppName}\Nidavellir Editor"; Filename: "{app}\ts_admin.exe"; WorkingDir: "{userdocs}\TombStone"; Comment: "Nidavellir Engine editor (ts_admin)"
+Name: "{autoprograms}\{#AppName}\Nidavellir Client"; Filename: "{app}\ts_client.exe"; WorkingDir: "{userdocs}\TombStone"; Comment: "Multiplayer client (ts_client)"
 Name: "{autoprograms}\{#AppName}\Documentation"; Filename: "{app}\docs\README.md"
 Name: "{autoprograms}\{#AppName}\Samples"; Filename: "{app}\samples"
 Name: "{autoprograms}\{#AppName}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\TombStone Editor"; Filename: "{app}\ts_admin.exe"; WorkingDir: "{userdocs}\TombStone"; Tasks: desktopicon
+Name: "{autodesktop}\Nidavellir Editor"; Filename: "{app}\ts_admin.exe"; WorkingDir: "{userdocs}\TombStone"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\ts_admin.exe"; WorkingDir: "{userdocs}\TombStone"; Description: "{cm:LaunchProgram,TombStone Editor}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\ts_admin.exe"; WorkingDir: "{userdocs}\TombStone"; Description: "{cm:LaunchProgram,Nidavellir Editor}"; Flags: nowait postinstall skipifsilent
 
 [InstallDelete]
 ; Templates retired since an earlier version. [Files] only adds and replaces,
@@ -144,7 +145,7 @@ begin
             SW_HIDE, ewWaitUntilTerminated, Code) then begin
       Log('GPU check exit code ' + IntToStr(Code));
       if Code <> 0 then
-        SuppressibleMsgBox('TombStone Engine needs a graphics card with OpenGL 3.3 or newer, and this PC''s driver did not offer it.'
+        SuppressibleMsgBox('Nidavellir Engine needs a graphics card with OpenGL 3.3 or newer, and this PC''s driver did not offer it.'
           + #13#10#13#10 + 'The engine is installed, but the editor may not start. Updating the graphics driver (NVIDIA, AMD or Intel) usually fixes this.',
           mbInformation, MB_OK, IDOK);
     end else
