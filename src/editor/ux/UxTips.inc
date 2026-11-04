@@ -503,6 +503,6 @@
 {"Menu/Add component", "Give the selection a component (collision, light, sound...)."},
 {"Menu/Add component/*", "Add this component to the selected objects (undoable)."},
 {"Menu/Host from my editor...", "Open this claim to your posse on the LAN: others join with this PC's address and the UDP port (24650)."},
-{"Menu/Join a posse...", "Ride a team claim with others: a host's address, or your Vault server with your API key."},
+{"Menu/Join clan...", "Join a clan on a host's address, or your Vault server with your API key."},
 {"Menu/Users", "Show the Team panel: who is riding, their colours, scenes and locks."},
 {"Menu/Leave", "Ride off: release your locks and stop syncing. Your scene stays as it is."},

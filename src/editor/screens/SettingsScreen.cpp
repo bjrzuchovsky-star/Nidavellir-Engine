@@ -119,12 +119,12 @@ void SettingsScreen::draw_ui() {
     }
   }
 
-  section_header("Rider", "account");
+  section_header("Wanderer", "account");
   ImGui::SetNextItemWidth(-1);
-  ImGui::InputTextWithHint("##username", "Default rider name", username_buf_,
+  ImGui::InputTextWithHint("##username", "Default name", username_buf_,
                            sizeof(username_buf_));
-  ImGui::Checkbox("Ride in on Dev login at startup", &draft_.auto_login_dev);
-  theme::StatusInfo("Skips the gate and signs in as the saved rider.");
+  ImGui::Checkbox("Sign in with Dev login at startup", &draft_.auto_login_dev);
+  theme::StatusInfo("Skips the gate and signs in as the saved name.");
 
   section_header("Lamplight", "appearance");
   const char* themes[] = {"Dusk  (charcoal + amber)",

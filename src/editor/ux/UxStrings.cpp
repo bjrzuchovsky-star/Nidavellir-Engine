@@ -118,9 +118,9 @@ const std::vector<WalkStep>& walkthrough_steps(bool three_d) {
       {"", "", "Play",
        "Press F5 (or Ctrl+P) to ride the scene, F5 again to stop. Stopping puts everything back "
        "the way it was."},
-      {"Plugins", "Plugins (Outfitter)", "Trading Post",
-       "The Trading Post has plugins, templates and assets for your claim. Open it from the "
-       "Plugins panel (View > Plugins): Visit the Trading Post..."},
+      {"Plugins", "Plugins (Outfitter)", "Market",
+       "The Market has plugins, templates and assets for your realm. Open it from the "
+       "Plugins panel (View > Plugins): Visit the Market..."},
       {"Vault", "Vault", "Vault",
        "The Vault keeps assets you share between claims. Send an asset there from its right-click "
        "menu; pull it into another claim later."},
@@ -144,9 +144,9 @@ const std::vector<WalkStep>& walkthrough_steps(bool three_d) {
        "ones in; drag a model into the viewport to place it."},
       {"", "", "Play",
        "Press F5 to play the scene, F5 again to stop; the scene goes back to how it was."},
-      {"Plugins###Plugins3D", "Plugins", "Trading Post",
-       "The Trading Post has plugins, templates and assets ready to use. Open it from the Plugins "
-       "panel (View > Plugins): Visit the Trading Post..."},
+      {"Plugins###Plugins3D", "Plugins", "Market",
+       "The Market has plugins, templates and assets ready to use. Open it from the Plugins "
+       "panel (View > Plugins): Visit the Market..."},
       {"Vault###Vault3D", "Vault", "Vault",
        "Assets shared between all your claims. Send one there from the Asset Browser's "
        "right-click menu."},
@@ -160,7 +160,7 @@ const std::vector<WalkStep>& walkthrough_steps(bool three_d) {
 const std::vector<SettingsSection>& settings_sections() {
   static const std::vector<SettingsSection> s = {
       {"Territory", "Where claims are kept on disk"},
-      {"Rider", "Your name and dev login"},
+      {"Wanderer", "Your name and dev login"},
       {"Lamplight", "Theme"},
       {"Supply Run", "Update checks"},
       {"Tools", "Blender, script editor, Source content folders"},

@@ -465,7 +465,7 @@ bool TradingPost::install(const std::string& id, std::string* error) {
   std::function<bool(const std::string&)> go = [&](const std::string& want) -> bool {
     const StoreEntry* e = find(want);
     if (!e) {
-      if (error) *error = "No plugin \"" + want + "\" in the Trading Post";
+      if (error) *error = "No plugin \"" + want + "\" in the Market";
       return false;
     }
     if (e->source == Source::ComingSoon) {

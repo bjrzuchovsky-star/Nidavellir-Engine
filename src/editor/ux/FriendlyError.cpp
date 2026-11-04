@@ -200,11 +200,11 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
       break;
     case ErrorKind::PluginMissing:
       f.title = "A plugin is missing";
-      f.what = "This claim asks for a plugin" + s + " that isn't installed, so it rides on without it.";
-      f.why = "The claim was made on another PC, or the plugin was uninstalled or failed to download.";
-      f.fix = "Open the Trading Post and install (hitch) the plugin, or switch it off for this claim.";
+      f.what = "This realm asks for a plugin" + s + " that isn't installed, so it runs on without it.";
+      f.why = "The realm was made on another PC, or the plugin was uninstalled or failed to download.";
+      f.fix = "Open the Market and install the plugin, or switch it off for this realm.";
       f.fix_action = "Panel/Trading Post";
-      f.fix_label = "Open Trading Post";
+      f.fix_label = "Open Market";
       break;
     case ErrorKind::ExportFailed:
       f.title = "Export didn't finish";

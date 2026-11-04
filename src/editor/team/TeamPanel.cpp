@@ -90,7 +90,7 @@ void draw_menu(TeamSession& t, bool* show_panel) {
     t.ui.mode = 1;
     *show_panel = true;
   }
-  if (ux::MenuItem("Join a posse...", nullptr, false, !active)) {
+  if (ux::MenuItem("Join clan...", nullptr, false, !active)) {
     t.ui.mode = 0;
     *show_panel = true;
   }
@@ -110,7 +110,7 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
     return;
   }
   team::TeamClient& c = t.client();
-  theme::SectionHeader("Team Claim", "ride this claim with your posse");
+  theme::SectionHeader("Clan", "edit this realm with your clan");
   ImGui::TextWrapped("%s", t.status_line().c_str());
   if (!c.warning().empty()) ImGui::TextColored(theme::Warning(), "%s", c.warning().c_str());
   if (!t.ui.last_error.empty()) ImGui::TextColored(theme::Danger(), "%s", t.ui.last_error.c_str());

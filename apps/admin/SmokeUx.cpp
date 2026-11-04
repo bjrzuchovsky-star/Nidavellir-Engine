@@ -441,7 +441,7 @@ int check_errors(Ctx& ctx, const fs::path& root, int* cases) {
       editor::friendly_vault_error("x", true).fix_label != "Vault settings")
     return fail("Vault error card isn't the friendly one");
   if (editor::friendly_trading_post_error("Example Spurs: download failed: could not resolve example.invalid").title !=
-      "Couldn't reach the Trading Post")
+      "Couldn't reach the Market")
     return fail("Trading Post error card isn't the friendly one");
 
   // Scene version, for real: a scene.json from the future opens with the
@@ -564,12 +564,12 @@ int check_tour_and_layouts(Ctx& ctx, Screen& s, bool three_d, int* steps_out) {
     saw_add |= body.find("Add Component") != std::string::npos;
     saw_import |= body.find("mport") != std::string::npos;
     saw_play |= body.find("Play") != std::string::npos;
-    saw_post |= body.find("Trading Post") != std::string::npos;
+    saw_post |= body.find("Market") != std::string::npos;
     saw_vault |= body.find("Vault") != std::string::npos;
     if (i + 1 < w.step_count()) w.next();
   }
   if (!(saw_gizmo && saw_add && saw_import && saw_play && saw_post && saw_vault))
-    return fail(t + ": walkthrough misses a stop (viewport G/R/S, Add Component, import, Play, Trading Post, Vault)");
+    return fail(t + ": walkthrough misses a stop (viewport G/R/S, Add Component, import, Play, Market, Vault)");
   w.back();
   if (w.step() != w.step_count() - 2) return fail(t + ": walkthrough Back");
   // Skip without "Don't show again": comes back next launch.

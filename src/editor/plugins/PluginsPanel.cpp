@@ -111,7 +111,7 @@ PluginsPanelResult draw_plugins_panel(EditorPlugins& plugins,
 
   // The Trading Post: install more plugins, then hitch them here.
   static TradingPostUi trading_post;
-  if (theme::CopperButton("Visit the Trading Post...", ImVec2(-1.0f, 0))) trading_post.open = true;
+  if (theme::CopperButton("Visit the Market...", ImVec2(-1.0f, 0))) trading_post.open = true;
   {
     TradingPostTarget target;
     target.plugins = &plugins;

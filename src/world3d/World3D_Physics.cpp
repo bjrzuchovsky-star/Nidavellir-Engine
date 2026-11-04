@@ -328,7 +328,7 @@ void World3D::phys_build() {
     if (wants) {
       post(LogLevel::Warn, "physics",
            "This scene has rigid bodies, grabbables or joints but no 3D physics plugin is on; "
-           "they stay put. Switch on Jolt Physics (ts.physics.jolt) in the Trading Post.");
+           "they stay put. Switch on Jolt Physics (ts.physics.jolt) in the Market.");
     }
     return;
   }

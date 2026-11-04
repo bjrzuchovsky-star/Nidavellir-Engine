@@ -147,7 +147,7 @@ void draw_sources(TradingPostUi& ui) {
 }  // namespace
 
 ux::FriendlyError friendly_trading_post_error(const std::string& raw) {
-  ux::FriendlyError f = ux::explain(raw, ux::ErrorKind::Unknown, "Trading Post");
+  ux::FriendlyError f = ux::explain(raw, ux::ErrorKind::Unknown, "Market");
   std::string l = raw;
   for (char& c : l) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   const bool net = l.find("download failed") != std::string::npos || l.find("could not reach") != std::string::npos ||
@@ -162,7 +162,7 @@ ux::FriendlyError friendly_trading_post_error(const std::string& raw) {
     f.fix = "Refresh and try again. If it keeps failing, check the source's signing key under Sources...";
   } else if (net || f.kind == ux::ErrorKind::Unknown || f.kind == ux::ErrorKind::UpdateCheck) {
     if (net) {
-      f.title = "Couldn't reach the Trading Post";
+      f.title = "Couldn't reach the Market";
       f.what = "A plugin source didn't answer, so the list may be out of date and nothing new was installed.";
       f.why = "Usually no internet connection, a proxy or firewall, or a source address that has moved.";
       f.fix = "Check your connection and press Refresh. Under Sources... you can remove or fix a source that's gone.";
@@ -293,7 +293,7 @@ TradingPostResult draw_trading_post_window(TradingPostUi& ui, const TradingPostT
                                   std::min(680.0f, vp->WorkSize.y - 40.0f)),
                            ImGuiCond_Appearing);
   ImGui::SetNextWindowFocus();
-  if (!ImGui::Begin("Trading Post###TradingPost", &ui.open, ImGuiWindowFlags_NoCollapse)) {
+  if (!ImGui::Begin("Market###TradingPost", &ui.open, ImGuiWindowFlags_NoCollapse)) {
     ImGui::End();
     return result;
   }
@@ -302,7 +302,7 @@ TradingPostResult draw_trading_post_window(TradingPostUi& ui, const TradingPostT
   std::snprintf(caption, sizeof(caption), "%zu goods on the shelf%s%s", post.entries().size(),
                 target.project ? "  |  outfitting " : "",
                 target.project ? target.project->name.c_str() : "");
-  theme::SectionHeader("Trading Post", caption);
+  theme::SectionHeader("Market", caption);
   ImGui::SetNextItemWidth(320.0f);
   ImGui::InputTextWithHint("##tpsearch", "Search plugins (name, tag, author)", ui.search,
                            sizeof(ui.search));

@@ -45,16 +45,16 @@ const Spec kSpecs[] = {
      "the Shipyard's Box2D hulls. Off: bodies stay put; riders, tiles and colliders keep the "
      "core collision.",
      plugin::kType2D},
-    {kRider3DId, "Rider 3D (first / third person)",
+    {kRider3DId, "Wanderer (first / third person)",
      "The 3D Player controller: WASD / stick walking, jump, first- or third-person view, look "
      "keys and right stick, mouse look with Sensitivity, Invert Y, Smoothing and cursor "
      "capture. Also rides a VR claim flat on the desktop.",
      plugin::kType3D | plugin::kTypeVR},
-    {kTopDownId, "Top-down Rider (2D)",
+    {kTopDownId, "Top-down Wanderer (2D)",
      "The 2D top-down Player controller: eight-way stick / WASD movement with wall sliding and "
      "Face mouse aiming (cursor or right stick).",
      plugin::kType2D},
-    {kPlatformerId, "Platformer Rider (2D)",
+    {kPlatformerId, "Platformer Wanderer (2D)",
      "The 2D platformer Player controller: walk, gravity, jump off the ground, ceiling bumps.",
      plugin::kType2D},
 };
