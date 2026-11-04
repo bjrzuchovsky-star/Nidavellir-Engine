@@ -1,6 +1,7 @@
 #include "plugins/rider3d/Rider3D.h"
 #include "plugins/split/Split.h"
 #include "core/Engine.h"
+#include "platform/SteamService.h"
 #include "profiler/Profiler.h"
 #include "editor/ux/FriendlyError.h"
 #include "editor/ux/Walkthrough.h"
@@ -2867,6 +2868,13 @@ int run_assets_shot(const char* png) {
 }
 
 int run_imgui_app() {
+  struct SteamGuard {
+    SteamGuard() { ok = ts::tombstone::steam::SteamService::instance().init(); }
+    ~SteamGuard() { ts::tombstone::steam::SteamService::instance().shutdown(); }
+    bool ok = true;
+  } steam_guard;
+  if (!steam_guard.ok) return 0;
+
   if (!glfwInit()) {
     std::cerr << "glfwInit failed\n";
     return 1;
@@ -2939,6 +2947,7 @@ int run_imgui_app() {
     }
     profiler::Profiler::get().begin_frame();
     glfwPollEvents();
+    ts::tombstone::steam::SteamService::instance().run_callbacks();
 
     editor::StringsPanel::apply_pending_fonts();  // non-Latin glyphs for the Strings panel
     ImGui_ImplOpenGL3_NewFrame();
@@ -2958,11 +2967,15 @@ int run_imgui_app() {
       last_theme = flow.settings().theme;
     }
 
-    // Window title follows the open project ("TombStone Admin | My Claim").
+    // Window title follows the open realm. A Steam build adds the persona.
     std::string title = editor::brand::kWindowTitle;
     if (flow.current_state() == AppState::Editor2D && flow.active_project()) {
       title = std::string(editor::brand::kWindowTitlePrefix) +
               flow.active_project()->name;
+    }
+    if (const char* who = ts::tombstone::steam::SteamService::instance().persona(); who && *who) {
+      title += " | ";
+      title += who;
     }
     if (title != last_title) {
       glfwSetWindowTitle(window, title.c_str());
