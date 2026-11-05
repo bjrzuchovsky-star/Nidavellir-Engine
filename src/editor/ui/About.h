@@ -3,6 +3,7 @@
 // Help > About. The lines are the same strings as src/core/Brand.h.
 
 #include "core/Brand.h"
+#include "editor/ux/Actions.h"
 
 #include <imgui.h>
 
@@ -12,7 +13,7 @@ namespace editor {
 namespace about {
 
 inline void draw_menu_item() {
-  if (ImGui::MenuItem("About")) ImGui::OpenPopup("##AboutNidavellir");
+  if (ux::MenuItem("About")) ImGui::OpenPopup("##AboutNidavellir");
   if (ImGui::BeginPopupModal("##AboutNidavellir", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::TextUnformatted(brand::kProduct);
     ImGui::TextUnformatted(brand::kCompany);

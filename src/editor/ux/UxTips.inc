@@ -328,6 +328,7 @@
 {"Menu/Sprite Slicer...", "Cut a sprite sheet into frames."},
 {"Menu/Back to Projects", "Save and return to the Project Manager."},
 {"Menu/Back to Claims", "Save and return to the Project Manager."},
+{"Menu/About", "Nidavellir Engine, published by BORENJO Studios."},
 {"Menu/Quit", "Save and close TombStone."},
 {"Menu/Undo", "Undo the last change."},
 {"Menu/Redo", "Redo what you just undid."},
