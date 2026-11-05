@@ -23,7 +23,7 @@
 // hide, align, drop to ground, Alt+drag copies, context menus.
 // Every edit is one undo step (Ctrl+Z / Ctrl+Y) and autosaves scene.json
 // (v9). Play (F5) rides the scene in a World3D copy; Stop restores it.
-// VR claims ("dimension": "vr", Editor3DScreen_VR.cpp): Play runs the
+// VR realms ("dimension": "vr", Editor3DScreen_VR.cpp): Play runs the
 // scene in VR mode through the desktop simulator, "Preview in headset"
 // through OpenXR (falls back to the simulator), with a Headset Mirror
 // window showing both eyes; inspector has the VR Rig / Grabbable
@@ -550,7 +550,7 @@ class Editor3DScreen final : public IScreen {
   void open_asset_browser();
   // Pull a Vault item dropped on the viewport, then place it there.
   void drop_vault_item(const std::string& item, const render3d::Vec3& pos);
-  // The Vault (asset library shared by every claim).
+  // The Vault (asset library shared by every realm).
   VaultPanel vault_panel_;
   bool show_vault_ = true;
   bool show_prefabs_ = true;

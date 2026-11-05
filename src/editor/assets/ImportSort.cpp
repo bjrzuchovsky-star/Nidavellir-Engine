@@ -276,7 +276,7 @@ bool import_files(const std::string& claim_dir, const std::vector<std::string>& 
   for (const std::string& s : sources) {
     const fs::path p = norm(fs::u8path(s));
     if (is_under(p, root)) {
-      out->notes.push_back(p.filename().string() + " is already in this claim (use the Asset Browser to move it)");
+      out->notes.push_back(p.filename().string() + " is already in this realm (use the Asset Browser to move it)");
       continue;
     }
     if (fs::is_directory(p, ec)) {

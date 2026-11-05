@@ -266,7 +266,7 @@ void ProjectManagerScreen::draw_ui() {
     ImGui::Dummy(ImVec2(0, 36));
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 c = ImGui::GetCursorScreenPos();
-    theme::TombstoneMark(dl, ImVec2(c.x + w * 0.5f, c.y), 56.0f,
+    theme::RuneMark(dl, ImVec2(c.x + w * 0.5f, c.y), 56.0f,
                          theme::U32(theme::Border()),
                          theme::U32(theme::Charcoal(), 0.7f));
     ImGui::Dummy(ImVec2(w, 68.0f));

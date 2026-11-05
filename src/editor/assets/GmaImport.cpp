@@ -105,7 +105,7 @@ bool extract(const std::string& claim_dir, const Plan& plan, const std::string& 
   std::replace(out->dest.begin(), out->dest.end(), '\\', '/');
   while (!out->dest.empty() && out->dest.back() == '/') out->dest.pop_back();
   if (gma::safe_relative_path(out->dest).empty()) {
-    out->errors.push_back("destination must be a folder inside the claim: " + out->dest);
+    out->errors.push_back("destination must be a folder inside the realm: " + out->dest);
     return false;
   }
   // A selected model brings its siblings.
@@ -216,7 +216,7 @@ bool draw_source_materials(assetdb::AssetDb& db, const assetdb::AssetDb::Entry& 
     const std::string name = picking_for->substr(e.rel.size() + 1);
     picking_for->clear();
     if (!file.empty()) {
-      // Relative to the model's folder when inside the claim (moves with it).
+      // Relative to the model's folder when inside the realm (moves with it).
       std::error_code ec;
       const fs::path model_dir = fs::u8path(db.abs(e.rel)).parent_path();
       const fs::path rel = fs::relative(fs::u8path(file), model_dir, ec);

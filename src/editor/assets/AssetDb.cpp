@@ -389,7 +389,7 @@ AssetDb::MigrationReport AssetDb::migrate() {
   }
   std::sort(sidecars.begin(), sidecars.end());
   adopt_sidecars(sidecars, &rep);
-  // Layout stamp: the claim's metadata now lives in the folder.
+  // Layout stamp: the realm's metadata now lives in the folder.
   const fs::path stamp = root / fs::u8path(am::kLayoutFile);
   std::string text;
   Value v;

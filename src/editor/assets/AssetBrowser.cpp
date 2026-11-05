@@ -403,7 +403,7 @@ void AssetBrowser::draw() {
   if (ImGui::BeginChild("##grid", ImVec2(0, body_h), ImGuiChildFlags_Borders)) draw_grid();
   ImGui::EndChild();
   grid_hovered_ = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-  accept_vault_drop();  // a Vault tile dropped on the grid: pull it into the claim
+  accept_vault_drop();  // a Vault tile dropped on the grid: pull it into the realm
   if (!selected_.empty()) {
     if (ImGui::BeginChild("##details", ImVec2(0, 0), ImGuiChildFlags_Borders)) draw_details();
     ImGui::EndChild();
@@ -424,7 +424,7 @@ void AssetBrowser::draw() {
     orphans_popup_ = false;
   }
   if (ImGui::BeginPopupModal("Orphaned asset metadata", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::TextUnformatted("These .meta files belong to assets that are no longer in the claim:");
+    ImGui::TextUnformatted("These .meta files belong to assets that are no longer in the realm:");
     const std::size_t show = std::min<std::size_t>(orphans_.size(), 12);
     for (std::size_t i = 0; i < show; ++i) ImGui::BulletText("%s", orphans_[i].c_str());
     if (orphans_.size() > show) ImGui::TextDisabled("... and %zu more", orphans_.size() - show);
@@ -455,7 +455,7 @@ void AssetBrowser::draw() {
   if (!confirm_delete_.empty() && !ImGui::IsPopupOpen("Delete asset?###ts_asset_delete"))
     ImGui::OpenPopup("Delete asset?###ts_asset_delete");
   if (ImGui::BeginPopupModal("Delete asset?###ts_asset_delete", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::Text("Delete %s from the claim?", confirm_delete_.c_str());
+    ImGui::Text("Delete %s from the realm?", confirm_delete_.c_str());
     ImGui::TextDisabled("The file and its .meta are removed from disk. Undo can't bring them back.");
     if (theme::DangerButton("Delete")) {
       std::vector<assetdb::Ref> refs;

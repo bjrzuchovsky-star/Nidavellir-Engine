@@ -4,7 +4,7 @@
 // supported format - glTF, Source .mdl, FBX / OBJ / DAE... see
 // render3d/ModelImport.h - sounds, fonts) gets a .meta holding a stable
 // GUID, its import settings and what the importer found. The .meta files
-// live in the claim's hidden metadata folder, mirroring the asset paths
+// live in the realm's hidden metadata folder, mirroring the asset paths
 // (core/AssetMeta.h):
 //
 //   assets/Textures/crate.png  ->  .tombstone/meta/assets/Textures/crate.png.meta
@@ -133,7 +133,7 @@ class AssetDb {
   };
 
   void set_importer(Importer importer) { importer_ = std::move(importer); }
-  // Opens the claim and runs migrate() (legacy sidecars -> metadata folder).
+  // Opens the realm and runs migrate() (legacy sidecars -> metadata folder).
   void open(const std::string& project_dir);
   // Moves sidecar .meta files next to assets into .tombstone/meta (GUIDs
   // kept), with a backup and a log. Safe to call again (no-op).

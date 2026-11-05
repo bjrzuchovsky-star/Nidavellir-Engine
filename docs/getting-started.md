@@ -61,7 +61,7 @@ With the Visual Studio generator, binaries go under `build/apps/<app>/<Config>/`
 
 1. Run `ts_admin`. Settings live in `./TombStoneConfig/settings.json`, and projects default to `./TombStoneProjects/`. Both paths are relative to the working directory.
 2. At Login, use **Dev login**.
-3. In the Project Manager, use **+ New Claim...** and pick a template (see [projects and templates](projects-and-templates.md)).
+3. In the Project Manager, use **+ New Realm...** and pick a template (see [projects and templates](projects-and-templates.md)).
 4. Press **F5** in the editor to play. Use **Launch Game** to start `ts_game` on the project.
 
 ## Smoke tests

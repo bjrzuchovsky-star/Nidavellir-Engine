@@ -74,7 +74,7 @@ std::string to_rel(const fs::path& root, const std::string& abs) {
 
 // A Vault / lock file path on disk. A .meta is named by its logical
 // sidecar path ("assets/a.png.meta", what libraries hold since the first
-// Vault and what older claims had on disk) and lives in the claim's
+// Vault and what older claims had on disk) and lives in the realm's
 // metadata folder (core/AssetMeta.h); a legacy sidecar is still found.
 fs::path disk_path(const fs::path& root, const std::string& rel) {
   if (!am::is_meta_rel(rel)) return root / fs::u8path(rel);
@@ -82,7 +82,7 @@ fs::path disk_path(const fs::path& root, const std::string& rel) {
   return fs::u8path(found.empty() ? am::meta_path(root.string(), am::asset_of(rel)) : found);
 }
 
-// Library paths from a claim that kept metadata in ".tombstone/meta/..."
+// Library paths from a realm that kept metadata in ".tombstone/meta/..."
 // read as the logical "<asset>.meta".
 std::string logical_rel(const std::string& rel) {
   const std::string store = std::string(am::kMetaDir) + "/";
@@ -633,7 +633,7 @@ bool pull_one(PullCtx& c, const std::string& id, int version, bool is_root, std:
   return true;
 }
 
-// Sorted pulls: where a new item's files land in this claim. A model and
+// Sorted pulls: where a new item's files land in this realm. A model and
 // the textures it brings keep their layout relative to each other under
 // assets/Models/<Name>/; textures, sounds, fonts on their own go to their
 // type folder. Items already here, and prefabs (which name their parts by

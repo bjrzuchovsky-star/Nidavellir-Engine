@@ -1,7 +1,7 @@
 #pragma once
 
 // The project side of The Vault: what "Send to Vault", "Pull", "Update"
-// and ts_admin --vault do to a claim. Headless (no ImGui); the Vault panel
+// and ts_admin --vault do to a realm. Headless (no ImGui); the Vault panel
 // runs these on a worker thread.
 //
 // Push: the asset (or prefab) and everything it needs become library
@@ -14,7 +14,7 @@
 //
 // Pull: copies the files and the .meta with the same GUID to the same
 // project-relative paths (or where that GUID already lives in this
-// project), so scenes and prefabs that name them work in every claim.
+// project), so scenes and prefabs that name them work in every realm.
 // Recorded in <project>/.vault/lock.json (origin, version, pin, hashes).
 
 #include "editor/assets/AssetDb.h"
@@ -95,10 +95,10 @@ struct PullOptions {
   int version = 0;     // 0 = latest
   bool force = false;  // overwrite files changed in this project since the last pull
   bool pin = false;    // keep this version when updating everything
-  // New items land in type folders when the claim sorts imports
+  // New items land in type folders when the realm sorts imports
   // (editor/assets/ImportSort.h): a model with its textures in
   // assets/Models/<Name>/, a texture in assets/Textures/... Prefabs and
-  // items this claim already holds keep their paths.
+  // items this realm already holds keep their paths.
   bool sort = true;
 };
 

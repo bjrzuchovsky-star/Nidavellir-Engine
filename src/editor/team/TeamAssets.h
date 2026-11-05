@@ -47,7 +47,7 @@ std::string team_meta_asset(const std::string& rel);  // its asset ("assets/..."
 
 struct TeamAssetPass {
   // In (copies: the pass never touches the session).
-  std::string root;                                   // claim folder
+  std::string root;                                   // realm folder
   std::map<std::string, team::AssetRef> session;      // confirmed assets
   std::map<std::string, TeamLocalFile> files;         // last scan
   std::map<std::string, std::string> synced;          // path -> sha the session confirmed here

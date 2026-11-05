@@ -9,6 +9,8 @@ namespace tombstone {
 // editor's locks are released, late joiners catch up from snapshot + tail,
 // the version guard refuses mismatched scene formats.
 int run_team_smoke();
+// Two in-process peers over loopback, plus chunk resume. Also part of --smoke.
+int run_asset_sync_smoke();
 
 }  // namespace tombstone
 }  // namespace ts

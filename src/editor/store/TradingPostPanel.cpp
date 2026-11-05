@@ -198,9 +198,9 @@ std::string trading_post_entry_tip(const store::StoreEntry& e, bool hitched) {
   } else if (e.update_available) {
     t += "Update available (" + e.installed_version + " installed). Select it, then Update.";
   } else if (hitched) {
-    t += "Hitched to this claim. Untick it in the details to switch it off.";
+    t += "Hitched to this realm. Untick it in the details to switch it off.";
   } else if (e.installed || e.source == store::Source::BuiltIn) {
-    t += "Installed. Select it, then tick Hitched to use it in this claim.";
+    t += "Installed. Select it, then tick Hitched to use it in this realm.";
   } else {
     t += "Select it, then Install (downloads are checked against their SHA-256).";
   }
@@ -430,7 +430,7 @@ TradingPostResult draw_trading_post_window(TradingPostUi& ui, const TradingPostT
         const char* label = e->update_available ? "Update" : "Install";
         const bool clicked = theme::PrimaryButton(label, ImVec2(120, 0));
         if (ImGui::IsItemHovered())
-          ux::SetTooltip("%s", e->update_available ? "Download and install the newer version." : "Download and install into the plugin cache. Then hitch it to a claim.");
+          ux::SetTooltip("%s", e->update_available ? "Download and install the newer version." : "Download and install into the plugin cache. Then hitch it to a realm.");
         if (clicked) {
           std::string err;
           const std::string id = e->id;
@@ -447,11 +447,11 @@ TradingPostResult draw_trading_post_window(TradingPostUi& ui, const TradingPostT
       }
       if (e && e->installed && !e->installed_dir.empty()) {
         if (theme::DangerButton("Uninstall", ImVec2(110, 0))) ImGui::OpenPopup("Uninstall plugin?###ts_uninstall");
-        if (ImGui::IsItemHovered()) ux::SetTooltip("Remove it from the plugin cache (asks first). Claims that use it will warn until you reinstall.");
+        if (ImGui::IsItemHovered()) ux::SetTooltip("Remove it from the plugin cache (asks first). Realms that use it will warn until you reinstall.");
         bool clicked = false;
         if (ImGui::BeginPopupModal("Uninstall plugin?###ts_uninstall", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
           ImGui::Text("Uninstall %s?", e->name.empty() ? e->id.c_str() : e->name.c_str());
-          ImGui::TextDisabled("Claims that use it will warn until you install it again.");
+          ImGui::TextDisabled("Realms that use it will warn until you install it again.");
           if (theme::DangerButton("Uninstall")) {
             clicked = true;
             ImGui::CloseCurrentPopup();
@@ -480,7 +480,7 @@ TradingPostResult draw_trading_post_window(TradingPostUi& ui, const TradingPostT
         const bool in_wagon = !target.plugins || target.plugins->catalog().find(e->id) != nullptr;
         ImGui::BeginDisabled(!usable || (!on && !in_wagon));
         bool want = on;
-        if (ImGui::Checkbox(target.project ? "Hitched to this claim" : "Enabled", &want)) {
+        if (ImGui::Checkbox(target.project ? "Hitched to this realm" : "Enabled", &want)) {
           std::string err;
           bool ok = false;
           if (target.plugins && target.plugins->is_open()) {
@@ -499,8 +499,8 @@ TradingPostResult draw_trading_post_window(TradingPostUi& ui, const TradingPostT
         }
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-          ux::SetTooltip("%s", !usable ? "Install it first, then tick to use it in this claim."
-                                       : "Tick to use this plugin in the claim (its needs come along too); untick to switch it off.");
+          ux::SetTooltip("%s", !usable ? "Install it first, then tick to use it in this realm."
+                                       : "Tick to use this plugin in the realm (its needs come along too); untick to switch it off.");
         if (!usable) {
           ImGui::SameLine();
           ImGui::TextDisabled("install it first");

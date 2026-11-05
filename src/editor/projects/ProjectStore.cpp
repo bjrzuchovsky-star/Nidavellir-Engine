@@ -332,7 +332,7 @@ bool ProjectStore::refresh() {
 
   // Samples are templates now (templates/ + TemplateStore): nothing is
   // seeded into the projects root any more. Roots seeded by older builds
-  // keep their sample claims and the old .*.seeded marker files, which
+  // keep their sample realms and the old .*.seeded marker files, which
   // nothing reads.
   return true;
 }

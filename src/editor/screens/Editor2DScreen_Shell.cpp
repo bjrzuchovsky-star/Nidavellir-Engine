@@ -166,7 +166,7 @@ void Editor2DScreen::draw_menu_bar() {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float h = ImGui::GetFrameHeight();
-    theme::TombstoneMark(dl, ImVec2(p.x + 7.0f, p.y + 3.0f), h - 6.0f,
+    theme::RuneMark(dl, ImVec2(p.x + 7.0f, p.y + 3.0f), h - 6.0f,
                          theme::U32(theme::Sand()),
                          theme::U32(theme::Charcoal(), 0.85f));
     ImGui::Dummy(ImVec2(16.0f, 0.0f));
@@ -221,7 +221,7 @@ void Editor2DScreen::draw_menus() {
       SpriteSlicerPanel::get().open(project_.path);
     }
     ImGui::Separator();
-    if (ux::MenuItem("Back to Projects")) {
+    if (ux::MenuItem("Back to Realms")) {
       leave_or_ask(false);
     }
     if (ux::MenuItem("Quit", "Alt+F4")) {
@@ -584,7 +584,7 @@ void Editor2DScreen::draw_status_bar() {
   {
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float h = ImGui::GetTextLineHeight();
-    theme::TombstoneMark(dl, ImVec2(p.x + 6.0f, p.y), h, theme::U32(theme::Sand()),
+    theme::RuneMark(dl, ImVec2(p.x + 6.0f, p.y), h, theme::U32(theme::Sand()),
                          theme::U32(theme::Charcoal(), 0.85f));
     ImGui::Dummy(ImVec2(14.0f, h));
     ImGui::SameLine();
@@ -1140,7 +1140,7 @@ void Editor2DScreen::setup_field_guide() {
   ux_.refresh_recent([this](const ux::RecentItem& r) {
     if (r.kind == "claim") {
       if (r.path == project_.path) {
-        note("Already riding this claim");
+        note("Already riding this realm");
         return;
       }
       ux::request_open_claim(r.path);
@@ -1153,7 +1153,7 @@ void Editor2DScreen::setup_field_guide() {
 }
 
 // --smoke-ux: every right-click menu body under its scope. Items only record
-// themselves in a harvest, so nothing here changes the claim.
+// themselves in a harvest, so nothing here changes the realm.
 void Editor2DScreen::draw_context_menus_for_audit() {
   const std::uint64_t saved_id = context_id_;
   const bool saved_vp = context_in_viewport_;

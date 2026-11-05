@@ -158,8 +158,11 @@ bool SessionBackend::upload(const std::string& path, const std::string& sha, std
     return false;
   }
   std::uint64_t off = 0;
+  int resumes = 0;
   std::string buf(kTeamBlobChunk, '\0');
   do {
+    f.clear();
+    f.seekg(static_cast<std::streamoff>(off));
     f.read(buf.data(), static_cast<std::streamsize>(buf.size()));
     const std::size_t n = static_cast<std::size_t>(f.gcount());
     Value req = Value::object();
@@ -169,7 +172,16 @@ bool SessionBackend::upload(const std::string& path, const std::string& sha, std
     req.set("off", Value::number(static_cast<double>(off)));
     req.set("data", Value::string(team::base64_encode(buf.substr(0, n))));
     Value r;
-    if (!rpc_->call(std::move(req), &r, kTimeout, error)) return false;
+    if (!rpc_->call(std::move(req), &r, kTimeout, error)) {
+      // The host kept a partial file. Continue from the byte it names.
+      const double have = r.num("have", -1);
+      if (have >= 0 && resumes < 8) {
+        off = static_cast<std::uint64_t>(have);
+        ++resumes;
+        continue;
+      }
+      return false;
+    }
     off += n;
     if (r.flag("done", false)) return true;
     if (n == 0) break;

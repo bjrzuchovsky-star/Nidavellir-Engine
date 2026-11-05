@@ -148,7 +148,7 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
   std::vector<Job> jobs;
   std::set<std::string> handled;
 
-  // 2. Deletes. A file the session and this claim agreed on ...
+  // 2. Deletes. A file the session and this realm agreed on ...
   for (auto it = p.synced.begin(); it != p.synced.end();) {
     const std::string rel = it->first;
     const std::string sha = it->second;
@@ -215,6 +215,12 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
     }
     auto sent = p.sent.find(rel);
     if (sent != p.sent.end() && sent->second == f.sha) continue;  // waiting for the commit
+    // Both sides edited since the last agreed copy: the writer who syncs
+    // last keeps the file, and the clan is told.
+    if (!meta && s != p.session.end() && known != p.synced.end() && known->second != f.sha &&
+        s->second.sha256 != known->second && s->second.sha256 != f.sha) {
+      p.notes.push_back("Both sides changed " + rel + ". This copy is the one the clan keeps.");
+    }
     jobs.push_back({true, rel, team::AssetRef{f.sha, f.size}});
   }
   for (const auto& [rel, a] : p.session) {

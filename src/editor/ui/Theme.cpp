@@ -419,6 +419,20 @@ void Divider() {
   ImGui::Dummy(ImVec2(w, 12.0f));
 }
 
+void RuneMark(ImDrawList* dl, const ImVec2& top_center, float height, ImU32 steel,
+              ImU32 ember) {
+  const float h = height * 0.86f;
+  const float w = h * 0.42f;
+  const float cx = top_center.x;
+  const float top = top_center.y + h * 0.08f;
+  const float bot = top_center.y + h;
+  const float t = std::max(1.6f, w * 0.18f);
+  dl->AddRectFilled(ImVec2(cx - t * 0.5f, top), ImVec2(cx + t * 0.5f, bot), steel);
+  dl->AddLine(ImVec2(cx, top + h * 0.28f), ImVec2(cx - w, top + h * 0.62f), ember, t);
+  dl->AddLine(ImVec2(cx, top + h * 0.28f), ImVec2(cx + w, top + h * 0.62f), ember, t);
+  dl->AddRectFilled(ImVec2(cx - w * 0.7f, bot), ImVec2(cx + w * 0.7f, bot + height * 0.08f), steel);
+}
+
 void TombstoneMark(ImDrawList* dl, const ImVec2& top_center, float height,
                    ImU32 stone, ImU32 engrave) {
   const float stone_h = height * 0.86f;
@@ -484,7 +498,7 @@ void TitleStrip(const char* title, const char* subtitle) {
   dl->AddRectFilled(ImVec2(p.x, p.y + h), ImVec2(p.x + w, p.y + h + 1.0f),
                     U32(Copper(), 0.6f));
 
-  TombstoneMark(dl, ImVec2(p.x + 22.0f, p.y + 8.0f), h - 16.0f, U32(Sand()),
+  RuneMark(dl, ImVec2(p.x + 22.0f, p.y + 8.0f), h - 16.0f, U32(Sand()),
                 U32(Charcoal(), 0.85f));
 
   const float title_px = 20.0f;
@@ -636,7 +650,7 @@ void BrandBlock(const char* title, const char* subtitle, float avail_width) {
   const ImVec2 cursor = ImGui::GetCursorScreenPos();
   const float mark_h = 46.0f;
   const float cx = cursor.x + avail_width * 0.5f;
-  TombstoneMark(dl, ImVec2(cx, cursor.y), mark_h, U32(Sand()),
+  RuneMark(dl, ImVec2(cx, cursor.y), mark_h, U32(Sand()),
                 U32(Charcoal(), 0.85f));
   ImGui::Dummy(ImVec2(avail_width, mark_h + 10.0f));
 
@@ -658,7 +672,7 @@ void BrandHero(const char* title, const char* tagline, float avail_width) {
   const ImVec2 cursor = ImGui::GetCursorScreenPos();
   const float mark_h = 64.0f;
   const float cx = cursor.x + avail_width * 0.5f;
-  TombstoneMark(dl, ImVec2(cx, cursor.y), mark_h, U32(Sand()),
+  RuneMark(dl, ImVec2(cx, cursor.y), mark_h, U32(Sand()),
                 U32(Charcoal(), 0.85f));
   ImGui::Dummy(ImVec2(avail_width, mark_h + 14.0f));
 

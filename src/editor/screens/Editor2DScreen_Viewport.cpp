@@ -304,7 +304,7 @@ void Editor2DScreen::draw_viewport() {
         ux::SetTooltip("Drop on an entity to attach the script");
       }
     }
-    // A Vault tile: pull it into the claim, then place it here.
+    // A Vault tile: pull it into the realm, then place it here.
     if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kVaultItemPayload)) {
       tool_ = TileTool::Select;
       drop_vault_item(static_cast<const char*>(payload->Data), mouse_world.x, mouse_world.y);

@@ -243,7 +243,7 @@ void SettingsScreen::draw_ui() {
       ImGui::PopID();
     }
     theme::StatusInfo("Source engine formats (.mdl/.vtf/.vmt/.gma): materials are looked up here after the model's "
-                      "own folders and the claim. Only read, never copied. Import only content you have the rights to.");
+                      "own folders and the realm. Only read, never copied. Import only content you have the rights to.");
   }
 
   section_header("Field Guide", "tooltips + walkthroughs");

@@ -1,9 +1,9 @@
 #pragma once
 
 // Template thumbnails rendered by the engine (ts_admin --bake-templates,
-// --bake-thumbnails). 2D claims go through the runtime's own draw list
+// --bake-thumbnails). 2D realms go through the runtime's own draw list
 // (runtime::World after a few Play ticks) onto a CPU canvas with the
-// editor's tile grid; 3D claims through the GL renderer (SceneView) in a
+// editor's tile grid; 3D realms through the GL renderer (SceneView) in a
 // hidden context, so 3D thumbnails need a display (Xvfb on Linux).
 
 #include <string>
@@ -17,7 +17,7 @@ namespace template_thumbs {
 constexpr int kWidth = 480;
 constexpr int kHeight = 250;
 
-// Renders the claim in `project_dir` to `png`. False with the reason.
+// Renders the realm in `project_dir` to `png`. False with the reason.
 bool render_project(const std::string& project_dir, const std::string& png,
                     std::string* error);
 

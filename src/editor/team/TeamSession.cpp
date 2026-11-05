@@ -258,7 +258,7 @@ bool TeamSession::join(const TeamJoinSettings& s, std::string* error) {
   o.wrap_transport = s.wrap_transport;
   files_url_ = s.vault_url;
   files_key_ = s.key;
-  // Seeds a session only if nobody is riding this claim yet (ts_vault).
+  // Seeds a session only if nobody is riding this realm yet (ts_vault).
   if (o.claim != "*") o.seed[binding_->scene_key()] = binding_->capture();
   o.rejoin = saved_rejoin_;
   loaded_ = false;
@@ -500,7 +500,7 @@ void TeamSession::start_reconnect() {
   reconnect_tries_ = 0;
   auto it = client_.confirmed().find(binding_->scene_key());
   rejoin_base_ = it == client_.confirmed().end() ? team::SceneDoc{} : it->second;
-  // Ride back in to the claim we were on, as ourselves.
+  // Ride back in to the realm we were on, as ourselves.
   last_join_.claim = client_.session().str("claim", last_join_.claim);
   last_join_.rejoin = client_.rejoin_token();
   asset_sync_.cancel_and_wait();
@@ -534,7 +534,7 @@ void TeamSession::tick_reconnect(double dt) {
   ++reconnect_tries_;
   team::JoinOptions o = last_join_;
   o.seed.clear();
-  // If the host lost the claim (restarted without its state), ours seeds it.
+  // If the host lost the realm (restarted without its state), ours seeds it.
   o.seed[binding_->scene_key()] = binding_->capture();
   std::string err;
   client_.join(o, &err);
@@ -691,7 +691,7 @@ void TeamSession::tick(double dt) {
       held_.clear();
       first_asset_pass_ = true;
       asset_clock_ = 2.0;  // first file pass on the next tick
-      notes_.push_back(client_.session().str("claim_name", "the claim") + ": you ride as " +
+      notes_.push_back(client_.session().str("claim_name", "the realm") + ": you ride as " +
                        client_.my_name() + (client_.rode_back() ? " (welcome back)." : "."));
       save_last_ride();
       send_presence(true);
@@ -754,7 +754,7 @@ void TeamSession::tick(double dt) {
   // 3b. Project files through the Vault (a worker does the hauling).
   finish_asset_pass();
   asset_clock_ += dt;
-  if (assets_ && !busy && asset_clock_ >= 2.0 && !asset_sync_.running()) {
+  if (assets_ && !busy && asset_clock_ >= 0.35 && !asset_sync_.running()) {
     asset_clock_ = 0.0;
     sync_assets();
   }
@@ -895,6 +895,8 @@ bool TeamSession::sync_assets() {
   p.can_write = client_.can_write();
   if (!asset_sync_.start(std::move(p), assets_)) return false;
   first_asset_pass_ = false;
+  asset_sync_state_ = "sending";
+  asset_sync_detail_.clear();
   return true;
 }
 
@@ -911,8 +913,14 @@ void TeamSession::finish_asset_pass() {
   }
   if (!r.error.empty()) {
     files_error_ = "Files can't travel " + files_route_ + ": " + r.error;
+    asset_sync_state_ = "failed";
+    asset_sync_detail_ = r.error;
   } else if (assets_) {
     files_error_.clear();
+    if (r.up || r.down || r.removed || !r.ops.empty()) {
+      asset_sync_state_ = "synced";
+      asset_sync_detail_.clear();
+    }
   }
   for (const std::string& rel : r.held_back) {
     if (held_noted_.insert(rel).second) {

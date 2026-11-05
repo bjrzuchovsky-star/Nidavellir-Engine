@@ -1,3 +1,11 @@
+# Clans (live team editing)
+
+A file that appears under `assets/` (a drag-drop, or a save from another tool) is hashed with its `.meta` and sent to the clan within a fraction of a second. Peers fetch anything missing or changed over the session, check the SHA-256, write it locally and hot-reload open references. Deletes and moves (a delete plus a new path) travel the same way. A late joiner diffs the manifest on join. If both sides edit one file, the copy that syncs last is kept and the clan is told. A failed send shows **failed** next to each member, with the reason and **Retry file sync**. **Reload from disk** and **Rescan assets** stay on the Realm menu as manual fallbacks.
+
+Large files go in 48 KB chunks. If a chunk is refused because the host already has part of the file, the sender continues from that byte.
+
+Steam builds carry the same bytes over `ISteamNetworkingMessages` (the relay). Without Steam, they go over the LAN UDP session. The engine version is checked when you join a Steam clan; a mismatch names both versions and does not open the session.
+
 # Live Team Claims (design, 0.2.0)
 
 > Status: **stage 1 done** on `feature/team-claims` (ready for review for 0.2.0, not merged).

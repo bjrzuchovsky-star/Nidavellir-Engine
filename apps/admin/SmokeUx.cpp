@@ -784,7 +784,7 @@ int run_ux_smoke() {
     e.on_enter();
     ctx.frames(3, [&] { e.on_update(1.0f / 60.0f); });
     if (int r = check_registry(ctx, e.field_guide(), "3D",
-                               {"Claim/Save scene", "Edit/Duplicate", "Edit/Undo", "Create/Cube"},
+                               {"Realm/Save scene", "Edit/Duplicate", "Edit/Undo", "Create/Cube"},
                                "View/Grid", [&] { return e.scene().show_grid; }))
       return r;
     menu3d = static_cast<int>(e.field_guide().actions().harvested("menu").size());

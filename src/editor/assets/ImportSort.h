@@ -1,6 +1,6 @@
 #pragma once
 
-// Auto-sorted imports. Files brought into a claim from outside (dropped on
+// Auto-sorted imports. Files brought into a realm from outside (dropped on
 // the editor window, Asset Browser > Import..., the 2D Supply Wagon image
 // import, a Vault pull) land in type folders by default:
 //
@@ -10,7 +10,7 @@
 //                                paths keep working)
 //   assets/Textures/  assets/Materials/  assets/Audio/  assets/Fonts/
 //   assets/Scenes/  assets/Animations/  assets/Other/
-//   prefabs/  scripts/           the claim's existing top-level folders
+//   prefabs/  scripts/           the realm's existing top-level folders
 //                                (prefab library, script builds)
 //
 // Per-claim settings in <claim>/.tombstone/import.json:
@@ -55,7 +55,7 @@ struct Result {
   std::vector<std::string> errors;
 };
 
-// Copies outside files (or whole folders) into the claim. dest_folder ""
+// Copies outside files (or whole folders) into the realm. dest_folder ""
 // = sorted (or assets/ with sorting off); else exactly that folder
 // (project-relative), keeping a dropped folder's structure. Existing
 // files are never overwritten (name_2.png, Models/crate_2/). False when
