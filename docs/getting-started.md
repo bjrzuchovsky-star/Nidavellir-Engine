@@ -74,6 +74,20 @@ ts_admin --shot-size 1920x1080 --shot-clean --gizmo-shot 3d out.png
 
 `--shot-size WxH` (64 to 8192 on each side) is the framebuffer those modes write. `--shot-clean` hides Telegraph lines and the 2D status path when they mention internal folders such as `.tombstone/meta`. The flags can sit anywhere on the command line. Smoke pixel checks (`--smoke-3d`, `--smoke-fx`, and the rest) keep their own small test resolutions.
 
+Store pages want the editor around a full scene. `--showcase-shot` uses the Forge theme and the same `--shot-size` / `--shot-clean` flags:
+
+```
+ts_admin --shot-size 1920x1080 --shot-clean --showcase-shot terrain out.png
+ts_admin --shot-size 1920x1080 --shot-clean --showcase-shot props out.png
+ts_admin --shot-size 1920x1080 --shot-clean --showcase-shot fx out.png
+ts_admin --shot-size 1920x1080 --shot-clean --showcase-shot graph out.png
+ts_admin --shot-size 1920x1080 --shot-clean --showcase-shot anim out.png
+ts_admin --shot-size 1920x1080 --shot-clean --showcase-shot survival out.png
+ts_admin --shot-size 1920x1080 --shot-clean --showcase-shot vr out.png
+```
+
+Scenes: `terrain` (forest, haze, terrain panel), `props` (ghost town, selection and gizmo), `fx` (night torches), `graph` (multi-node Brand Book), `anim` (skinned rig and the animation timeline), `survival` (2D frontier with a painted tilemap), `vr` (haunted saloon in the desktop simulator).
+
 ## Smoke tests
 
 `ts_admin --smoke` runs the whole headless suite. Single areas, from the flags parsed in `apps/admin/main.cpp`:

@@ -766,6 +766,13 @@ render3d::Camera3D Editor3DScreen::editor_camera() const {
   return cam;
 }
 
+void Editor3DScreen::look_at(const render3d::Vec3& target, float yaw, float pitch, float distance) {
+  scene_.editor_camera.target = target;
+  scene_.editor_camera.yaw = yaw;
+  scene_.editor_camera.pitch = std::clamp(pitch, -89.0f, 89.0f);
+  scene_.editor_camera.distance = std::clamp(distance, 0.5f, 800.0f);
+}
+
 void Editor3DScreen::orbit(float dyaw, float dpitch) {
   look_through_ = 0;  // moving the view leaves the camera
   scene_.editor_camera.yaw = std::fmod(scene_.editor_camera.yaw + dyaw, 360.0f);

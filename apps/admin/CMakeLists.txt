@@ -1,5 +1,6 @@
 add_executable(ts_admin
   main.cpp
+  ShowcaseShot.cpp
   SmokeRuntime.cpp
   SmokeCollision.cpp
   SmokeAnimation.cpp

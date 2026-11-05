@@ -180,6 +180,8 @@ class Editor3DScreen final : public IScreen {
 
   // ---- Viewport (pixels in a vw x vh view) ---------------------------------
   render3d::Camera3D editor_camera() const;
+  // Orbit camera for headless shots. Yaw and pitch are degrees.
+  void look_at(const render3d::Vec3& target, float yaw, float pitch, float distance);
   // Screen position and size of the view drawn last frame.
   void viewport_screen_rect(float* x, float* y, float* w, float* h) const {
     *x = viewport_x_;

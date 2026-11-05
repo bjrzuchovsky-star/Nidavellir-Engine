@@ -82,6 +82,7 @@
 #include "SmokeUx.h"
 #include "editor/vault/VaultPanel.h"
 int run_terrain_shot(const std::string& png);
+int run_showcase_shot(const std::string& scene, const std::string& png);
 #include "store/TradingPost.h"
 
 #include <imgui.h>
@@ -3252,6 +3253,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--terrain-shot") == 0 && i + 1 < argc) {
       return run_terrain_shot(argv[i + 1]);
+    }
+    if (std::strcmp(argv[i], "--showcase-shot") == 0 && i + 2 < argc) {
+      return run_showcase_shot(argv[i + 1], argv[i + 2]);
     }
     if (std::strcmp(argv[i], "--smoke-tiles") == 0) {
       return run_tiles_smoke();
