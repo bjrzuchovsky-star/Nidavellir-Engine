@@ -5,6 +5,7 @@
 #include "platform/ClanDirectory.h"
 #include "profiler/Profiler.h"
 #include "editor/ux/FriendlyError.h"
+#include "editor/ux/ShotOpts.h"
 #include "editor/ux/Walkthrough.h"
 #include "editor/audio/EditorAudio.h"
 #include "editor/tools/AutoTilePanel.h"
@@ -106,6 +107,22 @@ int run_terrain_shot(const std::string& png);
 #include <sstream>
 #include <string>
 #include <vector>
+
+namespace {
+
+// --shot-size replaces each capture's historical window. Only then do we
+// ask for a 1:1 framebuffer, so an unset flag leaves Mac retina shots as
+// they were.
+void shot_window_px(int fallback_w, int fallback_h, int* w, int* h) {
+  ts::tombstone::editor::shot::resolve(fallback_w, fallback_h, w, h);
+  if (ts::tombstone::editor::shot::size_set()) {
+#ifdef GLFW_COCOA_RETINA_FRAMEBUFFER
+    glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_FALSE);
+#endif
+  }
+}
+
+}  // namespace
 
 namespace {
 
@@ -1547,7 +1564,8 @@ int run_tiles_shot(std::string project, const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-  const int W = 1600, H = 940;
+  int W = 0, H = 0;
+  shot_window_px(1600, 940, &W, &H);
   GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Tiles", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
@@ -1657,7 +1675,9 @@ int run_gizmo_shot(const std::string& which, const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(1600, 940, "Nidavellir Gizmos", nullptr, nullptr);
+  int W = 0, H = 0;
+  shot_window_px(1600, 940, &W, &H);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Gizmos", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -1804,7 +1824,9 @@ int run_camera_shot(const std::string& which, const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(1600, 940, "Nidavellir Cameras", nullptr, nullptr);
+  int W = 0, H = 0;
+  shot_window_px(1600, 940, &W, &H);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Cameras", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -1938,7 +1960,9 @@ int run_ux_shot(const std::string& which, const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(1600, 940, "Nidavellir Field Guide", nullptr, nullptr);
+  int W = 0, H = 0;
+  shot_window_px(1600, 940, &W, &H);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Field Guide", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2045,7 +2069,9 @@ int run_scripts_shot(const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(1600, 1000, "Nidavellir Scripts", nullptr, nullptr);
+  int W = 0, H = 0;
+  shot_window_px(1600, 1000, &W, &H);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Scripts", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2156,7 +2182,8 @@ int run_templates_shot(const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  const int W = 1280, H = 1000;
+  int W = 0, H = 0;
+  shot_window_px(1280, 1000, &W, &H);
   GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Engine | New Realm", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
@@ -2254,7 +2281,8 @@ int run_freight_shot(std::string project, const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  const int W = 720, H = 940;
+  int W = 0, H = 0;
+  shot_window_px(720, 940, &W, &H);
   GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Freight Office", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
@@ -2333,7 +2361,8 @@ int run_team_shot(const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  const int W = 1280, H = 800;
+  int W = 0, H = 0;
+  shot_window_px(1280, 800, &W, &H);
   GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Engine | Clan", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
@@ -2482,7 +2511,8 @@ int run_vault_shot(const char* png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  const int W = 1280, H = 720;
+  int W = 0, H = 0;
+  shot_window_px(1280, 720, &W, &H);
   GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Vault", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
@@ -2584,7 +2614,8 @@ int run_vault_pm_shot(const char* png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  const int W = 1280, H = 760;
+  int W = 0, H = 0;
+  shot_window_px(1280, 760, &W, &H);
   GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Vault", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
@@ -2708,7 +2739,8 @@ int run_trading_post_shot(const char* png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  const int W = 1280, H = 760;
+  int W = 0, H = 0;
+  shot_window_px(1280, 760, &W, &H);
   GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Market", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
@@ -2797,7 +2829,8 @@ int run_assets_shot(const char* png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  const int W = 1280, H = 720;
+  int W = 0, H = 0;
+  shot_window_px(1280, 720, &W, &H);
   GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Asset Browser", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
@@ -3040,6 +3073,29 @@ ts::tombstone::plugins::ProviderHold& smoke_provider_hold() {
 }
 
 int main(int argc, char** argv) {
+  // Global capture flags, stripped so they can sit anywhere on the command
+  // line without being read as a shot's project path or output file.
+  {
+    namespace shot = ts::tombstone::editor::shot;
+    int kept = 1;
+    for (int i = 1; i < argc; ++i) {
+      if (std::strcmp(argv[i], "--shot-clean") == 0) {
+        shot::g_clean = true;
+        continue;
+      }
+      if (std::strcmp(argv[i], "--shot-size") == 0) {
+        if (i + 1 >= argc || !shot::parse_size(argv[i + 1], &shot::g_width, &shot::g_height)) {
+          std::cerr << "--shot-size wants WxH, for example 1920x1080 (64 to 8192 on each side)\n";
+          return 1;
+        }
+        ++i;
+        continue;
+      }
+      argv[kept++] = argv[i];
+    }
+    argc = kept;
+  }
+
   for (int i = 1; i < argc; ++i) {
     if (std::strcmp(argv[i], "+connect_lobby") == 0 && i + 1 < argc) {
       ts::tombstone::steam::note_connect_lobby(argv[++i]);

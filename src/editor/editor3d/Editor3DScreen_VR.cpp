@@ -4,6 +4,7 @@
 
 #include "weather/Weather3D.h"
 #include "editor/editor3d/Editor3DScreen.h"
+#include "editor/ux/ShotOpts.h"
 
 #include "editor/ui/Theme.h"
 
@@ -37,6 +38,7 @@ bool Editor3DScreen::vr_preview_start(bool simulator) {
   gizmo_cancel();
   ensure_renderer();
   world_.set_log_sink([this](const runtime::LogEntry& e) {
+    if (shot::hide_log_line(e.text)) return;
     log_.push_back(e);
     while (log_.size() > 400) log_.pop_front();
   });

@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <filesystem>
 #include "editor/ux/FriendlyError.h"
+#include "editor/ux/ShotOpts.h"
 #include "editor/ux/EmptyState.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
@@ -373,7 +374,7 @@ void AssetBrowser::draw() {
     ImGui::EndDisabled();
     if (changed) set_import_settings(st);
     ImGui::Separator();
-    ImGui::TextDisabled("Metadata (.meta) lives in .tombstone/meta");
+    if (!shot::clean()) ImGui::TextDisabled("Metadata (.meta) lives in .tombstone/meta");
     ImGui::EndPopup();
   }
   if (gma_dialog_.draw()) {

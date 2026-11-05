@@ -3,6 +3,7 @@
 #include "platform/ClanDirectory.h"
 
 #include "editor/ux/Actions.h"
+#include "editor/ux/ShotOpts.h"
 
 #include "editor/editor3d/Editor3DScreen.h"
 #include "editor/screens/Editor2DScreen.h"
@@ -205,7 +206,8 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
       ImGui::InputText("Vault API key", t.ui.key, sizeof(t.ui.key), ImGuiInputTextFlags_Password);
       ImGui::TextDisabled("Others join with this PC's address and the port.");
       ImGui::TextDisabled("No Vault URL: the posse's files travel over the session itself.");
-      ImGui::TextDisabled("The session is kept in .tombstone/team/host: hosting again picks it up.");
+      ImGui::TextDisabled(shot::clean() ? "The session is kept with this realm: hosting again picks it up."
+                                     : "The session is kept in .tombstone/team/host: hosting again picks it up.");
       const bool back = t.has_last_ride() && t.last_ride_hosted();
       if (ImGui::Button(back ? "Open the realm again (Host)" : "Open the realm (Host)")) host_now(t);
     }

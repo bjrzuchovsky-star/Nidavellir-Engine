@@ -2,6 +2,7 @@
 // sand layers painted by slope and height), pines, oaks, bushes, rocks and
 // grass, a breeze and light haze, rendered offscreen by the GL renderer.
 #include "core/PngWrite.h"
+#include "editor/ux/ShotOpts.h"
 #include "render3d/GlRenderer3D.h"
 #include "render3d/HiddenGl.h"
 #include "render3d/Renderer3D.h"
@@ -38,7 +39,8 @@ int run_terrain_shot(const std::string& png) {
     return 1;
   }
   renderer->set_offscreen(true);
-  const int W = 1600, H = 900;
+  int W = 1600, H = 900;
+  editor::shot::resolve(1600, 900, &W, &H);
 
   const fs::path dir = fs::temp_directory_path() / "ts_terrain_shot";
   std::error_code ec;

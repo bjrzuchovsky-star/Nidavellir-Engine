@@ -1,5 +1,6 @@
 #include "editor/editor3d/Editor3DScreen.h"
 #include "editor/ux/FriendlyError.h"
+#include "editor/ux/ShotOpts.h"
 #include "editor/plugins/PluginNeeds.h"
 #include "terrain/TerrainView.h"
 #include "plugins/profiler/ProfilerPlugin.h"
@@ -50,6 +51,7 @@ Editor3DScreen::~Editor3DScreen() {
 }
 
 void Editor3DScreen::note(const std::string& text, LogLevel level) {
+  if (shot::hide_log_line(text)) return;
   runtime::LogEntry e;
   e.level = level;
   e.channel = "editor";
@@ -69,6 +71,7 @@ void Editor3DScreen::on_enter() {
                   e.level = level;
                   e.channel = "plugins";
                   e.text = text;
+                  if (shot::hide_log_line(e.text)) return;
                   log_.push_back(std::move(e));
                 });
   std::string err;
@@ -911,6 +914,7 @@ bool Editor3DScreen::play_start() {
   world_.set_vr(false);
   gizmo_cancel();
   world_.set_log_sink([this](const runtime::LogEntry& e) {
+    if (shot::hide_log_line(e.text)) return;
     log_.push_back(e);
     while (log_.size() > 400) log_.pop_front();
   });

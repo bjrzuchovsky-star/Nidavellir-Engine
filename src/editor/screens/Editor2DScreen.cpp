@@ -1,5 +1,6 @@
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/ux/FriendlyError.h"
+#include "editor/ux/ShotOpts.h"
 #include "editor/plugins/PluginNeeds.h"
 
 #include "editor/assets/AssetLibrary.h"
@@ -240,6 +241,7 @@ bool Editor2DScreen::save_scene(std::string* error_out) {
 }
 
 void Editor2DScreen::note(std::string message) {
+  if (shot::hide_log_line(message)) return;
   std::cout << "[Editor2D] " << message << '\n';
   // Every status note also goes down the wire to the Telegraph.
   telegraph_.add(runtime::LogLevel::Info, "editor", message);

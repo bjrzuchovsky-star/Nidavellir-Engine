@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/ShotOpts.h"
 #include "editor/team/TeamPanel.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
@@ -651,7 +652,9 @@ void Editor2DScreen::draw_status_bar() {
     ImGui::TextColored(theme::Copper(), "%s", status_note_.c_str());
   }
   sep();
-  ImGui::TextDisabled("%s", project_.path.c_str());
+  // --shot-clean: the status bar would otherwise print the temp realm path.
+  if (shot::clean()) ImGui::TextDisabled("%s", project_.name.c_str());
+  else ImGui::TextDisabled("%s", project_.path.c_str());
   if (dirty_) {
     ImGui::SameLine();
     ImGui::TextColored(theme::Warning(), "  unsaved");

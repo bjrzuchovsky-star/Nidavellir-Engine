@@ -1,6 +1,7 @@
 #include "editor/team/TeamPanel.h"
 #include "editor/tools/SpriteSlicerPanel.h"
 #include "editor/ux/EmptyState.h"
+#include "editor/ux/ShotOpts.h"
 #include "editor/ux/FriendlyError.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
@@ -1258,6 +1259,7 @@ void Editor3DScreen::draw_telegraph() {
   if (log_.empty()) ux::EmptyState("telegraph", {{"Play (F5)", [this] { if (!playing()) play_start(); }, nullptr, !playing()}});
   int row = 0;
   for (const runtime::LogEntry& e : log_) {
+    if (shot::hide_log_line(e.text)) continue;
     const ImVec4 col = e.level == runtime::LogLevel::Error  ? theme::Danger()
                        : e.level == runtime::LogLevel::Warn ? theme::Warning()
                                                             : theme::TextMuted();

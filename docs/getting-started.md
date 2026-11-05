@@ -64,6 +64,16 @@ With the Visual Studio generator, binaries go under `build/apps/<app>/<Config>/`
 3. In the Project Manager, use **+ New Realm...** and pick a template (see [projects and templates](projects-and-templates.md)).
 4. Press **F5** in the editor to play. Use **Launch Game** to start `ts_game` on the project.
 
+## Screenshots
+
+Headless captures (`ts_admin --gizmo-shot`, `--tiles-shot`, `--scripts-shot`, `--assets-shot`, `--team-shot`, `--terrain-shot`, `--camera-shot`, `--ux-shot`, `--templates-shot`, `--freight-shot`, `--vault-shot`, `--vault-pm-shot`, `--trading-post-shot`) keep their usual window size unless you pass a global size:
+
+```
+ts_admin --shot-size 1920x1080 --shot-clean --gizmo-shot 3d out.png
+```
+
+`--shot-size WxH` (64 to 8192 on each side) is the framebuffer those modes write. `--shot-clean` hides Telegraph lines and the 2D status path when they mention internal folders such as `.tombstone/meta`. The flags can sit anywhere on the command line. Smoke pixel checks (`--smoke-3d`, `--smoke-fx`, and the rest) keep their own small test resolutions.
+
 ## Smoke tests
 
 `ts_admin --smoke` runs the whole headless suite. Single areas, from the flags parsed in `apps/admin/main.cpp`:
