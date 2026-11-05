@@ -43,8 +43,8 @@ VersionInfoDescription={#AppName} {#AppVersion} setup
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#AppVersion}
 VersionInfoCopyright=Copyright (c) 2026 BORENJO Studios / Nidavellir Engine. All rights reserved.
-; The Dusk tombstone icon (resources\windows\make_icons.py), same as ts_admin.exe.
-SetupIconFile=..\..\resources\windows\tombstone.ico
+; Nidavellir mark, same file the Windows executables embed (cmake/WinResources.cmake).
+SetupIconFile=..\..\resources\windows\nidavellir.ico
 DefaultDirName={autopf}\Nidavellir Engine
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
