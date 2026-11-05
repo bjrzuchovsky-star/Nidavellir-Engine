@@ -11,12 +11,12 @@
 
 #include <atomic>
 #include <cstdint>
-#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace ts {
@@ -86,9 +86,16 @@ class TeamAssetSync {
 
  private:
   void set_progress(const TeamAssetProgress& p);
-  std::future<TeamAssetPass> job_;
+  std::thread thread_;
   mutable std::mutex mu_;
   TeamAssetProgress progress_;
+  TeamAssetPass result_;
+  bool has_result_ = false;
+  // running_: the worker is inside the pass. done_: the pass is finished
+  // and not taken yet. Neither uses std::future::wait_for, which can report
+  // deferred and leave the pass unstarted (no error, no bytes).
+  std::atomic<bool> running_{false};
+  std::atomic<bool> done_{false};
   std::atomic<bool> cancel_{false};
 };
 

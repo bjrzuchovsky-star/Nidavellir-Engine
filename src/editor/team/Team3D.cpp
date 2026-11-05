@@ -383,7 +383,8 @@ void Editor3DScreen::tick_team(float dt) {
   for (const std::string& n : team_->take_notes()) note("Team: " + n);
   // Switching the view onto the mirror drops every cached mesh. That must
   // not happen under a live transform, or the drag preview stops updating.
-  if (team_->binding().busy()) return;
+  // A file pass in flight stays off this thread so its progress can be read.
+  if (team_->binding().busy() || team_->assets_busy()) return;
   const std::string root = team_->joined() && !team_->hosting() ? team_->files_root() : project_.path;
   asset_browser_.retarget(root);
   if (view_) view_->set_project_dir(root);

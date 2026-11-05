@@ -93,6 +93,12 @@ void TeamSession::ensure_mirror() {
   mirror_root_ = dir;
   std::error_code ec;
   const std::filesystem::path root = std::filesystem::u8path(mirror_root_);
+  // A new ride gets an empty cache. A leftover from an earlier session in
+  // this folder would already match the next send, so the Vault transfer
+  // (and its byte counter) would never start.
+  if (dir.find("nidavellir-clan-mirrors") != std::string::npos) {
+    std::filesystem::remove_all(root, ec);
+  }
   std::filesystem::create_directories(root / "assets", ec);
   std::filesystem::create_directories(root / ".tombstone", ec);
 }
@@ -789,7 +795,9 @@ void TeamSession::tick(double dt) {
   // 3b. Project files through the Vault (a worker does the hauling).
   finish_asset_pass();
   asset_clock_ += dt;
-  if (assets_ && !busy && asset_clock_ >= 0.35 && !asset_sync_.running()) {
+  // Freight keeps moving during a drag. The browser rescan waits (it
+  // reloads the open scene); the file pass does not.
+  if (assets_ && asset_clock_ >= 0.35 && !asset_sync_.running()) {
     asset_clock_ = 0.0;
     sync_assets();
   }
