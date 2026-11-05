@@ -889,7 +889,7 @@ void AssetBrowser::draw_settings(const AssetDb::Entry& e) {
             hulls ? "Auto (model hulls)\0Tight box\0Oriented box\0Capsule\0Convex hull\0Convex pieces\0Mesh\0None\0"
                   : (e.meta.info.flag("skinned", false)
                          ? "Auto (capsule)\0Tight box\0Oriented box\0Capsule\0Convex hull\0Convex pieces\0Mesh\0None\0"
-                         : "Auto (oriented box)\0Tight box\0Oriented box\0Capsule\0Convex hull\0Convex pieces\0Mesh\0None\0");
+                         : "Auto (mesh bounds)\0Tight box\0Oriented box\0Capsule\0Convex hull\0Convex pieces\0Mesh\0None\0");
         int ci = 0;
         const std::string cur = s.flag("generate_collider", true) ? s.str("collider", "auto") : "none";
         for (int k = 0; k < 8; ++k) {

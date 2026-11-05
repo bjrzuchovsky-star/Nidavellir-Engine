@@ -293,6 +293,12 @@ int check_blender_fbx(const fs::path& dir) {
                   ", want " + std::to_string(want) + " (" + err + ")");
     }
     if (blender && !near(m.bounds.max.y, 4.0f, 2e-3f)) return fail("Blender fbx bounds " + str(m.bounds));
+    ts::tombstone::scene3d::Collider3D fit;
+    if (!r3::fit_collider(m, r3::ColliderFit::Box, &fit) || !near3(fit.size, m.bounds.extent(), 2e-3f) ||
+        !near3(fit.offset, m.bounds.center(), 2e-3f)) {
+      return fail(std::string(blender ? "Blender" : "non-Blender") + " fbx box fit " + str(fit.size) + " at " +
+                  str(fit.offset) + " bounds " + str(m.bounds));
+    }
   }
   return 0;
 }
@@ -312,6 +318,33 @@ int check_gltf(const fs::path& dir) {
     if (!near3(m.bounds.min, Vec3{-1, 0, -2} * unit) || !near3(m.bounds.max, Vec3{3, 5, 2} * unit)) {
       return fail("gltf bounds " + str(m.bounds) + " at unit scale " + std::to_string(unit));
     }
+    // The box is not centred on the origin. Auto must use that centre.
+    ts::tombstone::scene3d::Collider3D c;
+    if (!r3::fit_collider(m, r3::ColliderFit::Auto, &c) ||
+        c.shape != ts::tombstone::scene3d::ColliderShape3D::Box ||
+        !near3(c.size, m.bounds.extent()) || !near3(c.offset, m.bounds.center())) {
+      return fail("gltf auto fit " + str(c.size) + " at " + str(c.offset) + " bounds " + str(m.bounds));
+    }
+  }
+  return 0;
+}
+
+// Z-up box whose pivot is not the origin. After the import rotation the
+// collider centre and extents match the rendered bounds.
+int check_z_up_fit() {
+  r3::Model m;
+  r3::ModelPrimitive p;
+  add_box(&p.mesh, {1.0f, -0.5f, 0.0f}, {2.0f, 0.5f, 2.0f}, -1);
+  m.primitives.push_back(p);
+  r3::bake_import_transform(&m, 1.0f, true);
+  const r3::Aabb want{{1.0f, 0.0f, -0.5f}, {2.0f, 2.0f, 0.5f}};
+  if (!near3(m.bounds.min, want.min) || !near3(m.bounds.max, want.max)) {
+    return fail("z-up rendered bounds " + str(m.bounds) + ", want " + str(want));
+  }
+  ts::tombstone::scene3d::Collider3D c;
+  if (!r3::fit_collider(m, r3::ColliderFit::Box, &c) || !near3(c.size, want.extent()) ||
+      !near3(c.offset, want.center())) {
+    return fail("z-up box fit " + str(c.size) + " at " + str(c.offset));
   }
   return 0;
 }
@@ -423,9 +456,10 @@ int run_bounds_smoke() {
   if (int r = check_dae(dir)) return r;
   if (int r = check_blender_fbx(dir)) return r;
   if (int r = check_gltf(dir)) return r;
+  if (int r = check_z_up_fit()) return r;
   if (int r = check_special_meshes(dir)) return r;
   if (int r = check_big_skeleton()) return r;
   fs::remove_all(dir, ec);
-  std::cout << "[smoke] bounds OK (scaled rig, Collada, Blender FBX bone children, glTF, UCX_ / LOD, 200 joints, fitted colliders)\n";
+  std::cout << "[smoke] bounds OK (scaled rig, Collada, Blender FBX bone children, glTF, Z-up fit, UCX_ / LOD, 200 joints, fitted colliders)\n";
   return 0;
 }
