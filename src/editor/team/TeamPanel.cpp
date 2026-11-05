@@ -231,6 +231,18 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
                   static_cast<unsigned long long>(t.assets_fetched()),
                   static_cast<unsigned long long>(t.assets_removed()));
       const TeamAssetProgress p = t.asset_progress();
+      {
+        const std::string st = p.running ? "sending" : t.asset_sync_state();
+        const std::string detail = t.asset_sync_detail();
+        auto row = [&](const std::string& who) {
+          if (st == "failed") ImGui::TextColored(theme::Danger(), "%s: failed. %s", who.c_str(), detail.c_str());
+          else if (st == "sending") ImGui::TextDisabled("%s: sending", who.c_str());
+          else ImGui::TextDisabled("%s: synced", who.c_str());
+        };
+        row("you");
+        for (const auto& [id, m] : c.members()) row(m.name);
+        if (st == "failed" && ImGui::SmallButton("Retry file sync")) t.sync_assets();
+      }
       if (p.running && p.files_total > 0) {
         // Freight on the trail: the editor keeps working while it moves.
         const float frac = p.bytes_total ? static_cast<float>(static_cast<double>(p.bytes_done) /

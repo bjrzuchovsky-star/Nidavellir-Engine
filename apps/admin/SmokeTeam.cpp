@@ -6,6 +6,7 @@
 
 #include "editor/editor3d/Editor3DScreen.h"
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/team/TeamFiles.h"
 #include "editor/team/TeamSession.h"
 #include "net/Net.h"
 #include "net/SimTransport.h"
@@ -1152,10 +1153,112 @@ int check_persist() {
   return 0;
 }
 
+// Chunked session blobs: a partial upload resumes from the host's byte count,
+// then the stored file matches the SHA-256.
+int check_blob_resume() {
+  const fs::path dir = fs::absolute("TombStoneProjects/_asset_sync_blobs");
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  std::string bytes(100000, 'x');
+  for (std::size_t i = 0; i < bytes.size(); i += 97) bytes[i] = static_cast<char>(i & 0xff);
+  const fs::path src = dir / "src.bin";
+  spit(src, bytes);
+  const std::string sha = ts::tombstone::vault::sha256_file(src.string());
+  ed::SessionBlobStore store((dir / "store").string());
+  auto put = [&](std::uint64_t off, std::size_t n) {
+    tc::Value req = tc::Value::object();
+    req.set("t", tc::Value::string("blob_put"));
+    req.set("sha", tc::Value::string(sha));
+    req.set("size", tc::Value::number(static_cast<double>(bytes.size())));
+    req.set("off", tc::Value::number(static_cast<double>(off)));
+    req.set("data", tc::Value::string(tc::base64_encode(bytes.substr(off, n))));
+    return store.handle(true, req);
+  };
+  const std::size_t chunk = ed::kTeamBlobChunk;
+  tc::Value first = put(0, chunk);
+  if (!first.flag("ok", false) || first.flag("done", false)) return fail("first chunk should be accepted, not finished");
+  tc::Value bad = put(1, chunk);
+  if (bad.flag("ok", false)) return fail("a skipped offset must be refused");
+  const auto have = static_cast<std::uint64_t>(bad.num("have", -1));
+  if (have != chunk) return fail("host should report the bytes it kept");
+  std::uint64_t off = have;
+  while (off < bytes.size()) {
+    const std::size_t n = std::min<std::size_t>(chunk, bytes.size() - static_cast<std::size_t>(off));
+    tc::Value r = put(off, n);
+    if (!r.flag("ok", false)) return fail("resume chunk refused: " + r.str("error"));
+    off += n;
+    if (r.flag("done", false)) break;
+  }
+  const fs::path stored = fs::u8path(store.blob_path(sha));
+  if (!fs::exists(stored) || ts::tombstone::vault::sha256_file(stored.string()) != sha) {
+    return fail("resumed blob does not match its SHA-256");
+  }
+  std::cout << "[smoke] asset-sync: chunk resume OK (" << bytes.size() << " bytes)\n";
+  return 0;
+}
+
+// Two editors on loopback. A file dropped into one realm arrives on the other
+// with the same bytes, and a delete follows. No manual rescan.
+int check_two_peers() {
+  ed::Editor3DScreen a(fresh("_asset_sync_a", ed::ProjectKind::ThreeD));
+  const fs::path pa(a.team().project().path);
+  const std::string crate = "assets/models/crate.gltf";
+  gltf_file(pa / crate, 1.0f);
+  a.on_enter();
+  a.asset_browser().rescan();
+  ed::Editor3DScreen b(fresh("_asset_sync_b", ed::ProjectKind::ThreeD));
+  b.on_enter();
+  const fs::path pb(b.team().project().path);
+  std::string err;
+  ed::TeamHostSettings hs;
+  hs.port = 0;
+  hs.pass = "forge";
+  hs.user = "Brynhild";
+  if (!a.team().host(hs, &err)) return fail("asset-sync host: " + err);
+  std::vector<Tick> ticks = {[&](float dt) { a.tick_team(dt); }, [&](float dt) { b.tick_team(dt); }};
+  if (!pump(ticks, [&] { return a.team().joined(); }, 5)) return fail("asset-sync host joined itself");
+  ed::TeamJoinSettings j;
+  j.port = a.team().server()->port();
+  j.pass = "forge";
+  j.user = "Eir";
+  if (!b.team().join(j, &err) || !pump(ticks, [&] { return b.team().joined(); }, 5)) return fail("asset-sync join");
+  if (!pump(ticks, [&] { return same_file(pa, pb, crate) && same_meta(pa, pb, crate); }, 15)) {
+    return fail("late joiner did not receive the host's file (" + b.team().files_error() + ")");
+  }
+  const std::string extra = "assets/models/anvil.gltf";
+  gltf_file(pa / extra, 3.0f);
+  if (!pump(ticks, [&] { return same_file(pa, pb, extra); }, 15)) {
+    return fail("a file that appears on the host did not reach the peer");
+  }
+  std::error_code ec;
+  fs::remove(pa / extra, ec);
+  fs::remove(meta_file(pa, extra), ec);
+  if (!pump(ticks, [&] { return !fs::exists(pb / extra); }, 15)) {
+    return fail("a deleted file stayed on the peer");
+  }
+  if (a.team().asset_sync_state() == "failed" || b.team().asset_sync_state() == "failed") {
+    return fail("file sync failed: " + a.team().asset_sync_detail() + " / " + b.team().asset_sync_detail());
+  }
+  b.team().leave();
+  a.team().leave();
+  std::cout << "[smoke] asset-sync: two peers OK\n";
+  return 0;
+}
+
 }  // namespace
 
 namespace ts {
 namespace tombstone {
+
+int run_asset_sync_smoke() {
+  if (!net::net_startup()) return fail("net startup");
+  ed::TeamSession::settings_fallback = false;
+  int rc = check_blob_resume();
+  if (rc == 0) rc = check_two_peers();
+  net::net_shutdown();
+  return rc;
+}
 
 int run_team_smoke() {
   if (!net::net_startup()) return fail("net startup");

@@ -754,7 +754,7 @@ void TeamSession::tick(double dt) {
   // 3b. Project files through the Vault (a worker does the hauling).
   finish_asset_pass();
   asset_clock_ += dt;
-  if (assets_ && !busy && asset_clock_ >= 2.0 && !asset_sync_.running()) {
+  if (assets_ && !busy && asset_clock_ >= 0.35 && !asset_sync_.running()) {
     asset_clock_ = 0.0;
     sync_assets();
   }
@@ -895,6 +895,8 @@ bool TeamSession::sync_assets() {
   p.can_write = client_.can_write();
   if (!asset_sync_.start(std::move(p), assets_)) return false;
   first_asset_pass_ = false;
+  asset_sync_state_ = "sending";
+  asset_sync_detail_.clear();
   return true;
 }
 
@@ -911,8 +913,14 @@ void TeamSession::finish_asset_pass() {
   }
   if (!r.error.empty()) {
     files_error_ = "Files can't travel " + files_route_ + ": " + r.error;
+    asset_sync_state_ = "failed";
+    asset_sync_detail_ = r.error;
   } else if (assets_) {
     files_error_.clear();
+    if (r.up || r.down || r.removed || !r.ops.empty()) {
+      asset_sync_state_ = "synced";
+      asset_sync_detail_.clear();
+    }
   }
   for (const std::string& rel : r.held_back) {
     if (held_noted_.insert(rel).second) {

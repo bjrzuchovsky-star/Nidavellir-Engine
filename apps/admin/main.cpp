@@ -1376,6 +1376,9 @@ int run_console_smoke() {
   if (ts::tombstone::run_clan_smoke() != 0) {
     return 1;
   }
+  if (ts::tombstone::run_asset_sync_smoke() != 0) {
+    return 1;
+  }
   if (ts::tombstone::run_team_smoke() != 0) {
     return 1;
   }
@@ -2706,7 +2709,7 @@ int run_trading_post_shot(const char* png) {
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
   const int W = 1280, H = 760;
-  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Trading Post", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Market", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -3118,6 +3121,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-clan") == 0) {
       return ts::tombstone::run_clan_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-asset-sync") == 0) {
+      return ts::tombstone::run_asset_sync_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-team") == 0) {
       // Live Team Claims: server + headless editors, convergence, locks.
