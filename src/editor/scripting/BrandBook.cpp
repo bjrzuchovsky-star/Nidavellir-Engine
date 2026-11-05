@@ -193,7 +193,7 @@ void BrandBook::open(const std::string& project_dir, const std::string& project_
   project_dir_ = project_dir;
   project_name_ = project_name;
   open_ = true;
-  (void)language_status();
+  ensure_language_probe();
   refresh_list();
   if (rel_.empty() && !graphs_.empty()) load(graphs_.front());
 }
