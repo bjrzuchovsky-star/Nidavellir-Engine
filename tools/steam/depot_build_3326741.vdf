@@ -1,7 +1,6 @@
 "DepotBuildConfig"
 {
 	"DepotID"	"3326741"
-	"ContentRoot"	"content/"
 	"FileMapping"
 	{
 		"LocalPath"	"*"
