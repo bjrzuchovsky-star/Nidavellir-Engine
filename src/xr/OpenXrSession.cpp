@@ -178,7 +178,7 @@ void OpenXrSession::probe() {
 #endif
   XrInstanceCreateInfo ci{XR_TYPE_INSTANCE_CREATE_INFO};
   copy_name(ci.applicationInfo.applicationName, XR_MAX_APPLICATION_NAME_SIZE,
-            cfg_.app_name.empty() ? "TombStone" : cfg_.app_name.c_str());
+            cfg_.app_name.empty() ? "Nidavellir" : cfg_.app_name.c_str());
   ci.applicationInfo.applicationVersion = 1;
   copy_name(ci.applicationInfo.engineName, XR_MAX_ENGINE_NAME_SIZE, "Nidavellir Engine");
   ci.applicationInfo.engineVersion = 1;
@@ -215,7 +215,7 @@ void OpenXrSession::probe() {
   if (XR_SUCCEEDED(xrGetSystemProperties(instance_, system_, &sp))) system_label_ = sp.systemName;
 #if defined(_WIN32)
   if (!has_gl_ext_) {
-    reason_ = runtime_ + " does not offer XR_KHR_opengl_enable (TombStone renders with OpenGL)";
+    reason_ = runtime_ + " does not offer XR_KHR_opengl_enable (Nidavellir renders with OpenGL)";
     return;
   }
   available_ = true;
@@ -230,7 +230,7 @@ void OpenXrSession::probe() {
   xrStringToPath(instance_, "/user/hand/right", &hand_[1]);
   XrActionSetCreateInfo as{XR_TYPE_ACTION_SET_CREATE_INFO};
   copy_name(as.actionSetName, XR_MAX_ACTION_SET_NAME_SIZE, "tombstone");
-  copy_name(as.localizedActionSetName, XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE, "TombStone");
+  copy_name(as.localizedActionSetName, XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE, "Nidavellir");
   XrResult r = xrCreateActionSet(instance_, &as, &set_);
   if (XR_FAILED(r)) return fail(error, "xrCreateActionSet", r);
   auto make = [&](XrAction* a, const char* name, const char* loc, XrActionType type) {
@@ -700,7 +700,7 @@ XrProbe probe_openxr(bool create_session) {
   XrProbe p;
   p.loader = true;
   XrConfig cfg;
-  cfg.app_name = "TombStone xr-probe";
+  cfg.app_name = "Nidavellir xr-probe";
   OpenXrSession s(cfg);
   p.instance = s.instance_ok();
   p.system = s.system_ok();

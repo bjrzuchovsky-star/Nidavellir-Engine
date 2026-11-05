@@ -50,7 +50,7 @@ const char* to_string(SessionState s);
 enum class FormFactor { HeadMounted, Handheld };
 
 struct XrConfig {
-  std::string app_name = "TombStone";
+  std::string app_name = "Nidavellir";
   FormFactor form_factor = FormFactor::HeadMounted;
   bool want_hand_tracking = false;
   // Simulator eye targets (per eye) and interpupillary distance.
@@ -142,7 +142,7 @@ class SimXrSession final : public XrSession {
   ~SimXrSession() override;
 
   const char* runtime_name() const override { return "simulator"; }
-  std::string system_name() const override { return "TombStone desktop VR simulator"; }
+  std::string system_name() const override { return "Nidavellir desktop VR simulator"; }
   bool simulated() const override { return true; }
   bool available() const override { return true; }
   const std::string& unavailable_reason() const override { return none_; }

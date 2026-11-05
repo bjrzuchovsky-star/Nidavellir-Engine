@@ -1533,7 +1533,7 @@ std::string make_tiles_demo_project() {
     }
   }
   fs::create_directories(dir / "assets");
-  write_png_rgba((dir / "assets/rider.png").string(), W, H, px);
+  write_png_rgba((dir / "assets/wanderer.png").string(), W, H, px);
   auto put_file = [&](const char* rel, const std::string& text) {
     std::ofstream(dir / rel, std::ios::binary) << text;
   };
@@ -1598,8 +1598,8 @@ int run_tiles_shot(std::string project, const std::string& png) {
     tiles.paint_demo();
   }
   editor::SpriteSlicerPanel& slicer = editor::SpriteSlicerPanel::get();
-  slicer.open(project, std::filesystem::exists(std::filesystem::path(project) / "assets/rider.png")
-                           ? "assets/rider.png"
+  slicer.open(project, std::filesystem::exists(std::filesystem::path(project) / "assets/wanderer.png")
+                           ? "assets/wanderer.png"
                            : "");
   slicer.set_auto_detect(true);
   if (slicer.clips().size() >= 2) {

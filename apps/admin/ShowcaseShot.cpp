@@ -35,6 +35,8 @@
 
 namespace fs = std::filesystem;
 using namespace ts::tombstone;
+// ts::fx, not a nested name under ts::tombstone (MSVC would bind fx:: there).
+namespace fx = ts::fx;
 
 namespace {
 
@@ -124,6 +126,31 @@ editor::ProjectInfo project_at(const fs::path& dir, const std::string& id, const
   info.vr = vr;
   info.path = dir.string();
   return info;
+}
+
+void dress_town(editor::Editor3DScreen& e) {
+  for (const scene3d::Entity3D& ent : e.scene().entities) {
+    if (ent.light && ent.name.rfind("Lantern", 0) == 0) {
+      scene3d::Entity3D copy = ent;
+      copy.light->intensity = 14.0f;
+      copy.light->range = 16.0f;
+      copy.light->color[0] = 1.0f;
+      copy.light->color[1] = 0.62f;
+      copy.light->color[2] = 0.28f;
+      e.replace_entity(copy, "Warm lantern");
+      continue;
+    }
+    if (!ent.material || !ent.mesh || ent.mesh->source.rfind("primitive:", 0) != 0) continue;
+    const bool cloth = ent.name == "Ground" || ent.name.find("Wall") != std::string::npos ||
+                       ent.name.find("Saloon") != std::string::npos || ent.name.find("Bank") != std::string::npos ||
+                       ent.name.find("Jail") != std::string::npos || ent.name.find("Store") != std::string::npos ||
+                       ent.name.find("Tower") != std::string::npos || ent.name.find("Board") != std::string::npos ||
+                       ent.name.find("Windmill") != std::string::npos;
+    if (!cloth || ent.material->albedo_texture == "assets/boards.tga") continue;
+    scene3d::Entity3D copy = ent;
+    copy.material->albedo_texture = "assets/boards.tga";
+    e.replace_entity(copy, "Boards on " + ent.name);
+  }
 }
 
 void haze(editor::Editor3DScreen& e) {
@@ -235,9 +262,10 @@ int shot_props(const fs::path& dir, const std::string& png, GlWindow& gl) {
       if (ent.name == "Old Hank") break;
     }
   }
+  dress_town(*e);
   if (pick) e->select(pick);
   e->gizmo().mode = editor::GizmoMode::Transform;
-  e->look_at({0.0f, 1.5f, 2.0f}, 32.0f, 18.0f, 18.0f);
+  e->look_at({1.2f, 1.4f, 1.5f}, 28.0f, 12.0f, 8.0f);
   return grab(gl.window, *screen, png, 16, {});
 }
 
@@ -260,26 +288,63 @@ int shot_fx(const fs::path& dir, const std::string& png, GlWindow& gl) {
   env.fog_color[2] = 0.08f;
   env.fog_density = 0.03f;
   e->set_environment(env, "Night");
-  const render3d::Vec3 spots[] = {{-2.2f, 0.0f, 1.4f}, {2.4f, 0.0f, -0.6f}, {0.2f, 0.0f, -2.8f}};
+  const render3d::Vec3 spots[] = {{-1.1f, 0.0f, 0.8f}, {1.2f, 0.0f, -0.4f}, {0.1f, 0.0f, -1.3f}};
+  auto place = [&](const render3d::Vec3& pos, const std::string& name, const fx::EmitterDesc& desc) {
+    const std::uint64_t id = e->create_empty(pos);
+    const scene3d::Entity3D* cur = e->find(id);
+    if (!cur) return;
+    scene3d::Entity3D copy = *cur;
+    copy.name = name;
+    copy.particles = desc;
+    e->replace_entity(copy, name);
+  };
   for (const render3d::Vec3& p : spots) {
-    scene3d::Entity3D torch;
-    torch.name = "Torch";
-    torch.transform.position = p + render3d::Vec3{0, 1.1f, 0};
     if (std::optional<fx::EmitterDesc> fire = fx::preset("campfire", fx::Space::ThreeD)) {
-      fire->rate = 40.0f;
-      torch.particles = *fire;
+      fire->rate = 220.0f;
+      fire->max_particles = 900;
+      fire->radius = 0.15f;
+      fire->speed_min = 0.8f;
+      fire->speed_max = 1.8f;
+      fire->life_min = 0.7f;
+      fire->life_max = 1.4f;
+      fire->size[0] = 0.55f;
+      fire->size[1] = 0.9f;
+      fire->size[2] = 0.25f;
+      fire->color_start[0] = 1.0f;
+      fire->color_start[1] = 0.85f;
+      fire->color_start[2] = 0.35f;
+      fire->color_start[3] = 1.0f;
+      place(p + render3d::Vec3{0, 1.15f, 0}, "Torch", *fire);
     }
-    e->add_entity(std::move(torch), "Torch");
-    scene3d::Entity3D ember;
-    ember.name = "Embers";
-    ember.transform.position = p + render3d::Vec3{0, 1.4f, 0};
     if (std::optional<fx::EmitterDesc> sparks = fx::preset("sparks", fx::Space::ThreeD)) {
-      ember.particles = *sparks;
+      sparks->rate = 160.0f;
+      sparks->max_particles = 700;
+      sparks->speed_min = 2.5f;
+      sparks->speed_max = 5.5f;
+      sparks->size[0] = 0.18f;
+      sparks->size[1] = 0.12f;
+      sparks->size[2] = 0.06f;
+      sparks->color_start[3] = 1.0f;
+      place(p + render3d::Vec3{0, 1.45f, 0}, "Embers", *sparks);
     }
-    e->add_entity(std::move(ember), "Embers");
-    e->create_light(false, p + render3d::Vec3{0, 1.6f, 0});
+    const std::uint64_t flame = e->create_primitive("sphere", p + render3d::Vec3{0, 1.25f, 0});
+    if (const scene3d::Entity3D* cur = e->find(flame)) {
+      scene3d::Entity3D copy = *cur;
+      copy.name = "Flame";
+      copy.transform.scale = {0.22f, 0.45f, 0.22f};
+      if (!copy.material) copy.material = scene3d::Material3D{};
+      copy.material->albedo[0] = 1.0f;
+      copy.material->albedo[1] = 0.45f;
+      copy.material->albedo[2] = 0.08f;
+      copy.material->emissive[0] = 4.0f;
+      copy.material->emissive[1] = 1.6f;
+      copy.material->emissive[2] = 0.2f;
+      copy.material->roughness = 1.0f;
+      e->replace_entity(copy, "Flame");
+    }
+    e->create_light(false, p + render3d::Vec3{0, 1.7f, 0});
   }
-  e->look_at({0.0f, 1.2f, 0.0f}, 28.0f, 14.0f, 9.0f);
+  e->look_at({0.0f, 1.3f, 0.0f}, 24.0f, 8.0f, 3.4f);
   return grab(gl.window, *screen, png, 36, {});
 }
 
@@ -334,6 +399,7 @@ int shot_anim(const fs::path& dir, const std::string& png, GlWindow& gl) {
     std::cerr << "showcase anim: Old Hank is not in this scene\n";
     return 1;
   }
+  dress_town(*e);
   e->select(hank);
   e->gizmo().mode = editor::GizmoMode::Transform;
   e->anim_preview().open = true;
