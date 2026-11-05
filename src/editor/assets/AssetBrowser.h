@@ -89,6 +89,9 @@ class AssetBrowser {
   // An asset tile's right-click menu body (also drawn for --smoke-ux).
   void draw_asset_context_items(const assetdb::AssetDb::Entry& e);
   void select(const std::string& rel) { selected_ = rel; }
+  // Show one folder's tiles ("" = every asset). Screenshots use this so the
+  // grid is a populated folder rather than the empty-state prompt.
+  void show_folder(const std::string& folder) { folder_ = folder; }
 
  private:
   void draw_folders();

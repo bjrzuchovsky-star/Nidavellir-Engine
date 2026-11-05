@@ -1491,7 +1491,7 @@ int run_brand_book_app(const std::string& project, const std::string& graph) {
 
 
 // A throwaway project for --tiles-shot demo: two terrains, a sprite sheet
-// and en / fr / ja strings with a few gaps.
+// and en / fr / ja strings, every key filled so the Strings panel is not red.
 std::string make_tiles_demo_project() {
   namespace fs = std::filesystem;
   const fs::path dir = fs::temp_directory_path() / "ts_tiles_demo";
@@ -1538,14 +1538,17 @@ std::string make_tiles_demo_project() {
   };
   put_file("strings/en.json",
            "{\"language.name\": \"English\", \"menu.start\": \"Ride out\", \"menu.quit\": \"Leave town\","
-           " \"hud.gold\": \"Gold: {0}\", \"ui.pause.resume\": \"Resume\", \"npc.sheriff.greet\": \"Howdy, {0}.\"}");
+           " \"hud.gold\": \"Gold: {0}\", \"ui.pause.resume\": \"Resume\","
+           " \"npc.sheriff.greet\": \"Howdy, {0}.\", \"npc.deputy.greet\": \"Evening, {0}.\"}");
   put_file("strings/strings.csv",
            "key,fr,ja\n"
            "language.name,Fran\xC3\xA7" "ais,\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E\n"
            "menu.start,En selle,\xE5\x87\xBA\xE7\x99\xBA\n"
-           "menu.quit,Quitter la ville,\n"
+           "menu.quit,Quitter la ville,\xE7\x94\xBA\xE3\x82\x92\xE5\x87\xBA\xE3\x82\x8B\n"
            "hud.gold,Or : {0},\xE9\x87\x91: {0}\n"
-           "ui.pause.resume,Reprendre,\xE5\x86\x8D\xE9\x96\x8B\n");
+           "ui.pause.resume,Reprendre,\xE5\x86\x8D\xE9\x96\x8B\n"
+           "npc.sheriff.greet,Salut, {0}.,\xE3\x82\x88\xE3\x81\x86\xE3\x81\x93\xE3\x81\x9D, {0}\n"
+           "npc.deputy.greet,Bonsoir, {0}.,\xE3\x81\x93\xE3\x82\x93\xE3\x81\xB0\xE3\x82\x93\xE3\x81\xAF, {0}\n");
   put_file("scripts/sheriff.lua", "function on_start() toast(tr('npc.sheriff.greet', 'stranger')) "
                                   "log(tr('npc.deputy.greet')) end\n");
   (void)a;
@@ -2821,6 +2824,26 @@ int run_trading_post_shot(const char* png) {
 int run_assets_shot(const char* png) {
   namespace fs = std::filesystem;
   const std::string project = make_sorted_demo_claim((fs::temp_directory_path() / "ts_assets_shot").string());
+  // A folder of real images even if the sorted import missed one, so the
+  // grid is tiles rather than the empty-state prompt.
+  {
+    const fs::path tex = fs::u8path(project) / "assets" / "Textures";
+    std::error_code ec;
+    fs::create_directories(tex, ec);
+    const unsigned char colours[][3] = {{176, 120, 64}, {120, 40, 30}, {80, 60, 140},
+                                        {200, 180, 150}, {90, 140, 70},  {40, 90, 160},
+                                        {210, 160, 40}, {70, 70, 80}};
+    for (int i = 0; i < 8; ++i) {
+      std::vector<unsigned char> px(64 * 64 * 4);
+      for (int p = 0; p < 64 * 64; ++p) {
+        px[p * 4 + 0] = colours[i][0];
+        px[p * 4 + 1] = colours[i][1];
+        px[p * 4 + 2] = colours[i][2];
+        px[p * 4 + 3] = 255;
+      }
+      write_png_rgba((tex / ("swatch_" + std::to_string(i) + ".png")).string(), 64, 64, px);
+    }
+  }
   if (!glfwInit()) {
     std::cerr << "glfwInit failed\n";
     return 1;
@@ -2855,23 +2878,33 @@ int run_assets_shot(const char* png) {
     editor::AssetBrowserHost host;
     host.note = [&](const std::string& n) { notes.push_back(n); };
     browser.open(project, host);
-    browser.select("assets/Models/lantern/lantern.gltf");
+    browser.rescan();
+    browser.show_folder("assets/Textures");
+    browser.select("assets/Textures/swatch_0.png");
     for (int frame = 0; frame < 30 && !glfwWindowShouldClose(window); ++frame) {
       glfwPollEvents();
       glfwGetFramebufferSize(window, &fw, &fh);
       ImGui_ImplOpenGL3_NewFrame();
       ImGui_ImplGlfw_NewFrame();
       ImGui::NewFrame();
+      std::vector<std::string> shown;
+      for (const std::string& n : notes) {
+        if (!editor::shot::hide_log_line(n)) shown.push_back(n);
+      }
+      const float bar = shown.empty() ? 0.0f : 70.0f;
       ImGui::SetNextWindowPos(ImVec2(0, 0));
-      ImGui::SetNextWindowSize(ImVec2(static_cast<float>(fw), static_cast<float>(fh) - 70));
+      ImGui::SetNextWindowSize(ImVec2(static_cast<float>(fw), static_cast<float>(fh) - bar));
       ImGui::Begin("Asset Browser", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
       browser.draw();
       ImGui::End();
-      ImGui::SetNextWindowPos(ImVec2(0, static_cast<float>(fh) - 70));
-      ImGui::SetNextWindowSize(ImVec2(static_cast<float>(fw), 70));
-      ImGui::Begin("Telegraph", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
-      for (std::size_t k = notes.size() > 2 ? notes.size() - 2 : 0; k < notes.size(); ++k) ImGui::TextUnformatted(notes[k].c_str());
-      ImGui::End();
+      if (!shown.empty()) {
+        ImGui::SetNextWindowPos(ImVec2(0, static_cast<float>(fh) - bar));
+        ImGui::SetNextWindowSize(ImVec2(static_cast<float>(fw), bar));
+        ImGui::Begin("Telegraph", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+        const std::size_t begin = shown.size() > 2 ? shown.size() - 2 : 0;
+        for (std::size_t k = begin; k < shown.size(); ++k) ImGui::TextUnformatted(shown[k].c_str());
+        ImGui::End();
+      }
       ImGui::Render();
       glViewport(0, 0, fw, fh);
       const ImVec4 clear = editor::theme::Charcoal();
