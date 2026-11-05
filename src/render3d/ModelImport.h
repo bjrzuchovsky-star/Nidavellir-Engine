@@ -14,7 +14,8 @@
 //   .blend              Blender, run headless to export glTF (when found)
 //
 // Import settings come from the Asset Browser's .meta (settings
-// object) and are shared by every format: unit_scale and up_axis are baked
+// object) and are shared by every format: unit_scale, up_axis and
+// forward_axis are baked
 // into the vertices / skeleton / hulls; material_path adds texture search
 // roots; lod picks a level of detail (Source); skin / body_groups pick
 // Source variants; import_animations / generate_collider turn those off.
@@ -34,9 +35,15 @@ namespace render3d {
 
 enum class UpAxis { Auto, Y, Z };
 
+// Which way the file's mesh noses. The engine's forward is -Z (Y up), the
+// same axis Transform.Forward and the rider use. Auto turns glTF's +Z
+// forward onto -Z and leaves other formats as they are.
+enum class ForwardAxis { Auto, PosX, NegX, PosY, NegY, PosZ, NegZ };
+
 struct ModelImportOptions {
   float unit_scale = 1.0f;  // file units -> metres (Source: 0.0254)
   UpAxis up = UpAxis::Auto;  // Auto = the format's own (Source: Z up)
+  ForwardAxis forward = ForwardAxis::Auto;
   std::vector<std::string> material_paths;  // extra roots ("a;b")
   int lod = 0;
   bool animations = true;
@@ -93,6 +100,8 @@ std::vector<std::string> steam_library_folders_from_vdf(const std::string& vdf_t
 // Bake uniform scale and Z-up -> Y-up into a model (vertices, normals,
 // tangents, skeleton roots / inverse binds, hulls, bounds).
 void bake_import_transform(Model* m, float scale, bool z_up);
+// Turns the file's forward axis onto engine -Z. Auto: glTF +Z, else no yaw.
+void bake_forward_axis(Model* m, ForwardAxis axis);
 // Recompute Model::bounds from what is drawn: the vertices the triangles
 // reference, skinned primitives posed by the rest pose (the palette the
 // renderer uses), after the import transform.

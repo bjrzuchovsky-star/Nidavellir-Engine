@@ -826,6 +826,20 @@ void AssetBrowser::draw_settings(const AssetDb::Entry& e) {
         s.set("up_axis", Value::string(up == 1 ? "y" : up == 2 ? "z" : "auto"));
         changed = true;
       }
+      if (ImGui::IsItemHovered()) ux::SetTooltip("Auto uses the file. Z up is turned to Y up.");
+      const std::string fw = s.str("forward_axis", "auto");
+      int fi = fw == "+x" ? 1 : fw == "-x" ? 2 : fw == "+y" ? 3 : fw == "-y" ? 4 : fw == "+z" ? 5 : fw == "-z" ? 6 : 0;
+      const char* fws[] = {"Auto", "+X", "-X", "+Y", "-Y", "+Z (glTF)", "-Z (engine)"};
+      ImGui::SetNextItemWidth(140);
+      if (ImGui::Combo("Forward axis", &fi, fws, 7)) {
+        const char* keys[] = {"auto", "+x", "-x", "+y", "-y", "+z", "-z"};
+        s.set("forward_axis", Value::string(keys[fi]));
+        changed = true;
+      }
+      if (ImGui::IsItemHovered()) {
+        ux::SetTooltip("Which way the mesh noses in the file. It is turned once so that\n"
+                       "axis points along the engine's forward (-Z). Auto does this for glTF.");
+      }
       number("scale", "Placement scale", 0.001f, 1000, "%.3f");
       auto path_field = [&](const char* key, const char* label, char* buf, std::size_t n,
                             std::string* owner, const char* hint) {

@@ -245,6 +245,8 @@ Both languages sit on one native API (`TsScriptApi`, ABI 4). Names match. C++ us
 
 Grounding in the sample is `Position.Y <= 0.01` plus `Move`. `Move` keeps the capsule on box colliders, on a terrain heightfield and on mesh / fitted convex colliders, including when the physics plugin is off. The sample does not call the Rider plugin.
 
+Facing is the body's rotation. `Transform.Forward` is **-Z**. The sample builds its move from `Transform.Forward` and `Transform.Right`, so it travels the way it looks. The rider does the same: it turns the body so -Z matches the velocity. A glTF whose nose is +Z is corrected on import ([model import](model-import.md#forward-and-up)); set **Forward axis** on the model if a file uses another axis.
+
 ### Not yet (parity with Unity / Unreal)
 
 Designed on the ABI 4 `query` slot, not finished in this patch:

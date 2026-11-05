@@ -313,6 +313,7 @@ int check_gltf(const fs::path& dir) {
   for (float unit : {1.0f, 0.25f}) {
     r3::ModelImportOptions opt;
     opt.unit_scale = unit;
+    opt.forward = r3::ForwardAxis::NegZ;  // scale check; facing is check_forward_axis
     r3::Model m;
     if (!r3::load_model(p.string(), opt, &m, &err)) return fail("gltf load: " + err);
     if (!near3(m.bounds.min, Vec3{-1, 0, -2} * unit) || !near3(m.bounds.max, Vec3{3, 5, 2} * unit)) {
@@ -331,6 +332,28 @@ int check_gltf(const fs::path& dir) {
 
 // Z-up box whose pivot is not the origin. After the import rotation the
 // collider centre and extents match the rendered bounds.
+// glTF noses along +Z. Auto turns that onto engine -Z, and the rider's
+// yaw-0 rotation points that same -Z along travel.
+int check_forward_axis() {
+  r3::Model m;
+  m.format = "gltf";
+  r3::ModelPrimitive p;
+  add_box(&p.mesh, {-0.1f, 0.0f, 0.0f}, {0.1f, 0.2f, 1.0f}, -1);
+  m.primitives.push_back(p);
+  r3::bake_forward_axis(&m, r3::ForwardAxis::Auto);
+  if (!(m.bounds.min.z < -0.9f && m.bounds.max.z < 0.05f && m.bounds.max.z > -0.05f)) {
+    return fail("glTF forward should land on -Z, bounds " + str(m.bounds));
+  }
+  const Vec3 travel{1.0f, 0.0f, 0.0f};
+  const r3::Quat face = r3::Quat::axis_angle({0, 1, 0}, std::atan2(-travel.x, -travel.z));
+  const Vec3 nose = face.rotate({0, 0, -1});
+  if (!near3(nose, travel, 1e-4f)) return fail("rider facing " + str(nose) + " want " + str(travel));
+  const Vec3 ahead{0, 0, -1};
+  const r3::Quat idle = r3::Quat::axis_angle({0, 1, 0}, std::atan2(-ahead.x, -ahead.z));
+  if (!near3(idle.rotate({0, 0, -1}), ahead, 1e-4f)) return fail("yaw 0 should face -Z");
+  return 0;
+}
+
 int check_z_up_fit() {
   r3::Model m;
   r3::ModelPrimitive p;
@@ -457,6 +480,7 @@ int run_bounds_smoke() {
   if (int r = check_blender_fbx(dir)) return r;
   if (int r = check_gltf(dir)) return r;
   if (int r = check_z_up_fit()) return r;
+  if (int r = check_forward_axis()) return r;
   if (int r = check_special_meshes(dir)) return r;
   if (int r = check_big_skeleton()) return r;
   fs::remove_all(dir, ec);

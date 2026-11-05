@@ -1,8 +1,14 @@
 # Model import
 
-> **Rights:** you are responsible for having the rights to any model you import, and to anything you ship. The engine only reads the file formats. It ships no Valve, Garry's Mod or other third-party models or textures, and its tests build their own tiny files in a temp folder. TombStone is not affiliated with or endorsed by Valve Corporation or Facepunch Studios; their names are used only to say which file formats are read.
+> **Rights:** you are responsible for having the rights to any model you import, and to anything you ship. The engine only reads the file formats. It ships no Valve, Garry's Mod or other third-party models or textures, and its tests build their own tiny files in a temp folder. Nidavellir is not affiliated with or endorsed by Valve Corporation or Facepunch Studios; their names are used only to say which file formats are read.
 
 Every 3D model goes through one loader, `render3d::load_model` (`src/render3d/ModelImport.h`). The 3D editor, Play, the Jolt colliders, exported games and the Asset Browser all use it, so a format that imports in the editor also loads in a shipped game.
+
+## Forward and up
+
+The engine is **Y up, -Z forward**. `Transform.Forward`, script `Move` along that axis, and the rider (`ts.move.rider3d`) all use it: yaw 0 looks down -Z, and the body rotation puts the mesh's -Z along the direction of travel.
+
+glTF files are authored **+Z forward**. On import, **Forward axis: Auto** turns that +Z onto -Z once (a 180° yaw). Other formats are left as they are until you pick an axis. The Asset Browser setting is per model (`forward_axis` in the `.meta`: `auto`, `+x`, `-x`, `+y`, `-y`, `+z`, `-z`). **Up axis** is unchanged: Auto uses the file, and Z up is turned to Y up before the forward correction.
 
 ## Formats
 
