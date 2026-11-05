@@ -153,7 +153,7 @@ bool write_test_tga(const std::filesystem::path& path, int w, int h,
 int run_console_smoke() {
   namespace fs = std::filesystem;
 
-  std::cout << "TombStone Admin (--smoke console path)\n";
+  std::cout << "Nidavellir Admin (--smoke console path)\n";
 
   const fs::path smoke_root = "./TombStoneProjects";
   const fs::path smoke_config = "./TombStoneConfig";
@@ -1262,26 +1262,26 @@ int run_console_smoke() {
   // (see Smoke3D.cpp / Smoke3DEditor.cpp).
   // AI toolkit + the ts.ai plugin (see SmokeAI.cpp / SmokeAIWorld.cpp).
   if (run_ai_smoke() != 0) {
-    std::cerr << "TombStone Admin smoke FAILED (AI)\n";
+    std::cerr << "Nidavellir Admin smoke FAILED (AI)\n";
     return 1;
   }
   // Story plugins: quests, dialogue, saves (see SmokeStory.cpp).
   if (run_story_smoke() != 0) {
-    std::cerr << "TombStone Admin smoke FAILED (story)\n";
+    std::cerr << "Nidavellir Admin smoke FAILED (story)\n";
     return 1;
   }
   // Profiler + debug tools (see SmokeProfiler.cpp).
   if (run_profiler_smoke() != 0) {
-    std::cerr << "TombStone Admin smoke FAILED (profiler)\n";
+    std::cerr << "Nidavellir Admin smoke FAILED (profiler)\n";
     return 1;
   }
   // Persistent world (see SmokeMmo.cpp).
   if (run_mmo_smoke() != 0) {
-    std::cerr << "TombStone Admin smoke FAILED (mmo)\n";
+    std::cerr << "Nidavellir Admin smoke FAILED (mmo)\n";
     return 1;
   }
   if (run_anim3d_smoke() != 0) {
-    std::cerr << "TombStone Admin smoke FAILED (3D animation)\n";
+    std::cerr << "Nidavellir Admin smoke FAILED (3D animation)\n";
     return 1;
   }
   if (run_3d_smoke() != 0) {
@@ -1406,7 +1406,7 @@ int run_console_smoke() {
     return 1;
   }
 
-  std::cout << "TombStone Admin smoke complete\n";
+  std::cout << "Nidavellir Admin smoke complete\n";
   return flow.current_state() == AppState::Quit ? 0 : 1;
 }
 
@@ -1423,7 +1423,7 @@ int run_brand_book_app(const std::string& project, const std::string& graph) {
 #if defined(__APPLE__)
   glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
-  GLFWwindow* window = glfwCreateWindow(1440, 860, "TombStone Brand Book", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(1440, 860, "Nidavellir Brand Book", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -1545,7 +1545,7 @@ int run_tiles_shot(std::string project, const std::string& png) {
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
   const int W = 1600, H = 940;
-  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Tiles", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Tiles", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -1654,7 +1654,7 @@ int run_gizmo_shot(const std::string& which, const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(1600, 940, "TombStone Gizmos", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(1600, 940, "Nidavellir Gizmos", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -1801,7 +1801,7 @@ int run_camera_shot(const std::string& which, const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(1600, 940, "TombStone Cameras", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(1600, 940, "Nidavellir Cameras", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -1935,7 +1935,7 @@ int run_ux_shot(const std::string& which, const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(1600, 940, "TombStone Field Guide", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(1600, 940, "Nidavellir Field Guide", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2042,7 +2042,7 @@ int run_scripts_shot(const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(1600, 1000, "TombStone Scripts", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(1600, 1000, "Nidavellir Scripts", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2154,7 +2154,7 @@ int run_templates_shot(const std::string& png) {
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
   const int W = 1280, H = 1000;
-  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone New Claim", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Engine | New Realm", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2252,7 +2252,7 @@ int run_freight_shot(std::string project, const std::string& png) {
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
   const int W = 720, H = 940;
-  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Freight Office", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Freight Office", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2331,7 +2331,7 @@ int run_team_shot(const std::string& png) {
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
   const int W = 1280, H = 800;
-  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Team Claims", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Engine | Clan", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2480,7 +2480,7 @@ int run_vault_shot(const char* png) {
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
   const int W = 1280, H = 720;
-  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Vault", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Vault", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2582,7 +2582,7 @@ int run_vault_pm_shot(const char* png) {
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
   const int W = 1280, H = 760;
-  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Vault", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Vault", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2706,7 +2706,7 @@ int run_trading_post_shot(const char* png) {
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
   const int W = 1280, H = 760;
-  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Trading Post", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Trading Post", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2795,7 +2795,7 @@ int run_assets_shot(const char* png) {
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
   const int W = 1280, H = 720;
-  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Asset Browser", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Asset Browser", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();

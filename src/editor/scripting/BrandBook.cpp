@@ -472,7 +472,7 @@ void BrandBook::draw_canvas() {
     dl->AddLine(ImVec2(origin.x, origin.y + y), ImVec2(origin.x + size.x, origin.y + y),
                 theme::U32(theme::GridLine(), major ? 1.6f : 0.7f));
   }
-  theme::TombstoneMark(dl, ImVec2(origin.x + size.x - 60, origin.y + size.y - 130), 100,
+  theme::RuneMark(dl, ImVec2(origin.x + size.x - 60, origin.y + size.y - 130), 100,
                        theme::U32(theme::Sand(), 0.06f), theme::U32(theme::Charcoal(), 0.10f));
   if (rel_.empty()) {
     theme::DrawSizedText(dl, ImVec2(origin.x + 30, origin.y + 30), 22, theme::U32(theme::TextMuted()),

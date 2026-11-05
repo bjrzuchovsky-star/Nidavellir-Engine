@@ -447,11 +447,11 @@ TradingPostResult draw_trading_post_window(TradingPostUi& ui, const TradingPostT
       }
       if (e && e->installed && !e->installed_dir.empty()) {
         if (theme::DangerButton("Uninstall", ImVec2(110, 0))) ImGui::OpenPopup("Uninstall plugin?###ts_uninstall");
-        if (ImGui::IsItemHovered()) ux::SetTooltip("Remove it from the plugin cache (asks first). Claims that use it will warn until you reinstall.");
+        if (ImGui::IsItemHovered()) ux::SetTooltip("Remove it from the plugin cache (asks first). Realms that use it will warn until you reinstall.");
         bool clicked = false;
         if (ImGui::BeginPopupModal("Uninstall plugin?###ts_uninstall", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
           ImGui::Text("Uninstall %s?", e->name.empty() ? e->id.c_str() : e->name.c_str());
-          ImGui::TextDisabled("Claims that use it will warn until you install it again.");
+          ImGui::TextDisabled("Realms that use it will warn until you install it again.");
           if (theme::DangerButton("Uninstall")) {
             clicked = true;
             ImGui::CloseCurrentPopup();

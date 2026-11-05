@@ -166,7 +166,7 @@ void Editor2DScreen::draw_menu_bar() {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float h = ImGui::GetFrameHeight();
-    theme::TombstoneMark(dl, ImVec2(p.x + 7.0f, p.y + 3.0f), h - 6.0f,
+    theme::RuneMark(dl, ImVec2(p.x + 7.0f, p.y + 3.0f), h - 6.0f,
                          theme::U32(theme::Sand()),
                          theme::U32(theme::Charcoal(), 0.85f));
     ImGui::Dummy(ImVec2(16.0f, 0.0f));
@@ -221,7 +221,7 @@ void Editor2DScreen::draw_menus() {
       SpriteSlicerPanel::get().open(project_.path);
     }
     ImGui::Separator();
-    if (ux::MenuItem("Back to Projects")) {
+    if (ux::MenuItem("Back to Realms")) {
       leave_or_ask(false);
     }
     if (ux::MenuItem("Quit", "Alt+F4")) {
@@ -584,7 +584,7 @@ void Editor2DScreen::draw_status_bar() {
   {
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float h = ImGui::GetTextLineHeight();
-    theme::TombstoneMark(dl, ImVec2(p.x + 6.0f, p.y), h, theme::U32(theme::Sand()),
+    theme::RuneMark(dl, ImVec2(p.x + 6.0f, p.y), h, theme::U32(theme::Sand()),
                          theme::U32(theme::Charcoal(), 0.85f));
     ImGui::Dummy(ImVec2(14.0f, h));
     ImGui::SameLine();

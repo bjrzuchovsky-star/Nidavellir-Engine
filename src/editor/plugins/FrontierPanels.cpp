@@ -174,7 +174,7 @@ void draw_prospector(SurvivalPlugin& p) {
     seed_edit = ws.seed;
     seeded_edit = true;
   }
-  ImGui::TextColored(theme::Accent(), "Claim \"%s\"", ws.world.c_str());
+  ImGui::TextColored(theme::Accent(), "Realm \"%s\"", ws.world.c_str());
   ImGui::SameLine();
   ImGui::TextColored(theme::TextMuted(), "(survival/world.json, %.0f-minute days)", ws.day_minutes);
   ImGui::SetNextItemWidth(160);

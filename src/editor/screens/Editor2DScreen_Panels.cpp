@@ -535,7 +535,7 @@ void Editor2DScreen::draw_inspector() {
 
   ImGui::Spacing();
   theme::Divider();
-  if (theme::SecondaryButton("Back to Projects", ImVec2(-1, 0))) {
+  if (theme::SecondaryButton("Back to Realms", ImVec2(-1, 0))) {
     leave_or_ask(false);
   }
 }

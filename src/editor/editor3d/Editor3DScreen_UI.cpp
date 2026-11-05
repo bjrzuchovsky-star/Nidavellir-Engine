@@ -223,7 +223,7 @@ void Editor3DScreen::draw_menu_bar() {
 }
 
 void Editor3DScreen::draw_menus() {
-  if (ux::BeginMenu("Claim")) {
+  if (ux::BeginMenu("Realm")) {
     if (ux::MenuItem("Save scene", "Ctrl+S")) {
       std::string err;
       if (save_scene(&err)) note("Saved scene.json");
@@ -243,7 +243,7 @@ void Editor3DScreen::draw_menus() {
     if (ux::MenuItem("Strings... (localisation)")) StringsPanel::get().open(project_.path, project_.name);
     if (ux::MenuItem("Sprite Slicer...")) SpriteSlicerPanel::get().open(project_.path);
     ImGui::Separator();
-    if (ux::MenuItem("Back to Claims")) leave_or_ask(false);
+    if (ux::MenuItem("Back to Realms")) leave_or_ask(false);
     if (ux::MenuItem("Quit", "Alt+F4")) leave_or_ask(true);
     ux::EndMenu();
   }

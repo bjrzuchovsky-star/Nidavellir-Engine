@@ -141,7 +141,7 @@ Each hook call has a budget of 20000 steps and a nesting depth limit of 64 (`kMa
 
 Open the editor (`src/editor/scripting/BrandBook.*`) in any of these ways:
 
-- **File > Brand Book... (visual scripts)** in 2D, or **Claim > Brand Book... (visual scripts)** in 3D
+- **File > Brand Book... (visual scripts)** in 2D, or **Realm > Brand Book... (visual scripts)** in 3D
 - by double-clicking a `.graph.json`
 - standalone: `ts_admin --brand-book <project> [graph]`
 

@@ -1033,7 +1033,7 @@ void VaultPanel::draw_delete_modal() {
   if (!ImGui::BeginPopupModal("Delete from the Vault?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
   if (del_version_ == 0) ImGui::Text("Delete \"%s\" and every version from the Vault?", del_name_.c_str());
   else ImGui::Text("Delete v%d of \"%s\" from the Vault?", del_version_, del_name_.c_str());
-  theme::StatusWarn("Claims that already pulled it keep their copies. No coming back.");
+  theme::StatusWarn("Realms that already pulled it keep their copies. No coming back.");
   ImGui::Spacing();
   if (theme::DangerButton("Delete", ImVec2(120, 0))) {
     auto backend = std::shared_ptr<vault::Backend>(make_backend());
