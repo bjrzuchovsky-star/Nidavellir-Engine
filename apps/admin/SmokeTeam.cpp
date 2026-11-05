@@ -47,6 +47,8 @@ int fail(const std::string& what) {
   return 1;
 }
 
+fs::path sync_root(const ed::TeamSession& t);
+
 ed::ProjectInfo fresh(const std::string& id, ed::ProjectKind kind) {
   const fs::path dir = fs::absolute(fs::path("TombStoneProjects") / id);
   std::error_code ec;
@@ -511,8 +513,6 @@ int check_assets() {
     a.on_enter();
     b.on_enter();
     const fs::path pa(a.team().project().path), pb(b.team().project().path);
-    fs::create_directories(pa / "assets", ec);
-    std::ofstream(pa / "assets" / "wanted.txt", std::ios::binary) << "WANTED: one ghost, dead or alive";
     std::vector<Tick> ticks = {[&](float) { server.poll(); }, [&](float dt) { a.tick_team(dt); },
                                [&](float dt) { b.tick_team(dt); }};
     ed::TeamJoinSettings j;
@@ -525,17 +525,26 @@ int check_assets() {
     j.claim = "*";
     j.user = "Wyatt";
     if (!b.team().join(j, &err) || !pump(ticks, [&] { return b.team().joined(); }, 5)) return fail("asset B join");
-    const fs::path got = pb / "assets" / "wanted.txt";
-    if (!pump(ticks, [&] { return fs::exists(got) && slurp(got) == slurp(pa / "assets" / "wanted.txt"); }, 10)) {
-      rc = fail("asset reached B through the Vault");
+    // Joiners share through the per-session cache. The open realms stay put.
+    const fs::path ma = sync_root(a.team());
+    const fs::path mb = sync_root(b.team());
+    if (ma == pa || mb == pb) return fail("vault ride-in should use the session cache");
+    fs::create_directories(ma / "assets", ec);
+    std::ofstream(ma / "assets" / "wanted.txt", std::ios::binary) << "WANTED: one ghost, dead or alive";
+    const fs::path got = mb / "assets" / "wanted.txt";
+    if (!pump(ticks, [&] { return fs::exists(got) && slurp(got) == slurp(ma / "assets" / "wanted.txt"); }, 10)) {
+      rc = fail("asset reached B's session mirror through the Vault (" + a.team().files_error() + " / " +
+                b.team().files_error() + ")");
+    } else if (fs::exists(pb / "assets" / "wanted.txt")) {
+      rc = fail("B's own realm was overwritten by the clan file");
     }
-    const std::string sha = tv::sha256_file((pa / "assets" / "wanted.txt").string());
+    const std::string sha = tv::sha256_file((ma / "assets" / "wanted.txt").string());
     if (!rc && !fs::exists(vroot / "blobs" / sha.substr(0, 2) / sha)) rc = fail("blob stored by SHA-256");
     // B changes it; A gets the new version.
     if (!rc) {
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
       std::ofstream(got, std::ios::binary | std::ios::trunc) << "REWARD: 500 dollars";
-      if (!pump(ticks, [&] { return slurp(pa / "assets" / "wanted.txt") == "REWARD: 500 dollars"; }, 10)) {
+      if (!pump(ticks, [&] { return slurp(ma / "assets" / "wanted.txt") == "REWARD: 500 dollars"; }, 10)) {
         rc = fail("changed asset reached A");
       }
     }
@@ -549,7 +558,7 @@ int check_assets() {
       b.team().set_asset_backend(std::make_shared<SlowBackend>(
           std::make_shared<tv::RemoteBackend>(url, key), 700));
       {
-        std::ofstream big(pa / "assets" / "canyon.bin", std::ios::binary);
+        std::ofstream big(ma / "assets" / "canyon.bin", std::ios::binary);
         std::string chunk(1 << 16, 'x');
         for (int i = 0; i < 48; ++i) {
           chunk[0] = static_cast<char>(i);
@@ -571,9 +580,9 @@ int check_assets() {
                                      saw_progress = true;
                                    }
                                  }};
-      const fs::path big_b = pb / "assets" / "canyon.bin";
+      const fs::path big_b = mb / "assets" / "canyon.bin";
       if (!pump(timed, [&] { return fs::exists(big_b) && fs::file_size(big_b) == (3u << 20); }, 20)) {
-        rc = fail("3 MB file reached B through the slow Vault");
+        rc = fail("3 MB file reached B's session mirror through the slow Vault");
       } else if (!saw_progress) {
         rc = fail("transfer progress shown (files / bytes)");
       } else if (worst_ms > 150.0) {
@@ -583,10 +592,10 @@ int check_assets() {
     // Deletes: A removes the wanted poster; B's copy goes (kept in the trash).
     if (!rc) {
       settle(ticks, 2.5);  // both sides agree the file is in step
-      fs::remove(pa / "assets" / "wanted.txt", ec);
+      fs::remove(ma / "assets" / "wanted.txt", ec);
       if (!pump(ticks, [&] { return !fs::exists(got); }, 15)) {
         rc = fail("asset delete reached B");
-      } else if (!fs::exists(pb / ".tombstone" / "team" / "trash" / "assets" / "wanted.txt")) {
+      } else if (!fs::exists(mb / ".tombstone" / "team" / "trash" / "assets" / "wanted.txt")) {
         rc = fail("deleted asset kept in B's team trash");
       } else {
         const tc::Docs* d = server.docs("_team_assets");
