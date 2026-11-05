@@ -155,7 +155,7 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
   switch (f.kind) {
     case ErrorKind::MissingFile:
       f.title = "A file is missing";
-      f.what = "TombStone went looking for a file" + s + " and it wasn't there.";
+      f.what = "Nidavellir went looking for a file" + s + " and it wasn't there.";
       f.why = "It was probably moved, renamed or deleted outside the editor, or the realm was copied without it.";
       f.fix = "Put the file back, or point the thing that uses it at the new file. Asset Browser > Rescan picks "
               "up files moved by hand.";
@@ -163,7 +163,7 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
     case ErrorKind::MissingTexture:
       f.title = "A texture couldn't be loaded";
       f.what = "An image" + s + " couldn't be opened, so a placeholder is drawn instead.";
-      f.why = "The file was moved or deleted, or it's in a format TombStone can't read (PNG, JPG, TGA, BMP and "
+      f.why = "The file was moved or deleted, or it's in a format Nidavellir can't read (PNG, JPG, TGA, BMP and "
               "VTF are fine).";
       f.fix = "Re-import the image (right-click it in the Asset Browser > Reimport), or pick another texture in "
               "the Inspector.";
@@ -178,7 +178,7 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
     case ErrorKind::ImportFailed:
       f.title = "Import didn't work";
       f.what = "The file" + s + " couldn't be brought into the realm.";
-      f.why = "The file may be damaged, still being written by another program, or in a format TombStone doesn't "
+      f.why = "The file may be damaged, still being written by another program, or in a format Nidavellir doesn't "
               "import.";
       f.fix = "Check the file opens in the program that made it, save it again (PNG for images, glTF/GLB or OBJ "
               "for models), then use Import file... again.";
@@ -224,7 +224,7 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
       break;
     case ErrorKind::BlenderNotFound:
       f.title = "Blender wasn't found";
-      f.what = "This file needs Blender to import, and TombStone couldn't find Blender on this PC.";
+      f.what = "This file needs Blender to import, and Nidavellir couldn't find Blender on this PC.";
       f.why = ".blend files (and some other formats) are converted by Blender in the background.";
       f.fix = "Install Blender, or set its path in Settings > Tools > Blender executable. You can also export "
               "glTF from Blender yourself and import that.";
@@ -233,7 +233,7 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
       break;
     case ErrorKind::UpdateCheck:
       f.title = "Couldn't check for updates";
-      f.what = "TombStone couldn't reach the release server" + s + ". Nothing has changed on this PC.";
+      f.what = "Nidavellir couldn't reach the release server" + s + ". Nothing has changed on this PC.";
       f.why = "Usually no internet connection, a proxy or firewall, or the server is busy.";
       f.fix = "Try again later. You can turn update checks off in Settings > Supply Run.";
       f.fix_action = "Settings/Supply Run";
@@ -250,10 +250,10 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
                 " claim, or move scene.json out of the way to start this realm fresh.";
         break;
       }
-      f.title = "This scene is from a newer TombStone";
-      f.what = "The scene" + s + " was saved by a newer version of TombStone than this one, so it wasn't opened.";
+      f.title = "This scene is from a newer Nidavellir";
+      f.what = "The scene" + s + " was saved by a newer version of Nidavellir than this one, so it wasn't opened.";
       f.why = "Newer versions add things older ones can't read. Opening it here could lose them.";
-      f.fix = "Update TombStone (the Project Manager shows a banner when a newer version is out), then open the "
+      f.fix = "Update Nidavellir (the Project Manager shows a banner when a newer version is out), then open the "
               "claim again. Saving is switched off for this scene, so your file hasn't been touched.";
       break;
     case ErrorKind::SaveFailed:
@@ -265,7 +265,7 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
       break;
     case ErrorKind::Unknown:
       f.title = "Something went wrong";
-      f.what = "TombStone hit a problem it doesn't have a plain explanation for yet.";
+      f.what = "Nidavellir hit a problem it doesn't have a plain explanation for yet.";
       f.why = "See Details for the exact message.";
       f.fix = "Try again. If it keeps happening, use Copy details and include it when you report the bug.";
       break;
@@ -276,7 +276,7 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
 std::string FriendlyError::summary() const { return what + "\nWhy: " + why + "\nWhat to do: " + fix; }
 
 std::string FriendlyError::copy_text() const {
-  return "TombStone error: " + title + " [" + to_string(kind) + "]\n" + summary() + "\n\nDetails:\n" + details + "\n";
+  return "Nidavellir error: " + title + " [" + to_string(kind) + "]\n" + summary() + "\n\nDetails:\n" + details + "\n";
 }
 
 // ---- modal ------------------------------------------------------------
@@ -428,7 +428,7 @@ const char* short_title(ErrorKind k) {
     case ErrorKind::VaultConnection: return "can't reach the Vault";
     case ErrorKind::BlenderNotFound: return "Blender not found";
     case ErrorKind::UpdateCheck: return "update check failed";
-    case ErrorKind::SceneVersion: return "scene from a newer TombStone";
+    case ErrorKind::SceneVersion: return "scene from a newer Nidavellir";
     case ErrorKind::SaveFailed: return "couldn't save";
     case ErrorKind::Unknown: return "";
   }

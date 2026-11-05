@@ -183,7 +183,7 @@ A URL typed in the Team panel always wins (handy for a Vault behind a proxy with
 
 - No key for the Vault: "Files can't travel: the posse's files live in the Vault at ..., which needs your Vault API key. Put it in the Team panel's key box (or Settings > Vault > API key), then ride out and in again."
 - Vault on 127.0.0.1 with a rider on another PC: "... restart ts_vault with --host 0.0.0.0 and allow TCP <port> through its firewall."
-- Older host, no URL: "Files can't travel: this team host doesn't say where the posse's files live (it runs an older TombStone). Type its Vault URL in the Team panel ..."
+- Older host, no URL: "Files can't travel: this team host doesn't say where the posse's files live (it runs an older Nidavellir). Type its Vault URL in the Team panel ..."
 - Vault or host unreachable, key refused: "Files can't travel through the Vault at ...: <the error>" (cleared by the next pass that works).
 - **Read-only key:** the panel says "your key is read-only, so you see the posse's files but yours stay on this PC"; each local file not sent gets a note once ("Read-only key: assets/cactus.png stays on this PC"), and an object you place is put back ("Read-only key: your edit was put back"). Session blobs refuse a read-only rider's upload with "Your key is read-only: you can see the posse's files but not place your own."
 

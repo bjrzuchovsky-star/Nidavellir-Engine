@@ -902,7 +902,7 @@ int check_ride_in_old_host() {
   j.claim = "_team_old";
   int rc = 0;
   if (!a.team().join(j, &err) || !pump(ticks, [&] { return a.team().joined(); }, 5)) rc = fail("old host join");
-  else if (a.team().files_error().find("older TombStone") == std::string::npos) {
+  else if (a.team().files_error().find("older Nidavellir") == std::string::npos) {
     rc = fail("readable error for a host that doesn't carry files: " + a.team().files_error());
   }
   a.team().leave();

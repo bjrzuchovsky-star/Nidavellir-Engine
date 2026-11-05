@@ -193,7 +193,7 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
       ImGui::InputText("Vault URL (optional)", t.ui.vault_url, sizeof(t.ui.vault_url));
       ImGui::TextDisabled("ts_vault --team: use your Vault key. LAN host: the passcode, if any.");
       ImGui::TextDisabled("Files under assets/ come to you on their own; leave the URL empty");
-      ImGui::TextDisabled("unless the host can't say where they live (older TombStone).");
+      ImGui::TextDisabled("unless the host can't say where they live (an older Nidavellir).");
       ImGui::TextDisabled("Joining swaps this realm's scene for the posse's.");
       const bool back = t.has_last_ride() && !t.last_ride_hosted();
       if (back) ImGui::TextDisabled("Filled in from your last ride (keys and passcodes are never saved).");

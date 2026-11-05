@@ -202,7 +202,7 @@ void UpdateService::start_download() {
     }
     AssetKind kind = AssetKind::None;
     const ReleaseAsset* asset = select_update_asset(rel, &kind);
-    if (!asset) return fail("no TombStone-" + strip_v(rel.tag) + "-update.exe or -setup.exe on " + rel.tag);
+    if (!asset) return fail("no Nidavellir-" + strip_v(rel.tag) + "-update.exe or -setup.exe on " + rel.tag);
     for (char c : asset->name) {
       if (c == '/' || c == '\\' || c == ':') return fail("odd asset name " + asset->name);
     }

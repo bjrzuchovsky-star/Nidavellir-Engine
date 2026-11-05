@@ -116,13 +116,13 @@ void TeamSession::choose_files_backend() {
     assets_ = std::make_shared<SessionBackend>(client_.rpc());
     files_route_ = server_ ? "over the team session (you host them)" : "over the team session (the host keeps them)";
   } else {
-    // An older host (TombStone 0.2.0) does not say where files travel.
+    // An older host (Nidavellir / TombStone 0.2.0) does not say where files travel.
     const std::string url = settings_fallback ? settings().vault_url : std::string();
     if (!url.empty()) {
       vault(url, " (from Settings > Vault)");
     } else {
       files_error_ = "Files can't travel: this team host doesn't say where the posse's files live (it runs an "
-                     "older TombStone). Type its Vault URL in the Team panel (ts_vault: http://<host>:25565), "
+                     "older Nidavellir). Type its Vault URL in the Team panel (ts_vault: http://<host>:25565), "
                      "or update the host.";
     }
   }

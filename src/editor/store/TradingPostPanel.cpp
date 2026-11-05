@@ -183,7 +183,7 @@ std::string trading_post_entry_tip(const store::StoreEntry& e, bool hitched) {
   }
   t += "\nWorks in: " + types_label(e.types) + " claims.  ";
   switch (e.source) {
-    case store::Source::BuiltIn: t += "Built in: ships with TombStone."; break;
+    case store::Source::BuiltIn: t += "Built in: ships with Nidavellir."; break;
     case store::Source::Local: t += "From a local folder: " + e.origin; break;
     case store::Source::ComingSoon: t += "Coming soon: nothing to install yet."; break;
     default: t += "From " + (e.origin.empty() ? std::string("a remote index") : e.origin) + "."; break;

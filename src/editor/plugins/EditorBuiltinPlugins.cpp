@@ -33,7 +33,7 @@ class PossePlugin final : public plugin::Plugin {
       i.description =
           "Play with posse: a local server and 1-4 riders in the editor, lag "
           "sim, the Network panel and ts_client windows.";
-      i.author = "TombStone";
+      i.author = "BORENJO Studios";
       i.version = plugin::Version{1, 0, 0};
       i.category = plugin::PluginCategory::Engine;
       i.project_types = plugin::kType2D;
