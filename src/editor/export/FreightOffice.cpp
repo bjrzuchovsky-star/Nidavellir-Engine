@@ -140,7 +140,7 @@ void FreightOffice::draw_rights() {
                      third_party_.size());
   ImGui::PopStyleColor();
   bool changed = false;
-  if (ImGui::Checkbox("I have the rights to ship all of these (this claim)", &rights_all_)) {
+  if (ImGui::Checkbox("I have the rights to ship all of these (this realm)", &rights_all_)) {
     exporter::provenance::acknowledge(project_dir_, "", rights_all_);
     changed = true;
   }

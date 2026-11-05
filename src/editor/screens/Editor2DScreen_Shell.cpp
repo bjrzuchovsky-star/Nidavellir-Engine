@@ -1140,7 +1140,7 @@ void Editor2DScreen::setup_field_guide() {
   ux_.refresh_recent([this](const ux::RecentItem& r) {
     if (r.kind == "claim") {
       if (r.path == project_.path) {
-        note("Already riding this claim");
+        note("Already riding this realm");
         return;
       }
       ux::request_open_claim(r.path);
@@ -1153,7 +1153,7 @@ void Editor2DScreen::setup_field_guide() {
 }
 
 // --smoke-ux: every right-click menu body under its scope. Items only record
-// themselves in a harvest, so nothing here changes the claim.
+// themselves in a harvest, so nothing here changes the realm.
 void Editor2DScreen::draw_context_menus_for_audit() {
   const std::uint64_t saved_id = context_id_;
   const bool saved_vp = context_in_viewport_;

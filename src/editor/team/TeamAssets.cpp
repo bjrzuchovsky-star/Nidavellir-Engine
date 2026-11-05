@@ -148,7 +148,7 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
   std::vector<Job> jobs;
   std::set<std::string> handled;
 
-  // 2. Deletes. A file the session and this claim agreed on ...
+  // 2. Deletes. A file the session and this realm agreed on ...
   for (auto it = p.synced.begin(); it != p.synced.end();) {
     const std::string rel = it->first;
     const std::string sha = it->second;

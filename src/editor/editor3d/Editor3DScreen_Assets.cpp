@@ -66,7 +66,7 @@ void Editor3DScreen::drop_vault_item(const std::string& item, const render3d::Ve
   vault_panel_.pull_then(item, [this, pos](const vaultp::PullResult& r) {
     if (r.kind == "prefab") drop_asset("prefab:" + r.main, pos);
     else if (r.kind == "model" || r.kind == "audio") drop_asset(r.main, pos);
-    else note("Pulled " + r.main + " into the claim");
+    else note("Pulled " + r.main + " into the realm");
   });
 }
 

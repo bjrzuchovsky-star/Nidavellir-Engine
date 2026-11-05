@@ -156,7 +156,7 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
     case ErrorKind::MissingFile:
       f.title = "A file is missing";
       f.what = "TombStone went looking for a file" + s + " and it wasn't there.";
-      f.why = "It was probably moved, renamed or deleted outside the editor, or the claim was copied without it.";
+      f.why = "It was probably moved, renamed or deleted outside the editor, or the realm was copied without it.";
       f.fix = "Put the file back, or point the thing that uses it at the new file. Asset Browser > Rescan picks "
               "up files moved by hand.";
       break;
@@ -177,7 +177,7 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
       break;
     case ErrorKind::ImportFailed:
       f.title = "Import didn't work";
-      f.what = "The file" + s + " couldn't be brought into the claim.";
+      f.what = "The file" + s + " couldn't be brought into the realm.";
       f.why = "The file may be damaged, still being written by another program, or in a format TombStone doesn't "
               "import.";
       f.fix = "Check the file opens in the program that made it, save it again (PNG for images, glTF/GLB or OBJ "
@@ -245,9 +245,9 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
         f.title = two ? "This is a 2D scene" : "This is a 3D scene";
         f.what = std::string("This claim's scene.json was made by the ") + (two ? "2D" : "3D") +
                  " editor, so this editor didn't open it.";
-        f.why = "The scene file was copied in from another claim, or the claim's kind was changed by hand.";
+        f.why = "The scene file was copied in from another realm, or the realm's kind was changed by hand.";
         f.fix = std::string("Open it from a ") + (two ? "2D" : "3D") +
-                " claim, or move scene.json out of the way to start this claim fresh.";
+                " claim, or move scene.json out of the way to start this realm fresh.";
         break;
       }
       f.title = "This scene is from a newer TombStone";

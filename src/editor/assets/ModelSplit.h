@@ -1,7 +1,7 @@
 #pragma once
 
 // Split a model asset into one glTF per mesh node, each with its own .meta
-// in the claim's metadata folder (editor/assets/AssetDb.h). The new files
+// in the realm's metadata folder (editor/assets/AssetDb.h). The new files
 // sit under assets/ like any other asset, so the Vault and a posse pick
 // them up on the next pass.
 

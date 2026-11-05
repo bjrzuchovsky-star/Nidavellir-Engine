@@ -1,4 +1,4 @@
-// VR claims in the 3D editor: Play in the desktop simulator, "Preview in
+// VR realms in the 3D editor: Play in the desktop simulator, "Preview in
 // headset" through OpenXR, and the Headset Mirror window (both eyes, the
 // session state, comfort settings, simulator keys).
 

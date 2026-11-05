@@ -661,7 +661,7 @@ void Editor3DScreen::draw_viewport() {
         ux::SetTooltip("Drop on an entity to attach the script");
       }
     }
-    // A Vault tile: pull it into the claim, then place it at the drop point.
+    // A Vault tile: pull it into the realm, then place it at the drop point.
     if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kVaultItemPayload)) {
       Vec3 at = scene_.editor_camera.target;
       ground_point(mx, my, vw, vh, &at);
@@ -1313,7 +1313,7 @@ void Editor3DScreen::setup_field_guide() {
   ux_.refresh_recent([this](const ux::RecentItem& r) {
     if (r.kind == "claim") {
       if (r.path == project_.path) {
-        note("Already riding this claim");
+        note("Already riding this realm");
         return;
       }
       ux::request_open_claim(r.path);

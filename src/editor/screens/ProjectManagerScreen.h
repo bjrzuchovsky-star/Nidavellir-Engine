@@ -24,7 +24,7 @@ struct ProjectTemplate;
 // On-disk project list/select shell with ImGui UI.
 // Actions: Open (select index / double-click), New Project (2D / 3D / VR
 // picker), Delete, Settings, Logout. A 2D project opens Editor2D; 3D and
-// VR open Editor3D (VR claims add the headset preview).
+// VR open Editor3D (VR realms add the headset preview).
 class ProjectManagerScreen final : public IScreen {
  public:
   ProjectManagerScreen(std::vector<ProjectInfo> projects,
@@ -103,8 +103,8 @@ class ProjectManagerScreen final : public IScreen {
   // Trading Post (plugin store), outfitting the highlighted claim.
   void open_trading_post() { trading_post_.open = true; }
   TradingPostUi& trading_post() { return trading_post_; }
-  // The Vault manager: the library without opening a claim (browse, edit,
-  // delete, Add files..., Pull into claim...). Drawn in place of the claims.
+  // The Vault manager: the library without opening a realm (browse, edit,
+  // delete, Add files..., Pull into the realm...). Drawn in place of the realms.
   void open_vault();
   void close_vault() { vault_open_ = false; }
   bool vault_open() const { return vault_open_; }

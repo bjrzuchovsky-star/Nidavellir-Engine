@@ -4,7 +4,7 @@
 // tree, thumbnail grid with search and type filter, drag into the scene
 // (the host picks the payload), drag onto a folder to move, rename /
 // delete with "in use" warnings, find references, per-asset import
-// settings (.meta, kept in the claim's .tombstone/meta folder), hot reload
+// settings (.meta, kept in the realm's .tombstone/meta folder), hot reload
 // of changed files, imports from outside (Import... button, files dropped
 // on the window) sorted into type folders (ImportSort.h), orphaned .meta
 // clean-up.

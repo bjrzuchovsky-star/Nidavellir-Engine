@@ -286,7 +286,7 @@ const ProjectTemplate* TemplateStore::find(const std::string& id) const {
 }
 
 namespace {
-// 0.2.0 split: a new claim gets the physics / movement plugins its scenes
+// 0.2.0 split: a a new realm gets the physics / movement plugins its scenes
 // use (on top of what the template lists) and is marked split, so opening
 // it never runs the pre-0.2.0 migration.
 void settle_plugins(ProjectInfo* out, ProjectKind kind, bool vr) {
@@ -449,7 +449,7 @@ std::vector<std::string> TemplateStore::generator_ids() {
 bool TemplateStore::run_generator(const std::string& id, const std::string& dir,
                                   const std::string& name, std::string* error) {
   if (id == "sample-2d-platformer") {
-    // What the editor writes the first time a 2D claim opens: the rider
+    // What the editor writes the first time a 2D realm opens: the rider
     // sheet, sample scripts and the Dusty Town starter scene.
     ProjectInfo p;
     p.id = fs::path(dir).filename().string();

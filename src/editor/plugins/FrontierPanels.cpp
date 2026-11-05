@@ -217,12 +217,12 @@ void draw_prospector(SurvivalPlugin& p) {
   ImGui::Separator();
   const bool riding = p.sim().active();
   ImGui::BeginDisabled(riding);
-  if (theme::PrimaryButton("Burn the claim / regenerate")) ImGui::OpenPopup("Burn the claim?");
+  if (theme::PrimaryButton("Burn the realm / regenerate")) ImGui::OpenPopup("Burn the realm?");
   ImGui::EndDisabled();
   if (riding && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
     ux::SetTooltip("Stop the ride first.");
   }
-  if (ImGui::BeginPopupModal("Burn the claim?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (ImGui::BeginPopupModal("Burn the realm?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::Text("Stake seed %" PRIu64 " and burn saves/%s/ (every dug tile, saddlebag and settler)?",
                 seed_edit, ws.world.c_str());
     if (theme::PrimaryButton("Burn it")) {
@@ -237,7 +237,7 @@ void draw_prospector(SurvivalPlugin& p) {
         const std::uintmax_t gone = fs::exists(saves, ec) ? fs::remove_all(saves, ec) : 0;
         p.reload_data(&err);
         status = ec ? "Seed staked, but the old save wouldn't burn: " + ec.message()
-                    : "Fresh claim staked on seed " + std::to_string(seed_edit) + " (" +
+                    : "Fresh realm staked on seed " + std::to_string(seed_edit) + " (" +
                           std::to_string(gone) + " old file(s) burned).";
       }
       ImGui::CloseCurrentPopup();

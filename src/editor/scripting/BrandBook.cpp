@@ -327,7 +327,7 @@ void BrandBook::draw_sidebar() {
   theme::BrandBlock("Brand Book", "visual scripts", ImGui::GetContentRegionAvail().x);
   theme::SectionHeader("Graphs", "scripts/*.graph.json");
   ImGui::BeginChild("##bb_list", ImVec2(0, 150), ImGuiChildFlags_Borders);
-  if (graphs_.empty()) ImGui::TextDisabled("No graphs on this claim yet.");
+  if (graphs_.empty()) ImGui::TextDisabled("No graphs on this realm yet.");
   for (const std::string& g : graphs_) {
     if (ImGui::Selectable(g.c_str() + 8, g == rel_)) {
       if (g != rel_) load(g);

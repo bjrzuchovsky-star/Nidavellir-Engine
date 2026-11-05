@@ -582,7 +582,7 @@ class Editor2DScreen final : public IScreen {
   void open_asset_browser();
   // Pull a Vault item dropped on the viewport, then place it there.
   void drop_vault_item(const std::string& item, float wx, float wy);
-  // The Vault (asset library shared by every claim).
+  // The Vault (asset library shared by every realm).
   VaultPanel vault_panel_;
   bool show_vault_ = true;
   bool show_prefabs_ = true;

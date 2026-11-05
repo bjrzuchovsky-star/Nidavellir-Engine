@@ -1,4 +1,4 @@
-// Scripts: the claim's script files in every language (Scripts panel:
+// Scripts: the realm's script files in every language (Scripts panel:
 // write one from a template, open it in VS Code / Visual Studio / the OS
 // editor, drag it onto an entity), the Inspector's script components (a
 // Unity-style stack: several per entity, each with its own props, enable

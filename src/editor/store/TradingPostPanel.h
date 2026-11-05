@@ -3,7 +3,7 @@
 // The Trading Post window (ImGui, Dusk theme): browse / search the plugin
 // catalog by category, read details (version, deps, project types, source,
 // hash), install / update / uninstall into the engine plugin cache, and
-// hitch a plugin to a claim. Opened from the Project Manager (for the
+// hitch a plugin to a realm. Opened from the Project Manager (for the
 // highlighted claim) and from the Outfitter's Wagon (for the open claim).
 
 #include "editor/ux/FriendlyError.h"

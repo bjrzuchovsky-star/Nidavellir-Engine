@@ -1,5 +1,5 @@
 // Project Manager: the template picker ("Break Ground"), Save as Template
-// and Claim Settings (the VR switch on 3D claims).
+// and Claim Settings (the VR switch on 3D realms).
 
 #include "editor/screens/ProjectManagerScreen.h"
 #include "editor/ux/Tooltip.h"
@@ -117,7 +117,7 @@ void ProjectManagerScreen::request_new_from_template(std::string name, std::stri
   pending_template_vr_ = vr;
   pending_template_dim_ = dimension;
   template_create_requested_ = true;
-  std::cout << "[ProjectManager] New claim from template \"" << pending_template_id_
+  std::cout << "[ProjectManager] New realm from template \"" << pending_template_id_
             << "\": \"" << pending_new_project_name_ << "\"\n";
 }
 

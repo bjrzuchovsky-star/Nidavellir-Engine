@@ -193,7 +193,7 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
       ImGui::TextDisabled("ts_vault --team: use your Vault key. LAN host: the passcode, if any.");
       ImGui::TextDisabled("Files under assets/ come to you on their own; leave the URL empty");
       ImGui::TextDisabled("unless the host can't say where they live (older TombStone).");
-      ImGui::TextDisabled("Joining swaps this claim's scene for the posse's.");
+      ImGui::TextDisabled("Joining swaps this realm's scene for the posse's.");
       const bool back = t.has_last_ride() && !t.last_ride_hosted();
       if (back) ImGui::TextDisabled("Filled in from your last ride (keys and passcodes are never saved).");
       if (ImGui::Button(back ? "Ride back in (Join)" : "Ride out (Join)")) join_now(t);
@@ -207,7 +207,7 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
       ImGui::TextDisabled("No Vault URL: the posse's files travel over the session itself.");
       ImGui::TextDisabled("The session is kept in .tombstone/team/host: hosting again picks it up.");
       const bool back = t.has_last_ride() && t.last_ride_hosted();
-      if (ImGui::Button(back ? "Open the claim again (Host)" : "Open the claim (Host)")) host_now(t);
+      if (ImGui::Button(back ? "Open the realm again (Host)" : "Open the realm (Host)")) host_now(t);
     }
     ImGui::End();
     return;
@@ -308,7 +308,7 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
     }
   }
   ImGui::Spacing();
-  if (ImGui::Button(t.hosting() ? "Close the claim (Leave)" : "Ride off (Leave)")) t.leave();
+  if (ImGui::Button(t.hosting() ? "Close the realm (Leave)" : "Ride off (Leave)")) t.leave();
   ImGui::End();
 }
 

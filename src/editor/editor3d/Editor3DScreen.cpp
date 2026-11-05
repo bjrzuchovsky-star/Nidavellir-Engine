@@ -82,9 +82,9 @@ void Editor3DScreen::on_enter() {
     } else {
       // The starter rider / grabbables ride with Rider 3D + Jolt (0.2.0).
       if (!plugins_.follow_needs(plugin_needs(scene_)).empty()) plugins_.apply();
-      note(vr_project() ? "Staked a fresh VR claim: ground, crate, lamp, a table of things to "
+      note(vr_project() ? "Staked a fresh VR realm: ground, crate, lamp, a table of things to "
                           "grab and the VR rig"
-                        : "Staked a fresh 3D claim: ground, crate, lamp and a rider");
+                        : "Staked a fresh 3D realm: ground, crate, lamp and a rider");
     }
   } else if (!scene3d::load_file(path, &scene_, &err)) {
     note(err, LogLevel::Error);
@@ -93,7 +93,7 @@ void Editor3DScreen::on_enter() {
       scene_locked_ = true;  // keep the newer file exactly as it is
       scene_locked_why_ = err;
     }
-    ux::show_error(ux::explain(err, ux::ErrorKind::MissingFile, "Opening claim " + project_.name));
+    ux::show_error(ux::explain(err, ux::ErrorKind::MissingFile, "Opening realm " + project_.name));
   } else {
     migrate_cameras_on_open(path);  // pre-v18: the follow camera becomes an entity
   }
@@ -194,7 +194,7 @@ AppState Editor3DScreen::on_update(float delta_seconds) {
   }
   asset_poll_clock_ += delta_seconds;
   vault_panel_.update();
-  // Hold the browser's rescan while the Vault worker writes into the claim.
+  // Hold the browser's rescan while the Vault worker writes into the realm.
   if (asset_poll_clock_ > 1.5 && !playing() && !vault_panel_.busy()) {
     asset_poll_clock_ = 0.0;
     asset_browser_.rescan();
@@ -207,7 +207,7 @@ AppState Editor3DScreen::on_update(float delta_seconds) {
   if (back_requested_) return AppState::ProjectManager;
   if (settings_requested_) {
     settings_requested_ = false;
-    return AppState::Settings;  // AppFlow comes back to this claim afterwards
+    return AppState::Settings;  // AppFlow comes back to this realm afterwards
   }
   return AppState::Editor3D;
 }

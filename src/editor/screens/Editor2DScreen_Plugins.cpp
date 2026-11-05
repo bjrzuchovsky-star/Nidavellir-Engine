@@ -34,7 +34,7 @@ bool Editor2DScreen::apply_plugin_changes_if_idle() {
   plugins_applying_ = true;
   const std::size_t n = plugins_.apply();
   plugins_applying_ = false;
-  note("Plugins re-hitched: " + std::to_string(n) + " riding with this claim.");
+  note("Plugins re-hitched: " + std::to_string(n) + " riding with this realm.");
   return true;
 }
 
