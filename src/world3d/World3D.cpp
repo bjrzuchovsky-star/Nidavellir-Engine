@@ -125,7 +125,7 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
         e.player = scene3d::Player3D{};
         e.player->look = scene3d::Player3D::Look::Keys;  // flat fallback: keys, cursor free
         player_ = e.id;
-        post(LogLevel::Info, "play", "VR scene on the desktop: " + e.name + " (VR Rig) rides as the rider");
+        post(LogLevel::Info, "play", "VR scene on the desktop: " + e.name + " (VR Rig) rides as the wanderer");
         break;
       }
     }
@@ -140,7 +140,7 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
            "itself. Wanderer is not required.");
     } else {
       post(LogLevel::Warn, "play",
-           "No rider in this scene (give an entity a Player component); the camera stays put");
+           "No wanderer in this scene (give an entity a Player component); the camera stays put");
     }
   }
   if (const Entity3D* p = find(player_)) spawn_ = p->transform.position;
@@ -870,7 +870,7 @@ std::uint64_t World3D::script_duplicate(std::uint64_t id, float x, float y) {
 void World3D::script_destroy(std::uint64_t id) {
   if (!live(id)) return;
   if (id == player_) {
-    post(LogLevel::Warn, "script", "Scripts cannot destroy the rider");
+    post(LogLevel::Warn, "script", "Scripts cannot destroy the wanderer");
     return;
   }
   dead_.insert(id);

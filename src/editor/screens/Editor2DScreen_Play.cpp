@@ -789,7 +789,7 @@ void Editor2DScreen::draw_inspector_gameplay(std::uint64_t id) {
         }
         char label[160];
         std::snprintf(label, sizeof(label), "%s%s##%llu", other.name.c_str(),
-                      other.player ? "  (rider)" : "",
+                      other.player ? "  (wanderer)" : "",
                       static_cast<unsigned long long>(other.id));
         if (ImGui::Selectable(label, other.id == e->camera->target)) {
           const std::uint64_t pick = other.id;

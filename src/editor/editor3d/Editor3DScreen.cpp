@@ -87,7 +87,7 @@ void Editor3DScreen::on_enter() {
       if (!plugins_.follow_needs(plugin_needs(scene_)).empty()) plugins_.apply();
       note(vr_project() ? "Staked a fresh VR realm: ground, crate, lamp, a table of things to "
                           "grab and the VR rig"
-                        : "Staked a fresh 3D realm: ground, crate, lamp and a rider");
+                        : "Staked a fresh 3D realm: ground, crate, lamp and a wanderer");
     }
   } else if (!scene3d::load_file(path, &scene_, &err)) {
     note(err, LogLevel::Error);

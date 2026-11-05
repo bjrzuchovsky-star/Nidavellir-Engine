@@ -37,8 +37,8 @@ struct Spec {
 const Spec kSpecs[] = {
     {kJoltId, "Jolt Physics (3D)",
      "3D / VR rigid bodies on Jolt: dynamic and kinematic bodies, triggers as sensors, joints, "
-     "ray and shape casts, impacts, VR grab-and-throw and the rider's character sweep. Off: "
-     "bodies stay put, the rider uses the core box collision.",
+     "ray and shape casts, impacts, VR grab-and-throw and the wanderer's character sweep. Off: "
+     "bodies stay put, the wanderer uses the core box collision.",
      plugin::kType3D | plugin::kTypeVR},
     {kBox2DId, "Box2D Physics (2D)",
      "2D rigid bodies on Box2D v3: dynamic / kinematic bodies, joints, ray casts, hit events and "

@@ -453,7 +453,7 @@ void Editor3DScreen::draw_status_bar() {
     play_state = sim ? " | VR preview: desktop simulator"
                      : " | VR preview: headset (" + vr_status_ + ")";
   } else if (playing()) {
-    play_state = world_.grounded() ? " | rider grounded" : " | rider airborne";
+    play_state = world_.grounded() ? " | Wanderer grounded" : " | Wanderer airborne";
     if (world_.mouse_look() && !free_camera_in_play_) {
       play_state += look_captured_ ? " | mouse look (Esc frees the cursor)"
                     : world_.wants_cursor_capture() ? " | click the view to look"

@@ -540,9 +540,9 @@ void Editor3DScreen::draw_inspector() {
     }
     if (c.rig != P::Rig::Fixed) {
       const scene3d::Entity3D* tgt = c.follow ? find(c.follow) : nullptr;
-      const std::string cur_t = tgt ? tgt->name : "The rider (Player)";
+      const std::string cur_t = tgt ? tgt->name : "The wanderer (Player)";
       if (ImGui::BeginCombo("Follow", cur_t.c_str())) {
-        if (ImGui::Selectable("The rider (Player)", c.follow == 0)) {
+        if (ImGui::Selectable("The wanderer (Player)", c.follow == 0)) {
           c.follow = 0;
           t.activated = true;
           t.commit = "Camera follow";
