@@ -86,6 +86,18 @@ void AssetBrowser::open(const std::string& project_dir, AssetBrowserHost host) {
   rescan();
 }
 
+void AssetBrowser::retarget(const std::string& project_dir) {
+  if (project_dir.empty() || project_dir == db_.project_dir()) return;
+  const std::string sel = selected_;
+  const std::string folder = folder_;
+  db_.open(project_dir);
+  import_settings_ = importsort::load_settings(project_dir);
+  thumbs_.clear();
+  selected_ = sel;
+  folder_ = folder;
+  rescan();
+}
+
 void AssetBrowser::set_import_settings(const importsort::Settings& s) {
   import_settings_ = s;
   std::string err;

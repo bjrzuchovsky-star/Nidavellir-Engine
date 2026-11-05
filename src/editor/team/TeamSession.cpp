@@ -64,6 +64,37 @@ std::vector<std::string> TeamSession::take_arrived() {
   return out;
 }
 
+std::string TeamSession::clan_mirror_dir(const std::string& project_id, const std::string& claim_id) {
+  std::string safe = claim_id.empty() || claim_id == "*" ? "session" : claim_id;
+  for (char& c : safe) {
+    if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?') c = '_';
+  }
+  std::string who = project_id.empty() ? "realm" : project_id;
+  for (char& c : who) {
+    if (c == '/' || c == '\\' || c == ':') c = '_';
+  }
+  return (std::filesystem::temp_directory_path() / "nidavellir-clan-mirrors" / who / safe).string();
+}
+
+std::string TeamSession::files_root() const {
+  if (hosting() || mirror_root_.empty()) return project_.path;
+  return mirror_root_;
+}
+
+void TeamSession::ensure_mirror() {
+  if (hosting() || !client_.joined()) {
+    mirror_root_.clear();
+    return;
+  }
+  std::string claim = client_.session().str("claim");
+  if (claim.empty() || claim == "*") claim = last_join_.claim;
+  mirror_root_ = clan_mirror_dir(project_.id, claim);
+  std::error_code ec;
+  const std::filesystem::path root = std::filesystem::u8path(mirror_root_);
+  std::filesystem::create_directories(root / "assets", ec);
+  std::filesystem::create_directories(root / ".tombstone", ec);
+}
+
 void TeamSession::choose_files_backend() {
   files_chosen_ = true;
   files_error_.clear();
@@ -437,10 +468,11 @@ void TeamSession::leave() {
     std::string next;
     steam::clan_backend().migrate(&next, nullptr);
     via_clan_ = false;
-    clan_host_pending_ = false;
-    clan_join_pending_ = false;
+  clan_host_pending_ = false;
+  clan_join_pending_ = false;
   }
   was_joined_ = false;
+  mirror_root_.clear();
   reconnecting_ = false;
   rejoin_pending_ = false;
   client_.rpc()->close("You rode out.");  // a file transfer waiting on the host gives up
@@ -655,6 +687,7 @@ void TeamSession::tick(double dt) {
     return;
   }
   was_joined_ = true;
+  ensure_mirror();
   const std::string scene = binding_->scene_key();
 
   team::Docs docs;
@@ -880,8 +913,9 @@ bool TeamSession::sync_assets() {
   finish_asset_pass();
   if (asset_sync_.running()) return false;
   const std::string scene = binding_->scene_key();
+  ensure_mirror();
   TeamAssetPass p;
-  p.root = project_.path;
+  p.root = files_root();
   auto cit = client_.confirmed().find(scene);
   if (cit != client_.confirmed().end()) p.session = cit->second.assets;
   p.files = files_;

@@ -379,6 +379,10 @@ TeamSession& Editor3DScreen::team() {
 void Editor3DScreen::tick_team(float dt) {
   if (!team_) return;
   team_->tick(dt);
+  const std::string root = team_->joined() && !team_->hosting() ? team_->files_root() : project_.path;
+  asset_browser_.retarget(root);
+  if (view_) view_->set_project_dir(root);
+  vault_panel_.set_pull_dir(team_->joined() ? team_->files_root() : std::string());
   for (const std::string& n : team_->take_notes()) note("Team: " + n);
   // Files the posse sent (or removed): models / textures reload on the next
   // draw and the Asset Browser shows them.

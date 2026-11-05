@@ -208,6 +208,9 @@ TeamSession& Editor2DScreen::team() {
 void Editor2DScreen::tick_team(float dt) {
   if (!team_) return;
   team_->tick(dt);
+  if (team_->joined() && !team_->hosting()) asset_browser_.retarget(team_->files_root());
+  else asset_browser_.retarget(project_.path);
+  vault_panel_.set_pull_dir(team_->joined() ? team_->files_root() : std::string());
   for (const std::string& n : team_->take_notes()) {
     note(n);
     telegraph_.add(runtime::LogLevel::Info, "team", n);

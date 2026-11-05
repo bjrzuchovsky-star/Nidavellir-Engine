@@ -234,7 +234,7 @@ std::string VaultPanel::origin_label(const std::string& rel) const {
 
 void VaultPanel::pull_then(const std::string& item, std::function<void(const vaultp::PullResult&)> done) {
   auto backend = std::shared_ptr<vault::Backend>(make_backend());
-  const std::string project = project_dir_;
+  const std::string project = pull_dir_.empty() ? project_dir_ : pull_dir_;
   const int version = item == selected_ ? pull_version_ : 0;
   start("Pulling", [backend, project, item, version] {
     JobResult r;
@@ -586,6 +586,12 @@ void VaultPanel::draw_details() {
   else if (st) label = "Update to v" + std::to_string(target);
   else label = "Pull v" + std::to_string(target) + " into this realm";
   if (theme::PrimaryButton(label.c_str())) pull_then(it.id, {});
+  ImGui::SameLine();
+  if (theme::SecondaryButton("Send to session")) pull_then(it.id, {});
+  if (ImGui::IsItemHovered()) {
+    ux::SetTooltip("Drop this into the clan's shared asset tree. Hosting a clan does not need a Vault server; "
+                   "the library is only a shelf.");
+  }
   if (st) {
     ImGui::SameLine();
     bool pinned = st->pinned;

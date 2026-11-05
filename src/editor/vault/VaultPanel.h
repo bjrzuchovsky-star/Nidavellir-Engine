@@ -58,6 +58,9 @@ class VaultPanel {
   VaultPanel& operator=(const VaultPanel&) = delete;
 
   void open(const std::string& project_dir, VaultHost host);
+  // While a clan is joined, pulls land in this folder (the host realm or the
+  // joiner's session cache) instead of the editor's own realm.
+  void set_pull_dir(const std::string& dir) { pull_dir_ = dir; }
   // Per frame (also while hidden): finishes background jobs.
   void update();
   void draw();
@@ -128,6 +131,7 @@ class VaultPanel {
   void start_add_files(const vaultp::PushOptions& opt);
 
   std::string project_dir_;
+  std::string pull_dir_;
   VaultHost host_;
   std::string thumb_dir_;
   gfx::TextureCache thumb_tex_;

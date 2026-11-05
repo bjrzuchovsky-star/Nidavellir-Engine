@@ -92,6 +92,8 @@ class AssetBrowser {
   // Show one folder's tiles ("" = every asset). Screenshots use this so the
   // grid is a populated folder rather than the empty-state prompt.
   void show_folder(const std::string& folder) { folder_ = folder; }
+  // Point the grid at another realm folder (the clan mirror) and rescan.
+  void retarget(const std::string& project_dir);
 
  private:
   void draw_folders();

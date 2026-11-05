@@ -162,6 +162,11 @@ class TeamSession {
   // http://...", "over the team session"), and why they can't ("" = fine).
   const std::string& files_route() const { return files_route_; }
   const std::string& files_error() const { return files_error_; }
+  // Host: the open realm. Joiner: a per-session cache so the joiner's own
+  // realm is never overwritten. Empty until the clan welcome arrives.
+  std::string files_root() const;
+  // <temp>/nidavellir-clan-mirrors/<project id>/<claim>. Smokes can seed it.
+  static std::string clan_mirror_dir(const std::string& project_id, const std::string& claim_id);
   // Project paths the file passes wrote or removed since the last call: the
   // editor drops its cached textures / models for them and rescans assets.
   std::vector<std::string> take_arrived();
@@ -237,6 +242,8 @@ class TeamSession {
   std::set<std::string> held_noted_;            // read-only: files we said stay here
   std::string files_url_, files_key_;           // typed in the Team panel (override)
   std::string files_route_, files_error_;
+  std::string mirror_root_;
+  void ensure_mirror();
   bool files_chosen_ = false;
   std::shared_ptr<SessionBlobStore> blob_store_;  // hosting: files over the session
   double asset_clock_ = 0.0;

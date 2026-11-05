@@ -649,6 +649,10 @@ fs::path meta_file(const fs::path& claim, const std::string& rel) {
   return fs::u8path(ts::tombstone::core::asset_meta::meta_path(claim.string(), rel));
 }
 
+// Where a clan member reads and writes shared files (the open realm for the
+// host, the per-session cache for a joiner).
+fs::path sync_root(const ed::TeamSession& t) { return fs::u8path(t.files_root()); }
+
 // Same bytes in both claims (file and its .meta).
 bool same_file(const fs::path& a, const fs::path& b, const std::string& rel) {
   return fs::exists(a / rel) && fs::exists(b / rel) && slurp(a / rel) == slurp(b / rel);
@@ -724,6 +728,14 @@ int check_ride_in_vault() {
     j.port = server.port();
     j.key = k_annie;
     j.claim = "_team_ridein";
+    {
+      // A is a joiner, so the shared copy lives in the session cache, not in A's realm.
+      const fs::path seed = fs::u8path(ed::TeamSession::clan_mirror_dir(a.team().project().id, "_team_ridein"));
+      fs::create_directories((seed / ghost).parent_path(), ec);
+      fs::create_directories(meta_file(seed, ghost).parent_path(), ec);
+      fs::copy_file(pa / ghost, seed / ghost, fs::copy_options::overwrite_existing, ec);
+      fs::copy_file(meta_file(pa, ghost), meta_file(seed, ghost), fs::copy_options::overwrite_existing, ec);
+    }
     if (!a.team().join(j, &err) || !pump(ticks, [&] { return a.team().joined(); }, 5)) return fail("ride-in A join");
     // A's own files go up to the posse.
     if (!pump(ticks, [&] {
@@ -742,9 +754,11 @@ int check_ride_in_vault() {
       j.key = k_wyatt;
       j.claim = "*";
       if (!b.team().join(j, &err) || !pump(ticks, [&] { return b.team().joined(); }, 5)) return fail("ride-in B join");
-      if (!pump(ticks, [&] { return same_file(pa, pb, ghost) && same_meta(pa, pb, ghost) && has_sprite(b, "Ghost", ghost); },
+      if (!pump(ticks, [&] { return same_file(sync_root(a.team()), sync_root(b.team()), ghost) &&
+                                    same_meta(sync_root(a.team()), sync_root(b.team()), ghost) &&
+                                    has_sprite(b, "Ghost", ghost) && !fs::exists(pb / ghost); },
                 15)) {
-        rc = fail("B got A's texture, its .meta and the sprite (" + b.team().files_error() + ")");
+        rc = fail("B got A's texture into the session cache (" + b.team().files_error() + ")");
       }
     }
     if (!rc) {
@@ -761,11 +775,12 @@ int check_ride_in_vault() {
       fs::remove_all(in, ec);
       png_file(in / "horse.png", 4, 4, 33);
       const auto r = b.asset_browser().import_files({(in / "horse.png").string()}, "assets/sprites");
-      if (!fs::exists(pb / horse)) rc = fail("B imported horse.png");
+      if (!fs::exists(sync_root(b.team()) / horse)) rc = fail("B imported horse.png into the cache");
       b.workspace().create_sprite_entity("Horse", horse, 40, 0, 16, 16);
     }
-    if (!rc && !pump(ticks, [&] { return same_file(pa, pb, horse) && same_meta(pa, pb, horse) && has_sprite(a, "Horse", horse) &&
-                                         a.asset_browser().db().by_path(horse); },
+    if (!rc && !pump(ticks, [&] { return same_file(sync_root(a.team()), sync_root(b.team()), horse) &&
+                                          same_meta(sync_root(a.team()), sync_root(b.team()), horse) &&
+                                          has_sprite(a, "Horse", horse) && a.asset_browser().db().by_path(horse); },
                      15)) {
       rc = fail("A got B's imported texture, its .meta and the placed sprite (" + b.team().files_error() + ")");
     }
@@ -773,8 +788,10 @@ int check_ride_in_vault() {
     if (!rc) {
       j.key = k_watch;
       if (!c.team().join(j, &err) || !pump(ticks, [&] { return c.team().joined(); }, 5)) return fail("ride-in C join");
-      if (!pump(ticks, [&] { return same_file(pa, pc, ghost) && same_file(pa, pc, horse) && same_meta(pa, pc, horse) &&
-                                    has_sprite(c, "Horse", horse); },
+      if (!pump(ticks, [&] { return same_file(sync_root(a.team()), sync_root(c.team()), ghost) &&
+                                    same_file(sync_root(a.team()), sync_root(c.team()), horse) &&
+                                    same_meta(sync_root(a.team()), sync_root(c.team()), horse) &&
+                                    has_sprite(c, "Horse", horse) && !fs::exists(pc / ghost); },
                 15)) {
         rc = fail("read-only rider sees the posse's files (" + c.team().files_error() + ")");
       } else if (c.team().files_route().find("read-only") == std::string::npos) {
@@ -843,11 +860,15 @@ int check_ride_in_lan() {
   j.pass = "dusk";
   j.user = "Hickok";
   if (!b.team().join(j, &err) || !pump(ticks, [&] { return b.team().joined(); }, 5)) return fail("LAN join");
+  const fs::path mb = sync_root(b.team());
   int rc = 0;
-  if (!pump(ticks, [&] { return same_file(pa, pb, crate) && same_file(pa, pb, crate_bin) && same_meta(pa, pb, crate) &&
+  if (mb == pb) rc = fail("LAN joiner should use a session cache");
+  else if (!pump(ticks, [&] { return same_file(pa, mb, crate) && same_file(pa, mb, crate_bin) && same_meta(pa, mb, crate) &&
                                 b.find(placed) != nullptr; },
             15)) {
     rc = fail("LAN rider got the host's model, .bin, .meta and object (" + b.team().files_error() + ")");
+  } else if (fs::exists(pb / crate)) {
+    rc = fail("LAN joiner realm was overwritten");
   } else if (b.team().files_route().find("over the team session") == std::string::npos) {
     rc = fail("LAN files route: " + b.team().files_route());
   } else {
@@ -864,11 +885,11 @@ int check_ride_in_lan() {
     fs::remove_all(in, ec);
     gltf_file(in / "barrel.gltf", 2.0f);
     b.asset_browser().import_files({(in / "barrel.gltf").string()}, "assets/models");
-    if (!fs::exists(pb / barrel)) rc = fail("LAN rider imported barrel.gltf");
+    if (!fs::exists(mb / barrel)) rc = fail("LAN rider imported barrel.gltf into the cache");
     else theirs = b.drop_asset(barrel, {2, 0, 0});
     if (!rc && !theirs) rc = fail("LAN rider placed the barrel");
   }
-  if (!rc && !pump(ticks, [&] { return same_file(pa, pb, barrel) && same_meta(pa, pb, barrel) && a.find(theirs) != nullptr &&
+  if (!rc && !pump(ticks, [&] { return same_file(pa, mb, barrel) && same_meta(pa, mb, barrel) && a.find(theirs) != nullptr &&
                                        a.asset_browser().db().by_path(barrel); },
                    15)) {
     rc = fail("host got the rider's model, .meta and object (" + b.team().files_error() + ")");
@@ -1223,19 +1244,30 @@ int check_two_peers() {
   j.pass = "forge";
   j.user = "Eir";
   if (!b.team().join(j, &err) || !pump(ticks, [&] { return b.team().joined(); }, 5)) return fail("asset-sync join");
-  if (!pump(ticks, [&] { return same_file(pa, pb, crate) && same_meta(pa, pb, crate); }, 15)) {
+  const fs::path mb = sync_root(b.team());
+  if (mb == pb) return fail("joiner should mirror into a cache, not their own realm");
+  if (!pump(ticks, [&] { return same_file(pa, mb, crate) && same_meta(pa, mb, crate); }, 15)) {
     return fail("late joiner did not receive the host's file (" + b.team().files_error() + ")");
   }
+  if (fs::exists(pb / crate)) return fail("joiner realm was overwritten by the host tree");
   const std::string extra = "assets/models/anvil.gltf";
   gltf_file(pa / extra, 3.0f);
-  if (!pump(ticks, [&] { return same_file(pa, pb, extra); }, 15)) {
+  if (!pump(ticks, [&] { return same_file(pa, mb, extra); }, 15)) {
     return fail("a file that appears on the host did not reach the peer");
   }
   std::error_code ec;
   fs::remove(pa / extra, ec);
   fs::remove(meta_file(pa, extra), ec);
-  if (!pump(ticks, [&] { return !fs::exists(pb / extra); }, 15)) {
+  if (!pump(ticks, [&] { return !fs::exists(mb / extra); }, 15)) {
     return fail("a deleted file stayed on the peer");
+  }
+  fs::create_directories((pa / "assets/models/renamed").parent_path(), ec);
+  fs::rename(pa / crate, pa / "assets/models/crate-renamed.gltf", ec);
+  fs::rename(meta_file(pa, crate), meta_file(pa, "assets/models/crate-renamed.gltf"), ec);
+  if (!pump(ticks, [&] {
+        return same_file(pa, mb, "assets/models/crate-renamed.gltf") && !fs::exists(mb / crate);
+      }, 15)) {
+    return fail("a renamed file did not follow to the joiner cache");
   }
   if (a.team().asset_sync_state() == "failed" || b.team().asset_sync_state() == "failed") {
     return fail("file sync failed: " + a.team().asset_sync_detail() + " / " + b.team().asset_sync_detail());
