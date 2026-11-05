@@ -194,7 +194,7 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
       ImGui::TextDisabled("ts_vault --team: use your Vault key. LAN host: the passcode, if any.");
       ImGui::TextDisabled("Files under assets/ come to you on their own; leave the URL empty");
       ImGui::TextDisabled("unless the host can't say where they live (an older Nidavellir).");
-      ImGui::TextDisabled("Joining swaps this realm's scene for the posse's.");
+      ImGui::TextDisabled("Joining swaps this realm's scene for the clan's.");
       const bool back = t.has_last_ride() && !t.last_ride_hosted();
       if (back) ImGui::TextDisabled("Filled in from your last ride (keys and passcodes are never saved).");
       if (ImGui::Button(back ? "Ride back in (Join)" : "Ride out (Join)")) join_now(t);
@@ -205,7 +205,7 @@ void draw_panel(TeamSession& t, bool* open, const char* window_id) {
       ImGui::InputText("Vault URL (optional)", t.ui.vault_url, sizeof(t.ui.vault_url));
       ImGui::InputText("Vault API key", t.ui.key, sizeof(t.ui.key), ImGuiInputTextFlags_Password);
       ImGui::TextDisabled("Others join with this PC's address and the port.");
-      ImGui::TextDisabled("No Vault URL: the posse's files travel over the session itself.");
+      ImGui::TextDisabled("No Vault URL: the clan's files travel over the session itself.");
       ImGui::TextDisabled(shot::clean() ? "The session is kept with this realm: hosting again picks it up."
                                      : "The session is kept in .tombstone/team/host: hosting again picks it up.");
       const bool back = t.has_last_ride() && t.last_ride_hosted();
@@ -386,7 +386,7 @@ void draw_presence(TeamSession& t, ImDrawList* draw,
 void draw_status_chip(TeamSession* t) {
   if (!t || !t->joined()) return;
   ImGui::SameLine();
-  ImGui::TextColored(colour_vec(t->client().my_colour()), "Posse of %zu",
+  ImGui::TextColored(colour_vec(t->client().my_colour()), "Clan of %zu",
                      t->client().members().size() + 1);
   const TeamAssetProgress p = t->asset_progress();
   if (p.running && p.files_total > 0) {

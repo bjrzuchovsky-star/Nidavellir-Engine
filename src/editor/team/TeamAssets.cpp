@@ -158,7 +158,7 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
     if (f == p.files.end() && s != p.session.end() && s->second.sha256 == sha && !p.first) {
       if (p.can_write) {
         p.ops.push_back(team::Op::asset(rel, "", 0));
-        if (!team_meta_rel(rel)) p.notes.push_back("Removed " + rel + " for the posse.");
+        if (!team_meta_rel(rel)) p.notes.push_back("Removed " + rel + " for the clan.");
         handled.insert(rel);
         it = p.synced.erase(it);
         continue;
@@ -179,7 +179,7 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
         p.arrived.push_back(rel);
         ++p.removed;
         if (!team_meta_rel(rel)) {
-          p.notes.push_back("Removed " + rel + " (deleted by the posse; a copy is in .tombstone/team/trash).");
+          p.notes.push_back("Removed " + rel + " (deleted by the clan; a copy is in .tombstone/team/trash).");
         }
       }
       handled.insert(rel);
@@ -283,7 +283,7 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
         if (!team_meta_rel(j.rel)) p.fetched.insert(j.rel);
         p.arrived.push_back(j.rel);
         ++p.down;
-        if (!team_meta_rel(j.rel)) p.notes.push_back("Fetched " + j.rel + " from the posse.");
+        if (!team_meta_rel(j.rel)) p.notes.push_back("Fetched " + j.rel + " from the clan.");
       }
     }
     ++prog.files_done;

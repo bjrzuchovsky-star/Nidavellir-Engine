@@ -52,10 +52,10 @@ std::string readme(const std::string& title, const std::string& what, const std:
                    const std::string& next, const std::vector<std::string>& plugins = {}) {
   const std::string plugin_line =
       plugins.empty()
-          ? "- No optional plugins are on. Turn them on from the Trading Post (or the Outfitter's "
+          ? "- No optional plugins are on. Turn them on from the Market (or the Outfitter's "
             "Wagon) when you need them.\n"
-          : "- On: " + join_ids(plugins) + " (physics and movement for the rider, 0.2.0 Trading "
-            "Post plugins). Turn more on from the Trading Post (or the Outfitter's Wagon) when you "
+          : "- On: " + join_ids(plugins) + " (physics and movement for the wanderer, from the "
+            "Market). Turn more on from the Market (or the Outfitter's Wagon) when you "
             "need them.\n";
   return "# " + title + "\n\n" + what + "\n\n## Play\n\n" + play + "\n\n## Next steps\n\n" + next +
          "\n" + plugin_line +

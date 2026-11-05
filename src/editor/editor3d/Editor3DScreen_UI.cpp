@@ -1074,7 +1074,7 @@ void Editor3DScreen::draw_hierarchy_row(const scene3d::Entity3D& e, int depth) {
 void Editor3DScreen::paste_components_3d() {
   if (!comp_clip_ || playing()) return;
   const scene3d::Scene3D before = scene_;
-  static const char* kNames[] = {"Mesh", "Material", "Light", "Collider", "Rigid Body", "Joint", "Player (rider)",
+  static const char* kNames[] = {"Mesh", "Material", "Light", "Collider", "Rigid Body", "Joint", "Wanderer",
                                  "Camera", "Follow", "Animator", "VR Rig", "Grabbable", "Audio Source", "Particles"};
   for (std::uint64_t id : selection()) {
     scene3d::Entity3D* d = scene_.find(id);

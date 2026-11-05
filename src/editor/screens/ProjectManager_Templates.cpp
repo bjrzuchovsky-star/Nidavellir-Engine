@@ -61,7 +61,7 @@ ImU32 mix(const ImVec4& a, const ImVec4& b, float t, float alpha = 1.0f) {
 }
 
 std::string plugin_short(const std::string& id) {
-  if (id == "ts.posse") return "Posse";
+  if (id == "ts.posse") return "Clan";
   if (id == "ts.frontier") return "Frontier";
   if (id == "ts.shipyard") return "Shipyard";
   if (id == "ts.tumbleweed") return "Tumbleweed";

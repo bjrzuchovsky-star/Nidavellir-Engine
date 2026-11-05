@@ -83,7 +83,7 @@ void TeamSession::choose_files_backend() {
   auto vault = [&](std::string url, const std::string& where) {
     if (key.empty() && settings_fallback) key = settings().vault_api_key;
     if (key.empty()) {
-      files_error_ = "Files can't travel: the posse's files live in the Vault at " + url +
+      files_error_ = "Files can't travel: the clan's files live in the Vault at " + url +
                      ", which needs your Vault API key. Put it in the Team panel's key box (or Settings > "
                      "Vault > API key), then ride out and in again.";
       return;
@@ -121,13 +121,13 @@ void TeamSession::choose_files_backend() {
     if (!url.empty()) {
       vault(url, " (from Settings > Vault)");
     } else {
-      files_error_ = "Files can't travel: this team host doesn't say where the posse's files live (it runs an "
+      files_error_ = "Files can't travel: this team host doesn't say where the clan's files live (it runs an "
                      "older Nidavellir). Type its Vault URL in the Team panel (ts_vault: http://<host>:25565), "
                      "or update the host.";
     }
   }
   if (assets_ && !client_.can_write()) {
-    files_route_ += "; your key is read-only, so you see the posse's files but yours stay on this PC";
+    files_route_ += "; your key is read-only, so you see the clan's files but yours stay on this PC";
   }
 }
 
@@ -515,7 +515,7 @@ void TeamSession::start_reconnect() {
   last_preview_.clear();
   held_.clear();
   loaded_ = false;
-  notes_.push_back("Lost the trail to the posse. Riding back in; keep working, your edits will follow.");
+  notes_.push_back("Lost the clan. Joining again; keep working, your edits will follow.");
 }
 
 void TeamSession::tick_reconnect(double dt) {
@@ -571,7 +571,7 @@ void TeamSession::rode_back_in(const team::Docs& docs) {
   ++rejoins_;
   notes_.push_back(std::string(client_.rode_back() ? "Rode back in as " : "Rode back in (as a new rider) as ") +
                    client_.my_name() + ": " + std::to_string(mine.size()) + " change(s) from while you were away, " +
-                   std::to_string(theirs.size()) + " from the posse.");
+                   std::to_string(theirs.size()) + " from the clan.");
 }
 
 void TeamSession::set_cursor(float x, float y, float z, bool valid) {
@@ -611,15 +611,15 @@ std::string TeamSession::status_line() const {
            (reconnect_tries_ ? " (try " + std::to_string(reconnect_tries_) + ")" : std::string()) + "...";
   }
   switch (client_.state()) {
-    case S::Idle: return "Riding solo";
-    case S::Connecting: return "Riding out to " + client_.options().host + "...";
+    case S::Idle: return "Not in a clan";
+    case S::Connecting: return "Joining " + client_.options().host + "...";
     case S::Refused: return "Turned away: " + client_.error();
-    case S::Closed: return client_.error().empty() ? "Riding solo" : client_.error();
+    case S::Closed: return client_.error().empty() ? "Not in a clan" : client_.error();
     case S::Joined: break;
   }
-  std::string s = std::string(hosting() ? "Hosting" : "Riding with") + " a posse of " +
+  std::string s = std::string(hosting() ? "Hosting" : "In") + " a clan of " +
                   std::to_string(client_.members().size() + 1);
-  if (client_.pending()) s += " (" + std::to_string(client_.pending()) + " edit(s) in the saddlebag)";
+  if (client_.pending()) s += " (" + std::to_string(client_.pending()) + " edit(s) waiting)";
   return s;
 }
 
@@ -924,7 +924,7 @@ void TeamSession::finish_asset_pass() {
   }
   for (const std::string& rel : r.held_back) {
     if (held_noted_.insert(rel).second) {
-      notes_.push_back("Read-only key: " + rel + " stays on this PC (the posse can't see it).");
+      notes_.push_back("Read-only key: " + rel + " stays on this PC (the clan can't see it).");
     }
   }
   assets_up_ += r.up;

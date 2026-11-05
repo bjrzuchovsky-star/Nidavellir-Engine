@@ -53,7 +53,7 @@ bool paste_component_values_3d(scene3d::Entity3D& dst, const scene3d::Entity3D& 
   else if (name == "Collider") dst.collider = src.collider;
   else if (name == "Rigid Body") dst.rigid_body = src.rigid_body;
   else if (name == "Joint") dst.joint = src.joint;
-  else if (name == "Player (rider)") dst.player = src.player;
+  else if (name == "Wanderer") dst.player = src.player;
   else if (name == "Camera") dst.camera = src.camera;
   else if (name == "Follow") dst.follow = src.follow;
   else if (name == "Animator") dst.animator = src.animator;
@@ -439,7 +439,7 @@ void Editor3DScreen::draw_inspector() {
       }
     }
   }
-  if (component("Player (rider)", e.player.has_value(), [&] { e.player = scene3d::Player3D{}; },
+  if (component("Wanderer", e.player.has_value(), [&] { e.player = scene3d::Player3D{}; },
                 [&] { e.player.reset(); })) {
     scene3d::Player3D& p = *e.player;
     ImGui::DragFloat("Speed", &p.speed, 0.05f, 0.1f, 50.0f);

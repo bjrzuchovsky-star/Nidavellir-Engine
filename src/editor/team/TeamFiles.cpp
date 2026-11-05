@@ -57,7 +57,7 @@ Value SessionBlobStore::handle(bool can_write, const Value& req) {
     return r;
   }
   if (t == "blob_put") {
-    if (!can_write) return fail("Your key is read-only: you can see the posse's files but not place your own.");
+    if (!can_write) return fail("Your key is read-only: you can see the clan's files but not place your own.");
     const std::string sha = req.str("sha");
     if (!vault::is_sha256_hex(sha)) return fail("Not a SHA-256.");
     const std::uint64_t size = static_cast<std::uint64_t>(req.num("size", 0));
@@ -127,7 +127,7 @@ Value SessionBlobStore::handle(bool can_write, const Value& req) {
 
 bool SessionBackend::ping(std::string* info, std::string* error) {
   if (!rpc_ || !rpc_->is_open()) {
-    if (error) *error = "Not riding with a posse.";
+    if (error) *error = "Not in a clan.";
     return false;
   }
   if (info) *info = "team session";
