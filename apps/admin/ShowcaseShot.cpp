@@ -12,6 +12,7 @@
 #include "fx/Particles.h"
 #include "plugins/survival/Sample.h"
 #include "render3d/Gltf.h"
+#include "render3d/Mesh.h"
 #include "render3d/Scene3D.h"
 #include "terrain/Foliage.h"
 #include "terrain/Terrain.h"
@@ -29,6 +30,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <vector>
@@ -153,6 +155,153 @@ void dress_town(editor::Editor3DScreen& e) {
   }
 }
 
+bool write_boards_tga(const fs::path& path) {
+  render3d::Image boards;
+  boards.width = boards.height = 64;
+  boards.rgba.assign(static_cast<std::size_t>(64 * 64 * 4), 255);
+  for (int y = 0; y < 64; ++y) {
+    for (int x = 0; x < 64; ++x) {
+      const bool seam = (y % 16) == 0 || ((x + (y / 16) * 21) % 64) == 0;
+      const int grain = ((x * 7 + y * 3) % 11) * 3;
+      unsigned char* px = &boards.rgba[(static_cast<std::size_t>(y) * 64 + x) * 4];
+      px[0] = static_cast<unsigned char>(seam ? 70 : 168 + grain);
+      px[1] = static_cast<unsigned char>(seam ? 46 : 118 + grain);
+      px[2] = static_cast<unsigned char>(seam ? 28 : 72 + grain / 2);
+    }
+  }
+  std::string bytes(18, '\0');
+  bytes[2] = 2;
+  bytes[12] = 64;
+  bytes[14] = 64;
+  bytes[16] = 32;
+  bytes[17] = 0x28;
+  for (std::size_t i = 0; i + 3 < boards.rgba.size(); i += 4) {
+    bytes.push_back(static_cast<char>(boards.rgba[i + 2]));
+    bytes.push_back(static_cast<char>(boards.rgba[i + 1]));
+    bytes.push_back(static_cast<char>(boards.rgba[i + 0]));
+    bytes.push_back(static_cast<char>(boards.rgba[i + 3]));
+  }
+  std::error_code ec;
+  fs::create_directories(path.parent_path(), ec);
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  out << bytes;
+  return static_cast<bool>(out);
+}
+
+void ensure_prop_assets(const fs::path& dir) {
+  std::error_code ec;
+  fs::create_directories(dir / "assets", ec);
+  if (!fs::exists(dir / "assets" / "boards.tga", ec)) write_boards_tga(dir / "assets" / "boards.tga");
+  if (!fs::exists(dir / "assets" / "lantern.gltf", ec)) {
+    std::string err;
+    render3d::write_sample_lantern_gltf((dir / "assets" / "lantern.gltf").string(), &err);
+  }
+}
+
+void paint_prop(editor::Editor3DScreen& e, std::uint64_t id, const std::string& name,
+                const render3d::Vec3& scale, const float rgb[3], const std::string& tex, float rough,
+                float metal, const float* emissive) {
+  const scene3d::Entity3D* cur = e.find(id);
+  if (!cur) return;
+  scene3d::Entity3D copy = *cur;
+  copy.name = name;
+  copy.transform.scale = scale;
+  if (!copy.material) copy.material = scene3d::Material3D{};
+  copy.material->albedo[0] = rgb[0];
+  copy.material->albedo[1] = rgb[1];
+  copy.material->albedo[2] = rgb[2];
+  copy.material->roughness = rough;
+  copy.material->metallic = metal;
+  if (!tex.empty()) copy.material->albedo_texture = tex;
+  if (emissive) {
+    copy.material->emissive[0] = emissive[0];
+    copy.material->emissive[1] = emissive[1];
+    copy.material->emissive[2] = emissive[2];
+  }
+  e.replace_entity(copy, name);
+}
+
+void place_lantern(editor::Editor3DScreen& e, const render3d::Vec3& pos, const std::string& name) {
+  const std::uint64_t id = e.create_empty(pos);
+  const scene3d::Entity3D* cur = e.find(id);
+  if (!cur) return;
+  scene3d::Entity3D copy = *cur;
+  copy.name = name;
+  copy.mesh = scene3d::MeshRef{"assets/lantern.gltf", true};
+  scene3d::Light3D light;
+  light.intensity = 18.0f;
+  light.range = 14.0f;
+  light.color[0] = 1.0f;
+  light.color[1] = 0.58f;
+  light.color[2] = 0.22f;
+  copy.light = light;
+  e.replace_entity(copy, name);
+}
+
+// Crates, barrels, a short fence and lanterns, packed around `at` so the
+// shot is timber and iron rather than the distant grey boxes.
+void fill_street(editor::Editor3DScreen& e, const render3d::Vec3& at) {
+  const float wood[3] = {0.62f, 0.40f, 0.22f};
+  const float dark[3] = {0.34f, 0.20f, 0.11f};
+  const char* tex = "assets/boards.tga";
+  auto box = [&](const char* name, render3d::Vec3 pos, render3d::Vec3 scale, const float* rgb) {
+    paint_prop(e, e.create_primitive("cube", pos), name, scale, rgb, tex, 0.75f, 0.0f, nullptr);
+  };
+  auto barrel = [&](const char* name, render3d::Vec3 pos) {
+    paint_prop(e, e.create_primitive("capsule", pos), name, {0.46f, 0.62f, 0.46f}, dark, tex, 0.65f, 0.08f,
+               nullptr);
+  };
+  box("Crate", at + render3d::Vec3{-1.3f, 0.38f, 0.2f}, {0.75f, 0.75f, 0.75f}, wood);
+  box("Crate Stack", at + render3d::Vec3{-1.15f, 1.05f, 0.15f}, {0.55f, 0.55f, 0.55f}, wood);
+  box("Supply Crate", at + render3d::Vec3{1.15f, 0.32f, 0.55f}, {0.64f, 0.64f, 0.64f}, dark);
+  barrel("Barrel", at + render3d::Vec3{0.15f, 0.45f, 1.05f});
+  barrel("Barrel 2", at + render3d::Vec3{0.7f, 0.45f, 0.85f});
+  for (int i = 0; i < 5; ++i) {
+    const float x = -1.6f + static_cast<float>(i) * 0.8f;
+    box("Fence Post", at + render3d::Vec3{x, 0.55f, -1.15f}, {0.12f, 1.1f, 0.12f}, dark);
+  }
+  box("Fence Rail", at + render3d::Vec3{0.0f, 0.85f, -1.15f}, {3.4f, 0.1f, 0.08f}, wood);
+  box("Fence Rail Low", at + render3d::Vec3{0.0f, 0.4f, -1.15f}, {3.4f, 0.1f, 0.08f}, wood);
+  place_lantern(e, at + render3d::Vec3{-1.8f, 0.0f, -0.2f}, "Porch Lantern");
+  place_lantern(e, at + render3d::Vec3{1.7f, 0.0f, 0.1f}, "Street Lantern");
+}
+
+void use_wanderer_png(const fs::path& dir, editor::Editor2DScreen* live) {
+  std::error_code ec;
+  const fs::path src = dir / "assets" / "rider.png";
+  const fs::path dst = dir / "assets" / "wanderer.png";
+  if (fs::exists(src, ec)) fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+  auto rewrite = [](const fs::path& p) {
+    std::ifstream in(p, std::ios::binary);
+    if (!in) return;
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+    const std::string from = "rider.png";
+    const std::string to = "wanderer.png";
+    std::string out;
+    out.reserve(text.size());
+    bool changed = false;
+    for (std::size_t i = 0; i < text.size();) {
+      if (text.compare(i, from.size(), from) == 0) {
+        out += to;
+        i += from.size();
+        changed = true;
+      } else {
+        out.push_back(text[i++]);
+      }
+    }
+    if (!changed) return;
+    std::ofstream file(p, std::ios::binary | std::ios::trunc);
+    file << out;
+  };
+  rewrite(dir / "scene.json");
+  rewrite(dir / "assets" / "rider.anim.json");
+  if (!live) return;
+  for (Entity2D& ent : live->workspace().entities()) {
+    if (ent.sprite && ent.sprite->path.find("rider.png") != std::string::npos) ent.sprite->path = "assets/wanderer.png";
+  }
+}
+
 void haze(editor::Editor3DScreen& e) {
   render3d::Environment env = e.scene().environment;
   env.sky_top[0] = 0.28f;
@@ -263,9 +412,11 @@ int shot_props(const fs::path& dir, const std::string& png, GlWindow& gl) {
     }
   }
   dress_town(*e);
+  fill_street(*e, {-4.6f, 0.0f, -0.4f});
   if (pick) e->select(pick);
   e->gizmo().mode = editor::GizmoMode::Transform;
-  e->look_at({1.2f, 1.4f, 1.5f}, 28.0f, 12.0f, 8.0f);
+  // Tight on the saloon front: lanterns, crates and the wanderer, not the far tanks.
+  e->look_at({-4.6f, 1.4f, -0.4f}, 38.0f, 14.0f, 5.2f);
   return grab(gl.window, *screen, png, 16, {});
 }
 
@@ -274,21 +425,55 @@ int shot_fx(const fs::path& dir, const std::string& png, GlWindow& gl) {
       project_at(dir, "showcase_fx", "Night Forge", editor::ProjectKind::ThreeD, false));
   editor::Editor3DScreen* e = screen.get();
   screen->on_enter();
+  ensure_prop_assets(dir);
+  std::uint64_t rider = 0;
+  for (const scene3d::Entity3D& ent : e->scene().entities) {
+    if (ent.name == "Rider") rider = ent.id;
+  }
+  if (rider) {
+    e->select(rider);
+    e->delete_selected();
+  }
   render3d::Environment env = e->scene().environment;
   env.sky_top[0] = 0.02f;
-  env.sky_top[1] = 0.03f;
-  env.sky_top[2] = 0.06f;
-  env.sky_horizon[0] = 0.12f;
+  env.sky_top[1] = 0.025f;
+  env.sky_top[2] = 0.05f;
+  env.sky_horizon[0] = 0.22f;
   env.sky_horizon[1] = 0.08f;
-  env.sky_horizon[2] = 0.06f;
-  env.ambient = 0.05f;
-  env.sun_intensity = 0.05f;
-  env.fog_color[0] = 0.05f;
-  env.fog_color[1] = 0.05f;
-  env.fog_color[2] = 0.08f;
-  env.fog_density = 0.03f;
+  env.sky_horizon[2] = 0.04f;
+  env.ambient = 0.08f;
+  env.sun_intensity = 0.02f;
+  env.fog_color[0] = 0.18f;
+  env.fog_color[1] = 0.07f;
+  env.fog_color[2] = 0.03f;
+  env.fog_density = 0.045f;
   e->set_environment(env, "Night");
-  const render3d::Vec3 spots[] = {{-1.1f, 0.0f, 0.8f}, {1.2f, 0.0f, -0.4f}, {0.1f, 0.0f, -1.3f}};
+  for (const scene3d::Entity3D& ent : e->scene().entities) {
+    if (ent.name != "Ground" || !ent.material) continue;
+    scene3d::Entity3D copy = ent;
+    copy.material->albedo[0] = 0.28f;
+    copy.material->albedo[1] = 0.16f;
+    copy.material->albedo[2] = 0.09f;
+    copy.material->albedo_texture = "assets/boards.tga";
+    e->replace_entity(copy, "Forge floor");
+    break;
+  }
+  const float iron[3] = {0.16f, 0.15f, 0.16f};
+  const float coal[3] = {1.0f, 0.35f, 0.05f};
+  const float glow[3] = {6.0f, 1.8f, 0.25f};
+  const render3d::Vec3 forge{0.0f, 0.0f, 0.0f};
+  paint_prop(*e, e->create_primitive("cube", forge + render3d::Vec3{0, 0.18f, 0.15f}), "Anvil Base",
+             {1.5f, 0.36f, 0.7f}, iron, "", 0.45f, 0.85f, nullptr);
+  paint_prop(*e, e->create_primitive("cube", forge + render3d::Vec3{-0.05f, 0.62f, 0.15f}), "Anvil",
+             {0.85f, 0.42f, 0.48f}, iron, "", 0.35f, 0.9f, nullptr);
+  paint_prop(*e, e->create_primitive("cube", forge + render3d::Vec3{0.55f, 0.72f, 0.15f}), "Anvil Horn",
+             {0.55f, 0.16f, 0.16f}, iron, "", 0.3f, 0.95f, nullptr);
+  paint_prop(*e, e->create_primitive("cube", forge + render3d::Vec3{0.0f, 0.7f, -0.85f}), "Forge",
+             {1.6f, 1.4f, 1.1f}, iron, "assets/boards.tga", 0.8f, 0.4f, nullptr);
+  paint_prop(*e, e->create_primitive("cube", forge + render3d::Vec3{0.0f, 0.55f, -0.28f}), "Forge Mouth",
+             {0.7f, 0.45f, 0.18f}, coal, "", 1.0f, 0.0f, glow);
+  paint_prop(*e, e->create_primitive("sphere", forge + render3d::Vec3{0.15f, 0.42f, 0.05f}), "Coals",
+             {0.28f, 0.12f, 0.28f}, coal, "", 1.0f, 0.0f, glow);
   auto place = [&](const render3d::Vec3& pos, const std::string& name, const fx::EmitterDesc& desc) {
     const std::uint64_t id = e->create_empty(pos);
     const scene3d::Entity3D* cur = e->find(id);
@@ -298,54 +483,87 @@ int shot_fx(const fs::path& dir, const std::string& png, GlWindow& gl) {
     copy.particles = desc;
     e->replace_entity(copy, name);
   };
-  for (const render3d::Vec3& p : spots) {
-    if (std::optional<fx::EmitterDesc> fire = fx::preset("campfire", fx::Space::ThreeD)) {
-      fire->rate = 220.0f;
-      fire->max_particles = 900;
-      fire->radius = 0.15f;
-      fire->speed_min = 0.8f;
-      fire->speed_max = 1.8f;
-      fire->life_min = 0.7f;
-      fire->life_max = 1.4f;
-      fire->size[0] = 0.55f;
-      fire->size[1] = 0.9f;
-      fire->size[2] = 0.25f;
-      fire->color_start[0] = 1.0f;
-      fire->color_start[1] = 0.85f;
-      fire->color_start[2] = 0.35f;
-      fire->color_start[3] = 1.0f;
-      place(p + render3d::Vec3{0, 1.15f, 0}, "Torch", *fire);
-    }
-    if (std::optional<fx::EmitterDesc> sparks = fx::preset("sparks", fx::Space::ThreeD)) {
-      sparks->rate = 160.0f;
-      sparks->max_particles = 700;
-      sparks->speed_min = 2.5f;
-      sparks->speed_max = 5.5f;
-      sparks->size[0] = 0.18f;
-      sparks->size[1] = 0.12f;
-      sparks->size[2] = 0.06f;
-      sparks->color_start[3] = 1.0f;
-      place(p + render3d::Vec3{0, 1.45f, 0}, "Embers", *sparks);
-    }
-    const std::uint64_t flame = e->create_primitive("sphere", p + render3d::Vec3{0, 1.25f, 0});
-    if (const scene3d::Entity3D* cur = e->find(flame)) {
-      scene3d::Entity3D copy = *cur;
-      copy.name = "Flame";
-      copy.transform.scale = {0.22f, 0.45f, 0.22f};
-      if (!copy.material) copy.material = scene3d::Material3D{};
-      copy.material->albedo[0] = 1.0f;
-      copy.material->albedo[1] = 0.45f;
-      copy.material->albedo[2] = 0.08f;
-      copy.material->emissive[0] = 4.0f;
-      copy.material->emissive[1] = 1.6f;
-      copy.material->emissive[2] = 0.2f;
-      copy.material->roughness = 1.0f;
-      e->replace_entity(copy, "Flame");
-    }
-    e->create_light(false, p + render3d::Vec3{0, 1.7f, 0});
+  if (std::optional<fx::EmitterDesc> embers = fx::preset("sparks", fx::Space::ThreeD)) {
+    embers->rate = 420.0f;
+    embers->max_particles = 1400;
+    embers->radius = 0.35f;
+    embers->direction[0] = 0.0f;
+    embers->direction[1] = 1.0f;
+    embers->direction[2] = 0.0f;
+    embers->spread = 18.0f;
+    embers->speed_min = 1.4f;
+    embers->speed_max = 3.2f;
+    embers->gravity[0] = 0.0f;
+    embers->gravity[1] = 2.4f;
+    embers->gravity[2] = 0.0f;
+    embers->life_min = 1.1f;
+    embers->life_max = 2.2f;
+    embers->size[0] = 0.22f;
+    embers->size[1] = 0.16f;
+    embers->size[2] = 0.08f;
+    embers->color_start[0] = 1.0f;
+    embers->color_start[1] = 0.72f;
+    embers->color_start[2] = 0.15f;
+    embers->color_start[3] = 1.0f;
+    embers->blend = fx::Blend::Additive;
+    place(forge + render3d::Vec3{0, 0.7f, -0.2f}, "Embers", *embers);
   }
-  e->look_at({0.0f, 1.3f, 0.0f}, 24.0f, 8.0f, 3.4f);
-  return grab(gl.window, *screen, png, 36, {});
+  const render3d::Vec3 torches[] = {{-1.35f, 0.0f, 0.35f}, {1.25f, 0.0f, -0.15f}};
+  for (const render3d::Vec3& p : torches) {
+    paint_prop(*e, e->create_primitive("cube", p + render3d::Vec3{0, 0.7f, 0}), "Torch Post", {0.12f, 1.4f, 0.12f},
+               iron, "assets/boards.tga", 0.7f, 0.2f, nullptr);
+    if (std::optional<fx::EmitterDesc> fire = fx::preset("campfire", fx::Space::ThreeD)) {
+      fire->rate = 280.0f;
+      fire->max_particles = 900;
+      fire->radius = 0.12f;
+      fire->direction[1] = 1.0f;
+      fire->speed_min = 0.9f;
+      fire->speed_max = 1.8f;
+      fire->gravity[1] = 1.6f;
+      fire->life_min = 0.55f;
+      fire->life_max = 1.1f;
+      fire->size[0] = 0.7f;
+      fire->size[1] = 1.05f;
+      fire->size[2] = 0.35f;
+      fire->color_start[0] = 1.0f;
+      fire->color_start[1] = 0.78f;
+      fire->color_start[2] = 0.2f;
+      fire->color_start[3] = 1.0f;
+      fire->blend = fx::Blend::Additive;
+      place(p + render3d::Vec3{0, 1.45f, 0}, "Torch", *fire);
+    }
+    const float flame_glow[3] = {8.0f, 2.4f, 0.3f};
+    paint_prop(*e, e->create_primitive("sphere", p + render3d::Vec3{0, 1.5f, 0}), "Flame", {0.28f, 0.55f, 0.28f},
+               coal, "", 1.0f, 0.0f, flame_glow);
+    const std::uint64_t lamp = e->create_light(false, p + render3d::Vec3{0, 1.7f, 0});
+    if (const scene3d::Entity3D* cur = e->find(lamp)) {
+      scene3d::Entity3D copy = *cur;
+      if (copy.light) {
+        copy.light->intensity = 22.0f;
+        copy.light->range = 16.0f;
+        copy.light->color[0] = 1.0f;
+        copy.light->color[1] = 0.5f;
+        copy.light->color[2] = 0.15f;
+      }
+      e->replace_entity(copy, "Torch Light");
+    }
+  }
+  place_lantern(*e, forge + render3d::Vec3{-0.9f, 0.0f, -0.9f}, "Forge Lantern");
+  const std::uint64_t fill = e->create_light(false, forge + render3d::Vec3{0.2f, 1.6f, 1.2f});
+  if (const scene3d::Entity3D* cur = e->find(fill)) {
+    scene3d::Entity3D copy = *cur;
+    copy.name = "Forge Glow";
+    if (copy.light) {
+      copy.light->intensity = 28.0f;
+      copy.light->range = 18.0f;
+      copy.light->color[0] = 1.0f;
+      copy.light->color[1] = 0.45f;
+      copy.light->color[2] = 0.12f;
+    }
+    e->replace_entity(copy, "Forge Glow");
+  }
+  e->look_at({0.05f, 0.85f, 0.0f}, 32.0f, 12.0f, 3.6f);
+  return grab(gl.window, *screen, png, 48, {});
 }
 
 int shot_graph(const fs::path& dir, const std::string& png, GlWindow& gl) {
@@ -379,6 +597,7 @@ int shot_graph(const fs::path& dir, const std::string& png, GlWindow& gl) {
   auto screen = std::make_unique<editor::Editor2DScreen>(
       project_at(dir, "showcase_graph", "Brand Book", editor::ProjectKind::TwoD, false));
   screen->on_enter();
+  use_wanderer_png(dir, screen.get());
   editor::BrandBook::get().open_graph(dir.string(), "Brand Book", "scripts/forge.graph.json");
   return grab(gl.window, *screen, png, 8, {});
 }
@@ -400,12 +619,13 @@ int shot_anim(const fs::path& dir, const std::string& png, GlWindow& gl) {
     return 1;
   }
   dress_town(*e);
+  fill_street(*e, {-1.4f, 0.0f, 1.5f});
   e->select(hank);
   e->gizmo().mode = editor::GizmoMode::Transform;
   e->anim_preview().open = true;
   e->anim_preview().playing = true;
   e->anim_preview().clip = "wave";
-  e->look_at({-3.0f, 1.0f, 0.5f}, -20.0f, 12.0f, 6.0f);
+  e->look_at({-3.0f, 1.15f, 0.5f}, -24.0f, 8.0f, 3.8f);
   return grab(gl.window, *screen, png, 24, [&](int) { e->anim_preview_tick(1.0f / 60.0f); });
 }
 
@@ -415,6 +635,7 @@ int shot_survival(const fs::path& dir, const std::string& png, GlWindow& gl) {
     std::cerr << "showcase survival: " << err << '\n';
     return 1;
   }
+  use_wanderer_png(dir, nullptr);
   auto screen = std::make_unique<editor::Editor2DScreen>(
       project_at(dir, "showcase_survival", "Frontier", editor::ProjectKind::TwoD, false));
   editor::Editor2DScreen* e = screen.get();
@@ -440,7 +661,34 @@ int shot_vr(const fs::path& dir, const std::string& png, GlWindow& gl) {
       project_at(dir, "showcase_vr", "Haunted Saloon", editor::ProjectKind::ThreeD, true));
   editor::Editor3DScreen* e = screen.get();
   screen->on_enter();
-  e->look_at({0.0f, 1.6f, 0.0f}, 20.0f, 8.0f, 7.0f);
+  ensure_prop_assets(dir);
+  for (const scene3d::Entity3D& ent : e->scene().entities) {
+    if (!ent.material || !ent.mesh) continue;
+    const bool cloth = ent.name.find("Wall") != std::string::npos || ent.name.find("Floor") != std::string::npos ||
+                       ent.name.find("Door") != std::string::npos || ent.name == "Bar" || ent.name == "Can Table";
+    if (!cloth) continue;
+    scene3d::Entity3D copy = ent;
+    copy.material->albedo_texture = "assets/boards.tga";
+    if (ent.name == "Bar" || ent.name.find("Floor") != std::string::npos) {
+      copy.material->albedo[0] = 0.55f;
+      copy.material->albedo[1] = 0.34f;
+      copy.material->albedo[2] = 0.18f;
+    }
+    e->replace_entity(copy, "Boards on " + ent.name);
+  }
+  place_lantern(*e, {-2.2f, 0.0f, -3.2f}, "Bar Lantern");
+  place_lantern(*e, {2.0f, 0.0f, -3.2f}, "Bar Lantern Right");
+  for (const scene3d::Entity3D& ent : e->scene().entities) {
+    if (ent.name.rfind("Oil Lamp", 0) != 0 || !ent.light) continue;
+    scene3d::Entity3D copy = ent;
+    copy.light->intensity = 16.0f;
+    copy.light->range = 12.0f;
+    copy.light->color[0] = 1.0f;
+    copy.light->color[1] = 0.62f;
+    copy.light->color[2] = 0.28f;
+    e->replace_entity(copy, ent.name);
+  }
+  e->look_at({0.0f, 1.35f, -1.5f}, 8.0f, 6.0f, 5.5f);
   return grab(gl.window, *screen, png, 20, [&](int frame) {
     if (frame == 3 && !e->vr_previewing()) e->vr_preview_start(true);
   });

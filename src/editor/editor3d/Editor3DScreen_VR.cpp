@@ -128,6 +128,8 @@ xr::SimDrive Editor3DScreen::poll_sim_drive() {
 
 void Editor3DScreen::draw_vr_mirror() {
   if (!vr_project()) return;
+  // Store shots keep the saloon picture, not the eye readouts and comfort keys.
+  if (shot::clean()) return;
   ImGui::SetNextWindowSize(ImVec2(620, 420), ImGuiCond_FirstUseEver);
   vr_mirror_hovered_ = false;
   if (!ImGui::Begin(kVrMirror)) {

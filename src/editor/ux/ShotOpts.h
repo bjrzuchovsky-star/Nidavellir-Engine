@@ -60,6 +60,11 @@ inline bool hide_log_line(std::string_view text) {
   if (has("tombstoneupdate")) return true;
   if (has("meta.log")) return true;
   if (has("imgui.ini")) return true;
+  // Plugin id and the VR simulator readout. The hierarchy label is separate.
+  if (has("ts.move.rider3d")) return true;
+  if (has("vr preview")) return true;
+  if (has("desktop simulator")) return true;
+  if (has("headset mirror")) return true;
   return false;
 }
 

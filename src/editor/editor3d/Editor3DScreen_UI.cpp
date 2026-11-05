@@ -448,7 +448,7 @@ void Editor3DScreen::draw_status_bar() {
   // Play state: the VR rig has no "grounded" (the headset floor is the
   // ground), so VR previews say where the picture goes instead.
   std::string play_state;
-  if (vr_previewing()) {
+  if (vr_previewing() && !shot::clean()) {
     const bool sim = vr_session_ && vr_session_->simulated();
     play_state = sim ? " | VR preview: desktop simulator"
                      : " | VR preview: headset (" + vr_status_ + ")";
@@ -996,7 +996,7 @@ void Editor3DScreen::draw_hierarchy_row(const scene3d::Entity3D& e, int depth) {
   ImGui::SameLine(0.0f, 4.0f);
 
   std::string label = e.name;
-  if (e.player) label += "  (rider)";
+  if (e.player) label += "  (wanderer)";
   else if (e.camera) label += play_camera_id() == e.id ? "  (camera, active)" : "  (camera)";
   else if (e.light) label += "  (light)";
   else if (e.script) label += "  (script)";
