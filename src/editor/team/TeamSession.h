@@ -253,6 +253,7 @@ class TeamSession {
   std::string asset_sync_detail_;
   // Mid-drag previews.
   double preview_clock_ = 0.0;
+  double lock_touch_clock_ = 0.0;
   std::string last_preview_;
   std::vector<std::uint64_t> my_preview_ids_;
   struct RemotePreview {

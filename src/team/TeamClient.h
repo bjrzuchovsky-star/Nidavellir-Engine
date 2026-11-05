@@ -110,7 +110,9 @@ class TeamClient {
   std::size_t pending() const { return pending_.size(); }
 
   // Locks: the full set this editor wants (selection / drag / Inspector).
-  void want_locks(std::vector<std::string> keys);
+  // force resends the same set, so a lock the server dropped while a drag
+  // was open (no committed edit to refresh it) is asked for again.
+  void want_locks(std::vector<std::string> keys, bool force = false);
   std::uint32_t lock_owner(const std::string& key) const;
   // Take over locks someone else has left idle (15 s by default). The
   // server says no (a note) while the holder is still using them.

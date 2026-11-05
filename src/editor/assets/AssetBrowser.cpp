@@ -87,7 +87,16 @@ void AssetBrowser::open(const std::string& project_dir, AssetBrowserHost host) {
 }
 
 void AssetBrowser::retarget(const std::string& project_dir) {
-  if (project_dir.empty() || project_dir == db_.project_dir()) return;
+  auto same_dir = [](std::string a, std::string b) {
+    for (char& c : a)
+      if (c == '\\') c = '/';
+    for (char& c : b)
+      if (c == '\\') c = '/';
+    while (a.size() > 1 && a.back() == '/') a.pop_back();
+    while (b.size() > 1 && b.back() == '/') b.pop_back();
+    return a == b;
+  };
+  if (project_dir.empty() || same_dir(project_dir, db_.project_dir())) return;
   const std::string sel = selected_;
   const std::string folder = folder_;
   db_.open(project_dir);

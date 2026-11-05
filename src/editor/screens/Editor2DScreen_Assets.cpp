@@ -28,10 +28,18 @@ bool Editor2DScreen::reload_scene_from_disk() {
 void Editor2DScreen::open_asset_browser() {
   AssetBrowserHost host;
   host.before_disk_change = [this] {
+    // The clan mirror is not this realm's scene.json. Saving or reloading
+    // it mid-drag commits the preview and ends the move.
+    if (is_playing() || workspace_.move_active() || workspace_.edit_open()) return;
+    if (team_ && team_->joined() && !team_->hosting()) return;
     std::string err;
-    if (!is_playing()) save_scene(&err);
+    save_scene(&err);
   };
-  host.after_refs_changed = [this] { reload_scene_from_disk(); };
+  host.after_refs_changed = [this] {
+    if (workspace_.move_active() || workspace_.edit_open()) return;
+    if (team_ && team_->joined() && !team_->hosting()) return;
+    reload_scene_from_disk();
+  };
   host.on_assets_changed = [this](const std::vector<std::string>& rels) {
     for (const std::string& rel : rels) {
       textures_.invalidate(asset_path(rel));

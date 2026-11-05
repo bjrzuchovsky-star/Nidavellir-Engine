@@ -428,10 +428,10 @@ std::vector<std::pair<std::string, Op>> TeamClient::take_apply() {
   return out;
 }
 
-void TeamClient::want_locks(std::vector<std::string> keys) {
+void TeamClient::want_locks(std::vector<std::string> keys, bool force) {
   std::sort(keys.begin(), keys.end());
   keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
-  if (want_sent_ && keys == want_) return;
+  if (!force && want_sent_ && keys == want_) return;
   want_ = std::move(keys);
   if (state_ != State::Joined) return;
   Value l = Value::object();

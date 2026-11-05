@@ -88,7 +88,9 @@ void TeamSession::ensure_mirror() {
   }
   std::string claim = client_.session().str("claim");
   if (claim.empty() || claim == "*") claim = last_join_.claim;
-  mirror_root_ = clan_mirror_dir(project_.id, claim);
+  const std::string dir = clan_mirror_dir(project_.id, claim);
+  if (dir == mirror_root_) return;
+  mirror_root_ = dir;
   std::error_code ec;
   const std::filesystem::path root = std::filesystem::u8path(mirror_root_);
   std::filesystem::create_directories(root / "assets", ec);
@@ -791,10 +793,22 @@ void TeamSession::tick(double dt) {
     asset_clock_ = 0.0;
     sync_assets();
   }
-  // 4. Locks = the selection.
+  // 4. Locks = the selection. A drag sends no committed edit, and the
+  // server releases a lock it has not heard about, which then drops the
+  // rest of the preview. Ask again while the edit is open.
   std::vector<std::string> keys;
   for (std::uint64_t id : binding_->selection()) keys.push_back(team::entity_lock(scene, id));
-  client_.want_locks(std::move(keys));
+  bool refresh_locks = false;
+  if (busy) {
+    lock_touch_clock_ += dt;
+    if (lock_touch_clock_ >= 0.4) {
+      lock_touch_clock_ = 0.0;
+      refresh_locks = true;
+    }
+  } else {
+    lock_touch_clock_ = 0.0;
+  }
+  client_.want_locks(std::move(keys), refresh_locks);
   // 5. Presence at up to 10 Hz, heartbeat every second (keeps locks).
   presence_clock_ += dt;
   heartbeat_clock_ += dt;
@@ -827,14 +841,15 @@ void TeamSession::tick_previews(double dt, bool busy) {
         team::Value arr = team::Value::array();
         for (const team::Op& op : puts) arr.push(team::op_to_json(op));
         const std::string text = team::write_compact(arr);
-        if (text != last_preview_) {
-          last_preview_ = text;
-          client_.send_preview(scene, puts);
-          ++previews_sent_;
-          for (const team::Op& op : puts) {
-            if (std::find(my_preview_ids_.begin(), my_preview_ids_.end(), op.id) == my_preview_ids_.end()) {
-              my_preview_ids_.push_back(op.id);
-            }
+        // Unreliable, so a lost packet is only repaired by the next one.
+        // Skipping an unchanged pose dropped the rest of a drag: B kept the
+        // first preview and never saw the later position.
+        last_preview_ = text;
+        client_.send_preview(scene, puts);
+        ++previews_sent_;
+        for (const team::Op& op : puts) {
+          if (std::find(my_preview_ids_.begin(), my_preview_ids_.end(), op.id) == my_preview_ids_.end()) {
+            my_preview_ids_.push_back(op.id);
           }
         }
       }
