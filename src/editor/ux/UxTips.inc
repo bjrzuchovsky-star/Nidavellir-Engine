@@ -477,6 +477,7 @@
 {"Menu/Animation Preview", "Show or hide the animation preview panel."},
 {"Menu/Bones", "Draw the skeleton on skinned characters. It follows the animation preview, or the animator while you ride."},
 {"Menu/Animation Timeline", "Show or hide the timeline: keyframe a clip, retarget another file onto this character, and mark events."},
+{"Menu/Animator Graph", "Show or hide the animator graph: states, transitions, parameters, and a one-click idle / walk / run blend."},
 {"AnimationTimeline/New clip", "Start an empty clip on this character. It stays in memory until you Save."},
 {"AnimationTimeline/Edit a copy", "Copy the imported clip so you can key it. The file itself changes only when you Save."},
 {"AnimationTimeline/Save", "Write these clips beside the model as a .anim3d.json file."},

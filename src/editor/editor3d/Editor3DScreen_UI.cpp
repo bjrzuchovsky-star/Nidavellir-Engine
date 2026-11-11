@@ -211,6 +211,15 @@ void Editor3DScreen::draw_ui() {
     if (ImGui::Begin("Animation Timeline", &timeline_.open)) draw_anim_timeline();
     ImGui::End();
   }
+  if (anim_graph_.open) {
+    ImGui::SetNextWindowSize(ImVec2(920, 560), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Animator Graph", &anim_graph_.open)) {
+      ImGui::BeginDisabled(locked);
+      draw_anim_graph();
+      ImGui::EndDisabled();
+    }
+    ImGui::End();
+  }
   ui_preview_.draw(&show_ui_preview_, project_.path);
   draw_vr_mirror();
   FreightOffice::get().draw();
@@ -328,6 +337,7 @@ void Editor3DScreen::draw_menus() {
     ux::MenuItem("UI Preview", nullptr, &show_ui_preview_);
     ux::MenuItem("Animation Preview", nullptr, &anim_preview_.open);
     ux::MenuItem("Animation Timeline", nullptr, &timeline_.open);
+    ux::MenuItem("Animator Graph", nullptr, &anim_graph_.open);
     ux::MenuItem("Prefabs", nullptr, &show_prefabs_);
     ux::MenuItem("Asset Browser", nullptr, &show_asset_browser_);
     ux::MenuItem("Vault", nullptr, &show_vault_);

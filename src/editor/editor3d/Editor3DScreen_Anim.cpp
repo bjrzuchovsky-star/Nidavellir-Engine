@@ -476,6 +476,489 @@ void Editor3DScreen::draw_anim_preview() {
   ux::EndAutoTips();
 }
 
+void Editor3DScreen::draw_anim_graph() {
+  const scene3d::Entity3D* cur = find(primary());
+  if (!cur) {
+    ImGui::TextDisabled("Select a character.");
+    return;
+  }
+  if (playing()) {
+    ImGui::TextDisabled("Stop riding to edit the graph. The animator keeps playing.");
+    return;
+  }
+  const render3d::Model* model = entity_model(*cur);
+  const bool skinned = model && model->skinned();
+  scene3d::Entity3D ent = *cur;
+  const char* what = "Animator graph";
+  auto touch = [&](bool commit_now) {
+    scene3d::Entity3D* live = scene_.find(ent.id);
+    if (!live) return;
+    if (*live == ent) {
+      if (commit_now && anim_graph_.before) {
+        push_undo(what, *anim_graph_.before);
+        anim_graph_.before.reset();
+      }
+      return;
+    }
+    if (!anim_graph_.before) anim_graph_.before = scene_;
+    *live = ent;
+    if (commit_now) {
+      push_undo(what, *anim_graph_.before);
+      anim_graph_.before.reset();
+    }
+  };
+
+  if (!skinned) {
+    ImGui::TextWrapped("\"%s\" has no skeleton. The graph plays on a rigged character.", ent.name.c_str());
+    return;
+  }
+  if (!ent.animator) {
+    ImGui::TextWrapped("No Animator on \"%s\" yet. Locomotion builds idle / walk / run by speed. One clip plays the preview.",
+                       ent.name.c_str());
+    if (ImGui::Button("Locomotion template")) {
+      ent.animator = scene3d::default_locomotion_animator();
+      what = "Locomotion template";
+      touch(true);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("One clip") && model && !model->clips.empty()) {
+      scene3d::Animator3D an;
+      an.drive_from_player = false;
+      scene3d::AnimState3D st;
+      st.name = anim_preview_.clip.empty() ? model->clips.front().name : anim_preview_.clip;
+      st.clip = st.name;
+      st.loop = anim_preview_.loop;
+      scene3d::AnimLayer3D layer;
+      layer.entry = st.name;
+      layer.states = {st};
+      an.layers = {layer};
+      an.speed = anim_preview_.speed;
+      ent.animator = std::move(an);
+      what = "One clip";
+      touch(true);
+    }
+    return;
+  }
+
+  if (ImGui::SmallButton("Locomotion template")) {
+    const std::string keep = ent.animator->model;
+    const bool drive = ent.animator->drive_from_player;
+    ent.animator = scene3d::default_locomotion_animator();
+    ent.animator->model = keep;
+    ent.animator->drive_from_player = drive;
+    anim_graph_.pos.clear();
+    anim_graph_.selected = "locomotion";
+    anim_graph_.link_from.clear();
+    anim_graph_.layer = 0;
+    what = "Locomotion template";
+    touch(true);
+    return;
+  }
+  if (ImGui::IsItemHovered()) {
+    ux::SetTooltip("Replace this Animator with idle / walk / run blended by speed, plus a jump.");
+  }
+
+  scene3d::Animator3D& anim = *ent.animator;
+  if (anim.layers.empty()) anim.layers.push_back({});
+  if (anim_graph_.layer < 0 || anim_graph_.layer >= static_cast<int>(anim.layers.size())) anim_graph_.layer = 0;
+
+  ImGui::SameLine();
+  if (ImGui::BeginCombo("Layer", anim.layers[static_cast<std::size_t>(anim_graph_.layer)].name.c_str())) {
+    for (int i = 0; i < static_cast<int>(anim.layers.size()); ++i) {
+      if (ImGui::Selectable(anim.layers[static_cast<std::size_t>(i)].name.c_str(), i == anim_graph_.layer)) {
+        anim_graph_.layer = i;
+        anim_graph_.selected.clear();
+        anim_graph_.link_from.clear();
+      }
+    }
+    ImGui::EndCombo();
+  }
+  ImGui::SameLine();
+  if (ImGui::SmallButton("+ State")) {
+    scene3d::AnimLayer3D& layer = anim.layers[static_cast<std::size_t>(anim_graph_.layer)];
+    scene3d::AnimState3D st;
+    st.name = "state";
+    int n = 2;
+    auto taken = [&](const std::string& name) {
+      for (const scene3d::AnimState3D& s : layer.states)
+        if (s.name == name) return true;
+      return false;
+    };
+    while (taken(st.name)) st.name = "state" + std::to_string(n++);
+    if (model && !model->clips.empty()) st.clip = model->clips.front().name;
+    if (layer.entry.empty()) layer.entry = st.name;
+    anim_graph_.selected = st.name;
+    layer.states.push_back(std::move(st));
+    what = "Add state";
+    touch(true);
+  }
+  ImGui::SameLine();
+  const bool linking = !anim_graph_.link_from.empty();
+  if (ImGui::SmallButton(linking ? "Cancel link" : "Transition")) {
+    if (linking) anim_graph_.link_from.clear();
+    else if (!anim_graph_.selected.empty()) anim_graph_.link_from = anim_graph_.selected;
+  }
+  if (ImGui::IsItemHovered()) {
+    ux::SetTooltip(linking ? "Click the state this should switch to."
+                           : "Then click another state. The arrow uses the first parameter.");
+  }
+
+  scene3d::AnimLayer3D& layer = anim.layers[static_cast<std::size_t>(anim_graph_.layer)];
+  const std::string layer_key = std::to_string(anim_graph_.layer) + "/";
+  auto pos_of = [&](const std::string& name, int index) -> std::pair<float, float>& {
+    const std::string key = layer_key + name;
+    auto it = anim_graph_.pos.find(key);
+    if (it == anim_graph_.pos.end()) {
+      const float x = 28.0f + static_cast<float>(index % 4) * 172.0f;
+      const float y = 28.0f + static_cast<float>(index / 4) * 108.0f;
+      it = anim_graph_.pos.emplace(key, std::make_pair(x, y)).first;
+    }
+    return it->second;
+  };
+
+  ImGui::BeginChild("##graph_body", ImVec2(0, 0));
+  ImGui::BeginChild("##params", ImVec2(168, 0), true);
+  ImGui::TextDisabled("Parameters");
+  for (std::size_t i = 0; i < anim.params.size(); ++i) {
+    scene3d::AnimParam3D& p = anim.params[i];
+    ImGui::PushID(static_cast<int>(i));
+    ImGui::SetNextItemWidth(150);
+    if (edit_str("##pn", &p.name)) touch(false);
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+      what = "Parameter";
+      touch(true);
+    }
+    int ty = static_cast<int>(p.type);
+    ImGui::SetNextItemWidth(78);
+    if (ImGui::Combo("##pt", &ty, "Float\0Bool\0Trigger\0")) {
+      p.type = scene3d::AnimParam3D::Type(ty);
+      what = "Parameter";
+      touch(true);
+    }
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(64);
+    if (ImGui::DragFloat("##pv", &p.value, 0.05f)) {
+      what = "Parameter";
+      touch(false);
+    }
+    if (ImGui::SmallButton("x##p")) {
+      anim.params.erase(anim.params.begin() + static_cast<std::ptrdiff_t>(i));
+      what = "Remove parameter";
+      touch(true);
+      ImGui::PopID();
+      break;
+    }
+    ImGui::PopID();
+  }
+  if (ImGui::SmallButton("+ Param")) {
+    anim.params.push_back({"param" + std::to_string(anim.params.size()), scene3d::AnimParam3D::Type::Float, 0.0f});
+    what = "Add parameter";
+    touch(true);
+  }
+  ImGui::EndChild();
+  ImGui::SameLine();
+
+  ImGui::BeginChild("##canvas_col", ImVec2(-230, 0), true, ImGuiWindowFlags_NoScrollbar);
+  const ImVec2 origin = ImGui::GetCursorScreenPos();
+  const ImVec2 avail = ImGui::GetContentRegionAvail();
+  const ImVec2 size(std::max(avail.x, 40.0f), std::max(avail.y, 40.0f));
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  dl->AddRectFilled(origin, ImVec2(origin.x + size.x, origin.y + size.y), IM_COL32(22, 18, 16, 255));
+  for (float g = 0; g < size.x; g += 24.0f)
+    dl->AddLine(ImVec2(origin.x + g, origin.y), ImVec2(origin.x + g, origin.y + size.y), IM_COL32(40, 34, 30, 255));
+  for (float g = 0; g < size.y; g += 24.0f)
+    dl->AddLine(ImVec2(origin.x, origin.y + g), ImVec2(origin.x + size.x, origin.y + g), IM_COL32(40, 34, 30, 255));
+  constexpr float kW = 148.0f, kH = 62.0f;
+  auto box_at = [&](int index) {
+    const auto& p = pos_of(layer.states[static_cast<std::size_t>(index)].name, index);
+    return ImVec2(origin.x + p.first, origin.y + p.second);
+  };
+  auto center_of = [&](int index) {
+    const ImVec2 b = box_at(index);
+    return ImVec2(b.x + kW * 0.5f, b.y + kH * 0.5f);
+  };
+  auto index_of = [&](const std::string& name) {
+    for (int i = 0; i < static_cast<int>(layer.states.size()); ++i)
+      if (layer.states[static_cast<std::size_t>(i)].name == name) return i;
+    return -1;
+  };
+  for (const scene3d::AnimTransition3D& tr : layer.transitions) {
+    const int to = index_of(tr.to);
+    if (to < 0) continue;
+    const int from = tr.from == "*" ? -1 : index_of(tr.from);
+    const ImVec2 b = center_of(to);
+    const ImVec2 a = from >= 0 ? center_of(from) : ImVec2(b.x - kW * 0.5f - 18.0f, b.y);
+    dl->AddLine(a, b, ImGui::GetColorU32(theme::Accent()), 2.0f);
+    const char* op = "?";
+    switch (tr.op) {
+      case scene3d::AnimTransition3D::Op::Greater: op = ">"; break;
+      case scene3d::AnimTransition3D::Op::Less: op = "<"; break;
+      case scene3d::AnimTransition3D::Op::True: op = "on"; break;
+      case scene3d::AnimTransition3D::Op::False: op = "off"; break;
+      case scene3d::AnimTransition3D::Op::Trigger: op = "trigger"; break;
+      case scene3d::AnimTransition3D::Op::Always: op = "always"; break;
+    }
+    char label[96];
+    if (tr.op == scene3d::AnimTransition3D::Op::Greater || tr.op == scene3d::AnimTransition3D::Op::Less)
+      std::snprintf(label, sizeof(label), "%s %s %.2f", tr.param.c_str(), op, tr.value);
+    else
+      std::snprintf(label, sizeof(label), "%s %s", tr.param.c_str(), op);
+    dl->AddText(ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f - 8.0f),
+                ImGui::GetColorU32(theme::Text()), label);
+  }
+  for (int i = 0; i < static_cast<int>(layer.states.size()); ++i) {
+    const scene3d::AnimState3D& st = layer.states[static_cast<std::size_t>(i)];
+    const ImVec2 b = box_at(i);
+    const bool sel = st.name == anim_graph_.selected;
+    const bool entry = st.name == layer.entry;
+    dl->AddRectFilled(b, ImVec2(b.x + kW, b.y + kH), IM_COL32(42, 34, 28, 255), 6.0f);
+    dl->AddRect(b, ImVec2(b.x + kW, b.y + kH),
+                ImGui::GetColorU32(sel || entry ? theme::Accent() : theme::Text()), 6.0f, 0, sel ? 2.5f : 1.0f);
+    dl->AddText(ImVec2(b.x + 8, b.y + 6), ImGui::GetColorU32(theme::Text()), st.name.c_str());
+    const std::string sub = st.blend.empty() ? st.clip : ("blend " + st.blend_param);
+    ImVec4 dim = theme::Text();
+    dim.w *= 0.65f;
+    dl->AddText(ImVec2(b.x + 8, b.y + 26), ImGui::GetColorU32(dim), sub.c_str());
+    if (entry) dl->AddText(ImVec2(b.x + 8, b.y + 44), ImGui::GetColorU32(theme::Accent()), "entry");
+  }
+  ImGui::InvisibleButton("##canvas", size);
+  const bool over = ImGui::IsItemHovered() || ImGui::IsItemActive();
+  int hit = -1;
+  if (over) {
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    for (int i = static_cast<int>(layer.states.size()) - 1; i >= 0; --i) {
+      const ImVec2 b = box_at(i);
+      if (mouse.x >= b.x && mouse.x <= b.x + kW && mouse.y >= b.y && mouse.y <= b.y + kH) {
+        hit = i;
+        break;
+      }
+    }
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+      if (hit >= 0) {
+        const std::string name = layer.states[static_cast<std::size_t>(hit)].name;
+        if (!anim_graph_.link_from.empty() && anim_graph_.link_from != name) {
+          scene3d::AnimTransition3D tr;
+          tr.from = anim_graph_.link_from;
+          tr.to = name;
+          tr.duration = 0.2f;
+          if (!anim.params.empty()) {
+            tr.param = anim.params.front().name;
+            tr.op = anim.params.front().type == scene3d::AnimParam3D::Type::Trigger
+                        ? scene3d::AnimTransition3D::Op::Trigger
+                        : anim.params.front().type == scene3d::AnimParam3D::Type::Bool
+                              ? scene3d::AnimTransition3D::Op::True
+                              : scene3d::AnimTransition3D::Op::Greater;
+            tr.value = 0.5f;
+          } else {
+            tr.op = scene3d::AnimTransition3D::Op::Always;
+          }
+          layer.transitions.push_back(std::move(tr));
+          anim_graph_.link_from.clear();
+          anim_graph_.selected = name;
+          what = "Add transition";
+          touch(true);
+        } else {
+          anim_graph_.selected = name;
+          anim_graph_.dragging = hit;
+          const ImVec2 b = box_at(hit);
+          anim_graph_.grab_x = mouse.x - b.x;
+          anim_graph_.grab_y = mouse.y - b.y;
+        }
+      } else if (anim_graph_.link_from.empty()) {
+        anim_graph_.selected.clear();
+      }
+    }
+    if (anim_graph_.dragging >= 0 && anim_graph_.dragging < static_cast<int>(layer.states.size()) &&
+        ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+      auto& p = pos_of(layer.states[static_cast<std::size_t>(anim_graph_.dragging)].name, anim_graph_.dragging);
+      p.first = std::max(8.0f, mouse.x - origin.x - anim_graph_.grab_x);
+      p.second = std::max(8.0f, mouse.y - origin.y - anim_graph_.grab_y);
+    }
+  }
+  if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) anim_graph_.dragging = -1;
+  ImGui::EndChild();
+  ImGui::SameLine();
+
+  ImGui::BeginChild("##state", ImVec2(0, 0), true);
+  scene3d::AnimState3D* sel = nullptr;
+  for (scene3d::AnimState3D& st : layer.states)
+    if (st.name == anim_graph_.selected) sel = &st;
+  if (!sel) {
+    ImGui::TextDisabled(linking ? "Click the state to enter." : "Select a state.");
+  } else {
+    ImGui::TextDisabled("State");
+    if (edit_str("Name", &sel->name)) {
+      anim_graph_.selected = sel->name;
+      touch(false);
+    }
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+      anim_graph_.selected = sel->name;
+      what = "Rename state";
+      touch(true);
+    }
+    if (sel->blend.empty()) {
+      if (clip_combo("Clip", &sel->clip, model)) {
+        what = "State clip";
+        touch(true);
+      }
+    }
+    if (ImGui::Checkbox("Loop", &sel->loop)) {
+      what = "State loop";
+      touch(true);
+    }
+    ImGui::SetNextItemWidth(80);
+    if (ImGui::DragFloat("Speed", &sel->speed, 0.01f, 0.0f, 5.0f, "%.2fx")) {
+      what = "State speed";
+      touch(false);
+    }
+    bool tree = !sel->blend.empty();
+    if (ImGui::Checkbox("Blend tree", &tree)) {
+      if (tree) {
+        const float at[3] = {0.0f, 1.8f, 4.5f};
+        const char* names[3] = {"idle", "walk", "run"};
+        int n = 0;
+        if (model) {
+          for (int i = 0; i < 3; ++i) {
+            if (model->find_clip(names[i]) >= 0) {
+              sel->blend.push_back({names[i], at[i]});
+              ++n;
+            }
+          }
+        }
+        if (n == 0) {
+          const std::string clip = !sel->clip.empty() ? sel->clip
+                                   : (model && !model->clips.empty() ? model->clips.front().name : std::string("clip"));
+          sel->blend.push_back({clip, 0.0f});
+        }
+        if (sel->blend_param.empty()) sel->blend_param = "speed";
+        bool have_speed = false;
+        for (const scene3d::AnimParam3D& p : anim.params)
+          if (p.name == "speed") have_speed = true;
+        if (!have_speed)
+          anim.params.push_back({"speed", scene3d::AnimParam3D::Type::Float, 0.0f});
+      } else {
+        if (!sel->blend.empty()) sel->clip = sel->blend.front().clip;
+        sel->blend.clear();
+        sel->blend_param.clear();
+      }
+      what = "Blend tree";
+      touch(true);
+    }
+    if (!sel->blend.empty()) {
+      std::vector<std::string> pnames;
+      for (const scene3d::AnimParam3D& p : anim.params)
+        if (p.type == scene3d::AnimParam3D::Type::Float) pnames.push_back(p.name);
+      if (name_combo("Blend by", &sel->blend_param, pnames)) {
+        what = "Blend parameter";
+        touch(true);
+      }
+      for (std::size_t i = 0; i < sel->blend.size(); ++i) {
+        ImGui::PushID(static_cast<int>(100 + i));
+        if (clip_combo("##bc", &sel->blend[i].clip, model)) {
+          what = "Blend point";
+          touch(true);
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(56);
+        if (ImGui::DragFloat("##at", &sel->blend[i].at, 0.05f)) {
+          what = "Blend point";
+          touch(false);
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("x")) {
+          sel->blend.erase(sel->blend.begin() + static_cast<std::ptrdiff_t>(i));
+          what = "Blend point";
+          touch(true);
+          ImGui::PopID();
+          break;
+        }
+        ImGui::PopID();
+      }
+      if (ImGui::SmallButton("+ Point")) {
+        const std::string clip = model && !model->clips.empty() ? model->clips.front().name : sel->clip;
+        const float at = sel->blend.empty() ? 0.0f : sel->blend.back().at + 1.0f;
+        sel->blend.push_back({clip, at});
+        what = "Blend point";
+        touch(true);
+      }
+    }
+    if (ImGui::SmallButton("Set as entry")) {
+      layer.entry = sel->name;
+      what = "Entry state";
+      touch(true);
+    }
+    if (ImGui::SmallButton("Delete state")) {
+      const std::string gone = sel->name;
+      layer.states.erase(std::remove_if(layer.states.begin(), layer.states.end(),
+                                        [&](const scene3d::AnimState3D& s) { return s.name == gone; }),
+                         layer.states.end());
+      layer.transitions.erase(std::remove_if(layer.transitions.begin(), layer.transitions.end(),
+                                             [&](const scene3d::AnimTransition3D& t) {
+                                               return t.from == gone || t.to == gone;
+                                             }),
+                              layer.transitions.end());
+      if (layer.entry == gone) layer.entry = layer.states.empty() ? std::string() : layer.states.front().name;
+      anim_graph_.selected.clear();
+      anim_graph_.link_from.clear();
+      sel = nullptr;
+      what = "Delete state";
+      touch(true);
+    }
+  }
+  if (sel) {
+    ImGui::Separator();
+    ImGui::TextDisabled("Transitions");
+    for (std::size_t i = 0; i < layer.transitions.size();) {
+      scene3d::AnimTransition3D& tr = layer.transitions[i];
+      if (tr.from != sel->name && tr.to != sel->name && tr.from != "*") {
+        ++i;
+        continue;
+      }
+      ImGui::PushID(static_cast<int>(300 + i));
+      ImGui::Text("%s -> %s", tr.from.c_str(), tr.to.c_str());
+      std::vector<std::string> pnames;
+      for (const scene3d::AnimParam3D& p : anim.params) pnames.push_back(p.name);
+      if (name_combo("When", &tr.param, pnames)) {
+        what = "Transition";
+        touch(true);
+      }
+      int op = static_cast<int>(tr.op);
+      if (ImGui::Combo("Test", &op, "Greater\0Less\0True\0False\0Trigger\0Always\0")) {
+        tr.op = scene3d::AnimTransition3D::Op(op);
+        what = "Transition";
+        touch(true);
+      }
+      if (tr.op == scene3d::AnimTransition3D::Op::Greater || tr.op == scene3d::AnimTransition3D::Op::Less) {
+        ImGui::SetNextItemWidth(80);
+        if (ImGui::DragFloat("Value", &tr.value, 0.05f)) {
+          what = "Transition";
+          touch(false);
+        }
+      }
+      ImGui::SetNextItemWidth(80);
+      if (ImGui::DragFloat("Fade", &tr.duration, 0.01f, 0.0f, 5.0f, "%.2f s")) {
+        what = "Transition";
+        touch(false);
+      }
+      if (ImGui::SmallButton("Remove")) {
+        layer.transitions.erase(layer.transitions.begin() + static_cast<std::ptrdiff_t>(i));
+        what = "Remove transition";
+        touch(true);
+        ImGui::PopID();
+        break;
+      }
+      ImGui::PopID();
+      ++i;
+    }
+  }
+  ImGui::EndChild();
+  ImGui::EndChild();
+  if (anim_graph_.before && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+    push_undo(what, *anim_graph_.before);
+    anim_graph_.before.reset();
+  }
+}
+
 }  // namespace editor
 }  // namespace tombstone
 }  // namespace ts

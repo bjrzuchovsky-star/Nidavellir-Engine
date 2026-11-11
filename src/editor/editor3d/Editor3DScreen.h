@@ -1,5 +1,6 @@
 #pragma once
 #include <map>
+#include <optional>
 #include "debugtools/DebugTools.h"
 #include "editor/plugins/ProfilerPanels.h"
 
@@ -545,6 +546,7 @@ class Editor3DScreen final : public IScreen {
   void draw_assets();
   void draw_environment();
   void draw_anim_preview();
+  void draw_anim_graph();
   void draw_anim_timeline();
   void draw_telegraph();
   void handle_shortcuts();
@@ -656,6 +658,20 @@ class Editor3DScreen final : public IScreen {
   bool show_mixer_ = false;
   AnimPreview anim_preview_;
   std::uint64_t last_anim_target_ = 0;
+  // Animator graph (View > Animator Graph). Node positions last for the
+  // session; the states themselves live on the Animator component.
+  struct AnimGraphUi {
+    bool open = false;
+    int layer = 0;
+    std::string selected;
+    std::string link_from;
+    int dragging = -1;
+    float grab_x = 0.0f;
+    float grab_y = 0.0f;
+    std::map<std::string, std::pair<float, float>> pos;
+    std::optional<scene3d::Scene3D> before;
+  };
+  AnimGraphUi anim_graph_;
   struct AnimTimeline {
     bool open = false;
     bool loaded = false;
