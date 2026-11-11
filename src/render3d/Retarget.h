@@ -47,6 +47,9 @@ HumanoidMap map_humanoid(const Skeleton& skel);
 const char* human_slot_name(HumanSlot slot);
 // -1 when `name` is not a slot. Case-insensitive.
 int human_slot_from_name(std::string_view name);
+// Comma-separated humanoid slots the auto-map did not find ("Head, ToesL").
+// Empty when every slot has a bone. Face and twist bones are not slots.
+std::string missing_humanoid_slots(const Skeleton& skel);
 
 // A hand-fixed slot on the destination rig (the avatar / IK map).
 // `slot` is human_slot_name ("Hips"); `bone` is that skeleton's joint.

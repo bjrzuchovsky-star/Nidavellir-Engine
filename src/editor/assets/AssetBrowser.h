@@ -58,6 +58,8 @@ struct AssetBrowserHost {
   // Double-click a model. The 3D editor previews an animation on the
   // selected character (or the last one that played a clip).
   std::function<void(const std::string& rel)> preview_model;
+  // An animation tile dropped onto a model tile (clip rel, model rel).
+  std::function<void(const std::string& clip_rel, const std::string& model_rel)> apply_clip_to;
 };
 
 class AssetBrowser {

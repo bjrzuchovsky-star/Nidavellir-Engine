@@ -664,6 +664,19 @@ bool AssetBrowser::tile(const AssetDb::Entry& e, float size) {
   ImGui::BeginGroup();
   const ImVec2 p0 = ImGui::GetCursorScreenPos();
   const bool clicked = ImGui::InvisibleButton("##tile", ImVec2(size, size + 18));
+  if (e.meta.kind == Kind::Model && ImGui::BeginDragDropTarget()) {
+    const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("TS_ASSET3D");
+    if (!payload) payload = ImGui::AcceptDragDropPayload("TS_ASSET_ANY");
+    if (payload && payload->Data && host_.apply_clip_to) {
+      const std::string clip(static_cast<const char*>(payload->Data));
+      const AssetDb::Entry* dragged = db_.by_path(clip);
+      if (dragged && dragged->rel != e.rel && dragged->meta.kind == Kind::Model &&
+          (dragged->meta.info.flag("animation_only", false) || dragged->meta.info.num("clips", 0) > 0)) {
+        host_.apply_clip_to(clip, e.rel);
+      }
+    }
+    ImGui::EndDragDropTarget();
+  }
   const bool hovered = ImGui::IsItemHovered();
   ImDrawList* dl = ImGui::GetWindowDrawList();
   const bool sel = selected_ == e.rel;

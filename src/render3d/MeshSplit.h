@@ -1,8 +1,9 @@
 #pragma once
 
 // Split a loaded model into one asset per mesh node (docs/model-import.md).
-// Node transforms are already baked into the vertices; a skinned part is
-// written in its rest pose, rigid, so each file stands on its own.
+// A rigid part is baked and can be recentred. A skinned part keeps the
+// shared skeleton and its vertex weights, in bind space, so a clip dropped
+// on any part plays on that mesh. Its origin stays at the model origin.
 //
 //   recentre  the pivot moves to the part's centre and `origin` is the
 //             model-space centre to put back when the part is placed

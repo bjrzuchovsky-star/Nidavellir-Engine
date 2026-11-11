@@ -280,7 +280,7 @@ void simplify_part(MeshData* m, std::size_t max_tris) {
 bool write_part_gltf(const std::string& path, const std::string& node_name, const std::vector<MeshData>& meshes,
                      const std::vector<MaterialDesc>& materials, const std::string& tex_dir,
                      std::vector<std::string>* written, std::unordered_map<const Image*, std::string>* shared,
-                     std::string* error) {
+                     const Skeleton* skel, std::string* error) {
   using json::Value;
   std::error_code ec;
   fs::create_directories(fs::u8path(path).parent_path(), ec);
@@ -349,6 +349,8 @@ bool write_part_gltf(const std::string& path, const std::string& node_name, cons
   }
   for (std::size_t pi = 0; pi < meshes.size(); ++pi) {
     const MeshData& m = meshes[pi];
+    double joints_acc = -1;
+    double weights_acc = -1;
     if (!m.valid()) {
       if (error) *error = "split: a part has an invalid mesh";
       return false;
@@ -372,6 +374,29 @@ bool write_part_gltf(const std::string& path, const std::string& node_name, cons
     append(bin, m.indices.data(), m.indices.size() * 4);
     const double idx = add_accessor(add_view(off, m.indices.size() * 4, 34963), 5125, m.indices.size(), "SCALAR",
                                     nullptr, nullptr);
+    if (skel && !skel->joints.empty() && m.skinned()) {
+      std::vector<std::uint16_t> joints(n * 4, 0);
+      std::vector<float> weights(n * 4, 0.0f);
+      const int nj = static_cast<int>(skel->joints.size());
+      for (std::size_t v = 0; v < n && v < m.skin.size(); ++v) {
+        for (int k = 0; k < 4; ++k) {
+          int j = static_cast<int>(m.skin[v].joints[k]);
+          if (j < 0 || j >= nj) j = 0;
+          joints[v * 4 + static_cast<std::size_t>(k)] = static_cast<std::uint16_t>(j);
+          weights[v * 4 + static_cast<std::size_t>(k)] = m.skin[v].weights[k];
+        }
+      }
+      pad4(bin);
+      off = bin.size();
+      append(bin, joints.data(), joints.size() * sizeof(std::uint16_t));
+      joints_acc = add_accessor(add_view(off, joints.size() * sizeof(std::uint16_t), 34962), 5123, n, "VEC4",
+                                nullptr, nullptr);
+      pad4(bin);
+      off = bin.size();
+      append(bin, weights.data(), weights.size() * sizeof(float));
+      weights_acc = add_accessor(add_view(off, weights.size() * sizeof(float), 34962), 5126, n, "VEC4", nullptr,
+                                 nullptr);
+    }
     pad4(bin);
 
     const MaterialDesc& md = materials[pi];
@@ -420,6 +445,10 @@ bool write_part_gltf(const std::string& path, const std::string& node_name, cons
     attrs.set("POSITION", Value::number(pos));
     attrs.set("NORMAL", Value::number(nrm));
     attrs.set("TEXCOORD_0", Value::number(tex));
+    if (joints_acc >= 0) {
+      attrs.set("JOINTS_0", Value::number(joints_acc));
+      attrs.set("WEIGHTS_0", Value::number(weights_acc));
+    }
     Value prim = Value::object();
     prim.set("attributes", std::move(attrs));
     prim.set("indices", Value::number(idx));
@@ -433,15 +462,65 @@ bool write_part_gltf(const std::string& path, const std::string& node_name, cons
   asset.set("generator", Value::string("Nidavellir Engine"));
   root.set("asset", std::move(asset));
   root.set("scene", Value::number(0));
-  Value node = Value::object();
-  node.set("name", Value::string(node_name));
-  node.set("mesh", Value::number(0));
   Value nodes = Value::array();
-  nodes.push(std::move(node));
+  Value sn = Value::array();
+  const bool with_skin = skel && !skel->joints.empty();
+  if (with_skin) {
+    const std::size_t nj = skel->joints.size();
+    std::vector<Mat4> global;
+    joint_matrices(*skel, rest_pose(*skel), &global);
+    std::vector<float> ibm;
+    ibm.reserve(nj * 16);
+    for (const Mat4& g : global) {
+      const Mat4 inv = g.inverse();
+      ibm.insert(ibm.end(), inv.m, inv.m + 16);
+    }
+    pad4(bin);
+    const std::size_t ibm_off = bin.size();
+    append(bin, ibm.data(), ibm.size() * sizeof(float));
+    const double ibm_acc = add_accessor(add_view(ibm_off, ibm.size() * sizeof(float), 34962), 5126, nj, "MAT4",
+                                        nullptr, nullptr);
+    for (std::size_t i = 0; i < nj; ++i) {
+      const Joint& j = skel->joints[i];
+      Value n = Value::object();
+      n.set("name", Value::string(j.name));
+      const float t[3] = {j.t.x, j.t.y, j.t.z};
+      const float r[4] = {j.r.x, j.r.y, j.r.z, j.r.w};
+      const float s[3] = {j.s.x, j.s.y, j.s.z};
+      n.set("translation", json::floats(t, 3));
+      n.set("rotation", json::floats(r, 4));
+      n.set("scale", json::floats(s, 3));
+      Value kids = Value::array();
+      for (std::size_t c = 0; c < nj; ++c) {
+        if (skel->joints[c].parent == static_cast<int>(i)) kids.push(Value::number(static_cast<double>(c)));
+      }
+      if (kids.size() > 0) n.set("children", std::move(kids));
+      nodes.push(std::move(n));
+      if (j.parent < 0) sn.push(Value::number(static_cast<double>(i)));
+    }
+    Value node = Value::object();
+    node.set("name", Value::string(node_name));
+    node.set("mesh", Value::number(0));
+    node.set("skin", Value::number(0));
+    sn.push(Value::number(static_cast<double>(nodes.size())));
+    nodes.push(std::move(node));
+    Value skin = Value::object();
+    skin.set("inverseBindMatrices", Value::number(ibm_acc));
+    Value joint_ids = Value::array();
+    for (std::size_t i = 0; i < nj; ++i) joint_ids.push(Value::number(static_cast<double>(i)));
+    skin.set("joints", std::move(joint_ids));
+    Value skins = Value::array();
+    skins.push(std::move(skin));
+    root.set("skins", std::move(skins));
+  } else {
+    Value node = Value::object();
+    node.set("name", Value::string(node_name));
+    node.set("mesh", Value::number(0));
+    nodes.push(std::move(node));
+    sn.push(Value::number(0));
+  }
   root.set("nodes", std::move(nodes));
   Value scene = Value::object();
-  Value sn = Value::array();
-  sn.push(Value::number(0));
   scene.set("nodes", std::move(sn));
   Value scenes = Value::array();
   scenes.push(std::move(scene));
@@ -522,13 +601,21 @@ bool write_model_parts(const Model& model, const std::string& dest_dir, const Sp
     std::vector<MaterialDesc> mats;
     Vec3 acc;
     int n = 0;
+    bool part_skinned = false;
+    for (int pi : g.prims) {
+      if (model.skinned() && model.primitives[pi].mesh.skinned()) part_skinned = true;
+    }
     for (int pi : g.prims) {
       const ModelPrimitive& prim = model.primitives[pi];
       MeshData mesh;
-      bake_prim(model, prim, &mesh);
-      const std::size_t before = mesh.indices.size() / 3;
-      simplify_part(&mesh, kSplitPartTriangleLimit);
-      if (mesh.indices.size() / 3 < before) simplified = true;
+      if (part_skinned && prim.mesh.skinned()) {
+        mesh = prim.mesh;
+      } else {
+        bake_prim(model, prim, &mesh);
+        const std::size_t before = mesh.indices.size() / 3;
+        simplify_part(&mesh, kSplitPartTriangleLimit);
+        if (mesh.indices.size() / 3 < before) simplified = true;
+      }
       const Aabb b = mesh_bounds(mesh);
       if (b.valid()) {
         acc += b.center();
@@ -542,17 +629,20 @@ bool write_model_parts(const Model& model, const std::string& dest_dir, const Sp
       mats.push_back(std::move(md));
     }
     const Vec3 origin = n ? acc * (1.0f / static_cast<float>(n)) : Vec3{};
-    if (opt.recentre) {
+    // A skinned part stays in bind space with the shared skeleton. Shifting
+    // it to its own pivot would pull it off the bones.
+    if (opt.recentre && !part_skinned) {
       for (MeshData& m : meshes) shift(&m, origin * -1.0f);
     }
     const std::string file = unique_file(dest_dir, g.name);
     std::vector<std::string> wrote;
-    if (!write_part_gltf(file, g.name, meshes, mats, dest_dir, &wrote, &shared_tex, error)) return false;
+    const Skeleton* skel = part_skinned ? &model.skeleton : nullptr;
+    if (!write_part_gltf(file, g.name, meshes, mats, dest_dir, &wrote, &shared_tex, skel, error)) return false;
     if (written_abs) written_abs->insert(written_abs->end(), wrote.begin(), wrote.end());
     SplitPart part;
     part.name = g.name;
     part.node = g.key.empty() ? g.name : g.key;
-    part.origin = origin;
+    part.origin = part_skinned ? Vec3{} : origin;
     part.rel_gltf = fs::u8path(file).filename().string();
     parts->push_back(std::move(part));
   }

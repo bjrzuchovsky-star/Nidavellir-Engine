@@ -486,8 +486,10 @@ void Editor3DScreen::draw_anim_graph() {
     ImGui::TextDisabled("Stop riding to edit the graph. The animator keeps playing.");
     return;
   }
-  const render3d::Model* model = entity_model(*cur);
+  if (const std::uint64_t skin = resolve_skinned_entity(cur->id)) cur = find(skin);
+  const render3d::Model* model = cur ? entity_model(*cur) : nullptr;
   const bool skinned = model && model->skinned();
+  if (!cur) return;
   scene3d::Entity3D ent = *cur;
   const char* what = "Animator graph";
   auto touch = [&](bool commit_now) {

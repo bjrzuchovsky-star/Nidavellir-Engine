@@ -126,6 +126,37 @@ const Alias kAliases[] = {
     {"righttoebase", HumanSlot::ToesR},
     {"righttoe", HumanSlot::ToesR},
     {"toesr", HumanSlot::ToesR},
+    // DAZ Genesis / G8 and similar: lThigh, lShldrBend, abdomenLower.
+    {"abdomenlower", HumanSlot::Spine},
+    {"abdomenupper", HumanSlot::Chest},
+    {"abdomen", HumanSlot::Spine},
+    {"abdomen2", HumanSlot::Chest},
+    {"chestlower", HumanSlot::Chest},
+    {"chestupper", HumanSlot::UpperChest},
+    {"necklower", HumanSlot::Neck},
+    {"neckupper", HumanSlot::Neck},
+    {"lcollar", HumanSlot::ShoulderL},
+    {"rcollar", HumanSlot::ShoulderR},
+    {"lshldr", HumanSlot::UpperArmL},
+    {"lshldrbend", HumanSlot::UpperArmL},
+    {"rshldr", HumanSlot::UpperArmR},
+    {"rshldrbend", HumanSlot::UpperArmR},
+    {"lforearm", HumanSlot::LowerArmL},
+    {"lforearmbend", HumanSlot::LowerArmL},
+    {"rforearm", HumanSlot::LowerArmR},
+    {"rforearmbend", HumanSlot::LowerArmR},
+    {"lhand", HumanSlot::HandL},
+    {"rhand", HumanSlot::HandR},
+    {"lthigh", HumanSlot::UpperLegL},
+    {"lthighbend", HumanSlot::UpperLegL},
+    {"rthigh", HumanSlot::UpperLegR},
+    {"rthighbend", HumanSlot::UpperLegR},
+    {"lshin", HumanSlot::LowerLegL},
+    {"rshin", HumanSlot::LowerLegR},
+    {"lfoot", HumanSlot::FootL},
+    {"rfoot", HumanSlot::FootR},
+    {"ltoe", HumanSlot::ToesL},
+    {"rtoe", HumanSlot::ToesR},
 };
 
 std::string normalize_bone(std::string_view in) {
@@ -277,6 +308,17 @@ const char* human_slot_name(HumanSlot slot) {
   const int i = static_cast<int>(slot);
   if (i < 0 || i >= static_cast<int>(HumanSlot::Count)) return nullptr;
   return kNames[i];
+}
+
+std::string missing_humanoid_slots(const Skeleton& skel) {
+  const HumanoidMap map = map_humanoid(skel);
+  std::string out;
+  for (int i = 0; i < static_cast<int>(HumanSlot::Count); ++i) {
+    if (map.joint[i] >= 0) continue;
+    if (!out.empty()) out += ", ";
+    out += human_slot_name(static_cast<HumanSlot>(i));
+  }
+  return out;
 }
 
 int human_slot_from_name(std::string_view name) {

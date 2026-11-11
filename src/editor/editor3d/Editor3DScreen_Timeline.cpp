@@ -251,7 +251,8 @@ std::string not_skinned_reason(const scene3d::Entity3D& e) {
     why += "It has no mesh. ";
   else
     why += "This mesh was imported without bones. ";
-  why += "Select a skinned character, then drop the animation on them or onto Animation in the Inspector.";
+  why += "The parent, the child parts, and this object were checked. None of them has a skeleton. ";
+  why += "Select the rigged character (or any of its parts) and drop the animation there, or onto its tile in the Asset Browser.";
   return why;
 }
 
@@ -635,12 +636,144 @@ void Editor3DScreen::draw_anim_timeline() {
   ux::EndAutoTips();
 }
 
+namespace {
+
+std::string file_rel_of(const scene3d::Entity3D& e) {
+  if (e.mesh && !e.mesh->is_primitive()) return e.mesh->source;
+  if (e.animator && !e.animator->model.empty()) return e.animator->model;
+  return {};
+}
+
+}  // namespace
+
+std::uint64_t Editor3DScreen::resolve_skinned_entity(std::uint64_t id) const {
+  auto skinned_file = [&](const std::string& rel) {
+    if (rel.empty() || !view_) return false;
+    const render3d::Model* m = view_->model(rel);
+    return m && m->skinned();
+  };
+  auto split_from = [&](const std::string& rel) {
+    const auto* a = asset_browser_.db().by_path(rel);
+    return a ? a->meta.settings.str("split_from") : std::string{};
+  };
+  auto holds_skeleton = [&](std::uint64_t i) {
+    const scene3d::Entity3D* e = find(i);
+    if (!e) return false;
+    const std::string rel = file_rel_of(*e);
+    if (skinned_file(rel)) return true;
+    return skinned_file(split_from(rel));
+  };
+  if (holds_skeleton(id)) return id;
+  for (std::uint64_t d : scene3d::descendants_of(scene_.entities, id)) {
+    if (holds_skeleton(d)) return d;
+  }
+  for (const scene3d::Entity3D* e = find(id); e && e->parent;) {
+    if (holds_skeleton(e->parent)) return e->parent;
+    e = find(e->parent);
+  }
+  return 0;
+}
+
+bool Editor3DScreen::apply_clip_to_model(const std::string& clip_rel, const std::string& model_rel,
+                                        std::string* error) {
+  std::uint64_t full = 0, part = 0;
+  for (const scene3d::Entity3D& e : scene_.entities) {
+    const std::string rel = file_rel_of(e);
+    if (rel == model_rel) full = e.id;
+    else if (!part) {
+      const auto* a = asset_browser_.db().by_path(rel);
+      if (a && a->meta.settings.str("split_from") == model_rel) part = e.id;
+    }
+  }
+  if (full) return apply_animation_asset(full, clip_rel, error);
+  if (part) return apply_animation_asset(part, clip_rel, error);
+  if (!view_) return false;
+  const render3d::Model* target = view_->model(model_rel);
+  if (!target || !target->skinned()) {
+    const std::string why = fs::path(model_rel).filename().string() +
+                            " has no skeleton, so a clip can't play on it.";
+    if (error) *error = why;
+    note(why, runtime::LogLevel::Warn);
+    return false;
+  }
+  fs::path file = fs::u8path(clip_rel);
+  std::error_code ec;
+  if (!fs::exists(file, ec)) file = fs::path(project_.path) / fs::u8path(clip_rel);
+  render3d::Model source;
+  std::string err;
+  if (!render3d::load_model(file.string(), &source, &err) || !source.skinned() || source.clips.empty()) {
+    if (error) *error = err.empty() ? "that file has no skinned clips" : err;
+    note(error ? *error : err, runtime::LogLevel::Warn);
+    return false;
+  }
+  const std::string abs = (fs::path(project_.path) / fs::u8path(model_rel)).string();
+  const std::vector<render3d::AvatarOverride> avatar = load_avatar(avatar_file_for(abs));
+  render3d::RetargetReport report;
+  std::vector<render3d::Clip> mapped = render3d::retarget_clips(
+      source.skeleton, source.clips, target->skeleton, &report, avatar.empty() ? nullptr : &avatar);
+  if (mapped.empty()) {
+    if (error) *error = "no bones in common. " + report.detail;
+    note(error ? *error : report.detail, runtime::LogLevel::Warn);
+    return false;
+  }
+  std::vector<render3d::Clip> clips;
+  render3d::load_clip_file(render3d::clip_sidecar_path(abs), target->skeleton, &clips, &err);
+  for (render3d::Clip& c : mapped) {
+    bool replaced_clip = false;
+    for (render3d::Clip& have : clips) {
+      if (have.name == c.name) {
+        have = std::move(c);
+        replaced_clip = true;
+        break;
+      }
+    }
+    if (!replaced_clip) clips.push_back(std::move(c));
+  }
+  if (!render3d::save_clip_file(render3d::clip_sidecar_path(abs), target->skeleton, clips, &err)) {
+    if (error) *error = err;
+    note(err.empty() ? "Could not save the clip" : err, runtime::LogLevel::Warn);
+    return false;
+  }
+  view_->clear();
+  const std::string miss = render3d::missing_humanoid_slots(target->skeleton);
+  note("Saved " + fs::path(clip_rel).filename().string() + " onto " + fs::path(model_rel).filename().string() +
+       " (" + std::to_string(target->skeleton.joints.size()) + " bones). Place the character to see it play." +
+       (miss.empty() ? "" : " Not mapped yet: " + miss + "."));
+  return true;
+}
+
 bool Editor3DScreen::apply_animation_asset(std::uint64_t id, const std::string& rel, std::string* error) {
   const scene3d::Entity3D* cur = find(id);
   if (!cur) {
     if (error) *error = "That object is no longer in the scene.";
     return false;
   }
+  const std::string asked = cur->name;
+  const std::uint64_t onto = resolve_skinned_entity(id);
+  if (!onto) {
+    const std::string why = not_skinned_reason(*cur);
+    if (error) *error = why;
+    note(why, runtime::LogLevel::Warn);
+    return false;
+  }
+  bool baked_part = false;
+  {
+    scene3d::Entity3D ent = *find(onto);
+    const std::string file = file_rel_of(ent);
+    const render3d::Model* own = (view_ && !file.empty()) ? view_->model(file) : nullptr;
+    if (!own || !own->skinned()) {
+      const auto* meta = asset_browser_.db().by_path(file);
+      const std::string from = meta ? meta->meta.settings.str("split_from") : std::string{};
+      const render3d::Model* src = (view_ && !from.empty()) ? view_->model(from) : nullptr;
+      if (src && src->skinned()) {
+        if (!ent.animator) ent.animator = scene3d::Animator3D{};
+        ent.animator->model = from;
+        if (scene3d::Entity3D* live = scene_.find(onto)) *live = ent;
+        baked_part = true;
+      }
+    }
+  }
+  id = onto;
   select(id);
   last_anim_target_ = id;
   if (!timeline_apply_file(rel, error)) return false;
@@ -712,10 +845,55 @@ bool Editor3DScreen::apply_animation_asset(std::uint64_t id, const std::string& 
     }
     replace_entity(ent, "Apply animation");
   }
+  if (!baked_part) {
+    const scene3d::Entity3D* src = find(id);
+    if (src) {
+      const std::string src_file = file_rel_of(*src);
+      const auto* src_meta = asset_browser_.db().by_path(src_file);
+      std::string group = src_meta ? src_meta->meta.settings.str("split_from") : std::string{};
+      if (group.empty()) group = src_file;
+      const std::string src_abs = (fs::path(project_.path) / fs::u8path(entity_model_rel(*src))).string();
+      const std::string src_side = render3d::clip_sidecar_path(src_abs);
+      const scene3d::Scene3D before = scene_;
+      bool shared = false;
+      for (scene3d::Entity3D& other : scene_.entities) {
+        if (other.id == src->id) continue;
+        const std::string orel = file_rel_of(other);
+        const auto* om = asset_browser_.db().by_path(orel);
+        std::string og = om ? om->meta.settings.str("split_from") : std::string{};
+        if (og.empty()) og = orel;
+        if (og != group || !view_) continue;
+        const render3d::Model* omode = view_->model(orel);
+        if (!omode || !omode->skinned()) continue;
+        if (orel != entity_model_rel(*src)) {
+          const std::string oabs = (fs::path(project_.path) / fs::u8path(orel)).string();
+          std::error_code ec;
+          fs::copy_file(fs::u8path(src_side), fs::u8path(render3d::clip_sidecar_path(oabs)),
+                        fs::copy_options::overwrite_existing, ec);
+        }
+        if (src->animator) {
+          other.animator = *src->animator;
+          other.animator->model.clear();
+          shared = true;
+        }
+      }
+      if (view_) view_->clear();
+      if (shared) push_undo("Apply animation to parts", before);
+    }
+  }
   const render3d::Model* posed = entity_model(*find(id));
   const std::string bones = posed ? std::to_string(posed->skeleton.joints.size()) + " bones, " : "";
-  note("Playing " + fs::path(rel).filename().string() + " on " + ent.name + " (" + bones + "source rig " + rig +
-       "). Preview is in the viewport; Play on start is in Animation.");
+  const std::string who = (asked == ent.name) ? ent.name : (asked + " → " + ent.name);
+  std::string msg = "Playing " + fs::path(rel).filename().string() + " on " + who + " (" + bones + "source rig " +
+                    rig + "). Preview is in the viewport; Play on start is in Animation.";
+  if (baked_part) {
+    msg += " This part was split without bone weights, so the mesh will not bend. Place the parts again to keep the skeleton.";
+  }
+  if (posed) {
+    const std::string miss = render3d::missing_humanoid_slots(posed->skeleton);
+    if (!miss.empty()) msg += " Not mapped yet: " + miss + ".";
+  }
+  note(msg);
   return true;
 }
 
@@ -745,7 +923,14 @@ bool Editor3DScreen::draw_animation_slot(scene3d::Entity3D& e, bool* touched, co
     }
     ImGui::EndDragDropTarget();
   }
-  const render3d::Model* model = entity_model(e);
+  const std::uint64_t skin_id = resolve_skinned_entity(e.id);
+  const scene3d::Entity3D* skin_ent = skin_id ? find(skin_id) : nullptr;
+  const render3d::Model* model = skin_ent ? entity_model(*skin_ent) : nullptr;
+  if (skin_ent && (!model || !model->skinned()) && skin_ent->mesh && view_) {
+    const auto* meta = asset_browser_.db().by_path(skin_ent->mesh->source);
+    const std::string from = meta ? meta->meta.settings.str("split_from") : std::string{};
+    if (!from.empty()) model = view_->model(from);
+  }
   const bool skinned = model && model->skinned();
   if (!skinned) {
     ImGui::PushTextWrapPos(0.0f);
@@ -753,10 +938,22 @@ bool Editor3DScreen::draw_animation_slot(scene3d::Entity3D& e, bool* touched, co
     ImGui::PopTextWrapPos();
     return replaced;
   }
+  if (skin_ent && skin_ent->id != e.id) {
+    ImGui::TextDisabled("Skeleton is on %s.", skin_ent->name.c_str());
+  }
   ImGui::TextDisabled("%zu bones, %zu clips", model->skeleton.joints.size(), model->clips.size());
+  {
+    const std::string miss = render3d::missing_humanoid_slots(model->skeleton);
+    if (!miss.empty()) {
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextWrapped("Not mapped yet: %s. Pick the bone in Avatar.", miss.c_str());
+      ImGui::PopTextWrapPos();
+    }
+  }
 
   std::vector<std::string> names;
-  if (timeline_.loaded && timeline_.model_rel == entity_model_rel(e)) {
+  const std::string skin_rel = skin_ent ? entity_model_rel(*skin_ent) : std::string{};
+  if (timeline_.loaded && timeline_.model_rel == skin_rel) {
     for (const render3d::Clip& c : timeline_.clips) names.push_back(c.name);
   }
   if (names.empty()) {

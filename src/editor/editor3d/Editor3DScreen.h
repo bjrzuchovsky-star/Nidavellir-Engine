@@ -441,6 +441,11 @@ class Editor3DScreen final : public IScreen {
   bool timeline_apply_file(const std::string& path, std::string* error = nullptr);
   // Drop an animation asset onto a character: retarget, save, and preview.
   bool apply_animation_asset(std::uint64_t entity, const std::string& rel, std::string* error = nullptr);
+  // The skinned character a drop should play on: this entity, a child part,
+  // or a parent. 0 when the whole family is rigid.
+  std::uint64_t resolve_skinned_entity(std::uint64_t id) const;
+  // Drop a clip onto a model in the Asset Browser (the character's tile).
+  bool apply_clip_to_model(const std::string& clip_rel, const std::string& model_rel, std::string* error = nullptr);
   // True when the drop replaced the live entity (the caller should re-copy it).
   bool draw_animation_slot(scene3d::Entity3D& e, bool* touched, const char** commit);
   const render3d::Clip* authored_clip(const std::string& name) const;

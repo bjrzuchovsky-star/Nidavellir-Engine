@@ -530,11 +530,24 @@ bool load_blend_model(const std::string& path, const ModelImportOptions& opt, Mo
             "            img.scale(max(1, int(w * s)), max(1, int(h * s)))\n"
             "    except Exception:\n"
             "        pass\n"
+            // export_apply bakes subdiv and similar into the mesh. The
+            // armature modifier is the skin and must stay enabled; a file
+            // over 32 MB skips the bake but still exports skins.
+            "for obj in bpy.data.objects:\n"
+            "    if getattr(obj, 'type', '') != 'MESH':\n"
+            "        continue\n"
+            "    for mod in obj.modifiers:\n"
+            "        if mod.type == 'ARMATURE':\n"
+            "            mod.show_viewport = True\n"
+            "            mod.show_render = True\n"
             "kw = dict(filepath=out, export_format='GLB', export_animations=True, export_yup=True, export_apply=apply_flag)\n"
             "try:\n"
-            "    bpy.ops.export_scene.gltf(export_morph=False, **kw)\n"
+            "    bpy.ops.export_scene.gltf(export_morph=False, export_skins=True, **kw)\n"
             "except TypeError:\n"
-            "    bpy.ops.export_scene.gltf(**kw)\n";
+            "    try:\n"
+            "        bpy.ops.export_scene.gltf(export_skins=True, **kw)\n"
+            "    except TypeError:\n"
+            "        bpy.ops.export_scene.gltf(**kw)\n";
     }
     import_report(12, "Exporting with Blender");
     const bool apply = size < 32ull * 1024ull * 1024ull;

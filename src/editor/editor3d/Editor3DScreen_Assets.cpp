@@ -67,6 +67,10 @@ void Editor3DScreen::open_asset_browser() {
     std::string err;
     apply_animation_asset(id, rel, &err);
   };
+  host.apply_clip_to = [this](const std::string& clip, const std::string& model) {
+    std::string err;
+    apply_clip_to_model(clip, model, &err);
+  };
   host.open_script = [this](const std::string& rel, int which) {
     std::string msg;
     const ExternalEditor ed = which == 1 ? ExternalEditor::VSCode

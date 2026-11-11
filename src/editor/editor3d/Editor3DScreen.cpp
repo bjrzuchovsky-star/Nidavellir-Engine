@@ -913,14 +913,43 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
     const bool any_hidden = std::any_of(scene_.entities.begin(), scene_.entities.end(),
                                         [](const Entity3D& e) { return e.editor_hidden; });
     const bool posing = (anim_preview_.open || timeline_.open) && find(primary()) != nullptr;
+    const std::uint64_t pose_root = posing ? resolve_skinned_entity(primary()) : 0;
+    auto pose_group = [&](std::uint64_t i) -> std::string {
+      const scene3d::Entity3D* e = find(i);
+      if (!e) return {};
+      std::string rel;
+      if (e->mesh && !e->mesh->is_primitive()) rel = e->mesh->source;
+      else if (e->animator && !e->animator->model.empty()) rel = e->animator->model;
+      auto grouped = [&](const std::string& r) -> std::string {
+        if (r.empty()) return {};
+        if (const auto* a = asset_browser_.db().by_path(r)) {
+          const std::string from = a->meta.settings.str("split_from");
+          if (!from.empty()) return from;
+        }
+        if (view_) {
+          const render3d::Model* m = view_->model(r);
+          if (m && m->skinned()) return r;
+        }
+        return {};
+      };
+      if (const std::string g = grouped(rel); !g.empty()) return g;
+      const std::uint64_t s = resolve_skinned_entity(i);
+      if (!s || s == i) return {};
+      const scene3d::Entity3D* o = find(s);
+      if (!o) return {};
+      std::string orel;
+      if (o->mesh && !o->mesh->is_primitive()) orel = o->mesh->source;
+      return grouped(orel);
+    };
+    const std::string pose_key = pose_root ? pose_group(pose_root) : std::string{};
     if (any_hidden || posing) {
       // Eye toggled off in the hierarchy: not drawn in the editor only.
-      // The animation preview poses the selection in this copy only.
+      // The animation preview poses the character and every skinned part.
       std::vector<Entity3D> shown;
       for (const Entity3D& e : scene_.entities) {
         if (effectively_hidden(e)) continue;
         shown.push_back(e);
-        if (posing && e.id == primary()) anim_preview_pose(&shown.back());
+        if (posing && !pose_key.empty() && pose_group(e.id) == pose_key) anim_preview_pose(&shown.back());
       }
       view_->begin(scene_.environment, shown, cam, width, height, opt);
     } else {

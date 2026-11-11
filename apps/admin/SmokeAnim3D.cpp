@@ -1096,6 +1096,20 @@ int animation_only_import(const fs::path& dir) {
   joint(&rigify, "DEF-foot.L", 2);
   joint(&rigify, "ORG-toe.L", 3);
   const r3::HumanoidMap rm = r3::map_humanoid(rigify);
+  r3::Skeleton daz;
+  joint(&daz, "hip", -1);
+  joint(&daz, "abdomenLower", 0);
+  joint(&daz, "lShldrBend", 1);
+  joint(&daz, "lThigh", 0);
+  const r3::HumanoidMap dm = r3::map_humanoid(daz);
+  if (dm.get(r3::HumanSlot::Hips) != 0 || dm.get(r3::HumanSlot::Spine) != 1 ||
+      dm.get(r3::HumanSlot::UpperArmL) != 2 || dm.get(r3::HumanSlot::UpperLegL) != 3) {
+    return fail("daz / genesis names did not map");
+  }
+  const std::string miss = r3::missing_humanoid_slots(daz);
+  if (miss.find("Head") == std::string::npos || miss.find("Hips") != std::string::npos) {
+    return fail("missing slots: " + miss);
+  }
   if (rm.get(r3::HumanSlot::Spine) != 0 || rm.get(r3::HumanSlot::UpperLegL) != 1 ||
       rm.get(r3::HumanSlot::LowerLegL) != 2 || rm.get(r3::HumanSlot::FootL) != 3 ||
       rm.get(r3::HumanSlot::ToesL) != 4) {
@@ -1211,6 +1225,104 @@ int animation_only_import(const fs::path& dir) {
   return 0;
 }
 
+// A character split into parts, with Rigify / DAZ bone names, still takes a
+// clip dropped on the empty parent or on a child of a part.
+int multipart_drop(const fs::path& dir) {
+  namespace ed = ts::tombstone::editor;
+  fs::create_directories(dir / "assets");
+  r3::Skeleton sk;
+  r3::Joint j;
+  j.name = "hips";
+  j.parent = -1;
+  j.t = {0, 1, 0};
+  sk.joints.push_back(j);
+  j.name = "DEF-thigh.L";
+  j.parent = 0;
+  j.t = {0.1f, -0.4f, 0};
+  sk.joints.push_back(j);
+  r3::GltfPart body = skin_cube();
+  body.mesh.name = "Body";
+  r3::GltfPart head = skin_cube();
+  head.mesh.name = "Head";
+  for (r3::SkinVertex& s : head.mesh.skin) s.joints[0] = 1;
+  std::string err;
+  const fs::path hero = dir / "assets" / "hero.gltf";
+  if (!r3::write_skinned_gltf(hero.string(), {body, head}, sk, {}, &err)) return fail("hero: " + err);
+  r3::Skeleton src;
+  j.name = "mixamorig:Hips";
+  j.parent = -1;
+  j.t = {0, 1, 0};
+  src.joints.push_back(j);
+  j.name = "mixamorig:LeftUpLeg";
+  j.parent = 0;
+  j.t = {0, -0.4f, 0};
+  src.joints.push_back(j);
+  r3::Clip run;
+  run.name = "running";
+  r3::Channel rot;
+  rot.joint = 1;
+  rot.path = r3::ChannelPath::Rotation;
+  const r3::Quat q = r3::Quat::axis_angle({1, 0, 0}, r3::radians(50.0f));
+  const float ident[4] = {0, 0, 0, 1}, bent[4] = {q.x, q.y, q.z, q.w};
+  r3::upsert_key(&rot, 0.0f, ident);
+  r3::upsert_key(&rot, 1.0f, bent);
+  run.channels = {rot};
+  r3::clip_duration(&run);
+  r3::GltfPart donor = skin_cube();
+  const fs::path clip = dir / "assets" / "run.gltf";
+  if (!r3::write_skinned_gltf(clip.string(), {donor}, src, {run}, &err)) return fail("run: " + err);
+
+  ed::ProjectInfo info;
+  info.id = "_parts";
+  info.name = "Parts";
+  info.kind = ed::ProjectKind::ThreeD;
+  info.path = dir.string();
+  ed::Editor3DScreen e(info);
+  e.on_enter();
+  e.rescan_assets();
+  const std::uint64_t parent = e.place_model_parts("assets/hero.gltf", {0, 0, 0}, false, false);
+  if (!parent) return fail("place parts");
+  const s3::Entity3D* root = e.scene().find(parent);
+  if (!root || root->mesh) return fail("part root should have no mesh of its own");
+  std::uint64_t child = 0;
+  int skinned_parts = 0;
+  for (const s3::Entity3D& en : e.scene().entities) {
+    if (en.parent != parent || !en.mesh) continue;
+    const r3::Model* m = e.entity_model(en);
+    if (!m || !m->skinned() || m->skeleton.find("DEF-thigh.L") < 0) return fail("part lost its skeleton");
+    if (!child) child = en.id;
+    ++skinned_parts;
+  }
+  if (skinned_parts < 2) return fail("expected two skinned parts");
+  std::string aerr;
+  if (!e.apply_animation_asset(parent, "assets/run.gltf", &aerr)) return fail("drop on parent: " + aerr);
+  const std::uint64_t cube = e.create_primitive("cube", {2, 0, 0});
+  if (!e.set_parent(cube, child)) return fail("parent cube to part");
+  if (!e.apply_animation_asset(cube, "assets/run.gltf", &aerr)) return fail("drop on a child of a part: " + aerr);
+  if (!e.apply_clip_to_model("assets/run.gltf", "assets/hero.gltf", &aerr)) return fail("drop on asset tile: " + aerr);
+  const s3::Entity3D* played = e.scene().find(e.primary());
+  if (!played) return fail("nothing selected after the drop");
+  const r3::Model* posed_model = e.entity_model(*played);
+  if (!posed_model || posed_model->find_clip("running") < 0) return fail("running clip did not land on the part");
+  const int thigh = posed_model->skeleton.find("DEF-thigh.L");
+  std::vector<r3::Mat4> rest;
+  r3::skin_palette(posed_model->skeleton, r3::rest_pose(posed_model->skeleton), &rest);
+  s3::Entity3D copy = *played;
+  e.anim_preview().open = true;
+  e.anim_preview().clip = "running";
+  e.anim_preview().time = 0.5f;
+  e.anim_preview().playing = false;
+  if (!e.anim_preview_pose(&copy) || !copy.skin_palette) return fail("part did not pose");
+  bool moved = false;
+  const r3::Mat4& a = rest[static_cast<std::size_t>(thigh)];
+  const r3::Mat4& b = (*copy.skin_palette)[static_cast<std::size_t>(thigh)];
+  for (int i = 0; i < 16; ++i) moved = moved || std::fabs(a.m[i] - b.m[i]) > 1e-3f;
+  if (!moved) return fail("clip did not move DEF-thigh.L");
+  e.on_exit();
+  std::cout << "[smoke] anim3d multi-part drop OK (" << skinned_parts << " skinned parts)\n";
+  return 0;
+}
+
 }  // namespace
 
 int run_anim3d_smoke() {
@@ -1229,6 +1341,7 @@ int run_anim3d_smoke() {
   if (gpu_render(dir) != 0) return 1;
   if (world(dir / "town") != 0) return 1;
   if (editor_preview(dir / "editor") != 0) return 1;
+  if (multipart_drop(dir / "parts") != 0) return 1;
   std::cout << "[smoke] anim3d OK (skin math vs reference, linear/step/cubic + slerp, 1D blend weights, "
                "animator: blend space, crossfade, jump trigger, upper-body mask, events, root motion; "
                "scene v12 round trip)\n";
