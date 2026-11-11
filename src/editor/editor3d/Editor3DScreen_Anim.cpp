@@ -4,6 +4,7 @@
 
 #include "editor/ui/Theme.h"
 #include "render3d/Animator.h"
+#include "render3d/Retarget.h"
 #include "render3d/Skeleton.h"
 
 #include <imgui.h>
@@ -362,7 +363,8 @@ void Editor3DScreen::anim_preview_tick(float dt) {
   if (!p.open || !p.playing) return;
   const scene3d::Entity3D* e = find(primary());
   if (!e) return;
-  const render3d::Clip* c = preview_clip(entity_model(*e), &p.clip);
+  const render3d::Clip* c = authored_clip(p.clip);
+  if (!c) c = preview_clip(entity_model(*e), &p.clip);
   if (!c || c->duration <= 0.0f) return;
   p.time = std::fmod(p.time + dt * p.speed, c->duration);
   if (p.time < 0.0f) p.time += c->duration;
@@ -375,7 +377,15 @@ bool Editor3DScreen::anim_preview_pose(scene3d::Entity3D* e) {
   if (!c) c = preview_clip(m, &anim_preview_.clip);
   if (!c) return false;
   render3d::Pose pose = render3d::rest_pose(m->skeleton);
-  render3d::sample_clip(*c, anim_preview_.time, true, &pose);
+  render3d::sample_clip(*c, anim_preview_.time, anim_preview_.loop, &pose);
+  if (anim_preview_.in_place) {
+    const render3d::HumanoidMap map = render3d::map_humanoid(m->skeleton);
+    int hip = map.get(render3d::HumanSlot::Hips);
+    if (hip < 0) hip = 0;
+    if (static_cast<std::size_t>(hip) < pose.size()) {
+      pose[static_cast<std::size_t>(hip)].t = m->skeleton.joints[static_cast<std::size_t>(hip)].t;
+    }
+  }
   auto pal = std::make_shared<std::vector<render3d::Mat4>>();
   render3d::skin_palette(m->skeleton, pose, pal.get());
   e->skin_palette = std::move(pal);

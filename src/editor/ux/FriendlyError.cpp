@@ -129,10 +129,14 @@ ErrorKind classify(const std::string& raw, ErrorKind hint) {
               "script engine fell over", "stack overflow", "nullreferenceexception", "exception in"}))
     return ErrorKind::ScriptRuntime;
   if (has(l, {"import failed", "could not import", "import error"}) || hint == ErrorKind::ImportFailed) {
+    if (has(l, {"no mesh", "no triangle", "no animation", "assimp could not", "animation only", "animation-only"}))
+      return ErrorKind::ImportFailed;
     if (missing_words(l) && texture_words(l)) return ErrorKind::MissingTexture;
     if (missing_words(l) && model_words(l) && !has(l, {"blender"})) return ErrorKind::MissingModel;
     return ErrorKind::ImportFailed;
   }
+  if (has(l, {"no mesh", "no triangle", "no animation", "assimp could not", "animation-only"}))
+    return ErrorKind::ImportFailed;
   if (has(l, {"script not found"})) return ErrorKind::MissingFile;
   if (missing_words(l)) {
     if (texture_words(l)) return ErrorKind::MissingTexture;
@@ -187,6 +191,11 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
         f.why = "Blender was still exporting when the time limit ran out, so it was stopped. The editor is still open.";
         f.fix = "Export glTF from Blender yourself (File > Export > glTF) and import that. A smaller texture size "
                 "in Blender helps a very large file.";
+      } else if (has(l, {"no mesh", "no triangle", "no animation", "assimp could not", "animation only",
+                         "animation-only"})) {
+        f.why = raw.size() > 420 ? raw.substr(0, 420) : raw;
+        f.fix = "A Mixamo FBX exported Without Skin is an animation clip: drop it on a skinned character, "
+                "or onto Animation in the Inspector. A mesh file needs triangles (glTF, GLB, FBX or OBJ).";
       } else if (has(l, {"import cancelled", "cancelled"})) {
         f.title = "Import cancelled";
         f.what = "The import was cancelled. Nothing else was changed.";

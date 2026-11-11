@@ -491,10 +491,24 @@ std::uint64_t Editor3DScreen::drop_asset(const std::string& rel, const Vec3& pos
   std::transform(ext.begin(), ext.end(), ext.begin(),
                  [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   if (render3d::is_model_file(rel)) {  // glTF, Source .mdl, FBX / OBJ / DAE..., .blend
-    if (view_ && !view_->model(rel)) {
+    const render3d::Model* dropped = view_ ? view_->model(rel) : nullptr;
+    if (view_ && !dropped) {
       collect_problems();
-      note("Could not place " + rel + " (see above)", LogLevel::Error);
+      note("Could not place " + rel, LogLevel::Error);
       return 0;
+    }
+    if (dropped && dropped->animation_only()) {
+      const std::uint64_t onto = target ? target : primary();
+      if (!onto) {
+        note(fs::path(rel).stem().string() +
+                 " is an animation (no mesh). Select a skinned character and drop it on them, "
+                 "or onto Animation in the Inspector.",
+             LogLevel::Warn);
+        return 0;
+      }
+      std::string err;
+      apply_animation_asset(onto, rel, &err);
+      return onto;
     }
     Entity3D e;
     e.name = fs::path(rel).stem().string();

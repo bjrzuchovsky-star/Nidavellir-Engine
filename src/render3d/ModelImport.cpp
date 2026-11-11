@@ -154,6 +154,14 @@ json::Value default_model_settings(const std::string& path) {
   s.set("hull_vertices", Value::number(64));
   s.set("decompose_max", Value::number(8));
   s.set("import_animations", Value::boolean(true));
+  s.set("animation_only", Value::boolean(false));
+  s.set("clip_start", Value::number(0));
+  s.set("clip_end", Value::number(0));
+  s.set("loop", Value::boolean(true));
+  s.set("root_motion", Value::boolean(false));
+  s.set("in_place", Value::boolean(false));
+  s.set("play_on_start", Value::boolean(true));
+  s.set("retarget_rig", Value::string("auto"));
   s.set("max_texture", Value::number(kDefaultMaxTextureEdge));
   if (source) s.set("skin", Value::number(0));
   if (ext_of(path) == ".blend") s.set("blender_path", Value::string(""));
@@ -179,6 +187,11 @@ ModelImportOptions model_options_from_settings(const json::Value& s, const std::
   o.material_paths = split_paths(s.str("material_path"));
   o.lod = std::max(0, static_cast<int>(num("lod")));
   o.animations = s.flag("import_animations", true);
+  o.clips_only = s.flag("animation_only", false);
+  o.clip_start = static_cast<float>(s.num("clip_start", 0));
+  o.clip_end = static_cast<float>(s.num("clip_end", 0));
+  if (!std::isfinite(o.clip_start) || o.clip_start < 0.0f) o.clip_start = 0.0f;
+  if (!std::isfinite(o.clip_end) || o.clip_end < 0.0f) o.clip_end = 0.0f;
   o.collision = s.flag("generate_collider", true);
   o.skin = std::max(0, static_cast<int>(s.num("skin", 0)));
   const json::Value& bg = s["body_groups"];
@@ -691,6 +704,53 @@ void bake_forward_axis(Model* m, ForwardAxis axis) {
   update_bounds(m);
 }
 
+namespace {
+
+int channel_stride(const Channel& ch) {
+  return ch.width() * (ch.interp == Interp::CubicSpline ? 3 : 1);
+}
+
+// Keep keys in [start, end] seconds and shift them to start at 0.
+void trim_clips(Model* out, float start, float end) {
+  if (!out || !(end > start)) return;
+  for (Clip& clip : out->clips) {
+    for (Channel& ch : clip.channels) {
+      const int stride = channel_stride(ch);
+      if (stride <= 0) continue;
+      std::vector<float> times;
+      std::vector<float> values;
+      for (std::size_t i = 0; i < ch.times.size(); ++i) {
+        const float t = ch.times[i];
+        if (t + 1e-4f < start || t - 1e-4f > end) continue;
+        const std::size_t base = i * static_cast<std::size_t>(stride);
+        if (base + static_cast<std::size_t>(stride) > ch.values.size()) break;
+        times.push_back(std::max(0.0f, t - start));
+        values.insert(values.end(), ch.values.begin() + static_cast<std::ptrdiff_t>(base),
+                      ch.values.begin() + static_cast<std::ptrdiff_t>(base + stride));
+      }
+      ch.times = std::move(times);
+      ch.values = std::move(values);
+    }
+    clip.channels.erase(std::remove_if(clip.channels.begin(), clip.channels.end(),
+                                       [](const Channel& ch) { return ch.times.empty(); }),
+                        clip.channels.end());
+    std::vector<ClipEvent> events;
+    for (ClipEvent ev : clip.events) {
+      if (ev.time + 1e-4f < start || ev.time - 1e-4f > end) continue;
+      ev.time = std::max(0.0f, ev.time - start);
+      events.push_back(std::move(ev));
+    }
+    clip.events = std::move(events);
+    float last = 0.0f;
+    for (const Channel& ch : clip.channels) {
+      if (!ch.times.empty()) last = std::max(last, ch.times.back());
+    }
+    clip.duration = last > 0.0f ? last : std::max(0.0f, end - start);
+  }
+}
+
+}  // namespace
+
 bool load_model(const std::string& path, Model* out, std::string* error) {
   ModelImportOptions opt;
   read_model_options(path, &opt);
@@ -771,7 +831,24 @@ bool load_model(const std::string& path, const ModelImportOptions& opt, Model* o
         err += clip_warn;
       }
     }
-    if (out->primitives.empty()) return fail(path + ": no meshes");
+    if (opt.clip_end > opt.clip_start) trim_clips(out, opt.clip_start, opt.clip_end);
+    if (opt.clips_only) {
+      out->primitives.clear();
+      out->materials.clear();
+      out->collision_hulls.clear();
+    }
+    if (out->primitives.empty() && !out->animation_only()) {
+      std::string why;
+      if (opt.clips_only) {
+        why = path + ": Animation only is on, but this file has no skeleton and no clips to keep.";
+      } else {
+        why = path + ": no meshes";
+        if (out->clips.empty()) why += " and no animation clips";
+        else why += " (clips were found, but there is no skeleton to play them on)";
+        why += ". An animation-only FBX or glTF (Mixamo 'Without Skin') needs a skeleton and at least one clip.";
+      }
+      return fail(why);
+    }
     apply_fitted_cache_file(path, out);
     const std::string notes = import_take_notes();
     if (!notes.empty()) {

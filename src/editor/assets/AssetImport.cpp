@@ -173,6 +173,7 @@ bool import_asset(const std::string& abs_path, Kind kind, const Value& settings,
       o.set("materials", Value::number(static_cast<double>(m.materials.size())));
       o.set("textures", Value::number(static_cast<double>(m.textures)));
       o.set("skinned", Value::boolean(m.skinned()));
+      o.set("animation_only", Value::boolean(m.animation_only()));
       o.set("clips", Value::number(static_cast<double>(m.clips.size())));
       const float sz[3] = {m.bounds.max.x - m.bounds.min.x, m.bounds.max.y - m.bounds.min.y,
                            m.bounds.max.z - m.bounds.min.z};
@@ -286,6 +287,11 @@ std::string info_summary(const Value& info, Kind kind) {
                     info.flag("alpha", false) ? ", alpha" : "");
       return buf;
     case Kind::Model:
+      if (info.flag("animation_only", false)) {
+        std::snprintf(buf, sizeof(buf), "Animation: %d clips, %d bones", int(info.num("clips", 0)),
+                      int(info.num("bones", 0)));
+        return buf;
+      }
       std::snprintf(buf, sizeof(buf), "%s%s%d prim, %d tris%s%s%s%s", info.str("format").c_str(),
                     info.str("format").empty() ? "" : ": ", int(info.num("primitives", 0)),
                     int(info.num("triangles", 0)), info.flag("skinned", false) ? ", skinned" : "",

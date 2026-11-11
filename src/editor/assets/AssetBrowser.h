@@ -55,6 +55,9 @@ struct AssetBrowserHost {
   // itself (no scene undo). recentre: pivot at each part's centre.
   std::function<bool(const std::string& rel, bool recentre, bool fit)> split_model;
   std::function<bool(const std::string& rel, bool recentre, bool fit)> place_parts;
+  // Double-click a model. The 3D editor previews an animation on the
+  // selected character (or the last one that played a clip).
+  std::function<void(const std::string& rel)> preview_model;
 };
 
 class AssetBrowser {

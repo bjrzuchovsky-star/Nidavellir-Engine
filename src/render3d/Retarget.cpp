@@ -3,6 +3,7 @@
 #include "render3d/ClipFile.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <string_view>
 #include <unordered_map>
@@ -27,11 +28,19 @@ const Alias kAliases[] = {
     {"hip", HumanSlot::Hips},
     {"spine", HumanSlot::Spine},
     {"spine1", HumanSlot::Spine},
+    {"spine01", HumanSlot::Spine},
+    {"spine001", HumanSlot::Spine},
     {"spine2", HumanSlot::Chest},
+    {"spine02", HumanSlot::Chest},
+    {"spine002", HumanSlot::Chest},
     {"chest", HumanSlot::Chest},
     {"spine3", HumanSlot::UpperChest},
+    {"spine03", HumanSlot::UpperChest},
+    {"spine003", HumanSlot::UpperChest},
     {"upperchest", HumanSlot::UpperChest},
     {"neck", HumanSlot::Neck},
+    {"neck01", HumanSlot::Neck},
+    {"neck001", HumanSlot::Neck},
     {"head", HumanSlot::Head},
     {"leftshoulder", HumanSlot::ShoulderL},
     {"leftclavicle", HumanSlot::ShoulderL},
@@ -85,12 +94,16 @@ const Alias kAliases[] = {
     {"thighr", HumanSlot::UpperLegR},
     {"rightthigh", HumanSlot::UpperLegR},
     {"rupleg", HumanSlot::UpperLegR},
+    {"shinl", HumanSlot::LowerLegL},
+    {"leftshin", HumanSlot::LowerLegL},
     {"leftleg", HumanSlot::LowerLegL},
     {"leftlowerleg", HumanSlot::LowerLegL},
     {"lowerlegl", HumanSlot::LowerLegL},
     {"calfl", HumanSlot::LowerLegL},
     {"leftcalf", HumanSlot::LowerLegL},
     {"leftshin", HumanSlot::LowerLegL},
+    {"shinr", HumanSlot::LowerLegR},
+    {"rightshin", HumanSlot::LowerLegR},
     {"rightleg", HumanSlot::LowerLegR},
     {"rightlowerleg", HumanSlot::LowerLegR},
     {"lowerlegr", HumanSlot::LowerLegR},
@@ -103,9 +116,13 @@ const Alias kAliases[] = {
     {"rightfoot", HumanSlot::FootR},
     {"footr", HumanSlot::FootR},
     {"footright", HumanSlot::FootR},
+    {"balll", HumanSlot::ToesL},
+    {"toel", HumanSlot::ToesL},
     {"lefttoebase", HumanSlot::ToesL},
     {"lefttoe", HumanSlot::ToesL},
     {"toesl", HumanSlot::ToesL},
+    {"ballr", HumanSlot::ToesR},
+    {"toer", HumanSlot::ToesR},
     {"righttoebase", HumanSlot::ToesR},
     {"righttoe", HumanSlot::ToesR},
     {"toesr", HumanSlot::ToesR},
@@ -124,6 +141,9 @@ std::string normalize_bone(std::string_view in) {
   if (out.rfind(prefix, 0) == 0) out.erase(0, prefix.size());
   if (out.rfind("bip01", 0) == 0) out.erase(0, 5);
   if (out.rfind("bip001", 0) == 0) out.erase(0, 6);
+  // Blender Rigify: DEF-spine, ORG-thigh.L (hyphens already stripped).
+  if (out.rfind("def", 0) == 0 && out.size() > 3) out.erase(0, 3);
+  if (out.rfind("org", 0) == 0 && out.size() > 3) out.erase(0, 3);
   return out;
 }
 
@@ -247,6 +267,34 @@ HumanoidMap::HumanoidMap() {
   for (int& j : joint) j = -1;
 }
 
+const char* human_slot_name(HumanSlot slot) {
+  static const char* kNames[] = {
+      "Hips", "Spine", "Chest", "UpperChest", "Neck", "Head",
+      "ShoulderL", "UpperArmL", "LowerArmL", "HandL",
+      "ShoulderR", "UpperArmR", "LowerArmR", "HandR",
+      "UpperLegL", "LowerLegL", "FootL", "ToesL",
+      "UpperLegR", "LowerLegR", "FootR", "ToesR"};
+  const int i = static_cast<int>(slot);
+  if (i < 0 || i >= static_cast<int>(HumanSlot::Count)) return nullptr;
+  return kNames[i];
+}
+
+int human_slot_from_name(std::string_view name) {
+  for (int i = 0; i < static_cast<int>(HumanSlot::Count); ++i) {
+    const char* n = human_slot_name(static_cast<HumanSlot>(i));
+    if (n && name.size() == std::char_traits<char>::length(n)) {
+      bool eq = true;
+      for (std::size_t c = 0; c < name.size(); ++c) {
+        const char a = static_cast<char>(std::tolower(static_cast<unsigned char>(name[c])));
+        const char b = static_cast<char>(std::tolower(static_cast<unsigned char>(n[c])));
+        if (a != b) { eq = false; break; }
+      }
+      if (eq) return i;
+    }
+  }
+  return -1;
+}
+
 HumanoidMap map_humanoid(const Skeleton& skel) {
   HumanoidMap map;
   for (std::size_t i = 0; i < skel.joints.size(); ++i) {
@@ -258,12 +306,21 @@ HumanoidMap map_humanoid(const Skeleton& skel) {
   return map;
 }
 
-Clip retarget_clip(const Skeleton& source, const Clip& clip, const Skeleton& target, RetargetReport* report) {
+Clip retarget_clip(const Skeleton& source, const Clip& clip, const Skeleton& target, RetargetReport* report,
+                   const std::vector<AvatarOverride>* avatar) {
   Clip out;
   out.name = clip.name.empty() ? "clip" : clip.name;
   out.events = clip.events;
   const HumanoidMap sm = map_humanoid(source);
-  const HumanoidMap dm = map_humanoid(target);
+  HumanoidMap dm = map_humanoid(target);
+  if (avatar) {
+    for (const AvatarOverride& o : *avatar) {
+      const int slot = human_slot_from_name(o.slot);
+      const int bone = target.find(o.bone);
+      if (slot < 0 || bone < 0) continue;
+      dm.joint[slot] = bone;
+    }
+  }
   const float src_leg = leg_length(source, sm);
   const float dst_leg = leg_length(target, dm);
   const float scale = std::clamp(dst_leg / std::max(src_leg, 1e-4f), 0.05f, 20.0f);
@@ -301,12 +358,12 @@ Clip retarget_clip(const Skeleton& source, const Clip& clip, const Skeleton& tar
 }
 
 std::vector<Clip> retarget_clips(const Skeleton& source, const std::vector<Clip>& clips, const Skeleton& target,
-                                 RetargetReport* report) {
+                                 RetargetReport* report, const std::vector<AvatarOverride>* avatar) {
   std::vector<Clip> out;
   out.reserve(clips.size());
   for (const Clip& c : clips) {
     if (c.channels.empty() && c.events.empty()) continue;
-    Clip mapped = retarget_clip(source, c, target, report);
+    Clip mapped = retarget_clip(source, c, target, report, avatar);
     if (mapped.channels.empty() && mapped.events.empty()) continue;
     out.push_back(std::move(mapped));
     if (report) ++report->clips;

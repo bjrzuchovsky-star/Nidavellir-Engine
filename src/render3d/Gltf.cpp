@@ -16,10 +16,12 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
 #include <new>
+#include <set>
 
 namespace ts {
 namespace tombstone {
@@ -415,6 +417,77 @@ bool load_gltf(const std::string& path, Model* out, std::string* error) {
     }
   }
 
+  // Animation-only glTF: nodes and clips, no skin and no mesh.
+  if (model.skeleton.empty() && data->animations_count > 0) {
+    std::set<const cgltf_node*> want;
+    for (cgltf_size a = 0; a < data->animations_count; ++a) {
+      const cgltf_animation& an = data->animations[a];
+      for (cgltf_size c = 0; c < an.channels_count; ++c) {
+        for (const cgltf_node* n = an.channels[c].target_node; n; n = n->parent) want.insert(n);
+      }
+    }
+    std::map<const cgltf_node*, int> joint_of;
+    std::function<void(const cgltf_node*)> add = [&](const cgltf_node* n) {
+      if (!n || !want.count(n) || joint_of.count(n)) return;
+      if (n->parent && want.count(n->parent)) add(n->parent);
+      Joint j;
+      j.name = n->name && *n->name ? n->name : ("joint" + std::to_string(model.skeleton.joints.size()));
+      j.parent = (n->parent && joint_of.count(n->parent)) ? joint_of[n->parent] : -1;
+      if (n->has_matrix) {
+        Mat4 m;
+        std::memcpy(m.m, n->matrix, sizeof(m.m));
+        decompose(m, &j.t, &j.r, &j.s);
+      } else {
+        if (n->has_translation) j.t = {n->translation[0], n->translation[1], n->translation[2]};
+        if (n->has_rotation) j.r = normalize(Quat{n->rotation[0], n->rotation[1], n->rotation[2], n->rotation[3]});
+        if (n->has_scale) j.s = {n->scale[0], n->scale[1], n->scale[2]};
+      }
+      joint_of[n] = static_cast<int>(model.skeleton.joints.size());
+      model.skeleton.joints.push_back(std::move(j));
+    };
+    for (cgltf_size i = 0; i < data->nodes_count; ++i) add(&data->nodes[i]);
+    std::vector<Mat4> globals;
+    joint_matrices(model.skeleton, rest_pose(model.skeleton), &globals);
+    for (std::size_t i = 0; i < model.skeleton.joints.size() && i < globals.size(); ++i) {
+      model.skeleton.joints[i].inverse_bind = globals[i].inverse();
+    }
+    for (cgltf_size a = 0; a < data->animations_count; ++a) {
+      const cgltf_animation& an = data->animations[a];
+      Clip clip;
+      clip.name = an.name && *an.name ? an.name : ("clip " + std::to_string(a + 1));
+      for (cgltf_size c = 0; c < an.channels_count; ++c) {
+        const cgltf_animation_channel& ac = an.channels[c];
+        auto jt = joint_of.find(ac.target_node);
+        if (jt == joint_of.end() || !ac.sampler || !ac.sampler->input || !ac.sampler->output) continue;
+        Channel ch;
+        ch.joint = jt->second;
+        if (ac.target_path == cgltf_animation_path_type_translation) ch.path = ChannelPath::Translation;
+        else if (ac.target_path == cgltf_animation_path_type_rotation) ch.path = ChannelPath::Rotation;
+        else if (ac.target_path == cgltf_animation_path_type_scale) ch.path = ChannelPath::Scale;
+        else continue;
+        ch.interp = ac.sampler->interpolation == cgltf_interpolation_type_step ? Interp::Step
+                    : ac.sampler->interpolation == cgltf_interpolation_type_cubic_spline ? Interp::CubicSpline
+                                                                                         : Interp::Linear;
+        const cgltf_accessor* in = ac.sampler->input;
+        const cgltf_accessor* outp = ac.sampler->output;
+        ch.times.resize(in->count);
+        for (cgltf_size k = 0; k < in->count; ++k) cgltf_accessor_read_float(in, k, &ch.times[k], 1);
+        const int w = ch.width();
+        ch.values.resize(outp->count * static_cast<cgltf_size>(w));
+        for (cgltf_size k = 0; k < outp->count; ++k) {
+          cgltf_accessor_read_float(outp, k, &ch.values[k * static_cast<cgltf_size>(w)], static_cast<cgltf_size>(w));
+        }
+        const std::size_t need = ch.times.size() * static_cast<std::size_t>(w) *
+                                 (ch.interp == Interp::CubicSpline ? 3 : 1);
+        if (ch.times.empty() || ch.values.size() < need) continue;
+        clip.duration = std::max(clip.duration, ch.times.back());
+        clip.channels.push_back(std::move(ch));
+      }
+      if (!clip.channels.empty()) model.clips.push_back(std::move(clip));
+    }
+    if (!model.clips.empty()) warn = (warn.empty() ? "" : warn + "; ") + "animation-only glTF (no mesh)";
+  }
+
   auto add_mesh = [&](const cgltf_mesh& mesh, const Mat4& world, bool skinned,
                       const std::string& node_path) -> bool {
     Mat4 normal_m = world.inverse();
@@ -579,12 +652,14 @@ bool load_gltf(const std::string& path, Model* out, std::string* error) {
   }
   bool any_skinned = false;
   for (const ModelPrimitive& p : model.primitives) any_skinned = any_skinned || p.mesh.skinned();
-  if (!any_skinned) {
+  // A rigid file does not keep a leftover skin. An animation-only file
+  // (nodes + clips, no mesh) does: that is a clip asset, not a failed mesh.
+  if (!any_skinned && !model.primitives.empty()) {
     model.skeleton = {};
     model.clips.clear();
   }
-  if (model.primitives.empty()) {
-    if (error) *error = path + ": no triangle meshes";
+  if (model.primitives.empty() && (model.skeleton.empty() || model.clips.empty())) {
+    if (error) *error = path + ": no triangle meshes and no animation clips";
     return false;
   }
   model.textures = images.decoded();
@@ -609,7 +684,7 @@ bool load_gltf(const std::string& path, Model* out, std::string* error) {
     b.min = vmin(b.min, pb.min);
     b.max = vmax(b.max, pb.max);
   }
-  model.bounds = b;
+  model.bounds = model.primitives.empty() ? Aabb{} : b;
   *out = std::move(model);
   if (error && !warn.empty()) *error = "warning: " + warn;
   return true;

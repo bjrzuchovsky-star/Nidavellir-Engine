@@ -111,6 +111,8 @@ struct Model {
   Skeleton skeleton;
   std::vector<Clip> clips;
   bool skinned() const { return !skeleton.empty(); }
+  // A clip file: a skeleton and clips, and nothing to draw (Mixamo "Without Skin").
+  bool animation_only() const { return primitives.empty() && skinned() && !clips.empty(); }
   int find_clip(const std::string& name) const;
   std::size_t triangles() const;
 };

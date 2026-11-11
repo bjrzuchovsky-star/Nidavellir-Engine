@@ -10,6 +10,7 @@
 #include "render3d/Skeleton.h"
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ts {
@@ -38,8 +39,21 @@ struct HumanoidMap {
 };
 
 // First joint that owns each slot, or -1. "mixamorig:LeftArm", "LeftArm",
-// "upper_arm.L" and "upper_arm_l" all land on UpperArmL.
+// "upper_arm.L", "upperarm_l" (Unreal) and "DEF-thigh.L" (Rigify) all land
+// on the same slot.
 HumanoidMap map_humanoid(const Skeleton& skel);
+
+// "Hips", "UpperArmL", ... in HumanSlot order. Null when out of range.
+const char* human_slot_name(HumanSlot slot);
+// -1 when `name` is not a slot. Case-insensitive.
+int human_slot_from_name(std::string_view name);
+
+// A hand-fixed slot on the destination rig (the avatar / IK map).
+// `slot` is human_slot_name ("Hips"); `bone` is that skeleton's joint.
+struct AvatarOverride {
+  std::string slot;
+  std::string bone;
+};
 
 struct RetargetReport {
   int clips = 0;
@@ -50,9 +64,11 @@ struct RetargetReport {
 };
 
 Clip retarget_clip(const Skeleton& source, const Clip& clip, const Skeleton& target,
-                   RetargetReport* report = nullptr);
+                   RetargetReport* report = nullptr,
+                   const std::vector<AvatarOverride>* avatar = nullptr);
 std::vector<Clip> retarget_clips(const Skeleton& source, const std::vector<Clip>& clips,
-                                 const Skeleton& target, RetargetReport* report = nullptr);
+                                 const Skeleton& target, RetargetReport* report = nullptr,
+                                 const std::vector<AvatarOverride>* avatar = nullptr);
 
 }  // namespace render3d
 }  // namespace tombstone

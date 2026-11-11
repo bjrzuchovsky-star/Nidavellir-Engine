@@ -720,9 +720,24 @@ bool AssetBrowser::tile(const AssetDb::Entry& e, float size) {
     ImGui::Text("%s", e.rel.c_str());
     ImGui::EndDragDropSource();
   }
+  if (e.meta.kind == Kind::Model && e.meta.info.flag("animation_only", false)) {
+    const char* mark = "ANIM";
+    const ImVec2 ms = ImGui::CalcTextSize(mark);
+    dl->AddRectFilled(ImVec2(t0.x + 1, t0.y + 1), ImVec2(t0.x + ms.x + 7, t0.y + ms.y + 3),
+                      ImGui::GetColorU32(theme::Accent()), 3.0f);
+    dl->AddText(ImVec2(t0.x + 4, t0.y + 2), ImGui::GetColorU32(theme::TextOnAccent()), mark);
+  }
   if (hovered) {
-    ux::SetTooltip("%s\n%s  %s\nGUID %s", e.rel.c_str(), assetdb::kind_name(e.meta.kind),
-                      assetdb::info_summary(e.meta.info, e.meta.kind).c_str(), e.meta.guid.c_str());
+    const char* how = (e.meta.kind == Kind::Model && e.meta.info.flag("animation_only", false))
+                          ? "\nAnimation clip — drag onto a character, or double-click to preview"
+                          : "";
+    ux::SetTooltip("%s\n%s  %s%s\nGUID %s", e.rel.c_str(), assetdb::kind_name(e.meta.kind),
+                   assetdb::info_summary(e.meta.info, e.meta.kind).c_str(), how, e.meta.guid.c_str());
+  }
+  if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && e.meta.kind == Kind::Model &&
+      host_.preview_model &&
+      (e.meta.info.flag("animation_only", false) || e.meta.info.num("clips", 0) > 0)) {
+    host_.preview_model(e.rel);
   }
   if (ImGui::BeginPopupContextItem("##ctx")) {
     selected_ = e.rel;
@@ -1058,6 +1073,39 @@ void AssetBrowser::draw_settings(const AssetDb::Entry& e) {
       }
       ImGui::SameLine();
       flag("import_animations", "Animations");
+      flag("animation_only", "Animation only");
+      if (ImGui::IsItemHovered()) {
+        ux::SetTooltip("Import the skeleton and clips, and drop the mesh. A Mixamo\n"
+                       "FBX exported Without Skin is detected on its own.");
+      }
+      flag("loop", "Loop");
+      ImGui::SameLine();
+      flag("play_on_start", "Play on start");
+      flag("root_motion", "Root motion");
+      ImGui::SameLine();
+      flag("in_place", "In place");
+      if (ImGui::IsItemHovered()) {
+        ux::SetTooltip("Keep the hips planted when this clip is dropped on a character.\n"
+                       "Root motion lets the clip move the object instead.");
+      }
+      number("clip_start", "From (s)", 0.0f, 600.0f, "%.2f");
+      number("clip_end", "To (s)", 0.0f, 600.0f, "%.2f");
+      if (ImGui::IsItemHovered()) ux::SetTooltip("Frame range in seconds. To = 0 keeps the whole clip.");
+      {
+        const std::string rig = s.str("retarget_rig", "auto");
+        int ri = rig == "mixamo" ? 1 : rig == "unreal" ? 2 : rig == "rigify" ? 3 : 0;
+        const char* rigs[] = {"Auto", "Mixamo", "Unreal mannequin", "Blender Rigify"};
+        ImGui::SetNextItemWidth(160);
+        if (ImGui::Combo("Retarget source", &ri, rigs, 4)) {
+          const char* keys[] = {"auto", "mixamo", "unreal", "rigify"};
+          s.set("retarget_rig", Value::string(keys[ri]));
+          changed = true;
+        }
+        if (ImGui::IsItemHovered()) {
+          ux::SetTooltip("Which rig this clip was authored on. Auto reads Mixamo,\n"
+                         "Unreal and Rigify bone names. Fix a miss in the character's Avatar map.");
+        }
+      }
       if (e.meta.info.num("hitboxes", 0) > 0) {
         ImGui::TextDisabled("%d hitboxes (set \"%s\"): View > Hitboxes shows them",
                             static_cast<int>(e.meta.info.num("hitboxes", 0)), e.meta.info.str("hitbox_set").c_str());

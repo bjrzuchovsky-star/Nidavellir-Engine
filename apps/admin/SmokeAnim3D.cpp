@@ -1057,8 +1057,157 @@ int editor_preview(const fs::path& dir) {
   }
   const r3::Clip& nod = saved->clips[static_cast<std::size_t>(saved->find_clip("nod"))];
   if (nod.events.size() != 1 || nod.events[0].name != "step") return fail("editor: event was not saved");
+  const std::uint64_t cube = e.create_primitive("cube", {3.0f, 0.0f, 0.0f});
+  std::string cube_err;
+  if (e.apply_animation_asset(cube, running.string(), &cube_err)) return fail("editor: a cube accepted a clip");
+  if (cube_err.find("no skeleton") == std::string::npos) return fail("editor: cube reason: " + cube_err);
   e.on_exit();
   std::cout << "[smoke] anim3d editor preview OK (wave at 0.25 s, " << st.skinned << " skinned draws)\n";
+  return 0;
+}
+
+int animation_only_import(const fs::path& dir) {
+  r3::Skeleton unreal;
+  auto joint = [](r3::Skeleton* s, const char* name, int parent) {
+    r3::Joint j;
+    j.name = name;
+    j.parent = parent;
+    s->joints.push_back(j);
+  };
+  joint(&unreal, "pelvis", -1);
+  joint(&unreal, "spine_01", 0);
+  joint(&unreal, "clavicle_l", 1);
+  joint(&unreal, "upperarm_l", 2);
+  joint(&unreal, "thigh_l", 0);
+  joint(&unreal, "calf_l", 4);
+  joint(&unreal, "foot_l", 5);
+  joint(&unreal, "ball_l", 6);
+  const r3::HumanoidMap um = r3::map_humanoid(unreal);
+  if (um.get(r3::HumanSlot::Hips) != 0 || um.get(r3::HumanSlot::Spine) != 1 ||
+      um.get(r3::HumanSlot::ShoulderL) != 2 || um.get(r3::HumanSlot::UpperArmL) != 3 ||
+      um.get(r3::HumanSlot::UpperLegL) != 4 || um.get(r3::HumanSlot::LowerLegL) != 5 ||
+      um.get(r3::HumanSlot::FootL) != 6 || um.get(r3::HumanSlot::ToesL) != 7) {
+    return fail("unreal mannequin names did not map");
+  }
+  r3::Skeleton rigify;
+  joint(&rigify, "DEF-spine", -1);
+  joint(&rigify, "DEF-thigh.L", 0);
+  joint(&rigify, "DEF-shin.L", 1);
+  joint(&rigify, "DEF-foot.L", 2);
+  joint(&rigify, "ORG-toe.L", 3);
+  const r3::HumanoidMap rm = r3::map_humanoid(rigify);
+  if (rm.get(r3::HumanSlot::Spine) != 0 || rm.get(r3::HumanSlot::UpperLegL) != 1 ||
+      rm.get(r3::HumanSlot::LowerLegL) != 2 || rm.get(r3::HumanSlot::FootL) != 3 ||
+      rm.get(r3::HumanSlot::ToesL) != 4) {
+    return fail("rigify names did not map");
+  }
+
+  r3::Skeleton src;
+  joint(&src, "mixamorig:Hips", -1);
+  src.joints[0].t = {0, 1, 0};
+  r3::Clip slide;
+  slide.name = "slide";
+  r3::Channel tr;
+  tr.joint = 0;
+  tr.path = r3::ChannelPath::Translation;
+  const float a[3] = {0, 1, 0}, b[3] = {1, 1, 0};
+  r3::upsert_key(&tr, 0.0f, a);
+  r3::upsert_key(&tr, 1.0f, b);
+  slide.channels = {tr};
+  r3::clip_duration(&slide);
+  r3::Skeleton dst;
+  joint(&dst, "root", -1);
+  joint(&dst, "hips", 0);
+  dst.joints[1].t = {0, 1, 0};
+  std::vector<r3::AvatarOverride> over{{"Hips", "root"}};
+  const r3::Clip mapped = r3::retarget_clip(src, slide, dst, nullptr, &over);
+  bool on_root = false;
+  for (const r3::Channel& ch : mapped.channels)
+    if (ch.joint == 0 && ch.path == r3::ChannelPath::Translation) on_root = true;
+  if (!on_root) return fail("avatar override did not retarget hips onto root");
+
+  const fs::path gltf = dir / "clip-only.gltf";
+  const fs::path bin = dir / "clip.bin";
+  float bytes[10] = {0, 1, 0, 0, 0, 1, 0, 0, 0, 1};
+  const float s = std::sin(0.78539816339f), c = std::cos(0.78539816339f);
+  bytes[6] = s;
+  bytes[9] = c;
+  {
+    std::ofstream out(bin, std::ios::binary);
+    out.write(reinterpret_cast<const char*>(bytes), sizeof(bytes));
+    if (!out) return fail("clip bin");
+  }
+  {
+    std::ofstream out(gltf);
+    out << R"({
+      "asset": {"version": "2.0"},
+      "scene": 0,
+      "scenes": [{"nodes": [0]}],
+      "nodes": [
+        {"name": "mixamorig:Hips", "translation": [0, 1, 0], "children": [1]},
+        {"name": "mixamorig:LeftUpLeg", "translation": [0.1, -0.4, 0]}
+      ],
+      "animations": [{
+        "name": "run",
+        "samplers": [{"input": 0, "output": 1, "interpolation": "LINEAR"}],
+        "channels": [{"sampler": 0, "target": {"node": 1, "path": "rotation"}}]
+      }],
+      "accessors": [
+        {"bufferView": 0, "componentType": 5126, "count": 2, "type": "SCALAR", "min": [0], "max": [1]},
+        {"bufferView": 1, "componentType": 5126, "count": 2, "type": "VEC4"}
+      ],
+      "bufferViews": [
+        {"buffer": 0, "byteOffset": 0, "byteLength": 8},
+        {"buffer": 0, "byteOffset": 8, "byteLength": 32}
+      ],
+      "buffers": [{"uri": "clip.bin", "byteLength": 40}]
+    })";
+    if (!out) return fail("clip gltf");
+  }
+  r3::Model clip;
+  std::string err;
+  if (!r3::load_model(gltf.string(), &clip, &err)) return fail("anim-only gltf: " + err);
+  if (!clip.animation_only() || clip.clips.empty() || !clip.primitives.empty()) {
+    return fail("anim-only gltf was not an animation asset");
+  }
+  if (clip.skeleton.find("mixamorig:Hips") < 0 || clip.skeleton.find("mixamorig:LeftUpLeg") < 0) {
+    return fail("anim-only gltf lost mixamo joint names");
+  }
+  if (clip.find_clip("run") < 0) return fail("anim-only gltf lost the run clip");
+
+  const fs::path junk = dir / "not-a-model.gltf";
+  {
+    std::ofstream out(junk);
+    out << "this is not a gltf";
+  }
+  r3::Model bad;
+  std::string why;
+  if (r3::load_model(junk.string(), &bad, &why)) return fail("garbage gltf imported");
+  if (why == junk.string() + ": could not be read") return fail("import error is still bare 'could not be read'");
+  if (why.empty()) return fail("garbage gltf had an empty error");
+
+  const char* env = std::getenv("TS_MIXAMO_FBX");
+  fs::path fbx = env && env[0] ? fs::path(env) : fs::path("/tmp/running-fbx/Running.fbx");
+  if (r3::assimp_available() && fs::exists(fbx)) {
+    r3::Model mix;
+    std::string merr;
+    if (!r3::load_model(fbx.string(), &mix, &merr)) return fail(std::string("mixamo fbx: ") + merr);
+    if (!mix.primitives.empty()) return fail("mixamo fbx imported a mesh; expected animation-only");
+    if (mix.clips.empty() || mix.skeleton.empty()) return fail("mixamo fbx has no clip or skeleton");
+    bool hips = false;
+    for (const r3::Joint& j : mix.skeleton.joints) {
+      if (j.name.find("Hips") != std::string::npos || j.name.find("hips") != std::string::npos) hips = true;
+    }
+    if (!hips) {
+      std::string names;
+      for (std::size_t i = 0; i < mix.skeleton.joints.size() && i < 6; ++i) names += mix.skeleton.joints[i].name + " ";
+      return fail("mixamo fbx has no hips bone (" + names + ")");
+    }
+    std::cout << "[smoke] mixamo " << fbx.string() << ": " << mix.clips.size() << " clips, "
+              << mix.skeleton.joints.size() << " joints\n";
+  }
+
+  std::cout << "[smoke] anim3d animation-only import OK\n";
   return 0;
 }
 
@@ -1072,6 +1221,7 @@ int run_anim3d_smoke() {
   if (skin_math() != 0 || sampling() != 0 || blend_weights() != 0) return 1;
   if (sidecar_and_bones(dir) != 0) return 1;
   if (retarget_blend(dir) != 0) return 1;
+  if (animation_only_import(dir) != 0) return 1;
   r3::Model drifter;
   if (assets(dir, &drifter) != 0) return 1;
   if (animator(drifter) != 0) return 1;

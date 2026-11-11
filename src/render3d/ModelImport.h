@@ -48,6 +48,12 @@ struct ModelImportOptions {
   int lod = 0;
   bool animations = true;
   bool collision = true;
+  // Drop the mesh and keep the skeleton + clips (Mixamo "Without Skin",
+  // or a full file the user wants as a clip only).
+  bool clips_only = false;
+  // Seconds. clip_end <= clip_start keeps the whole clip.
+  float clip_start = 0.0f;
+  float clip_end = 0.0f;
   int skin = 0;                              // Source skin family
   std::map<std::string, int> body_groups;    // Source: group -> option
   std::string blender_path;                  // override for .blend

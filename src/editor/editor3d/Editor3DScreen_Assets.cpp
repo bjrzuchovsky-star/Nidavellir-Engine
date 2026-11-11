@@ -1,6 +1,8 @@
 // Asset Browser wiring for the 3D editor (see editor/assets/AssetBrowser.h).
 #include "editor/editor3d/Editor3DScreen.h"
 
+#include <filesystem>
+
 namespace ts {
 namespace tombstone {
 namespace editor {
@@ -42,6 +44,28 @@ void Editor3DScreen::open_asset_browser() {
   };
   host.place_parts = [this](const std::string& rel, bool recentre, bool fit) {
     return place_model_parts(rel, {}, recentre, fit) != 0;
+  };
+  host.preview_model = [this](const std::string& rel) {
+    std::uint64_t id = primary();
+    auto skinned = [&](std::uint64_t i) {
+      const scene3d::Entity3D* e = find(i);
+      if (!e) return false;
+      const render3d::Model* m = entity_model(*e);
+      return m && m->skinned();
+    };
+    if (!skinned(id) && skinned(last_anim_target_)) id = last_anim_target_;
+    if (!skinned(id)) {
+      for (const scene3d::Entity3D& e : scene_.entities) {
+        if (skinned(e.id)) { id = e.id; break; }
+      }
+    }
+    if (!skinned(id)) {
+      note(std::filesystem::path(rel).stem().string() +
+           " is an animation. Select a skinned character, then double-click it or drop it on them.");
+      return;
+    }
+    std::string err;
+    apply_animation_asset(id, rel, &err);
   };
   host.open_script = [this](const std::string& rel, int which) {
     std::string msg;

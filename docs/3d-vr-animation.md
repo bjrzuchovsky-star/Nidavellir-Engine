@@ -118,13 +118,16 @@ anim.param(e, "speed"); anim.state(e, 1); anim.stop(e, 2, 0.3)
 
 **Editor:** the Animator inspector, **View → Animation Preview** (bones overlay on the posed character; **View → Bones** toggles it), and **View → Animation Timeline**.
 
-**Apply a separate clip (Mixamo `running.fbx`) onto a character:**
+**Apply a separate clip (Mixamo `running.fbx`, with or without a mesh) onto a character:**
 
-1. Select the skinned character in the 3D viewport.
-2. Open **View → Animation Timeline**.
-3. Under **Apply animation**, pick `assets/running.fbx` (or any rigged `.fbx`, `.gltf`, `.glb`, `.dae`, or `.blend`) from the project list, paste a path, or drop the file on the button. **Retarget onto character**.
-4. Bones match by humanoid slot. `mixamorig:Hips`, `LeftArm`, `LeftUpLeg` and the character's `hips`, `upper_arm.L`, `upper_leg.L` are the same slot. Rotations are the change from each rig's rest pose. Hip travel scales with leg length. A bone with no match stays in the rest pose.
-5. Scrub the new clip, add **Events** (they call `on_anim_event`), then **Save**. That writes `<model>.anim3d.json` beside the character. The Animator can use the clip name, and C# / C++ call `PlayAnimation("running")`, `CrossfadeAnimation`, `SetAnimFloat`, `SetAnimTrigger`, `AnimState`.
+1. Import the FBX or glTF. A file with no mesh (Mixamo **Without Skin**) becomes an **Animation** asset: the Asset Browser tile says ANIM and the summary is `Animation: N clips, M bones`. A full rigged file stays a model and keeps its clips. Import settings on the asset: **Animation only**, **Loop**, **Play on start**, **Root motion**, **In place**, **From (s)** / **To (s)** (To = 0 keeps the whole clip), and **Retarget source** (Auto, Mixamo, Unreal mannequin, Blender Rigify).
+2. Select the skinned character. Drop the animation from the Asset Browser onto the character in the viewport, or onto **Drop clip here** under **Animation** in the Inspector. Double-click the animation to preview it on the selected character, or the last one that played a clip.
+3. The clip is retargeted and saved beside the character (`<model>.anim3d.json`). The viewport plays it. **Animation** in the Inspector has the clip, **Preview animation**, **Anim loop**, **Playback speed**, **Play on start**, **Root motion** and **In place**. **Play on start** adds an Animator that plays that clip when the scene starts. **Locomotion template** builds idle / walk / run by speed in one click.
+4. If the object is not skinned, the Inspector says so (a cube or an unrigged mesh cannot play a clip).
+5. **Avatar** on that character lists hips, spine, arms and legs. Mixamo (`mixamorig:Hips`), Unreal (`pelvis`, `thigh_l`) and Rigify (`DEF-thigh.L`) map on their own. Pick a bone in a slot to override; that writes `<model>.avatar.json`. Drop the clip again to apply the new map.
+6. The Timeline route is still there: **View → Animation Timeline**, **Apply animation**, then **Save**. Events on the timeline call `on_anim_event`.
+
+Bones match by humanoid slot. Rotations are the change from each rig's rest pose. Hip travel scales with leg length. A bone with no match stays in the rest pose. **In place** plants the hips. **Root motion** moves the object by the clip.
 
 A rig with more than 768 bones still skins. The viewport draws the first 768 joints so the editor does not stall, and the bone list asks you to filter.
 

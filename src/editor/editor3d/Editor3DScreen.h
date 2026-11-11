@@ -408,6 +408,9 @@ class Editor3DScreen final : public IScreen {
   struct AnimPreview {
     bool open = false;
     bool playing = true;
+    bool loop = true;
+    bool in_place = false;
+    bool root_motion = false;
     float speed = 1.0f;
     float time = 0.0f;
     std::string clip;
@@ -435,6 +438,10 @@ class Editor3DScreen final : public IScreen {
   // Load a rigged file (glTF, FBX, DAE, .blend) and retarget its clips onto
   // the selected character. They stay in the timeline until Save.
   bool timeline_apply_file(const std::string& path, std::string* error = nullptr);
+  // Drop an animation asset onto a character: retarget, save, and preview.
+  bool apply_animation_asset(std::uint64_t entity, const std::string& rel, std::string* error = nullptr);
+  // True when the drop replaced the live entity (the caller should re-copy it).
+  bool draw_animation_slot(scene3d::Entity3D& e, bool* touched, const char** commit);
   const render3d::Clip* authored_clip(const std::string& name) const;
   const std::vector<render3d::Clip>& timeline_clips() const { return timeline_.clips; }
   // The selected entity posed at the preview time (sets skin_palette);
@@ -648,6 +655,7 @@ class Editor3DScreen final : public IScreen {
   std::vector<std::string> sounds_;  // project sounds (Audio Source picker)
   bool show_mixer_ = false;
   AnimPreview anim_preview_;
+  std::uint64_t last_anim_target_ = 0;
   struct AnimTimeline {
     bool open = false;
     bool loaded = false;

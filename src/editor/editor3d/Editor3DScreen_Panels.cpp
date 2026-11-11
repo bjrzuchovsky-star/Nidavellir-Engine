@@ -169,6 +169,18 @@ void Editor3DScreen::draw_inspector() {
     return open;
   };
 
+  {
+    bool anim_touch = false;
+    const char* anim_commit = nullptr;
+    if (draw_animation_slot(e, &anim_touch, &anim_commit)) {
+      if (const scene3d::Entity3D* again = find(e.id)) e = *again;
+    }
+    if (anim_touch) {
+      t.activated = true;
+      t.commit = anim_commit ? anim_commit : "Animation";
+    }
+  }
+
   if (component("Mesh", e.mesh.has_value(), [&] { e.mesh = scene3d::MeshRef{}; },
                 [&] { e.mesh.reset(); })) {
     std::string src = e.mesh->source;
