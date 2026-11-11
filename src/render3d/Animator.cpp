@@ -412,7 +412,7 @@ void AnimatorRuntime::advance(int layer, Playing* p, float dt, bool fire) {
   p->phase += dt * speed / d;
   const bool loop = looping(layer, *p);
   if (!loop) p->phase = std::min(p->phase, 1.0f);
-  if (!fire || cfg_.events.empty() || p->phase <= old) return;
+  if (!fire || p->phase <= old) return;
   // Events of the dominant clip.
   std::vector<std::pair<int, float>> w;
   weights_of(layer, *p, &w);
@@ -421,20 +421,25 @@ void AnimatorRuntime::advance(int layer, Playing* p, float dt, bool fire) {
                                      [](const auto& a, const auto& b) { return a.second < b.second; });
   const Clip& clip = model_->clips[static_cast<std::size_t>(dom.first)];
   const float cd = std::max(clip.duration, 1e-3f);
-  for (const auto& e : cfg_.events) {
-    if (e.clip != clip.name) continue;
-    const float at = std::clamp(e.time / cd, 0.0f, 1.0f);
+  auto fire_one = [&](const std::string& name, float time) {
+    if (name.empty() || fired_.size() >= 64) return;
+    const float at = std::clamp(time / cd, 0.0f, 1.0f);
     if (loop) {
       for (float k = std::floor(old); k <= std::floor(p->phase); k += 1.0f) {
         const float x = k + at;
-        if (x > old && x <= p->phase && fired_.size() < 64) fired_.push_back({e.name, clip.name, e.time});
+        if (x > old && x <= p->phase) fired_.push_back({name, clip.name, time});
       }
-    } else if (at > old && at <= p->phase && fired_.size() < 64) {
-      fired_.push_back({e.name, clip.name, e.time});
-    } else if (old == 0.0f && at == 0.0f && fired_.size() < 64) {
-      fired_.push_back({e.name, clip.name, e.time});
+    } else if (at > old && at <= p->phase) {
+      fired_.push_back({name, clip.name, time});
+    } else if (old == 0.0f && at == 0.0f) {
+      fired_.push_back({name, clip.name, time});
     }
+  };
+  for (const auto& e : cfg_.events) {
+    if (e.clip == clip.name) fire_one(e.name, e.time);
   }
+  // Events authored on the clip itself (the timeline, or a retargeted file).
+  for (const ClipEvent& e : clip.events) fire_one(e.name, e.time);
 }
 
 void AnimatorRuntime::go(int layer, const Playing& to, float fade) {

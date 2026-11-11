@@ -223,6 +223,17 @@ bool clips_from_json(const std::string& text, const Skeleton& skel, std::vector<
         if (!ch.times.empty()) clip.channels.push_back(std::move(ch));
       }
     }
+    const json::Value& events = jc["events"];
+    if (events.is_array()) {
+      for (std::size_t e = 0; e < events.size(); ++e) {
+        const json::Value& ev = events[e];
+        if (!ev.is_object()) continue;
+        ClipEvent ce;
+        ce.time = ev["t"].as_float();
+        ce.name = ev.str("name");
+        if (!ce.name.empty() && std::isfinite(ce.time)) clip.events.push_back(std::move(ce));
+      }
+    }
     clip_duration(&clip);
     out->push_back(std::move(clip));
   }
@@ -264,6 +275,16 @@ std::string clips_to_json(const Skeleton& skel, const std::vector<Clip>& clips) 
       channels.push(std::move(jch));
     }
     jc.set("channels", std::move(channels));
+    if (!clip.events.empty()) {
+      json::Value events = json::Value::array();
+      for (const ClipEvent& ev : clip.events) {
+        json::Value one = json::Value::object();
+        one.set("t", json::Value::number(ev.time));
+        one.set("name", json::Value::string(ev.name));
+        events.push(std::move(one));
+      }
+      jc.set("events", std::move(events));
+    }
     arr.push(std::move(jc));
   }
   root.set("clips", std::move(arr));

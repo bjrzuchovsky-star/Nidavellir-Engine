@@ -430,6 +430,11 @@ class Editor3DScreen final : public IScreen {
   bool timeline_set_interp(const std::string& clip, int joint, render3d::ChannelPath path,
                            render3d::Interp interp);
   bool timeline_save(std::string* error = nullptr);
+  bool timeline_add_event(const std::string& clip, float time, const std::string& name);
+  bool timeline_erase_event(const std::string& clip, int index);
+  // Load a rigged file (glTF, FBX, DAE, .blend) and retarget its clips onto
+  // the selected character. They stay in the timeline until Save.
+  bool timeline_apply_file(const std::string& path, std::string* error = nullptr);
   const render3d::Clip* authored_clip(const std::string& name) const;
   const std::vector<render3d::Clip>& timeline_clips() const { return timeline_.clips; }
   // The selected entity posed at the preview time (sets skin_palette);
@@ -651,6 +656,10 @@ class Editor3DScreen final : public IScreen {
     std::vector<render3d::Clip> clips;
     int path = 0;       // ChannelPath
     int drag_key = -1;  // index being dragged on the dopesheet (-1 = none)
+    int drag_event = -1;
+    std::string apply_path;
+    std::string bone_filter;
+    char event_name[48] = "footstep";
   };
   AnimTimeline timeline_;
   render3d::Clip* timeline_find(const std::string& name);

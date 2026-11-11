@@ -4,13 +4,18 @@
 
 #include "editor/editor3d/Editor3DScreen.h"
 
+#include "editor/assets/AssetLibrary.h"
 #include "editor/ui/Theme.h"
 #include "render3d/ClipFile.h"
+#include "render3d/ModelImport.h"
+#include "render3d/Retarget.h"
 
 #include <imgui.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <string>
 
@@ -165,6 +170,72 @@ bool Editor3DScreen::timeline_set_interp(const std::string& clip, int joint, ren
   return true;
 }
 
+bool Editor3DScreen::timeline_add_event(const std::string& clip, float time, const std::string& name) {
+  render3d::Clip* c = timeline_find(clip);
+  if (!c || name.empty() || !std::isfinite(time)) return false;
+  c->events.push_back({time, name});
+  std::stable_sort(c->events.begin(), c->events.end(),
+                   [](const render3d::ClipEvent& a, const render3d::ClipEvent& b) { return a.time < b.time; });
+  timeline_.dirty = true;
+  return true;
+}
+
+bool Editor3DScreen::timeline_erase_event(const std::string& clip, int index) {
+  render3d::Clip* c = timeline_find(clip);
+  if (!c || index < 0 || static_cast<std::size_t>(index) >= c->events.size()) return false;
+  c->events.erase(c->events.begin() + index);
+  timeline_.dirty = true;
+  timeline_.drag_event = -1;
+  return true;
+}
+
+bool Editor3DScreen::timeline_apply_file(const std::string& path, std::string* error) {
+  const scene3d::Entity3D* e = find(primary());
+  if (!e || !timeline_bind(e->id)) {
+    if (error) *error = "select a skinned character first";
+    return false;
+  }
+  const render3d::Model* target = entity_model(*e);
+  if (!target || !target->skinned()) {
+    if (error) *error = "the selection has no skeleton";
+    return false;
+  }
+  fs::path file = fs::u8path(path);
+  std::error_code ec;
+  if (!fs::exists(file, ec)) file = fs::path(project_.path) / fs::u8path(path);
+  if (!fs::exists(file, ec)) {
+    if (error) *error = "no such file: " + path;
+    return false;
+  }
+  render3d::Model source;
+  std::string err;
+  if (!render3d::load_model(file.string(), &source, &err) || !source.skinned() || source.clips.empty()) {
+    if (error) *error = err.empty() ? "that file has no skinned clips" : err;
+    note(error ? *error : "that file has no skinned clips", runtime::LogLevel::Warn);
+    return false;
+  }
+  render3d::RetargetReport report;
+  const std::vector<render3d::Clip> mapped =
+      render3d::retarget_clips(source.skeleton, source.clips, target->skeleton, &report);
+  if (mapped.empty()) {
+    if (error) *error = "no bones in common. " + report.detail;
+    note(error ? *error : report.detail, runtime::LogLevel::Warn);
+    return false;
+  }
+  for (const render3d::Clip& clip : mapped) {
+    if (render3d::Clip* have = timeline_find(clip.name)) *have = clip;
+    else timeline_.clips.push_back(clip);
+  }
+  timeline_.dirty = true;
+  anim_preview_.clip = mapped.front().name;
+  anim_preview_.time = 0.0f;
+  anim_preview_.playing = false;
+  anim_preview_.open = true;
+  timeline_.apply_path = path;
+  note("Retargeted " + report.detail);
+  return true;
+}
+
 bool Editor3DScreen::timeline_save(std::string* error) {
   const scene3d::Entity3D* e = find(primary());
   if (!e || !timeline_.loaded) {
@@ -247,14 +318,34 @@ void Editor3DScreen::draw_anim_timeline() {
                          ? model->skeleton.joints[static_cast<std::size_t>(bone_joint_)].name.c_str()
                          : model->skeleton.joints.front().name.c_str();
   if (bone_joint_ < 0 && !model->skeleton.joints.empty()) bone_joint_ = 0;
+  if (model->skeleton.joints.size() > 80) {
+    char filter[64];
+    std::snprintf(filter, sizeof(filter), "%s", timeline_.bone_filter.c_str());
+    if (ImGui::InputTextWithHint("Bones", "filter a large rig", filter, sizeof(filter))) timeline_.bone_filter = filter;
+  }
   if (ImGui::BeginCombo("Bone", bone)) {
+    int shown = 0;
+    const bool filter = model->skeleton.joints.size() > 80;
+    std::string want = timeline_.bone_filter;
+    for (char& ch : want) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
     for (std::size_t i = 0; i < model->skeleton.joints.size(); ++i) {
+      if (filter && static_cast<int>(i) != bone_joint_) {
+        std::string n = model->skeleton.joints[i].name;
+        for (char& ch : n) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        if (want.empty() || n.find(want) == std::string::npos) continue;
+      }
+      if (shown++ > 60 && static_cast<int>(i) != bone_joint_) continue;
       if (ImGui::Selectable(model->skeleton.joints[i].name.c_str(), bone_joint_ == static_cast<int>(i))) {
         bone_joint_ = static_cast<int>(i);
         timeline_.drag_key = -1;
       }
     }
+    if (filter && shown > 60) ImGui::TextDisabled("Keep typing to narrow %zu bones.", model->skeleton.joints.size());
     ImGui::EndCombo();
+  }
+  if (model->skeleton.joints.size() > static_cast<std::size_t>(render3d::kMaxDrawnBones)) {
+    ImGui::TextDisabled("Viewport draws %d of %zu bones so a large rig stays responsive.",
+                        render3d::kMaxDrawnBones, model->skeleton.joints.size());
   }
   ImGui::Combo("Channel", &timeline_.path, "Translation\0Rotation\0Scale\0");
   const auto path = static_cast<render3d::ChannelPath>(timeline_.path);
@@ -331,6 +422,54 @@ void Editor3DScreen::draw_anim_timeline() {
       if (c.joint == joint && c.path == path) sheet = &c;
     }
   }
+  theme::SectionHeader("Apply animation");
+  {
+    char path_buf[260];
+    std::snprintf(path_buf, sizeof(path_buf), "%s", timeline_.apply_path.c_str());
+    if (ImGui::InputText("Clip file", path_buf, sizeof(path_buf))) timeline_.apply_path = path_buf;
+    if (ImGui::BeginCombo("Project file", timeline_.apply_path.empty() ? "(pick)" : timeline_.apply_path.c_str())) {
+      for (const AssetEntry& a : assets_) {
+        if (!a.model || a.rel == timeline_.model_rel) continue;
+        if (ImGui::Selectable(a.rel.c_str(), a.rel == timeline_.apply_path)) timeline_.apply_path = a.rel;
+      }
+      ImGui::EndCombo();
+    }
+    if (ImGui::Button("Retarget onto character")) {
+      std::string why;
+      if (!timeline_apply_file(timeline_.apply_path, &why) && !why.empty()) note(why, runtime::LogLevel::Warn);
+    }
+    if (ImGui::BeginDragDropTarget()) {
+      if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(assets::kDragPayload)) {
+        const std::string rel(static_cast<const char*>(payload->Data), payload->DataSize ? payload->DataSize - 1 : 0);
+        timeline_.apply_path = rel;
+        std::string why;
+        timeline_apply_file(rel, &why);
+      }
+      ImGui::EndDragDropTarget();
+    }
+    ImGui::TextWrapped(
+        "Drop running.fbx here, or pick it above. Mixamo names (mixamorig:Hips, LeftArm) and this character's "
+        "bones (hips, upper_arm.L) are matched, then Save writes the clip beside the model.");
+  }
+  if (edited) {
+    theme::SectionHeader("Events");
+    ImGui::InputText("Event", timeline_.event_name, sizeof(timeline_.event_name));
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Add at playhead")) {
+      timeline_add_event(edited->name, anim_preview_.time, timeline_.event_name);
+    }
+    for (std::size_t i = 0; i < edited->events.size(); ++i) {
+      ImGui::PushID(static_cast<int>(1000 + i));
+      ImGui::Text("%.2f s  %s", static_cast<double>(edited->events[i].time), edited->events[i].name.c_str());
+      ImGui::SameLine();
+      if (ImGui::SmallButton("x")) {
+        timeline_erase_event(edited->name, static_cast<int>(i));
+        ImGui::PopID();
+        break;
+      }
+      ImGui::PopID();
+    }
+  }
   ImGui::TextDisabled("%s  %.3f s", path_label(path), static_cast<double>(anim_preview_.time));
   const float width = std::max(40.0f, ImGui::GetContentRegionAvail().x);
   ImGui::InvisibleButton("##dopesheet", ImVec2(width, 36.0f));
@@ -342,28 +481,55 @@ void Editor3DScreen::draw_anim_timeline() {
   const float play_x = x_of(anim_preview_.time);
   dl->AddLine(ImVec2(play_x, lo.y), ImVec2(play_x, hi.y), IM_COL32(232, 196, 122, 255), 1.5f);
   if (sheet) {
-    for (std::size_t i = 0; i < sheet->times.size(); ++i) {
+    const std::size_t nkeys = sheet->times.size();
+    const std::size_t step = nkeys > 2000 ? nkeys / 2000 : 1;
+    for (std::size_t i = 0; i < nkeys; i += step) {
       const float x = x_of(sheet->times[i]);
       const ImVec2 a(x, (lo.y + hi.y) * 0.5f);
       dl->AddQuadFilled(ImVec2(a.x, a.y - 7), ImVec2(a.x + 7, a.y), ImVec2(a.x, a.y + 7), ImVec2(a.x - 7, a.y),
                         IM_COL32(240, 164, 72, 255));
     }
   }
+  if (edited) {
+    for (const render3d::ClipEvent& ev : edited->events) {
+      const float x = x_of(ev.time);
+      dl->AddTriangleFilled(ImVec2(x, lo.y + 2), ImVec2(x + 6, lo.y + 12), ImVec2(x - 6, lo.y + 12),
+                            IM_COL32(120, 210, 255, 255));
+    }
+  }
   if (ImGui::IsItemActive() && span > 0.0f) {
     const float t = std::clamp((ImGui::GetIO().MousePos.x - lo.x) / (hi.x - lo.x), 0.0f, 1.0f) * span;
-    int hit = -1;
-    if (sheet && timeline_.drag_key < 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-      float best = 8.0f;
-      for (std::size_t i = 0; i < sheet->times.size(); ++i) {
-        const float d = std::fabs(x_of(sheet->times[i]) - ImGui::GetIO().MousePos.x);
-        if (d < best) {
-          best = d;
-          hit = static_cast<int>(i);
+    if (timeline_.drag_key < 0 && timeline_.drag_event < 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+      if (edited) {
+        float best = 8.0f;
+        for (std::size_t i = 0; i < edited->events.size(); ++i) {
+          const float d = std::fabs(x_of(edited->events[i].time) - ImGui::GetIO().MousePos.x);
+          if (d < best) {
+            best = d;
+            timeline_.drag_event = static_cast<int>(i);
+          }
         }
       }
-      timeline_.drag_key = hit;
+      if (timeline_.drag_event < 0 && sheet) {
+        float best = 8.0f;
+        int hit = -1;
+        for (std::size_t i = 0; i < sheet->times.size(); ++i) {
+          const float d = std::fabs(x_of(sheet->times[i]) - ImGui::GetIO().MousePos.x);
+          if (d < best) {
+            best = d;
+            hit = static_cast<int>(i);
+          }
+        }
+        timeline_.drag_key = hit;
+      }
     }
-    if (sheet && timeline_.drag_key >= 0) {
+    if (edited && timeline_.drag_event >= 0 &&
+        static_cast<std::size_t>(timeline_.drag_event) < edited->events.size()) {
+      edited->events[static_cast<std::size_t>(timeline_.drag_event)].time = t;
+      timeline_.dirty = true;
+      anim_preview_.time = t;
+      anim_preview_.playing = false;
+    } else if (sheet && timeline_.drag_key >= 0) {
       const int moved = render3d::move_key(sheet, timeline_.drag_key, t);
       if (moved < 0) timeline_.drag_key = -1;
       else {
@@ -378,7 +544,10 @@ void Editor3DScreen::draw_anim_timeline() {
       anim_preview_.playing = false;
     }
   }
-  if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) timeline_.drag_key = -1;
+  if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+    timeline_.drag_key = -1;
+    timeline_.drag_event = -1;
+  }
   ImGui::TextDisabled("Drag a diamond to move it. Click empty space to scrub. Save writes %s",
                       render3d::clip_sidecar_path(timeline_.model_rel).c_str());
 }

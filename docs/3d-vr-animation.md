@@ -116,7 +116,17 @@ anim.param(e, "speed"); anim.state(e, 1); anim.stop(e, 2, 0.3)
 
 **Graph nodes:** `anim.play`, `anim.crossfade`, `anim.set_param`.
 
-**Editor:** the Animator inspector, and **View → Animation Preview**.
+**Editor:** the Animator inspector, **View → Animation Preview** (bones overlay on the posed character; **View → Bones** toggles it), and **View → Animation Timeline**.
+
+**Apply a separate clip (Mixamo `running.fbx`) onto a character:**
+
+1. Select the skinned character in the 3D viewport.
+2. Open **View → Animation Timeline**.
+3. Under **Apply animation**, pick `assets/running.fbx` (or any rigged `.fbx`, `.gltf`, `.glb`, `.dae`, or `.blend`) from the project list, paste a path, or drop the file on the button. **Retarget onto character**.
+4. Bones match by humanoid slot. `mixamorig:Hips`, `LeftArm`, `LeftUpLeg` and the character's `hips`, `upper_arm.L`, `upper_leg.L` are the same slot. Rotations are the change from each rig's rest pose. Hip travel scales with leg length. A bone with no match stays in the rest pose.
+5. Scrub the new clip, add **Events** (they call `on_anim_event`), then **Save**. That writes `<model>.anim3d.json` beside the character. The Animator can use the clip name, and C# / C++ call `PlayAnimation("running")`, `CrossfadeAnimation`, `SetAnimFloat`, `SetAnimTrigger`, `AnimState`.
+
+A rig with more than 768 bones still skins. The viewport draws the first 768 joints so the editor does not stall, and the bone list asks you to filter.
 
 **Sample assets (CC0):**
 

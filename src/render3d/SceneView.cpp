@@ -1,5 +1,6 @@
 #include "render3d/SceneView.h"
 #include "render3d/ClipFile.h"
+#include "render3d/Retarget.h"
 #include "render3d/HullFit.h"
 #include "render3d/ModelImport.h"
 #include "profiler/Profiler.h"
@@ -262,7 +263,11 @@ void SceneView::draw_bones(const scene3d::Entity3D& e, int highlight) {
   const float bone[4] = {0.96f, 0.84f, 0.42f, 1.0f};
   const float hot[4] = {1.0f, 0.42f, 0.16f, 1.0f};
   const float mark[4] = {0.98f, 0.96f, 0.90f, 1.0f};
+  // A Mixamo-sized rig is fine. Past kMaxDrawnBones the rest still skin;
+  // drawing every joint marker would stall the viewport.
+  const std::size_t budget = std::min(at.size(), static_cast<std::size_t>(kMaxDrawnBones));
   for (std::size_t i = 0; i < m->skeleton.joints.size() && i < at.size(); ++i) {
+    if (i >= budget && static_cast<int>(i) != highlight) continue;
     const Vec3 w = world.transform_point(at[i]);
     const bool sel = highlight == static_cast<int>(i);
     const int parent = m->skeleton.joints[i].parent;

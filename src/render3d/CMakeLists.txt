@@ -20,6 +20,7 @@ add_library(ts_render3d
   import/BlenderImport.cpp
   Skeleton.cpp
   ClipFile.cpp
+  Retarget.cpp
   Animator.cpp
   Scene3D.cpp
   Attach3D.cpp
