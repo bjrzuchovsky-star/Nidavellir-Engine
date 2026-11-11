@@ -449,6 +449,7 @@ void Editor3DScreen::draw_anim_preview() {
   for (const render3d::Channel& ch : cur->channels) ++interp[static_cast<int>(ch.interp)];
   ImGui::TextDisabled("%d linear, %d step, %d cubic-spline channels", interp[0], interp[1], interp[2]);
   // Highlight one bone in the viewport overlay (View > Bones).
+  ux::BeginAutoTips("AnimationPreview");
   const char* bone_label = bone_joint_ >= 0 && static_cast<std::size_t>(bone_joint_) < m->skeleton.joints.size()
                                ? m->skeleton.joints[static_cast<std::size_t>(bone_joint_)].name.c_str()
                                : "(all)";
@@ -462,6 +463,7 @@ void Editor3DScreen::draw_anim_preview() {
     ImGui::EndCombo();
   }
   if (!show_bones_) ImGui::TextDisabled("View > Bones is off, so the skeleton is hidden.");
+  ux::EndAutoTips();
 }
 
 }  // namespace editor

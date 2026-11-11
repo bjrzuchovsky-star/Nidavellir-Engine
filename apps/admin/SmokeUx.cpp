@@ -253,11 +253,14 @@ int check_registry(Ctx& ctx, ux::EditorUx& u, const char* tag,
 
   // Running a menu toggle through the registry flips the real state.
   const bool before = toggle_state();
-  if (!u.run_now(run_toggle)) return fail(t + ": run " + run_toggle);
+  // harvest() opens a window, so the registry run has to be inside a frame.
+  bool ran = false;
+  ctx.frames(1, [&] { ran = u.run_now(run_toggle); });
+  if (!ran) return fail(t + ": run " + run_toggle);
   ctx.frames(1, [&] { u.frame(); });
   if (toggle_state() == before) return fail(t + ": " + run_toggle + " did not toggle");
   if (u.actions().run_count(run_toggle) < 1) return fail(t + ": run count");
-  u.run_now(run_toggle);
+  ctx.frames(1, [&] { u.run_now(run_toggle); });
   if (toggle_state() != before) return fail(t + ": toggle back");
 
   // Disabled items refuse to run.
@@ -341,7 +344,9 @@ int check_empty(Ctx& ctx, ux::EditorUx& u, const char* tag, const std::function<
   for (const auto& [panel, ids] : want) {
     quiet();  // the Telegraph is only empty before anything has been logged
     ux::reset_empty_states_seen();
-    if (!u.run_now("Panel/" + panel)) return fail(std::string(tag) + ": no palette entry Panel/" + panel);
+    bool opened = false;
+    ctx.frames(1, [&] { opened = u.run_now("Panel/" + panel); });
+    if (!opened) return fail(std::string(tag) + ": no palette entry Panel/" + panel);
     bool ok = false;
     for (int f = 0; f < 120 && !ok; ++f) {  // the Vault opens its library on a worker
       ctx.frames(1, [&] { tick(); });
@@ -578,10 +583,15 @@ int check_tour_and_layouts(Ctx& ctx, Screen& s, bool three_d, int* steps_out) {
   tick(2);
   if (w.active() || ImGui::FindWindowByName("###ts_walkthrough")->WasActive) return fail(t + ": Skip left the card up");
   if (done(ux::prefs()) || done(prefs_on_disk())) return fail(t + ": Skip without 'Don't show again' still marked the tour seen");
-  // Help > Walkthrough runs it again.
-  u.harvest();
-  const std::string help = find_action(u.actions().harvested("menu"), "/Walkthrough");
-  if (help.empty() || !u.run_now(help)) return fail(t + ": no Help > Walkthrough");
+  // Help > Walkthrough runs it again. harvest() opens a window, so it runs inside a frame.
+  std::string help;
+  bool restarted = false;
+  ctx.frames(1, [&] {
+    u.harvest();
+    help = find_action(u.actions().harvested("menu"), "/Walkthrough");
+    if (!help.empty()) restarted = u.run_now(help);
+  });
+  if (help.empty() || !restarted) return fail(t + ": no Help > Walkthrough");
   if (!w.active() || w.step() != 0) return fail(t + ": Help > Walkthrough didn't restart the tour");
   // Skip with "Don't show again" ticked (the default): saved to settings.json.
   if (!w.dont_show_again) return fail(t + ": 'Don't show again' should start ticked");
@@ -589,14 +599,14 @@ int check_tour_and_layouts(Ctx& ctx, Screen& s, bool three_d, int* steps_out) {
   if (!done(prefs_on_disk())) return fail(t + ": 'Don't show again' didn't reach settings.json");
   // Finishing also counts; run it from Help and Next all the way.
   (three_d ? ux::prefs().walkthrough_3d_done : ux::prefs().walkthrough_2d_done) = false;
-  u.run_now(help);
+  ctx.frames(1, [&] { u.run_now(help); });
   for (int i = 0; i < 20 && w.active(); ++i) w.next();
   if (w.active() || !done(prefs_on_disk())) return fail(t + ": Finish didn't mark the tour seen");
   *steps_out = w.step_count();
 
   // ---- layouts ----
   const char* panel = three_d ? "Inspector###Inspector3D" : "Inspector";
-  u.run_now("Panel/Inspector");
+  ctx.frames(1, [&] { u.run_now("Panel/Inspector"); });
   tick(4);
   ImGuiWindow* insp = ImGui::FindWindowByName(panel);
   if (!insp || insp->DockId == 0) return fail(t + ": Inspector isn't docked by default");
@@ -609,7 +619,7 @@ int check_tour_and_layouts(Ctx& ctx, Screen& s, bool three_d, int* steps_out) {
   tick(3);
   if (insp->DockId != 0) return fail(t + ": couldn't float the Inspector for the layout test");
   // Save through the menu + popup path (Window > Layouts > Save current...).
-  u.harvest();
+  ctx.frames(1, [&] { u.harvest(); });
   const std::vector<ux::Action> menu = u.actions().harvested("menu");
   const std::string save_id = find_action(menu, "Layouts/Save current...");
   const std::string reset_id = find_action(menu, "Layouts/Reset layout");
@@ -626,9 +636,14 @@ int check_tour_and_layouts(Ctx& ctx, Screen& s, bool three_d, int* steps_out) {
     if (ss.str().find("[Docking]") == std::string::npos) return fail(t + ": saved layout has no docking section");
   }
   // Load the docked one from the menu: applied at the start of the next frame.
-  u.harvest();
-  const std::string load_a = find_action(u.actions().harvested("menu"), "Layouts/" + a);
-  if (load_a.empty() || !u.run_now(load_a)) return fail(t + ": saved layout not in Window > Layouts");
+  std::string load_a;
+  bool loaded_menu = false;
+  ctx.frames(1, [&] {
+    u.harvest();
+    load_a = find_action(u.actions().harvested("menu"), "Layouts/" + a);
+    if (!load_a.empty()) loaded_menu = u.run_now(load_a);
+  });
+  if (load_a.empty() || !loaded_menu) return fail(t + ": saved layout not in Window > Layouts");
   if (!ux::layout_pending()) return fail(t + ": layout load not queued");
   tick(3);
   insp = ImGui::FindWindowByName(panel);
@@ -637,14 +652,18 @@ int check_tour_and_layouts(Ctx& ctx, Screen& s, bool three_d, int* steps_out) {
   tick(3);
   insp = ImGui::FindWindowByName(panel);
   if (!insp || insp->DockId != 0) return fail(t + ": loading the floating layout didn't float the Inspector");
-  if (!u.run_now(reset_id)) return fail(t + ": Reset layout");
+  bool reset_ok = false;
+  ctx.frames(1, [&] { reset_ok = u.run_now(reset_id); });
+  if (!reset_ok) return fail(t + ": Reset layout");
   tick(3);
   insp = ImGui::FindWindowByName(panel);
   if (!insp || insp->DockId == 0) return fail(t + ": Reset layout left the Inspector floating");
   (void)docked;
   // The name popup, with a path-ish name: cleaned, stays in layouts/.
   if (ux::clean_layout_name("../../evil\\name?") != "evilname") return fail("layout names aren't cleaned");
-  if (!u.run_now(save_id)) return fail(t + ": Save current...");
+  bool save_ok = false;
+  ctx.frames(1, [&] { save_ok = u.run_now(save_id); });
+  if (!save_ok) return fail(t + ": Save current...");
   tick(2);
   if (!ImGui::FindWindowByName("Save layout###ts_save_layout")) return fail(t + ": Save current... didn't ask for a name");
   ctx.frames(1, [&] {

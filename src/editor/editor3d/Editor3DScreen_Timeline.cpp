@@ -6,6 +6,7 @@
 
 #include "editor/assets/AssetLibrary.h"
 #include "editor/ui/Theme.h"
+#include "editor/ux/Tooltip.h"
 #include "render3d/ClipFile.h"
 #include "render3d/ModelImport.h"
 #include "render3d/Retarget.h"
@@ -272,6 +273,7 @@ void Editor3DScreen::draw_anim_timeline() {
   }
   const render3d::Model* model = entity_model(*e);
   if (!model) return;
+  ux::BeginAutoTips("AnimationTimeline");
   ImGui::Text("%s", timeline_.model_rel.c_str());
   if (timeline_.dirty) {
     ImGui::SameLine();
@@ -550,6 +552,7 @@ void Editor3DScreen::draw_anim_timeline() {
   }
   ImGui::TextDisabled("Drag a diamond to move it. Click empty space to scrub. Save writes %s",
                       render3d::clip_sidecar_path(timeline_.model_rel).c_str());
+  ux::EndAutoTips();
 }
 
 }  // namespace editor
