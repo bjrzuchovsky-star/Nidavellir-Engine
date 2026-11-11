@@ -13,6 +13,7 @@
 
 #include "editor/assets/AssetImport.h"
 #include "editor/ui/Theme.h"
+#include "render3d/ImportLimits.h"
 #include "render3d/ModelImport.h"
 
 #include <imgui.h>
@@ -73,6 +74,7 @@ const char* const kPayloads[] = {kAssetAnyPayload, "TS_ASSET_IMAGE", "TS_ASSET3D
 void AssetBrowser::open(const std::string& project_dir, AssetBrowserHost host) {
   host_ = std::move(host);
   db_.set_importer(assetdb::import_asset);
+  db_.set_defer_import_bytes(render3d::kDeferImportBytes);
   db_.open(project_dir);  // moves legacy sidecar .meta files into .tombstone/meta
   import_settings_ = importsort::load_settings(project_dir);
   thumbs_.clear();
@@ -161,7 +163,77 @@ importsort::Result AssetBrowser::import_files(const std::vector<std::string>& al
 
 void AssetBrowser::take_os_drop(const std::string& folder) {
   const std::vector<std::string> paths = importsort::take_os_drop();
-  if (!paths.empty()) import_files(paths, folder);
+  if (!paths.empty()) queue_import(paths, folder);
+}
+
+void AssetBrowser::queue_import(const std::vector<std::string>& sources, const std::string& dest_folder) {
+  if (sources.empty()) return;
+  if (import_job_.state().running) {
+    if (host_.note) host_.note("An import is already running. Cancel it before starting another.");
+    return;
+  }
+  ImportJob::Request req;
+  req.project_dir = db_.project_dir();
+  req.sources = sources;
+  req.dest_folder = dest_folder;
+  req.settings = import_settings_;
+  req.split = split_on_import_;
+  req.split_recenter = split_recenter_;
+  req.split_fit = split_fit_parts_;
+  import_job_.start(std::move(req));
+  if (host_.note) host_.note("Importing in the background. You can keep working, or press Cancel.");
+}
+
+void AssetBrowser::kick_pending() {
+  if (import_job_.state().running) return;
+  std::vector<std::string> rels;
+  for (const AssetDb::Entry& e : db_.entries()) {
+    if (e.import_pending) rels.push_back(e.rel);
+  }
+  if (rels.empty()) return;
+  ImportJob::Request req;
+  req.project_dir = db_.project_dir();
+  req.reimport_rels = std::move(rels);
+  import_job_.start(std::move(req));
+}
+
+void AssetBrowser::pump_import() {
+  ImportJob::State done;
+  if (!import_job_.take(&done)) return;
+  rescan();
+  if (done.cancelled) {
+    if (host_.note) host_.note("Import cancelled.");
+    return;
+  }
+  if (!done.ok) {
+    const std::string why = done.error.empty() ? "Import failed." : done.error;
+    if (host_.note) host_.note(why);
+    ux::show_error(ux::explain(why, ux::ErrorKind::ImportFailed, "Importing a model"));
+    return;
+  }
+  if (done.split) {
+    for (const std::string& rel : done.copied.mains) {
+      const AssetDb::Entry* e = db_.by_path(rel);
+      if (!e || e->meta.kind != assetdb::Kind::Model) continue;
+      if (host_.split_model) host_.split_model(rel, done.split_recenter, done.split_fit);
+      else split_here(rel, done.split_recenter, done.split_fit);
+    }
+  }
+  if (host_.note) {
+    if (!done.copied.mains.empty()) {
+      host_.note("Imported " + std::to_string(done.copied.mains.size()) + " asset(s).");
+    } else if (!done.copied.files.empty()) {
+      host_.note("Imported " + std::to_string(done.copied.files.size()) + " file(s).");
+    } else {
+      host_.note("Import finished.");
+    }
+    for (const std::string& n : done.copied.notes) host_.note("Import: " + n);
+  }
+  if (!done.copied.mains.empty()) {
+    selected_ = done.copied.mains.front();
+    const auto slash = selected_.find_last_of('/');
+    if (!folder_.empty() && slash != std::string::npos) folder_ = selected_.substr(0, slash);
+  }
 }
 
 void AssetBrowser::draw_import_popup() {
@@ -196,11 +268,12 @@ void AssetBrowser::draw_import_popup() {
   }
   if (import_picker_.draw(import_pick_folder_ ? "Import folder##assets" : "Import file##assets")) {
     const std::string picked = import_picker_.take_result();
-    if (!picked.empty()) import_files({picked}, folder_);
+    if (!picked.empty()) queue_import({picked}, folder_);
   }
 }
 
 AssetDb::ScanReport AssetBrowser::rescan() {
+  if (import_job_.state().running) return {};
   // Moves outside the editor rewrite files on disk: save the open scene
   // first only when needed (we learn that from the scan itself, which does
   // not touch references).
@@ -231,10 +304,13 @@ AssetDb::ScanReport AssetBrowser::rescan() {
     host_.note("Reimported " + std::to_string(rep.changed.size()) + " changed asset(s)");
   }
   if (!changed.empty() && host_.on_assets_changed) host_.on_assets_changed(changed);
+  kick_pending();
   return rep;
 }
 
 void AssetBrowser::poll(double now, double interval) {
+  pump_import();
+  if (import_job_.state().running) return;
   if (now - last_poll_ < interval) return;
   last_poll_ = now;
   rescan();
@@ -294,6 +370,17 @@ void AssetBrowser::accept_vault_drop() {
 }
 
 void AssetBrowser::reimport(const std::string& rel) {
+  const AssetDb::Entry* e = db_.by_path(rel);
+  if (e && e->meta.kind == assetdb::Kind::Model && e->size >= render3d::kDeferImportBytes) {
+    if (import_job_.state().running) {
+      if (host_.note) host_.note("An import is already running.");
+      return;
+    }
+    db_.mark_import_pending(rel);
+    kick_pending();
+    if (host_.note) host_.note("Reimporting " + rel + " in the background.");
+    return;
+  }
   db_.reimport(rel);
   thumbs_.invalidate(db_.abs(rel));
   if (host_.on_assets_changed) host_.on_assets_changed({rel});
@@ -347,7 +434,15 @@ void AssetBrowser::draw_split_popup() {
 }
 
 void AssetBrowser::draw() {
+  pump_import();
   thumbs_.poll_changes(ImGui::GetTime());
+  const ImportJob::State job = import_job_.state();
+  if (job.running) {
+    ImGui::TextUnformatted(job.phase.empty() ? "Importing..." : job.phase.c_str());
+    theme::BrandProgress(job.percent / 100.0f, ImVec2(std::max(80.0f, ImGui::GetContentRegionAvail().x - 90.0f), 16.0f));
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) import_job_.cancel();
+  }
   // Toolbar.
   ImGui::SetNextItemWidth(180);
   ImGui::InputTextWithHint("##assetsearch", "Search assets...", search_, sizeof(search_));
@@ -598,7 +693,8 @@ bool AssetBrowser::tile(const AssetDb::Entry& e, float size) {
     theme::DrawSizedText(dl, ImVec2((t0.x + t1.x - ts.x) * 0.5f, (t0.y + t1.y - ts.y) * 0.5f), px,
                          kind_color(e.meta.kind), g);
   }
-  if (!e.import_ok) dl->AddText(ImVec2(t0.x + 2, t0.y), ImGui::GetColorU32(theme::Danger()), "!");
+  if (e.import_pending) dl->AddText(ImVec2(t0.x + 2, t0.y), ImGui::GetColorU32(theme::Accent()), "...");
+  else if (!e.import_ok) dl->AddText(ImVec2(t0.x + 2, t0.y), ImGui::GetColorU32(theme::Danger()), "!");
   // Vault origin: a marker for pulled / sent assets, a copper "UPD" when a newer version waits.
   if (const int vb = host_.vault_badge ? host_.vault_badge(e.rel) : 0) {
     const char* mark = vb == 2 ? "UPD" : "V";
@@ -947,6 +1043,15 @@ void AssetBrowser::draw_settings(const AssetDb::Entry& e) {
         if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
         if (ImGui::IsItemHovered()) {
           ux::SetTooltip("Convex pieces cuts a concave mesh into this many hulls, for a dynamic prop.");
+        }
+        int tex = static_cast<int>(s.num("max_texture", render3d::kDefaultMaxTextureEdge));
+        ImGui::SetNextItemWidth(140);
+        if (ImGui::SliderInt("Texture size", &tex, 256, render3d::kHardMaxTextureEdge)) {
+          s.set("max_texture", Value::number(tex));
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+        if (ImGui::IsItemHovered()) {
+          ux::SetTooltip("Longest edge kept for this model's textures. Larger images are scaled down on import.");
         }
         const int part_n = static_cast<int>(e.meta.info.num("parts", 0));
         if (part_n > 1) ImGui::TextDisabled("%d parts — right-click to split them apart", part_n);

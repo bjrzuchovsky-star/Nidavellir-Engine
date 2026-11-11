@@ -25,6 +25,7 @@ add_library(ts_render3d
   CameraMigrate3D.cpp
   Scene3D_Physics.cpp
   SceneView.cpp
+  UploadStage.cpp
   Renderer3D.cpp
   GlApi.cpp
   GlRenderer3D.cpp

@@ -51,6 +51,9 @@ struct ModelImportOptions {
   int skin = 0;                              // Source skin family
   std::map<std::string, int> body_groups;    // Source: group -> option
   std::string blender_path;                  // override for .blend
+  // Longest edge kept for decoded textures (ImportLimits.h). 0 keeps the
+  // original, still refused past kHardMaxTextureEdge.
+  int max_texture = 2048;
   // Source materials relinked by hand: material name (as in the model,
   // lower case) -> .vmt / .vtf / image file (absolute, or relative to the
   // model's folder). Settings key "material_overrides".
@@ -131,6 +134,23 @@ void limit_skin_joints(Model* m);
 void hitbox_matrices(const Model& m, const std::vector<Mat4>* palette, std::vector<Mat4>* out);
 // 8x8 magenta / black checker shown where a texture is missing.
 std::shared_ptr<const Image> missing_texture_image();
+
+// Thread-wide progress / cancel for the import running on this thread
+// (the editor's background job, or a smoke). Null clears it. The pointer
+// is not owned and must outlive the import.
+struct ImportMonitor {
+  bool (*cancelled)(void* user) = nullptr;
+  void (*progress)(void* user, int percent, const char* phase) = nullptr;
+  void* user = nullptr;
+};
+void set_import_monitor(const ImportMonitor* monitor);
+bool import_was_cancelled();
+void import_report(int percent, const char* phase);
+// Longest texture edge for the import on this thread (0 = not clamping).
+int active_import_texture_edge();
+// One-line note merged into the import warning (deduped).
+void import_note(const std::string& text);
+std::string import_take_notes();
 
 // One-line rights note shown by the import UI.
 inline constexpr const char* kModelRightsNote =

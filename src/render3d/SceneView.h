@@ -14,9 +14,12 @@
 #include "render3d/Scene3D.h"
 #include "terrain/TerrainView.h"
 
+#include <atomic>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace ts {
@@ -43,6 +46,10 @@ class SceneView {
   void set_project_dir(const std::string& dir);
   const std::string& project_dir() const { return dir_; }
   Renderer3D* renderer() const { return r_; }
+  // Bytes of mesh/texture data one frame may upload. 0 uploads the whole
+  // model in the frame that needs it (shots, small meshes).
+  void set_upload_budget(std::size_t bytes) { upload_budget_ = bytes; }
+  std::size_t upload_budget() const { return upload_budget_; }
 
   // Drop every cached GPU / CPU resource (files changed on disk).
   void clear();
@@ -89,13 +96,30 @@ class SceneView {
                   const std::vector<scene3d::Entity3D>& entities);
 
  private:
+  struct PendingModel {
+    std::atomic<bool> cancel{false};
+    std::atomic<bool> done{false};
+    std::mutex mu;
+    std::unique_ptr<Model> model;
+    std::string error;
+  };
+  struct GpuPiece {
+    MeshHandle mesh;
+    int prim = 0;
+  };
   struct ModelEntry {
     bool tried = false;
+    bool loading = false;
     std::unique_ptr<Model> model;
-    std::vector<MeshHandle> meshes;      // per primitive
+    std::shared_ptr<PendingModel> pending;
+    std::thread loader;
+    std::vector<GpuPiece> pieces;
     std::vector<MaterialHandle> materials;  // per model material (+1 default)
     std::vector<Mat4> rest_palette;         // skinned models: the rest pose
     bool uploaded = false;
+    std::size_t prim_cursor = 0;
+    std::size_t index_cursor = 0;
+    std::size_t mat_cursor = 0;
   };
   struct MaterialEntry {
     MaterialHandle handle;
@@ -103,6 +127,7 @@ class SceneView {
   };
 
   ModelEntry& entry(const std::string& source);
+  void stop_load(ModelEntry& m);
   void upload(ModelEntry& m);
   MaterialHandle material_for(const scene3d::Material3D& m);
   std::shared_ptr<const Image> image(const std::string& rel);
@@ -120,6 +145,8 @@ class SceneView {
   std::unique_ptr<terrain::TerrainView> terrain_;
   float time_ = 0.0f;
   bool fixed_time_ = false;
+  std::size_t upload_budget_ = 0;
+  std::size_t upload_used_ = 0;
 };
 
 }  // namespace render3d

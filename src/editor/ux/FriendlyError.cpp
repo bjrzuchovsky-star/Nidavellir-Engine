@@ -175,14 +175,31 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
       f.fix = "Re-import the model from the Asset Browser, or keep the .gltf, .bin and textures together in one "
               "folder and import again.";
       break;
-    case ErrorKind::ImportFailed:
+    case ErrorKind::ImportFailed: {
+      const std::string l = lower(raw);
       f.title = "Import didn't work";
       f.what = "The file" + s + " couldn't be brought into the realm.";
-      f.why = "The file may be damaged, still being written by another program, or in a format Nidavellir doesn't "
-              "import.";
-      f.fix = "Check the file opens in the program that made it, save it again (PNG for images, glTF/GLB or OBJ "
-              "for models), then use Import file... again.";
+      if (has(l, {"out of memory"})) {
+        f.why = "The model or its textures needed more memory than this PC had free. The editor is still open.";
+        f.fix = "Lower Texture size on the asset (or in the import), close other programs, or decimate the mesh "
+                "in Blender and export glTF.";
+      } else if (has(l, {"timed out", "timeout"})) {
+        f.why = "Blender was still exporting when the time limit ran out, so it was stopped. The editor is still open.";
+        f.fix = "Export glTF from Blender yourself (File > Export > glTF) and import that. A smaller texture size "
+                "in Blender helps a very large file.";
+      } else if (has(l, {"import cancelled", "cancelled"})) {
+        f.title = "Import cancelled";
+        f.what = "The import was cancelled. Nothing else was changed.";
+        f.why = "Cancel stops Blender and the rest of the import so you can keep working.";
+        f.fix = "Import the file again when you want to. Exporting glTF from Blender is the sure path for a huge .blend.";
+      } else {
+        f.why = "The file may be damaged, still being written by another program, or in a format Nidavellir doesn't "
+                "import.";
+        f.fix = "Check the file opens in the program that made it, save it again (PNG for images, glTF/GLB or OBJ "
+                "for models), then use Import file... again.";
+      }
       break;
+    }
     case ErrorKind::ScriptCompile:
       f.title = "A script has a mistake in it";
       f.what = "The script" + s + " couldn't be read, so it won't run until it's fixed.";

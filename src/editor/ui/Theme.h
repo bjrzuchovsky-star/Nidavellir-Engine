@@ -75,7 +75,7 @@ void TitleStrip(const char* title, const char* subtitle);
 // plinth.
 void TombstoneMark(ImDrawList* dl, const ImVec2& top_center, float height,
                    ImU32 stone, ImU32 engrave);
-// Forge mark used on the splash, title strip and About block.
+// Hammer-and-anvil mark used on the splash, title strip and About block.
 void RuneMark(ImDrawList* dl, const ImVec2& top_center, float height, ImU32 steel,
               ImU32 ember);
 

@@ -2,6 +2,7 @@
 // tiny export script writing a .glb into a cache folder (keyed by the
 // file's path, size and time), then the glTF loader reads that. Assimp's
 // own .blend reader is not used (it misses most modern files).
+#include "render3d/ImportLimits.h"
 #include "render3d/ModelImport.h"
 
 #include <algorithm>
@@ -127,13 +128,33 @@ int run_process(const std::string& exe, const std::vector<std::string>& args, in
   if (!CreateProcessW(nullptr, line.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
     return -1;
   }
-  const DWORD w = WaitForSingleObject(pi.hProcess, static_cast<DWORD>(timeout_s) * 1000);
+  // Poll so a cancel (or a clock) can kill Blender instead of freezing the
+  // caller for the whole timeout. -2 means cancelled.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeout_s);
   DWORD code = static_cast<DWORD>(-1);
-  if (w == WAIT_OBJECT_0) GetExitCodeProcess(pi.hProcess, &code);
-  else TerminateProcess(pi.hProcess, 1);
+  int result = -1;
+  for (;;) {
+    if (import_was_cancelled()) {
+      TerminateProcess(pi.hProcess, 1);
+      WaitForSingleObject(pi.hProcess, 2000);
+      result = -2;
+      break;
+    }
+    const DWORD w = WaitForSingleObject(pi.hProcess, 200);
+    if (w == WAIT_OBJECT_0) {
+      GetExitCodeProcess(pi.hProcess, &code);
+      result = static_cast<int>(code);
+      break;
+    }
+    if (std::chrono::steady_clock::now() > deadline) {
+      TerminateProcess(pi.hProcess, 1);
+      result = -1;
+      break;
+    }
+  }
   CloseHandle(pi.hThread);
   CloseHandle(pi.hProcess);
-  return w == WAIT_OBJECT_0 ? static_cast<int>(code) : -1;
+  return result;
 #else
   std::vector<std::string> all = {exe};
   all.insert(all.end(), args.begin(), args.end());
@@ -148,6 +169,11 @@ int run_process(const std::string& exe, const std::vector<std::string>& args, in
     const pid_t r = waitpid(pid, &status, WNOHANG);
     if (r == pid) break;
     if (r < 0) return -1;
+    if (import_was_cancelled()) {
+      kill(pid, SIGKILL);
+      waitpid(pid, &status, 0);
+      return -2;
+    }
     if (std::chrono::steady_clock::now() > end) {
       kill(pid, SIGKILL);
       waitpid(pid, &status, 0);
@@ -487,19 +513,50 @@ bool load_blend_model(const std::string& path, const ModelImportOptions& opt, Mo
   const fs::path glb = cache / (std::string(key) + ".glb");
   if (!is_file(glb)) {
     const fs::path script = cache / "ts_export_gltf.py";
+    const int tex = opt.max_texture > 0 ? opt.max_texture : kHardMaxTextureEdge;
     {
       std::ofstream py(script, std::ios::binary | std::ios::trunc);
-      py << "import bpy, sys\n"
-            "out = sys.argv[sys.argv.index('--') + 1]\n"
-            "bpy.ops.export_scene.gltf(filepath=out, export_format='GLB', export_animations=True,"
-            " export_apply=True, export_yup=True)\n";
+      // Shape keys are not imported, and export_apply bakes every modifier
+      // into a second copy of a heavy mesh. Large files skip both so Blender
+      // does not die allocating them. Textures are scaled down before export.
+      py << "import bpy, os, sys\n"
+            "argv = sys.argv[sys.argv.index('--') + 1:]\n"
+            "out, max_size, apply_flag = argv[0], int(argv[1]), argv[2] == '1'\n"
+            "for img in list(bpy.data.images):\n"
+            "    try:\n"
+            "        w, h = img.size\n"
+            "        if w > max_size or h > max_size:\n"
+            "            s = max_size / float(max(w, h))\n"
+            "            img.scale(max(1, int(w * s)), max(1, int(h * s)))\n"
+            "    except Exception:\n"
+            "        pass\n"
+            "kw = dict(filepath=out, export_format='GLB', export_animations=True, export_yup=True, export_apply=apply_flag)\n"
+            "try:\n"
+            "    bpy.ops.export_scene.gltf(export_morph=False, **kw)\n"
+            "except TypeError:\n"
+            "    bpy.ops.export_scene.gltf(**kw)\n";
     }
-    const int rc = run_process(blender, {"-b", u8(src), "--python", u8(script), "--", u8(glb)}, 300);
-    if (rc != 0 || !is_file(glb)) {
-      if (error) *error = u8(fs::u8path(path).filename()) + ": Blender (" + blender + ") could not export it to glTF (exit " + std::to_string(rc) + ")";
+    import_report(12, "Exporting with Blender");
+    const bool apply = size < 32ull * 1024ull * 1024ull;
+    const int rc = run_process(blender,
+                               {"-b", u8(src), "--python", u8(script), "--", u8(glb), std::to_string(tex),
+                                apply ? "1" : "0"},
+                               300);
+    if (rc == -2 || import_was_cancelled()) {
+      if (error) *error = u8(fs::u8path(path).filename()) + ": Import cancelled.";
       fs::remove(glb, ec);
       return false;
     }
+    if (rc != 0 || !is_file(glb)) {
+      if (error) {
+        *error = u8(fs::u8path(path).filename()) + ": Blender (" + blender + ") " +
+                 (rc == -1 ? "timed out after 300 s and was stopped" : "could not export it to glTF (exit " + std::to_string(rc) + ")") +
+                 ". Try exporting glTF from Blender yourself.";
+      }
+      fs::remove(glb, ec);
+      return false;
+    }
+    if (!apply) import_note("Blender export skipped modifier apply and shape keys (file is over 32 MB)");
   }
   if (!load_gltf(glb.string(), out, error)) return false;
   return true;

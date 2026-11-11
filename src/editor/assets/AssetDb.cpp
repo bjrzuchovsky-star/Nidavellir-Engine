@@ -567,7 +567,8 @@ AssetDb::ScanReport AssetDb::scan() {
         dirty = true;
       }
       const std::string h = unchanged_stat ? old->second.meta.hash : asset_hash(a);
-      if (h != m.hash) {
+      const bool hash_changed = h != m.hash;
+      if (hash_changed) {
         m.hash = h;
         reimport = dirty = true;
         if (!m.hash.empty() && old != known.end()) rep.changed.push_back(rel);
@@ -578,6 +579,12 @@ AssetDb::ScanReport AssetDb::scan() {
       }
       if (kind == Kind::Model && m.info.num("importer_version", 1) < kModelImporterVersion) {
         dirty = reimport = true;  // info from an older importer (bounds)
+      }
+      // A worker owns this file. Don't import it again on the UI thread,
+      // and don't treat a missing importer_version as a fresh import.
+      // A changed file falls through and is deferred again below.
+      if (defer_bytes_ > 0 && kind == Kind::Model && m.info.flag("import_pending", false) && !hash_changed) {
+        reimport = false;
       }
     } else {
       const std::string h = asset_hash(a);
@@ -633,13 +640,26 @@ AssetDb::ScanReport AssetDb::scan() {
       dirty = true;
     }
     e.meta = std::move(m);
-    if (reimport) {
+    e.import_pending = e.meta.info.flag("import_pending", false);
+    if (reimport && defer_bytes_ > 0 && kind == Kind::Model && e.size >= defer_bytes_) {
+      e.import_pending = true;
+      e.import_ok = false;
+      e.import_error.clear();
+      e.meta.info.set("import_pending", Value::boolean(true));
+      dirty = true;
+    } else if (reimport) {
       import_entry(&e);
+      e.import_pending = e.meta.info.flag("import_pending", false);
     } else if (old != known.end()) {
-      e.import_ok = old->second.import_ok;
-      e.import_error = old->second.import_error;
+      if (old->second.import_pending && !e.import_pending) {
+        e.import_ok = !e.meta.info.has("error");
+        e.import_error = e.meta.info.str("error");
+      } else {
+        e.import_ok = old->second.import_ok;
+        e.import_error = old->second.import_error;
+      }
     } else {
-      e.import_ok = !e.meta.info.has("error");
+      e.import_ok = !e.import_pending && !e.meta.info.has("error");
       e.import_error = e.meta.info.str("error");
     }
     if (dirty || reimport) {
@@ -725,6 +745,21 @@ bool AssetDb::set_settings(const std::string& rel, const Value& settings, std::s
     return write_meta(meta_abs(e.rel), e.meta, error);
   }
   if (error) *error = "unknown asset " + rel;
+  return false;
+}
+
+bool AssetDb::mark_import_pending(const std::string& rel) {
+  for (Entry& e : entries_) {
+    if (e.rel != clean_rel(rel)) continue;
+    e.import_pending = true;
+    e.import_ok = false;
+    e.import_error.clear();
+    e.meta.info.set("import_pending", Value::boolean(true));
+    std::error_code ec;
+    fs::create_directories(fs::u8path(meta_abs(e.rel)).parent_path(), ec);
+    write_meta(meta_abs(e.rel), e.meta);
+    return true;
+  }
   return false;
 }
 

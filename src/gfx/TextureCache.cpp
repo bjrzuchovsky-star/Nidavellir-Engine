@@ -4,8 +4,11 @@
 
 #include <stb_image.h>
 
+#include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <system_error>
 
 namespace ts {
@@ -16,6 +19,41 @@ namespace fs = std::filesystem;
 
 namespace {
 TextureUploader* g_uploader = nullptr;
+
+// Asset-browser thumbs don't need the full plate. 512 on the longest edge
+// is enough for a tile and keeps glTexImage2D off the multi-megabyte path.
+void downscale_thumb(std::vector<unsigned char>* rgba, int* w, int* h, int max_edge) {
+  if (!rgba || !w || !h || *w <= 0 || *h <= 0) return;
+  if (*w <= max_edge && *h <= max_edge) return;
+  const double s = std::min(static_cast<double>(max_edge) / *w, static_cast<double>(max_edge) / *h);
+  const int nw = std::max(1, static_cast<int>(std::lround(*w * s)));
+  const int nh = std::max(1, static_cast<int>(std::lround(*h * s)));
+  std::vector<unsigned char> dst(static_cast<std::size_t>(nw) * static_cast<std::size_t>(nh) * 4u);
+  const unsigned char* src = rgba->data();
+  for (int y = 0; y < nh; ++y) {
+    const int y0 = y * *h / nh;
+    const int y1 = std::max(y0 + 1, (y + 1) * *h / nh);
+    for (int x = 0; x < nw; ++x) {
+      const int x0 = x * *w / nw;
+      const int x1 = std::max(x0 + 1, (x + 1) * *w / nw);
+      unsigned sum[4] = {};
+      unsigned n = 0;
+      for (int yy = y0; yy < y1; ++yy) {
+        for (int xx = x0; xx < x1; ++xx) {
+          const unsigned char* p = src + (static_cast<std::size_t>(yy) * static_cast<std::size_t>(*w) + xx) * 4u;
+          for (int c = 0; c < 4; ++c) sum[c] += p[c];
+          ++n;
+        }
+      }
+      unsigned char* o = dst.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(nw) + x) * 4u;
+      if (n == 0) n = 1;
+      for (int c = 0; c < 4; ++c) o[c] = static_cast<unsigned char>(sum[c] / n);
+    }
+  }
+  *rgba = std::move(dst);
+  *w = nw;
+  *h = nh;
+}
 }  // namespace
 
 void set_texture_uploader(TextureUploader* uploader) { g_uploader = uploader; }
@@ -45,6 +83,13 @@ bool TextureCache::decode_file(const std::string& path,
     if (error) *error = "empty or oversized file";
     return false;
   }
+  int iw = 0, ih = 0, ic = 0;
+  if (stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()), &iw, &ih, &ic)) {
+    if (iw > 8192 || ih > 8192) {
+      if (error) *error = "image is " + std::to_string(iw) + "x" + std::to_string(ih) + ", over the 8192 limit";
+      return false;
+    }
+  }
   if (g_extra_decoder && g_extra_decoder(bytes.data(), bytes.size(), rgba, width, height)) return true;
   int w = 0;
   int h = 0;
@@ -58,8 +103,14 @@ bool TextureCache::decode_file(const std::string& path,
     }
     return false;
   }
+  if (w <= 0 || h <= 0 || w > 8192 || h > 8192) {
+    stbi_image_free(px);
+    if (error) *error = "image is " + std::to_string(w) + "x" + std::to_string(h) + ", over the 8192 limit";
+    return false;
+  }
   if (rgba) {
-    rgba->assign(px, px + static_cast<std::size_t>(w) * h * 4);
+    const auto n = static_cast<std::uint64_t>(w) * static_cast<std::uint64_t>(h) * 4ull;
+    rgba->assign(px, px + static_cast<std::size_t>(n));
   }
   stbi_image_free(px);
   if (width) *width = w;
@@ -111,9 +162,13 @@ void TextureCache::load_into(const std::string& path, Entry& entry) {
     return;
   }
   entry.info.ok = true;
+  // The tile draws a small square. Upload a preview, not the full 4K plate,
+  // so opening a folder of textures doesn't stall the frame. Width and
+  // height stay the file's, for the tile's aspect.
+  int uw = entry.info.width, uh = entry.info.height;
+  downscale_thumb(&rgba, &uw, &uh, 512);
   if (g_uploader) {
-    entry.info.handle =
-        g_uploader->upload_rgba(rgba.data(), entry.info.width, entry.info.height);
+    entry.info.handle = g_uploader->upload_rgba(rgba.data(), uw, uh);
     entry.owner = entry.info.handle != 0 ? g_uploader : nullptr;
   }
 }

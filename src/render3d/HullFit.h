@@ -43,6 +43,9 @@ std::uint64_t mesh_fingerprint(const Model& m);
 
 // Build (or keep) model.fitted. False only when the model has no triangles.
 bool ensure_fitted(Model* m, const FitParams& params);
+// Same hulls without copying the model (a copy duplicated every vertex and
+// every texture pointer's mesh). Uses model.fitted when it still matches.
+FittedCollision fitted_preview(const Model& m, const FitParams& params);
 // Read info["fitted"] when it still matches this mesh and these limits.
 void apply_fitted_cache(Model* m, const json::Value& info, const FitParams& params);
 json::Value fitted_to_json(const FittedCollision& f);

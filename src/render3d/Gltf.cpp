@@ -3,18 +3,23 @@
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 
+#include "render3d/ImportLimits.h"
 #include "render3d/Json.h"
+#include "render3d/ModelImport.h"
 
 #include "stb_image.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <memory>
+#include <new>
 
 namespace ts {
 namespace tombstone {
@@ -35,18 +40,98 @@ std::size_t Model::triangles() const {
   return n;
 }
 
+bool downscale_image(Image* img, int max_edge) {
+  if (!img || max_edge <= 0 || img->width <= 0 || img->height <= 0) return false;
+  if (img->width <= max_edge && img->height <= max_edge) return true;
+  if (!img->valid()) return false;
+  const double s = std::min(static_cast<double>(max_edge) / img->width,
+                            static_cast<double>(max_edge) / img->height);
+  const int nw = std::max(1, static_cast<int>(std::lround(img->width * s)));
+  const int nh = std::max(1, static_cast<int>(std::lround(img->height * s)));
+  std::vector<unsigned char> dst(static_cast<std::size_t>(nw) * static_cast<std::size_t>(nh) * 4u);
+  const int sw = img->width, sh = img->height;
+  const unsigned char* src = img->rgba.data();
+  for (int y = 0; y < nh; ++y) {
+    const int y0 = y * sh / nh;
+    const int y1 = std::max(y0 + 1, (y + 1) * sh / nh);
+    for (int x = 0; x < nw; ++x) {
+      const int x0 = x * sw / nw;
+      const int x1 = std::max(x0 + 1, (x + 1) * sw / nw);
+      unsigned sum[4] = {};
+      unsigned n = 0;
+      for (int yy = y0; yy < y1; ++yy) {
+        for (int xx = x0; xx < x1; ++xx) {
+          const unsigned char* p = src + (static_cast<std::size_t>(yy) * static_cast<std::size_t>(sw) + xx) * 4u;
+          for (int c = 0; c < 4; ++c) sum[c] += p[c];
+          ++n;
+        }
+      }
+      unsigned char* o = dst.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(nw) + x) * 4u;
+      if (n == 0) n = 1;
+      for (int c = 0; c < 4; ++c) o[c] = static_cast<unsigned char>(sum[c] / n);
+    }
+  }
+  img->rgba = std::move(dst);
+  img->width = nw;
+  img->height = nh;
+  return true;
+}
+
+void clamp_imported_image(Image* img) {
+  const int edge = active_import_texture_edge();
+  if (!img || edge <= 0) return;
+  if (img->width <= edge && img->height <= edge) return;
+  const int ow = img->width, oh = img->height;
+  if (!downscale_image(img, edge)) return;
+  import_note("downscaled textures larger than " + std::to_string(edge) + " (saw " + std::to_string(ow) + "x" +
+              std::to_string(oh) + ")");
+}
+
 bool load_image_memory(const unsigned char* data, std::size_t size, Image* out,
                        std::string* error) {
-  int w = 0, h = 0, comp = 0;
-  unsigned char* px = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &comp, 4);
-  if (!px) {
-    if (error) *error = std::string("image decode failed: ") + stbi_failure_reason();
+  auto fail = [&](const std::string& why) {
+    if (error) *error = why;
     return false;
+  };
+  if (!data || size == 0 || !out) return fail("image decode failed: empty");
+  if (size > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    return fail("image file is larger than 2 GB");
   }
-  out->width = w;
-  out->height = h;
-  out->rgba.assign(px, px + static_cast<std::size_t>(w) * h * 4);
+  int iw = 0, ih = 0, ic = 0;
+  if (stbi_info_from_memory(data, static_cast<int>(size), &iw, &ih, &ic)) {
+    if (iw <= 0 || ih <= 0) return fail("image decode failed: bad dimensions");
+    if (iw > kHardMaxTextureEdge || ih > kHardMaxTextureEdge) {
+      return fail("image is " + std::to_string(iw) + "x" + std::to_string(ih) +
+                  ", over the " + std::to_string(kHardMaxTextureEdge) + " limit");
+    }
+  }
+  int w = 0, h = 0, comp = 0;
+  unsigned char* px = nullptr;
+  try {
+    px = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &comp, 4);
+  } catch (const std::bad_alloc&) {
+    return fail("out of memory decoding image");
+  }
+  if (!px) {
+    const char* why = stbi_failure_reason();
+    return fail(std::string("image decode failed: ") + (why ? why : "unknown"));
+  }
+  if (w <= 0 || h <= 0 || w > kHardMaxTextureEdge || h > kHardMaxTextureEdge) {
+    stbi_image_free(px);
+    return fail("image is " + std::to_string(w) + "x" + std::to_string(h) +
+                ", over the " + std::to_string(kHardMaxTextureEdge) + " limit");
+  }
+  const auto bytes = static_cast<std::uint64_t>(w) * static_cast<std::uint64_t>(h) * 4ull;
+  try {
+    out->width = w;
+    out->height = h;
+    out->rgba.assign(px, px + static_cast<std::size_t>(bytes));
+  } catch (const std::bad_alloc&) {
+    stbi_image_free(px);
+    return fail("out of memory decoding image");
+  }
   stbi_image_free(px);
+  clamp_imported_image(out);
   return true;
 }
 
@@ -195,6 +280,18 @@ MaterialDesc convert_material(const cgltf_material& m, ImageCache& images,
 }  // namespace
 
 bool load_gltf(const std::string& path, Model* out, std::string* error) {
+  {
+    std::error_code ec;
+    const auto sz = fs::file_size(fs::u8path(path), ec);
+    if (!ec && sz > 4ull * 1024ull * 1024ull * 1024ull) {
+      if (error) *error = path + ": file is over 4 GB";
+      return false;
+    }
+  }
+  if (import_was_cancelled()) {
+    if (error) *error = path + ": Import cancelled.";
+    return false;
+  }
   cgltf_options options{};
   cgltf_data* data = nullptr;
   const std::string p8 = path;
@@ -217,6 +314,7 @@ bool load_gltf(const std::string& path, Model* out, std::string* error) {
 
   Model model;
   model.source = path;
+  import_report(18, "Decoding textures");
   ImageCache images(data, fs::path(path).parent_path());
   std::string warn;
   for (cgltf_size i = 0; i < data->materials_count; ++i) {
@@ -348,9 +446,34 @@ bool load_gltf(const std::string& path, Model* out, std::string* error) {
       mp.mesh.name = mesh.name ? mesh.name : "mesh";
       mp.node = node_path;
       const cgltf_size n = pos->count;
-      mp.mesh.vertices.resize(n);
-      if (skin_this) mp.mesh.skin.resize(n);
+      const cgltf_size nidx = prim.indices ? prim.indices->count : n;
+      if (n == 0) continue;
+      if (n > kMaxImportVertices || nidx / 3 > kMaxImportTriangles) {
+        if (error) {
+          *error = path + ": mesh \"" + mp.mesh.name + "\" has " + std::to_string(n) + " vertices and " +
+                   std::to_string(nidx / 3) +
+                   " triangles, over the import limit. Decimate it in Blender and export glTF.";
+        }
+        return false;
+      }
+      if (import_was_cancelled()) {
+        if (error) *error = path + ": Import cancelled.";
+        return false;
+      }
+      try {
+        mp.mesh.vertices.resize(n);
+        if (skin_this) mp.mesh.skin.resize(n);
+        mp.mesh.indices.resize(nidx - nidx % 3);
+      } catch (const std::bad_alloc&) {
+        if (error) *error = path + ": out of memory reading mesh \"" + mp.mesh.name + "\"";
+        return false;
+      }
+      import_report(40, "Reading mesh");
       for (cgltf_size v = 0; v < n; ++v) {
+        if ((v & 0xffffu) == 0 && import_was_cancelled()) {
+          if (error) *error = path + ": Import cancelled.";
+          return false;
+        }
         Vertex3D& vx = mp.mesh.vertices[v];
         float f[4] = {0, 0, 0, 1};
         cgltf_accessor_read_float(pos, v, f, 3);
@@ -388,20 +511,23 @@ bool load_gltf(const std::string& path, Model* out, std::string* error) {
         }
       }
       if (prim.indices) {
-        mp.mesh.indices.resize(prim.indices->count);
-        for (cgltf_size k = 0; k < prim.indices->count; ++k) {
+        for (cgltf_size k = 0; k < mp.mesh.indices.size(); ++k) {
           mp.mesh.indices[k] = static_cast<std::uint32_t>(cgltf_accessor_read_index(prim.indices, k));
         }
       } else {
-        mp.mesh.indices.resize(n);
-        for (cgltf_size k = 0; k < n; ++k) mp.mesh.indices[k] = static_cast<std::uint32_t>(k);
+        for (cgltf_size k = 0; k < mp.mesh.indices.size(); ++k) mp.mesh.indices[k] = static_cast<std::uint32_t>(k);
       }
-      // Flat normals when the file has none.
+      // Flat normals when the file has none. Bad indices are an error, not a crash.
       if (!nrm) {
         for (std::size_t k = 0; k + 2 < mp.mesh.indices.size(); k += 3) {
-          Vertex3D& a = mp.mesh.vertices[mp.mesh.indices[k]];
-          Vertex3D& b = mp.mesh.vertices[mp.mesh.indices[k + 1]];
-          Vertex3D& c = mp.mesh.vertices[mp.mesh.indices[k + 2]];
+          const std::uint32_t ia = mp.mesh.indices[k], ib = mp.mesh.indices[k + 1], ic = mp.mesh.indices[k + 2];
+          if (ia >= mp.mesh.vertices.size() || ib >= mp.mesh.vertices.size() || ic >= mp.mesh.vertices.size()) {
+            if (error) *error = path + ": primitive with bad indices in mesh " + mp.mesh.name;
+            return false;
+          }
+          Vertex3D& a = mp.mesh.vertices[ia];
+          Vertex3D& b = mp.mesh.vertices[ib];
+          Vertex3D& c = mp.mesh.vertices[ic];
           const Vec3 fn = normalize(cross(b.position - a.position, c.position - a.position));
           a.normal += fn;
           b.normal += fn;
@@ -462,6 +588,9 @@ bool load_gltf(const std::string& path, Model* out, std::string* error) {
     return false;
   }
   model.textures = images.decoded();
+  // Drop the file's buffers before the caller holds the model. Images and
+  // vertices are already copies; keeping the GLB alive doubled the peak.
+  guard.reset();
   Aabb b{{1e30f, 1e30f, 1e30f}, {-1e30f, -1e30f, -1e30f}};
   std::vector<Mat4> rest;
   if (model.skinned()) skin_palette(model.skeleton, rest_pose(model.skeleton), &rest);

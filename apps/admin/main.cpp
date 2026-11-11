@@ -32,6 +32,7 @@
 #include "Smoke3D.h"
 #include "SmokeAssets.h"
 #include "SmokeBounds.h"
+#include "SmokeBigModel.h"
 #include "SmokeMeta.h"
 #include "SmokeModels.h"
 #include "SmokeMeshParts.h"
@@ -1349,6 +1350,10 @@ int run_console_smoke() {
   }
   // Split meshes and fitted colliders (see SmokeMeshParts.cpp).
   if (run_mesh_parts_smoke() != 0) {
+    return 1;
+  }
+  // Large procedural model: no crash, bounded memory, UI thread stays free.
+  if (run_big_model_smoke() != 0) {
     return 1;
   }
   // Source engine formats: .gma / .vtf / .vmt, search order, rights (see SmokeGmod.cpp).
@@ -3334,6 +3339,9 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-mesh-parts") == 0) {
       // Split multi-part models and mesh-fitted colliders.
       return run_mesh_parts_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-bigmodel") == 0) {
+      return run_big_model_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-assets") == 0) {
       // Just the asset pipeline checks (database, importers, browser ops).
