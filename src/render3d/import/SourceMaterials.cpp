@@ -335,7 +335,10 @@ std::shared_ptr<const Image> MaterialResolver::image(const std::string& path, st
   if (lower(fs::u8path(path).extension().string()) == ".vtf") {
     std::ifstream in(fs::u8path(path), std::ios::binary);
     std::vector<unsigned char> b((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if (decode_vtf(b.data(), b.size(), im.get(), &err)) img = std::move(im);
+    if (decode_vtf(b.data(), b.size(), im.get(), &err)) {
+      clamp_imported_image(im.get());
+      img = std::move(im);
+    }
   } else if (load_image_file(path, im.get(), &err)) {
     img = std::move(im);
   }

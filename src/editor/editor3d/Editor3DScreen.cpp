@@ -21,6 +21,7 @@
 #include "editor/assets/ModelSplit.h"
 #include "render3d/ColliderFit.h"
 #include "render3d/HullFit.h"
+#include "render3d/ImportLimits.h"
 #include "render3d/ModelImport.h"
 
 #include <GLFW/glfw3.h>
@@ -158,6 +159,7 @@ void Editor3DScreen::ensure_renderer() {
   }
   renderer_->set_offscreen(true);
   view_ = std::make_unique<render3d::SceneView>(renderer_.get());
+  view_->set_upload_budget(render3d::kUploadBudgetBytes);
   view_->set_project_dir(project_.path);
 }
 

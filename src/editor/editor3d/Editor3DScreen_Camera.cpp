@@ -6,6 +6,7 @@
 #include "editor/editor3d/Editor3DScreen.h"
 
 #include "render3d/CameraMigrate3D.h"
+#include "render3d/ImportLimits.h"
 #include "render3d/GlRenderer3D.h"
 #include "scene/CameraMigrate.h"
 
@@ -264,6 +265,7 @@ bool Editor3DScreen::render_camera_preview(int width, int height) {
     }
     preview_renderer_->set_offscreen(true);
     preview_view_ = std::make_unique<render3d::SceneView>(preview_renderer_.get());
+    preview_view_->set_upload_budget(render3d::kUploadBudgetBytes);
     preview_view_->set_project_dir(project_.path);
   }
   const scene3d::PlayCamera3D& c = *e->camera;

@@ -55,7 +55,8 @@ inline constexpr const char* kMetaExt = ".meta";
 // Model importer revision stored in .meta info ("importer_version"); a
 // lower one is reimported on the next scan (2 = bounds fix, 3 = Source
 // materials through the content search folders, 4 = fitted collider cache).
-inline constexpr int kModelImporterVersion = 4;
+// 5: large-file import (texture edge, sampled colliders, cancellable load).
+inline constexpr int kModelImporterVersion = 5;
 
 Kind kind_for(const std::string& path);   // by extension
 const char* kind_name(Kind k);            // "texture" / "model" / ...
@@ -101,6 +102,7 @@ class AssetDb {
     std::filesystem::file_time_type mtime{};
     std::uintmax_t size = 0;
     bool import_ok = true;
+    bool import_pending = false;  // heavy import handed to a worker
     std::string import_error;
   };
   struct ScanReport {
@@ -133,6 +135,11 @@ class AssetDb {
   };
 
   void set_importer(Importer importer) { importer_ = std::move(importer); }
+  // Model files at least this big are marked import_pending instead of
+  // imported on the calling thread. 0 disables it (smokes, the worker).
+  void set_defer_import_bytes(std::uintmax_t bytes) { defer_bytes_ = bytes; }
+  // Flag a model so the next scan leaves it for the background import.
+  bool mark_import_pending(const std::string& rel);
   // Opens the realm and runs migrate() (legacy sidecars -> metadata folder).
   void open(const std::string& project_dir);
   // Moves sidecar .meta files next to assets into .tombstone/meta (GUIDs
@@ -196,6 +203,7 @@ class AssetDb {
   std::vector<std::string> extra_folders_;
   Importer importer_;
   MigrationReport migration_;
+  std::uintmax_t defer_bytes_ = 0;
 };
 
 }  // namespace assetdb

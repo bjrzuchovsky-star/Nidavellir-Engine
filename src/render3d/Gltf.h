@@ -121,6 +121,11 @@ bool load_gltf(const std::string& path, Model* out, std::string* error);
 bool load_image_file(const std::string& path, Image* out, std::string* error);
 bool load_image_memory(const unsigned char* data, std::size_t size, Image* out,
                        std::string* error);
+// Box-downscale so the longest edge is <= max_edge. The full buffer is
+// released. No-op when the image is already small enough.
+bool downscale_image(Image* img, int max_edge);
+// Apply the active import edge (active_import_texture_edge) and note it.
+void clamp_imported_image(Image* img);
 
 // A small glTF with everything in one file (base64 buffer): one mesh per
 // part, metal/rough materials. Used for the samples and tests.

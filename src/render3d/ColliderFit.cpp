@@ -1,4 +1,5 @@
 #include "render3d/ColliderFit.h"
+#include "render3d/ImportLimits.h"
 #include "render3d/ModelImport.h"
 
 #include <algorithm>
@@ -62,12 +63,7 @@ bool obb_is_tighter(const Aabb& box, const FittedCollision& f) {
 bool fit_collider(const Model& m, ColliderFit f, scene3d::Collider3D* out, const FitParams& params) {
   const ColliderFit r = resolve_collider_fit(m, f);
   if (r == ColliderFit::None || !out) return false;
-  FittedCollision fitted = m.fitted;
-  if (!fitted.matches(mesh_fingerprint(m), clamp_fit_params(params).hull_vertices,
-                      clamp_fit_params(params).decompose_max)) {
-    Model copy = m;
-    if (ensure_fitted(&copy, params)) fitted = copy.fitted;
-  }
+  FittedCollision fitted = fitted_preview(m, params);
   Aabb b = m.bounds;
   // Flat models (planes, decals): a sliver so the box still collides.
   auto sliver = [](float& lo, float& hi) {
@@ -105,14 +101,17 @@ bool fit_collider(const Model& m, ColliderFit f, scene3d::Collider3D* out, const
       // Upright capsule: the bind pose's height; the radius from where
       // most vertices are (80th percentile of the distance from the
       // vertical axis) so T-pose arms do not make it a barrel.
-      MeshData rest;
-      rest_pose_mesh(m, &rest);
+      // A high-poly skin would copy the whole rest pose for that percentile.
       std::vector<float> d;
-      d.reserve(rest.indices.size());
-      for (std::uint32_t i : rest.indices) {
-        if (i >= rest.vertices.size()) continue;
-        const Vec3& p = rest.vertices[i].position;
-        d.push_back(std::sqrt((p.x - ctr.x) * (p.x - ctr.x) + (p.z - ctr.z) * (p.z - ctr.z)));
+      if (m.triangles() <= kColliderFullTriangleLimit) {
+        MeshData rest;
+        rest_pose_mesh(m, &rest);
+        d.reserve(rest.indices.size());
+        for (std::uint32_t i : rest.indices) {
+          if (i >= rest.vertices.size()) continue;
+          const Vec3& p = rest.vertices[i].position;
+          d.push_back(std::sqrt((p.x - ctr.x) * (p.x - ctr.x) + (p.z - ctr.z) * (p.z - ctr.z)));
+        }
       }
       float radius = 0.5f * std::min(ext.x, ext.z);
       if (!d.empty()) {

@@ -2,6 +2,8 @@
 #include "render3d/HullFit.h"
 #include "render3d/ModelImport.h"
 
+#include "render3d/ImportLimits.h"
+
 #include "core/AssetMeta.h"
 
 #include <algorithm>
@@ -10,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <new>
 #include <set>
 #include <sstream>
 
@@ -151,6 +154,7 @@ json::Value default_model_settings(const std::string& path) {
   s.set("hull_vertices", Value::number(64));
   s.set("decompose_max", Value::number(8));
   s.set("import_animations", Value::boolean(true));
+  s.set("max_texture", Value::number(kDefaultMaxTextureEdge));
   if (source) s.set("skin", Value::number(0));
   if (ext_of(path) == ".blend") s.set("blender_path", Value::string(""));
   return s;
@@ -182,6 +186,9 @@ ModelImportOptions model_options_from_settings(const json::Value& s, const std::
     for (const auto& [k, v] : bg.members()) o.body_groups[k] = static_cast<int>(v.as_number(0));
   }
   o.blender_path = s.str("blender_path");
+  o.max_texture = static_cast<int>(num("max_texture"));
+  if (o.max_texture < 0) o.max_texture = 0;
+  if (o.max_texture > kHardMaxTextureEdge) o.max_texture = kHardMaxTextureEdge;
   if (const json::Value& mo = s["material_overrides"]; mo.is_object()) {
     for (const auto& [k, v] : mo.members()) {
       if (v.is_string() && !v.as_string().empty()) o.material_overrides[lower(k)] = v.as_string();
@@ -431,76 +438,167 @@ int split_special_meshes(Model* m, int lod, bool keep_hulls) {
   return removed;
 }
 
+namespace {
+
+struct MonitorSlot {
+  ImportMonitor mon{};
+  bool on = false;
+  int texture_edge = 0;
+  std::string notes;
+};
+
+MonitorSlot& monitor_slot() {
+  thread_local MonitorSlot slot;
+  return slot;
+}
+
+}  // namespace
+
+void set_import_monitor(const ImportMonitor* monitor) {
+  MonitorSlot& s = monitor_slot();
+  if (!monitor) {
+    s.on = false;
+    s.mon = {};
+    return;
+  }
+  s.mon = *monitor;
+  s.on = true;
+}
+
+bool import_was_cancelled() {
+  const MonitorSlot& s = monitor_slot();
+  return s.on && s.mon.cancelled && s.mon.cancelled(s.mon.user);
+}
+
+void import_report(int percent, const char* phase) {
+  const MonitorSlot& s = monitor_slot();
+  if (s.on && s.mon.progress) s.mon.progress(s.mon.user, percent, phase ? phase : "");
+}
+
+int active_import_texture_edge() { return monitor_slot().texture_edge; }
+
+void import_note(const std::string& text) {
+  if (text.empty()) return;
+  MonitorSlot& s = monitor_slot();
+  if (s.notes.find(text) != std::string::npos) return;
+  if (!s.notes.empty()) s.notes += " ";
+  s.notes += text;
+}
+
+std::string import_take_notes() {
+  std::string out;
+  out.swap(monitor_slot().notes);
+  return out;
+}
+
+namespace {
+
+struct TextureEdgeScope {
+  int prev;
+  explicit TextureEdgeScope(int edge) : prev(monitor_slot().texture_edge) {
+    monitor_slot().texture_edge = edge;
+  }
+  ~TextureEdgeScope() { monitor_slot().texture_edge = prev; }
+};
+
+}  // namespace
+
 void limit_skin_joints(Model* m) {
   if (!m->skinned()) return;
   const std::size_t limit = static_cast<std::size_t>(kMaxBones);
-  bool needed = m->skeleton.joints.size() > limit;
-  if (!needed) return;
+  if (m->skeleton.joints.size() <= limit) return;
+  const int nj = static_cast<int>(m->skeleton.joints.size());
   std::vector<ModelPrimitive> out;
+  out.reserve(m->primitives.size());
   for (ModelPrimitive& p : m->primitives) {
     if (!p.mesh.skinned() || !p.joint_map.empty()) {
       out.push_back(std::move(p));
       continue;
     }
-    auto used_of = [&](std::uint32_t v, std::vector<int>* js) {
+    // The old path copied a std::set per triangle. On a high-poly skin that
+    // is millions of allocations and the thing that froze a rig import.
+    // A byte per joint says whether the current chunk already has it.
+    std::vector<char> in_chunk(static_cast<std::size_t>(std::max(nj, 0)), 0);
+    struct Chunk {
+      std::vector<std::uint32_t> idx;
+      std::vector<int> joints;
+    };
+    std::vector<Chunk> chunks(1);
+    auto joints_of = [&](std::uint32_t v, int* js, int* njs) {
+      if (v >= p.mesh.skin.size()) return;
       const SkinVertex& s = p.mesh.skin[v];
       for (int k = 0; k < 4; ++k) {
-        if (s.weights[k] > 0.0f || k == 0) js->push_back(static_cast<int>(s.joints[k]));
+        if (s.weights[k] <= 0.0f && k != 0) continue;
+        const int j = static_cast<int>(s.joints[k] + 0.5f);
+        if (j < 0 || j >= nj) continue;
+        bool seen = false;
+        for (int i = 0; i < *njs; ++i) seen = seen || js[i] == j;
+        if (!seen && *njs < 12) js[(*njs)++] = j;
       }
     };
-    // Greedy: triangles in order, a new chunk when the joint set would
-    // pass the limit.
-    std::vector<std::vector<std::uint32_t>> chunks(1);
-    std::vector<std::set<int>> sets(1);
-    for (std::size_t t = 0; t + 2 < p.mesh.indices.size(); t += 3) {
-      std::vector<int> js;
-      for (int c = 0; c < 3; ++c) used_of(p.mesh.indices[t + c], &js);
-      std::set<int> merged = sets.back();
-      merged.insert(js.begin(), js.end());
-      if (merged.size() > limit && !chunks.back().empty()) {
+    auto grow = [&](const int* js, int njs) {
+      int add = 0;
+      for (int i = 0; i < njs; ++i)
+        if (!in_chunk[static_cast<std::size_t>(js[i])]) ++add;
+      if (!chunks.back().idx.empty() && chunks.back().joints.size() + static_cast<std::size_t>(add) > limit) {
+        for (int j : chunks.back().joints) in_chunk[static_cast<std::size_t>(j)] = 0;
         chunks.emplace_back();
-        sets.emplace_back();
-        merged = std::set<int>(js.begin(), js.end());
       }
-      sets.back() = std::move(merged);
-      for (int c = 0; c < 3; ++c) chunks.back().push_back(p.mesh.indices[t + c]);
+      for (int i = 0; i < njs; ++i) {
+        const int j = js[i];
+        if (in_chunk[static_cast<std::size_t>(j)]) continue;
+        in_chunk[static_cast<std::size_t>(j)] = 1;
+        chunks.back().joints.push_back(j);
+      }
+    };
+    for (std::size_t t = 0; t + 2 < p.mesh.indices.size(); t += 3) {
+      if ((t & 0xffffu) == 0 && import_was_cancelled()) return;
+      int js[12];
+      int njs = 0;
+      for (int c = 0; c < 3; ++c) joints_of(p.mesh.indices[t + static_cast<std::size_t>(c)], js, &njs);
+      grow(js, njs);
+      for (int c = 0; c < 3; ++c) chunks.back().idx.push_back(p.mesh.indices[t + static_cast<std::size_t>(c)]);
     }
-    for (std::size_t c = 0; c < chunks.size(); ++c) {
-      if (chunks[c].empty()) continue;
+    for (Chunk& ch : chunks) {
+      if (ch.idx.empty()) continue;
       ModelPrimitive q;
       q.material = p.material;
       q.node = p.node;
       q.mesh.name = p.mesh.name;
-      std::map<int, int> local;
-      for (int j : sets[c]) {
-        local[j] = static_cast<int>(q.joint_map.size());
+      q.joint_map.reserve(ch.joints.size());
+      std::vector<int> local(static_cast<std::size_t>(std::max(nj, 1)), -1);
+      for (int j : ch.joints) {
+        local[static_cast<std::size_t>(j)] = static_cast<int>(q.joint_map.size());
         q.joint_map.push_back(j);
       }
-      std::map<std::uint32_t, std::uint32_t> vmap;
-      for (std::uint32_t v : chunks[c]) {
-        auto it = vmap.find(v);
-        if (it == vmap.end()) {
-          const std::uint32_t nv = static_cast<std::uint32_t>(q.mesh.vertices.size());
+      std::vector<std::uint32_t> vmap(p.mesh.vertices.size(), 0xffffffffu);
+      q.mesh.vertices.reserve(std::min(p.mesh.vertices.size(), ch.idx.size()));
+      q.mesh.skin.reserve(q.mesh.vertices.capacity());
+      q.mesh.indices.reserve(ch.idx.size());
+      for (std::uint32_t v : ch.idx) {
+        if (v >= p.mesh.vertices.size()) continue;
+        std::uint32_t& slot = vmap[v];
+        if (slot == 0xffffffffu) {
+          slot = static_cast<std::uint32_t>(q.mesh.vertices.size());
           q.mesh.vertices.push_back(p.mesh.vertices[v]);
-          SkinVertex s = p.mesh.skin[v];
+          SkinVertex s = v < p.mesh.skin.size() ? p.mesh.skin[v] : SkinVertex{};
           for (int k = 0; k < 4; ++k) {
-            auto l = local.find(static_cast<int>(s.joints[k]));
-            if (l != local.end()) {
-              s.joints[k] = static_cast<float>(l->second);
+            const int j = static_cast<int>(s.joints[k] + 0.5f);
+            if (j >= 0 && j < nj && local[static_cast<std::size_t>(j)] >= 0) {
+              s.joints[k] = static_cast<float>(local[static_cast<std::size_t>(j)]);
             } else {
               s.joints[k] = 0.0f;
               s.weights[k] = 0.0f;
             }
           }
           q.mesh.skin.push_back(s);
-          it = vmap.emplace(v, nv).first;
         }
-        q.mesh.indices.push_back(it->second);
+        q.mesh.indices.push_back(slot);
       }
-      out.push_back(std::move(q));
+      if (q.mesh.valid()) out.push_back(std::move(q));
     }
   }
-  m->primitives = std::move(out);
+  if (!out.empty()) m->primitives = std::move(out);
 }
 
 void hitbox_matrices(const Model& m, const std::vector<Mat4>* palette, std::vector<Mat4>* out) {
@@ -601,76 +699,96 @@ bool load_model(const std::string& path, Model* out, std::string* error) {
 
 bool load_model(const std::string& path, const ModelImportOptions& opt, Model* out,
                 std::string* error) {
-  const std::string e = ext_of(path);
-  *out = Model{};
-  std::string err;
-  bool ok = false;
-  bool z_up = opt.up == UpAxis::Z;
-  if (is_gltf_ext(e)) {
-    ok = load_gltf(path, out, &err);
-    out->format = "gltf";
-  } else if (e == ".mdl") {
-    ok = load_source_mdl(path, opt, out, &err);
-    if (ok) {
-      out->format = "source-mdl";
-      if (opt.up == UpAxis::Auto) z_up = true;  // Source is Z up
-    } else if (err.rfind("not a Source", 0) == 0 && assimp_available()) {
-      // Quake / Half-Life 1 .mdl: Assimp reads those.
-      *out = Model{};
-      err.clear();
-      ok = load_assimp_model(path, opt, out, &err);
-      if (ok) out->format = "mdl";
-    }
-  } else if (e == ".blend") {
-    ok = load_blend_model(path, opt, out, &err);
-    out->format = "blend";
-  } else if (is_assimp_ext(e)) {
-    if (!assimp_available()) {
-      err = model_format_name(path) +
-            " needs the Assimp importers (this build has TS_WITH_ASSIMP off); export to glTF";
+  if (!out) return false;
+  (void)import_take_notes();
+  TextureEdgeScope edge(opt.max_texture);
+  auto fail = [&](const std::string& why) {
+    *out = Model{};
+    if (error) *error = why;
+    return false;
+  };
+  if (import_was_cancelled()) return fail(path + ": Import cancelled.");
+  try {
+    const std::string e = ext_of(path);
+    *out = Model{};
+    std::string err;
+    bool ok = false;
+    bool z_up = opt.up == UpAxis::Z;
+    import_report(8, "Opening file");
+    if (is_gltf_ext(e)) {
+      ok = load_gltf(path, out, &err);
+      out->format = "gltf";
+    } else if (e == ".mdl") {
+      ok = load_source_mdl(path, opt, out, &err);
+      if (ok) {
+        out->format = "source-mdl";
+        if (opt.up == UpAxis::Auto) z_up = true;  // Source is Z up
+      } else if (err.rfind("not a Source", 0) == 0 && assimp_available()) {
+        // Quake / Half-Life 1 .mdl: Assimp reads those.
+        *out = Model{};
+        err.clear();
+        ok = load_assimp_model(path, opt, out, &err);
+        if (ok) out->format = "mdl";
+      }
+    } else if (e == ".blend") {
+      ok = load_blend_model(path, opt, out, &err);
+      out->format = "blend";
+    } else if (is_assimp_ext(e)) {
+      if (!assimp_available()) {
+        err = model_format_name(path) +
+              " needs the Assimp importers (this build has TS_WITH_ASSIMP off); export to glTF";
+      } else {
+        // (Auto up axis: the loader applies the file's own axis metadata.)
+        ok = load_assimp_model(path, opt, out, &err);
+        out->format = e.substr(1);
+      }
     } else {
-      // (Auto up axis: the loader applies the file's own axis metadata.)
-      ok = load_assimp_model(path, opt, out, &err);
-      out->format = e.substr(1);
+      err = "no model importer for '" + e + "'";
     }
-  } else {
-    err = "no model importer for '" + e + "'";
-  }
-  if (!ok) {
-    if (error) *error = err.empty() ? path + ": import failed" : err;
-    return false;
-  }
-  out->source = path;
-  if (!opt.animations) out->clips.clear();
-  if (out->format != "source-mdl") {
-    // Collision (UCX_...) and LOD > chosen meshes: not drawn, not bounds.
-    split_special_meshes(out, opt.lod, opt.collision);
-  }
-  if (!opt.collision) out->collision_hulls.clear();
-  bake_import_transform(out, opt.unit_scale, z_up);
-  bake_forward_axis(out, opt.forward);
-  limit_skin_joints(out);
-  update_bounds(out);
-  // Authored clips sit beside the file (hero.gltf -> hero.anim3d.json).
-  // They replace a clip of the same name and append the rest, then skin
-  // through the same palette as anything the file imported.
-  if (opt.animations && out->skinned()) {
-    std::string clip_warn;
-    if (!merge_clip_sidecar(out, &clip_warn)) {
-      if (!err.empty()) err += "; ";
-      err += clip_warn.empty() ? "anim3d sidecar failed" : clip_warn;
-    } else if (!clip_warn.empty()) {
-      if (!err.empty()) err += "; ";
-      err += clip_warn;
+    if (import_was_cancelled()) return fail(path + ": Import cancelled.");
+    if (!ok) return fail(err.empty() ? path + ": import failed" : err);
+    out->source = path;
+    if (!opt.animations) out->clips.clear();
+    import_report(72, "Preparing mesh");
+    if (out->format != "source-mdl") {
+      // Collision (UCX_...) and LOD > chosen meshes: not drawn, not bounds.
+      split_special_meshes(out, opt.lod, opt.collision);
     }
+    if (!opt.collision) out->collision_hulls.clear();
+    bake_import_transform(out, opt.unit_scale, z_up);
+    bake_forward_axis(out, opt.forward);
+    limit_skin_joints(out);
+    if (import_was_cancelled()) return fail(path + ": Import cancelled.");
+    update_bounds(out);
+    // Authored clips sit beside the file (hero.gltf -> hero.anim3d.json).
+    if (opt.animations && out->skinned()) {
+      std::string clip_warn;
+      if (!merge_clip_sidecar(out, &clip_warn)) {
+        if (!err.empty()) err += "; ";
+        err += clip_warn.empty() ? "anim3d sidecar failed" : clip_warn;
+      } else if (!clip_warn.empty()) {
+        if (!err.empty()) err += "; ";
+        err += clip_warn;
+      }
+    }
+    if (out->primitives.empty()) return fail(path + ": no meshes");
+    apply_fitted_cache_file(path, out);
+    const std::string notes = import_take_notes();
+    if (!notes.empty()) {
+      if (!err.empty() && err.rfind("warning:", 0) != 0) err = "warning: " + err;
+      if (err.empty()) err = "warning: " + notes;
+      else err += " " + notes;
+    }
+    import_report(88, "Model ready");
+    if (error) *error = err;
+    return true;
+  } catch (const std::bad_alloc&) {
+    return fail(path +
+                ": out of memory while importing. The file is larger than this machine can hold. "
+                "Lower Texture size in the asset settings, or decimate the mesh in Blender and export glTF.");
+  } catch (const std::exception& ex) {
+    return fail(path + ": import failed (" + ex.what() + ")");
   }
-  if (out->primitives.empty()) {
-    if (error) *error = path + ": no meshes";
-    return false;
-  }
-  apply_fitted_cache_file(path, out);
-  if (error) *error = err;
-  return true;
 }
 
 }  // namespace render3d

@@ -11,6 +11,7 @@
 
 #include "editor/assets/AssetDb.h"
 #include "editor/assets/GmaImport.h"
+#include "editor/assets/ImportJob.h"
 #include "editor/assets/ImportSort.h"
 #include "editor/ui/FolderBrowser.h"
 #include "gfx/TextureCache.h"
@@ -75,6 +76,8 @@ class AssetBrowser {
   // Copy outside files / folders in (dest_folder "" = sorted by type, see
   // ImportSort.h), then rescan so they get their .meta. Returns the result.
   importsort::Result import_files(const std::vector<std::string>& sources, const std::string& dest_folder = {});
+  // Same copy as import_files, but the read / Blender export / collider fit
+  // run off the UI thread. import_files stays synchronous for smokes.
   const importsort::Settings& import_settings() const { return import_settings_; }
   void set_import_settings(const importsort::Settings& s);
   // Orphaned .meta files from the last scan (asset paths).
@@ -105,11 +108,15 @@ class AssetBrowser {
   void accept_move_into(const std::string& folder);
   void accept_vault_drop();
   void take_os_drop(const std::string& folder);
+  void queue_import(const std::vector<std::string>& sources, const std::string& dest_folder);
+  void kick_pending();
+  void pump_import();
   void draw_import_popup();
   void draw_split_popup();
   bool split_here(const std::string& rel, bool recentre, bool fit);
 
   assetdb::AssetDb db_;
+  ImportJob import_job_;
   AssetBrowserHost host_;
   gfx::TextureCache thumbs_;
   std::string folder_ = "";  // "" = everything

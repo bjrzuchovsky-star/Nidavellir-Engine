@@ -1,5 +1,6 @@
 #include "render3d/MeshSplit.h"
 
+#include "render3d/ImportLimits.h"
 #include "render3d/ModelImport.h"
 #include "render3d/Skeleton.h"
 #include "scene/JsonTree.h"
@@ -209,6 +210,7 @@ bool write_png(const std::string& path, const Image& img) {
 std::string base64(const std::string& in) {
   static const char* k = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   std::string out;
+  out.reserve((in.size() + 2) / 3 * 4);
   std::size_t i = 0;
   for (; i + 2 < in.size(); i += 3) {
     const unsigned v = (static_cast<unsigned char>(in[i]) << 16) |
@@ -239,9 +241,46 @@ struct TexSlot {
   std::string uri;
 };
 
+// Keep every `step`th triangle and the vertices it uses. A high-poly part
+// otherwise becomes a base64 blob big enough to exhaust memory while writing.
+void simplify_part(MeshData* m, std::size_t max_tris) {
+  if (!m) return;
+  const std::size_t tris = m->indices.size() / 3;
+  if (tris <= max_tris || max_tris == 0) return;
+  const std::size_t step = std::max<std::size_t>(1, tris / max_tris);
+  std::vector<std::uint32_t> idx;
+  idx.reserve(max_tris * 3);
+  for (std::size_t t = 0, n = 0; t < tris && n < max_tris; t += step, ++n) {
+    idx.push_back(m->indices[t * 3]);
+    idx.push_back(m->indices[t * 3 + 1]);
+    idx.push_back(m->indices[t * 3 + 2]);
+  }
+  std::unordered_map<std::uint32_t, std::uint32_t> remap;
+  std::vector<Vertex3D> verts;
+  std::vector<std::uint32_t> packed;
+  verts.reserve(idx.size());
+  packed.reserve(idx.size());
+  for (std::uint32_t i : idx) {
+    if (i >= m->vertices.size()) continue;
+    auto it = remap.find(i);
+    if (it == remap.end()) {
+      const auto nv = static_cast<std::uint32_t>(verts.size());
+      remap.emplace(i, nv);
+      verts.push_back(m->vertices[i]);
+      packed.push_back(nv);
+    } else {
+      packed.push_back(it->second);
+    }
+  }
+  m->vertices = std::move(verts);
+  m->indices = std::move(packed);
+  m->skin.clear();
+}
+
 bool write_part_gltf(const std::string& path, const std::string& node_name, const std::vector<MeshData>& meshes,
                      const std::vector<MaterialDesc>& materials, const std::string& tex_dir,
-                     std::vector<std::string>* written, std::string* error) {
+                     std::vector<std::string>* written, std::unordered_map<const Image*, std::string>* shared,
+                     std::string* error) {
   using json::Value;
   std::error_code ec;
   fs::create_directories(fs::u8path(path).parent_path(), ec);
@@ -250,6 +289,14 @@ bool write_part_gltf(const std::string& path, const std::string& node_name, cons
   auto image_index = [&](const std::shared_ptr<const Image>& img, const std::string& fallback_path,
                          const char* role) -> int {
     if (img && img->valid()) {
+      if (shared) {
+        auto sit = shared->find(img.get());
+        if (sit != shared->end()) {
+          image_of[img.get()] = static_cast<int>(images.size());
+          images.push_back({img.get(), sit->second});
+          return static_cast<int>(images.size()) - 1;
+        }
+      }
       auto it = image_of.find(img.get());
       if (it != image_of.end()) return it->second;
       const std::string file = node_name + "_" + role + (images.empty() ? "" : std::to_string(images.size())) + ".png";
@@ -259,6 +306,7 @@ bool write_part_gltf(const std::string& path, const std::string& node_name, cons
         return -2;
       }
       if (written) written->push_back(abs);
+      if (shared) (*shared)[img.get()] = file;
       image_of[img.get()] = static_cast<int>(images.size());
       images.push_back({img.get(), file});
       return static_cast<int>(images.size()) - 1;
@@ -467,6 +515,8 @@ bool write_model_parts(const Model& model, const std::string& dest_dir, const Sp
   }
   std::error_code ec;
   fs::create_directories(fs::u8path(dest_dir), ec);
+  std::unordered_map<const Image*, std::string> shared_tex;
+  bool simplified = false;
   for (const Group& g : groups) {
     std::vector<MeshData> meshes;
     std::vector<MaterialDesc> mats;
@@ -476,6 +526,9 @@ bool write_model_parts(const Model& model, const std::string& dest_dir, const Sp
       const ModelPrimitive& prim = model.primitives[pi];
       MeshData mesh;
       bake_prim(model, prim, &mesh);
+      const std::size_t before = mesh.indices.size() / 3;
+      simplify_part(&mesh, kSplitPartTriangleLimit);
+      if (mesh.indices.size() / 3 < before) simplified = true;
       const Aabb b = mesh_bounds(mesh);
       if (b.valid()) {
         acc += b.center();
@@ -494,7 +547,7 @@ bool write_model_parts(const Model& model, const std::string& dest_dir, const Sp
     }
     const std::string file = unique_file(dest_dir, g.name);
     std::vector<std::string> wrote;
-    if (!write_part_gltf(file, g.name, meshes, mats, dest_dir, &wrote, error)) return false;
+    if (!write_part_gltf(file, g.name, meshes, mats, dest_dir, &wrote, &shared_tex, error)) return false;
     if (written_abs) written_abs->insert(written_abs->end(), wrote.begin(), wrote.end());
     SplitPart part;
     part.name = g.name;
@@ -503,6 +556,7 @@ bool write_model_parts(const Model& model, const std::string& dest_dir, const Sp
     part.rel_gltf = fs::u8path(file).filename().string();
     parts->push_back(std::move(part));
   }
+  (void)simplified;
   return true;
 }
 

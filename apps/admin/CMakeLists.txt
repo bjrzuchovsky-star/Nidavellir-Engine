@@ -36,6 +36,7 @@ add_executable(ts_admin
   SmokeGmod.cpp
   GmodCli.cpp
   SmokeBounds.cpp
+  SmokeBigModel.cpp
   SmokeUi.cpp
   SmokeFx.cpp
   ExportCli.cpp

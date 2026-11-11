@@ -421,16 +421,38 @@ void Divider() {
 
 void RuneMark(ImDrawList* dl, const ImVec2& top_center, float height, ImU32 steel,
               ImU32 ember) {
-  const float h = height * 0.86f;
-  const float w = h * 0.42f;
+  // Hammer and anvil, flat. `steel` is the anvil, the hammer head is the
+  // forge accent so the mark stays the same on every screen that draws it.
+  (void)ember;
+  const float h = height;
   const float cx = top_center.x;
-  const float top = top_center.y + h * 0.08f;
-  const float bot = top_center.y + h;
-  const float t = std::max(1.6f, w * 0.18f);
-  dl->AddRectFilled(ImVec2(cx - t * 0.5f, top), ImVec2(cx + t * 0.5f, bot), steel);
-  dl->AddLine(ImVec2(cx, top + h * 0.28f), ImVec2(cx - w, top + h * 0.62f), ember, t);
-  dl->AddLine(ImVec2(cx, top + h * 0.28f), ImVec2(cx + w, top + h * 0.62f), ember, t);
-  dl->AddRectFilled(ImVec2(cx - w * 0.7f, bot), ImVec2(cx + w * 0.7f, bot + height * 0.08f), steel);
+  const float top = top_center.y;
+  const ImU32 hammer = U32(Accent());
+  const float face_y = top + h * 0.56f;
+  const float face_h = std::max(2.0f, h * 0.11f);
+  const float face_l = cx - h * 0.28f;
+  const float face_r = cx + h * 0.26f;
+  dl->AddRectFilled(ImVec2(face_l, face_y), ImVec2(face_r, face_y + face_h), steel);
+  // Horn, pointing left.
+  dl->AddTriangleFilled(ImVec2(face_l, face_y), ImVec2(face_l, face_y + face_h),
+                        ImVec2(cx - h * 0.48f, face_y + face_h * 0.55f), steel);
+  // Heel on the right.
+  dl->AddTriangleFilled(ImVec2(face_r, face_y), ImVec2(face_r, face_y + face_h),
+                        ImVec2(cx + h * 0.40f, face_y + face_h * 0.35f), steel);
+  const float waist_top = face_y + face_h;
+  const float waist_bot = top + h * 0.84f;
+  dl->AddRectFilled(ImVec2(cx - h * 0.09f, waist_top), ImVec2(cx + h * 0.11f, waist_bot), steel);
+  dl->AddRectFilled(ImVec2(cx - h * 0.40f, waist_bot), ImVec2(cx + h * 0.36f, top + h * 0.96f), steel);
+  // Hammer head, just above the face, and a handle up to the right.
+  const float head_w = h * 0.34f;
+  const float head_h = std::max(2.0f, h * 0.13f);
+  const float head_cx = cx + h * 0.02f;
+  const float head_bot = face_y - h * 0.04f;
+  dl->AddRectFilled(ImVec2(head_cx - head_w * 0.5f, head_bot - head_h),
+                    ImVec2(head_cx + head_w * 0.5f, head_bot), hammer);
+  const float handle = std::max(1.8f, h * 0.055f);
+  dl->AddLine(ImVec2(head_cx + head_w * 0.12f, head_bot - head_h * 0.45f),
+              ImVec2(cx + h * 0.30f, top + h * 0.08f), steel, handle);
 }
 
 void TombstoneMark(ImDrawList* dl, const ImVec2& top_center, float height,

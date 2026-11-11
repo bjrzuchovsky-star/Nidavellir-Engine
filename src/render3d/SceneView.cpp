@@ -2,7 +2,9 @@
 #include "render3d/ClipFile.h"
 #include "render3d/Retarget.h"
 #include "render3d/HullFit.h"
+#include "render3d/ImportLimits.h"
 #include "render3d/ModelImport.h"
+#include "render3d/UploadStage.h"
 #include "profiler/Profiler.h"
 
 #include "core/MemImages.h"
@@ -43,10 +45,18 @@ void SceneView::set_project_dir(const std::string& dir) {
   dir_ = dir;
 }
 
+void SceneView::stop_load(ModelEntry& m) {
+  if (m.pending) m.pending->cancel.store(true);
+  if (m.loader.joinable()) m.loader.join();
+  m.pending.reset();
+  m.loading = false;
+}
+
 void SceneView::clear() {
+  for (auto& [k, m] : models_) stop_load(m);
   if (r_) {
     for (auto& [k, m] : models_) {
-      for (MeshHandle h : m.meshes) r_->destroy_mesh(h);
+      for (const GpuPiece& piece : m.pieces) r_->destroy_mesh(piece.mesh);
       for (MaterialHandle h : m.materials) r_->destroy_material(h);
     }
     for (auto& [k, m] : materials_) r_->destroy_material(m.handle);
@@ -72,11 +82,31 @@ std::vector<std::string> SceneView::take_problems() {
 
 SceneView::ModelEntry& SceneView::entry(const std::string& source) {
   ModelEntry& m = models_[source];
+  if (m.loading) {
+    if (m.pending && m.pending->done.load()) {
+      std::unique_ptr<Model> got;
+      std::string err;
+      {
+        std::lock_guard<std::mutex> lock(m.pending->mu);
+        got = std::move(m.pending->model);
+        err = std::move(m.pending->error);
+      }
+      stop_load(m);
+      m.tried = true;
+      if (!got) {
+        problem("model:" + source, "3D model " + source + " would not load: " + err);
+        return m;
+      }
+      if (!err.empty()) problem("model-warn:" + source, source + ": " + err);
+      m.model = std::move(got);
+    }
+    return m;
+  }
   if (m.tried) return m;
-  m.tried = true;
   auto model = std::make_unique<Model>();
   MeshData prim;
   if (make_primitive(source, &prim)) {
+    m.tried = true;
     model->source = source;
     model->bounds = prim.bounds();
     ModelPrimitive p;
@@ -85,8 +115,39 @@ SceneView::ModelEntry& SceneView::entry(const std::string& source) {
     m.model = std::move(model);
     return m;
   }
-  if (source.empty()) return m;
+  if (source.empty()) {
+    m.tried = true;
+    return m;
+  }
   const std::string path = (fs::path(dir_) / fs::path(source)).string();
+  std::error_code ec;
+  const auto sz = fs::file_size(fs::u8path(path), ec);
+  if (!ec && sz >= kAsyncModelBytes) {
+    m.loading = true;
+    m.pending = std::make_shared<PendingModel>();
+    auto state = m.pending;
+    problem("loading:" + source, "Loading " + source + "...");
+    m.loader = std::thread([state, path] {
+      if (state->cancel.load()) {
+        state->done.store(true);
+        return;
+      }
+      ImportMonitor mon;
+      mon.user = state.get();
+      mon.cancelled = [](void* p) { return static_cast<PendingModel*>(p)->cancel.load(); };
+      set_import_monitor(&mon);
+      auto model = std::make_unique<Model>();
+      std::string err;
+      const bool ok = load_model(path, model.get(), &err);
+      set_import_monitor(nullptr);
+      std::lock_guard<std::mutex> lock(state->mu);
+      if (ok && !state->cancel.load()) state->model = std::move(model);
+      state->error = err;
+      state->done.store(true);
+    });
+    return m;
+  }
+  m.tried = true;
   std::string err;
   if (!load_model(path, model.get(), &err)) {
     problem("model:" + source, "3D model " + source + " would not load: " + err);
@@ -137,11 +198,73 @@ Aabb SceneView::local_bounds(const scene3d::Entity3D& e) {
 
 void SceneView::upload(ModelEntry& m) {
   if (m.uploaded || !m.model || !r_) return;
-  m.uploaded = true;
-  if (m.model->skinned()) skin_palette(m.model->skeleton, rest_pose(m.model->skeleton), &m.rest_palette);
-  for (const ModelPrimitive& p : m.model->primitives) m.meshes.push_back(r_->create_mesh(p.mesh));
-  for (const MaterialDesc& d : m.model->materials) m.materials.push_back(r_->create_material(d));
-  m.materials.push_back(r_->create_material(MaterialDesc{}));
+  const std::size_t budget = upload_budget_;
+  // True when this many bytes still fit in the frame. A single resource
+  // larger than the budget does not fit (the caller slices it), unless
+  // `allow_over` is set so one oversized texture can still move.
+  auto room = [&](std::size_t bytes, bool allow_over) {
+    if (budget == 0) return true;
+    if (bytes > budget) {
+      if (!allow_over || upload_used_ > 0) return false;
+      upload_used_ += bytes;
+      return true;
+    }
+    if (upload_used_ > 0 && upload_used_ + bytes > budget) return false;
+    upload_used_ += bytes;
+    return true;
+  };
+  if (m.rest_palette.empty() && m.model->skinned()) {
+    skin_palette(m.model->skeleton, rest_pose(m.model->skeleton), &m.rest_palette);
+  }
+  if (m.materials.empty()) {
+    // A stand-in so the mesh can draw before its textures have uploaded.
+    m.materials.push_back(r_->create_material(MaterialDesc{}));
+  }
+  while (m.mat_cursor < m.model->materials.size()) {
+    const MaterialDesc& d = m.model->materials[m.mat_cursor];
+    auto img_bytes = [](const std::shared_ptr<const Image>& im) {
+      return im && im->valid() ? static_cast<std::size_t>(im->width) * static_cast<std::size_t>(im->height) * 4u : 0u;
+    };
+    const std::size_t bytes = img_bytes(d.base_color_image) + img_bytes(d.normal_image) + img_bytes(d.metal_rough_image);
+    if (!room(bytes, true)) return;
+    // Insert before the stand-in so material index matches the model.
+    m.materials.insert(m.materials.end() - 1, r_->create_material(d));
+    ++m.mat_cursor;
+  }
+  while (m.prim_cursor < m.model->primitives.size()) {
+    const MeshData& mesh = m.model->primitives[m.prim_cursor].mesh;
+    if (m.index_cursor == 0) {
+      const std::size_t whole = mesh_upload_bytes(mesh);
+      if (room(whole, false)) {
+        const MeshHandle h = r_->create_mesh(mesh);
+        if (h.id) m.pieces.push_back({h, static_cast<int>(m.prim_cursor)});
+        ++m.prim_cursor;
+        continue;
+      }
+      if (budget == 0) return;
+    }
+    if (budget > 0 && upload_used_ >= budget) return;
+    const std::size_t left = budget == 0 ? 0 : budget - upload_used_;
+    const MeshSlice slice = plan_mesh_slice(mesh, m.index_cursor, left);
+    if (slice.index_count == 0) {
+      ++m.prim_cursor;
+      m.index_cursor = 0;
+      continue;
+    }
+    if (!room(slice.bytes, true) && !m.pieces.empty()) return;
+    MeshData chunk;
+    if (bake_mesh_slice(mesh, slice, &chunk)) {
+      const MeshHandle h = r_->create_mesh(chunk);
+      if (h.id) m.pieces.push_back({h, static_cast<int>(m.prim_cursor)});
+    }
+    m.index_cursor += slice.index_count;
+    if (m.index_cursor >= mesh.indices.size()) {
+      ++m.prim_cursor;
+      m.index_cursor = 0;
+    }
+    if (budget > 0) return;  // one slice of a mesh that did not fit
+  }
+  m.uploaded = m.prim_cursor >= m.model->primitives.size() && m.mat_cursor >= m.model->materials.size();
 }
 
 std::shared_ptr<const Image> SceneView::image(const std::string& rel) {
@@ -414,6 +537,7 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
                       const Camera3D& camera, int width, int height,
                       const SceneViewOptions& opt) {
   if (!r_) return;
+  upload_used_ = 0;
   r_->set_environment(env);
   r_->begin_frame(camera, width, height);
   terrain_->reset_stats();
@@ -456,11 +580,15 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
     const Mat4 world = e.transform.matrix();
     const bool own_material = e.material && (e.mesh->is_primitive() || e.material->override_model);
     const MaterialHandle override_mat = own_material ? material_for(*e.material) : MaterialHandle{};
-    for (std::size_t i = 0; i < m.meshes.size(); ++i) {
+    for (const GpuPiece& piece : m.pieces) {
+      const std::size_t i = static_cast<std::size_t>(piece.prim);
+      if (i >= m.model->primitives.size()) continue;
       MaterialHandle mat = override_mat;
       if (!own_material) {
         const int mi = m.model->primitives[i].material;
-        mat = (mi >= 0 && static_cast<std::size_t>(mi) + 1 < m.materials.size())
+        // materials holds uploaded model materials, then the stand-in.
+        mat = (mi >= 0 && static_cast<std::size_t>(mi) < m.mat_cursor &&
+               static_cast<std::size_t>(mi) + 1 < m.materials.size())
                   ? m.materials[static_cast<std::size_t>(mi)]
                   : m.materials.back();
       }
@@ -470,15 +598,15 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
             (e.skin_palette && !e.skin_palette->empty()) ? *e.skin_palette : m.rest_palette;
         const ModelPrimitive& prim = m.model->primitives[i];
         if (prim.joint_map.empty()) {
-          r_->draw_skinned(m.meshes[i], mat, world, full.data(), full.size(), e.mesh->cast_shadows);
+          r_->draw_skinned(piece.mesh, mat, world, full.data(), full.size(), e.mesh->cast_shadows);
         } else {
           // Big skeleton: this primitive's own <= kMaxBones palette.
           primitive_palette(prim, full, &prim_palette_);
-          r_->draw_skinned(m.meshes[i], mat, world, prim_palette_.data(), prim_palette_.size(),
+          r_->draw_skinned(piece.mesh, mat, world, prim_palette_.data(), prim_palette_.size(),
                            e.mesh->cast_shadows);
         }
       } else {
-        r_->draw_matrix(m.meshes[i], mat, world, e.mesh->cast_shadows);
+        r_->draw_matrix(piece.mesh, mat, world, e.mesh->cast_shadows);
       }
     }
   }

@@ -6,6 +6,7 @@
 
 #include "render3d/Gltf.h"
 #include "render3d/HullFit.h"
+#include "render3d/ImportLimits.h"
 #include "render3d/ModelImport.h"
 #include "render3d/Mesh.h"
 #include "runtime/ScriptHost.h"
@@ -15,6 +16,8 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <exception>
+#include <new>
 
 namespace ts {
 namespace tombstone {
@@ -116,7 +119,15 @@ const render3d::MeshData* World3D::phys_mesh(const std::string& source) {
     render3d::Model model;
     std::string err;
     const std::string path = (std::filesystem::path(project_dir_) / source).string();
-    if (render3d::load_model(path, &model, &err)) {
+    bool loaded = false;
+    try {
+      loaded = render3d::load_model(path, &model, &err);
+    } catch (const std::bad_alloc&) {
+      err = "out of memory";
+    } catch (const std::exception& ex) {
+      err = ex.what();
+    }
+    if (loaded) {
       // Imported collision (Source .phy): convex pieces for hull colliders.
       if (!model.collision_hulls.empty()) phys_hulls_[source] = model.collision_hulls;
       render3d::FitParams fp = render3d::fit_params_for_file(path);
@@ -223,6 +234,14 @@ void World3D::phys_add(const Entity3D& e) {
       post(LogLevel::Warn, "physics",
            e.name + ": a mesh collider can only be static; using its convex hull", e.id);
     }
+    const std::size_t tri_count = m ? m->indices.size() / 3 : 0;
+    const bool heavy_mesh = tri_count > render3d::kMeshColliderTriangleLimit;
+    if (heavy_mesh && tri) {
+      post(LogLevel::Warn, "physics",
+           e.name + ": mesh collider has " + std::to_string(tri_count) +
+               " triangles; using a convex hull instead",
+           e.id);
+    }
     const bool want_pieces = c.fit == "decompose";
     const bool use_authored = !want_pieces && hull && (c.fit.empty() || c.fit == "auto");
     auto authored = use_authored ? phys_hulls_.find(src) : phys_hulls_.end();
@@ -242,7 +261,7 @@ void World3D::phys_add(const Entity3D& e) {
       add_hulls(pieces->second);
     } else if ((hull || dynamic_mesh) && generated != phys_convex_.end() && !generated->second.empty()) {
       add_hulls(generated->second);
-    } else if (m && !dynamic_mesh && tri) {
+    } else if (m && !dynamic_mesh && tri && !heavy_mesh) {
       p3::ShapeDesc s;
       s.type = p3::ShapeType::Mesh;
       s.points.reserve(m->vertices.size());
@@ -252,7 +271,7 @@ void World3D::phys_add(const Entity3D& e) {
       s.indices = m->indices;
       s.offset = render3d::mul(c.offset, scale);
       d.shapes.push_back(std::move(s));
-    } else if (m) {
+    } else if (m && m->vertices.size() <= 8000) {
       p3::ShapeDesc s;
       s.type = p3::ShapeType::ConvexHull;
       s.points.reserve(m->vertices.size());
@@ -261,6 +280,17 @@ void World3D::phys_add(const Entity3D& e) {
       }
       s.indices = m->indices;
       d.shapes.push_back(std::move(s));
+    } else if (m) {
+      // No small hull and too many vertices to hand to Jolt raw.
+      p3::ShapeDesc s;
+      s.type = p3::ShapeType::Box;
+      const render3d::Aabb box = m->bounds();
+      const render3d::Vec3 ext = box.extent();
+      s.size = {std::max(0.02f, ext.x * std::fabs(scale.x)), std::max(0.02f, ext.y * std::fabs(scale.y)),
+                std::max(0.02f, ext.z * std::fabs(scale.z))};
+      s.offset = render3d::mul(box.center(), scale);
+      d.shapes.push_back(std::move(s));
+      post(LogLevel::Warn, "physics", e.name + ": collider fell back to a box", e.id);
     }
   } else {
     p3::ShapeDesc s = prim_shape(c.shape, c.size, scale);
