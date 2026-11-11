@@ -239,7 +239,7 @@ const char* lookup(const std::string& section, const std::string& key) {
     if (const char* t = dictionary_text(section + "/" + key)) return t;
   }
   if (const char* t = dictionary_text(key)) return t;
-  // "ScriptProp/*": fields whose names come from the claim (script props).
+  // "ScriptProp/*": fields whose names come from the realm (script props).
   if (!section.empty()) return dictionary_text(section + "/*");
   return nullptr;
 }

@@ -1,5 +1,6 @@
 #include "editor/editor3d/Editor3DScreen.h"
 #include "editor/ux/FriendlyError.h"
+#include "editor/ux/ShotOpts.h"
 #include "editor/plugins/PluginNeeds.h"
 #include "terrain/TerrainView.h"
 #include "plugins/profiler/ProfilerPlugin.h"
@@ -50,6 +51,7 @@ Editor3DScreen::~Editor3DScreen() {
 }
 
 void Editor3DScreen::note(const std::string& text, LogLevel level) {
+  if (shot::hide_log_line(text)) return;
   runtime::LogEntry e;
   e.level = level;
   e.channel = "editor";
@@ -69,6 +71,7 @@ void Editor3DScreen::on_enter() {
                   e.level = level;
                   e.channel = "plugins";
                   e.text = text;
+                  if (shot::hide_log_line(e.text)) return;
                   log_.push_back(std::move(e));
                 });
   std::string err;
@@ -82,9 +85,9 @@ void Editor3DScreen::on_enter() {
     } else {
       // The starter rider / grabbables ride with Rider 3D + Jolt (0.2.0).
       if (!plugins_.follow_needs(plugin_needs(scene_)).empty()) plugins_.apply();
-      note(vr_project() ? "Staked a fresh VR claim: ground, crate, lamp, a table of things to "
+      note(vr_project() ? "Staked a fresh VR realm: ground, crate, lamp, a table of things to "
                           "grab and the VR rig"
-                        : "Staked a fresh 3D claim: ground, crate, lamp and a rider");
+                        : "Staked a fresh 3D realm: ground, crate, lamp and a wanderer");
     }
   } else if (!scene3d::load_file(path, &scene_, &err)) {
     note(err, LogLevel::Error);
@@ -93,7 +96,7 @@ void Editor3DScreen::on_enter() {
       scene_locked_ = true;  // keep the newer file exactly as it is
       scene_locked_why_ = err;
     }
-    ux::show_error(ux::explain(err, ux::ErrorKind::MissingFile, "Opening claim " + project_.name));
+    ux::show_error(ux::explain(err, ux::ErrorKind::MissingFile, "Opening realm " + project_.name));
   } else {
     migrate_cameras_on_open(path);  // pre-v18: the follow camera becomes an entity
   }
@@ -194,7 +197,7 @@ AppState Editor3DScreen::on_update(float delta_seconds) {
   }
   asset_poll_clock_ += delta_seconds;
   vault_panel_.update();
-  // Hold the browser's rescan while the Vault worker writes into the claim.
+  // Hold the browser's rescan while the Vault worker writes into the realm.
   if (asset_poll_clock_ > 1.5 && !playing() && !vault_panel_.busy()) {
     asset_poll_clock_ = 0.0;
     asset_browser_.rescan();
@@ -207,7 +210,7 @@ AppState Editor3DScreen::on_update(float delta_seconds) {
   if (back_requested_) return AppState::ProjectManager;
   if (settings_requested_) {
     settings_requested_ = false;
-    return AppState::Settings;  // AppFlow comes back to this claim afterwards
+    return AppState::Settings;  // AppFlow comes back to this realm afterwards
   }
   return AppState::Editor3D;
 }
@@ -763,6 +766,13 @@ render3d::Camera3D Editor3DScreen::editor_camera() const {
   return cam;
 }
 
+void Editor3DScreen::look_at(const render3d::Vec3& target, float yaw, float pitch, float distance) {
+  scene_.editor_camera.target = target;
+  scene_.editor_camera.yaw = yaw;
+  scene_.editor_camera.pitch = std::clamp(pitch, -89.0f, 89.0f);
+  scene_.editor_camera.distance = std::clamp(distance, 0.5f, 800.0f);
+}
+
 void Editor3DScreen::orbit(float dyaw, float dpitch) {
   look_through_ = 0;  // moving the view leaves the camera
   scene_.editor_camera.yaw = std::fmod(scene_.editor_camera.yaw + dyaw, 360.0f);
@@ -917,6 +927,7 @@ bool Editor3DScreen::play_start() {
   world_.set_vr(false);
   gizmo_cancel();
   world_.set_log_sink([this](const runtime::LogEntry& e) {
+    if (shot::hide_log_line(e.text)) return;
     log_.push_back(e);
     while (log_.size() > 400) log_.pop_front();
   });

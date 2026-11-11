@@ -46,7 +46,9 @@ bool TeamClient::join(const JoinOptions& opt, std::string* error) {
   opt_ = opt;
   error_.clear();
   warn_.clear();
-  std::unique_ptr<net::Transport> t = net::make_enet_transport();
+  std::unique_ptr<net::Transport> t =
+      opt_.make_transport ? opt_.make_transport() : net::make_enet_transport();
+  if (!t) t = net::make_enet_transport();
   if (opt_.wrap_transport) t = opt_.wrap_transport(std::move(t));
   std::string err;
   server_ = t->connect(opt_.host, opt_.port, &err);
@@ -426,10 +428,10 @@ std::vector<std::pair<std::string, Op>> TeamClient::take_apply() {
   return out;
 }
 
-void TeamClient::want_locks(std::vector<std::string> keys) {
+void TeamClient::want_locks(std::vector<std::string> keys, bool force) {
   std::sort(keys.begin(), keys.end());
   keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
-  if (want_sent_ && keys == want_) return;
+  if (!force && want_sent_ && keys == want_) return;
   want_ = std::move(keys);
   if (state_ != State::Joined) return;
   Value l = Value::object();

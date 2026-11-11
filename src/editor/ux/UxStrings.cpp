@@ -55,17 +55,17 @@ EmptyText empty_text(const std::string& id) {
         "Add a cube, camera or light below (more in the Create menu), or drag a model from the "
         "Assets panel into the viewport."}},
       {"assets",
-       {"No assets in this claim yet.",
+       {"No assets in this realm yet.",
         "Import brings in images, models, sounds and fonts (or drop files onto the window). Files "
-        "copied into the claim's assets folder show up after Rescan. Pull from the Vault to reuse "
-        "assets from your other claims."}},
+        "copied into the realm's assets folder show up after Rescan. Pull from the Vault to reuse "
+        "assets from your other realms."}},
       {"scripts",
        {"No scripts yet.",
         "Scripts make objects do things in Play. Write one here (name, language and template "
         "above), then drag it onto an object or attach it with Add Component in the Inspector."}},
       {"vault",
        {"The Vault is empty.",
-        "The Vault keeps assets you share between claims. Right-click an asset in the Asset "
+        "The Vault keeps assets you share between realms. Right-click an asset in the Asset "
         "Browser and choose Send to Vault to put the first one in."}},
       {"telegraph",
        {"Nothing on the wire yet.",
@@ -113,17 +113,17 @@ const std::vector<WalkStep>& walkthrough_steps(bool three_d) {
        "Component gives it a sprite, collider, script and more. Right-click a component header to "
        "reset, copy or remove it."},
       {"Asset Browser", "Asset Browser", "Asset Browser",
-       "Your claim's images, sounds, models and scripts. Import (or drop files on the window) to "
+       "Your realm's images, sounds, models and scripts. Import (or drop files on the window) to "
        "bring new ones in; drag an image into the viewport to place it."},
       {"", "", "Play",
        "Press F5 (or Ctrl+P) to ride the scene, F5 again to stop. Stopping puts everything back "
        "the way it was."},
-      {"Plugins", "Plugins (Outfitter)", "Trading Post",
-       "The Trading Post has plugins, templates and assets for your claim. Open it from the "
-       "Plugins panel (View > Plugins): Visit the Trading Post..."},
+      {"Plugins", "Plugins (Outfitter)", "Market",
+       "The Market has plugins, templates and assets for your realm. Open it from the "
+       "Plugins panel (View > Plugins): Visit the Market..."},
       {"Vault", "Vault", "Vault",
-       "The Vault keeps assets you share between claims. Send an asset there from its right-click "
-       "menu; pull it into another claim later."},
+       "The Vault keeps assets you share between realms. Send an asset there from its right-click "
+       "menu; pull it into another realm later."},
       {"", "", "Find anything",
        "Press Ctrl+Shift+P for the command palette: every menu item, panel and setting by name. "
        "Window > Layouts saves panel arrangements; Help > Walkthrough shows this again."},
@@ -140,15 +140,15 @@ const std::vector<WalkStep>& walkthrough_steps(bool three_d) {
        "gives it a mesh, light, collider or script. Right-click a component header for reset, "
        "copy and paste."},
       {"Asset Browser###AssetBrowser3D", "Asset Browser", "Asset Browser",
-       "Models, textures, sounds and scripts in this claim. Import (or drop files) to bring new "
+       "Models, textures, sounds and scripts in this realm. Import (or drop files) to bring new "
        "ones in; drag a model into the viewport to place it."},
       {"", "", "Play",
        "Press F5 to play the scene, F5 again to stop; the scene goes back to how it was."},
-      {"Plugins###Plugins3D", "Plugins", "Trading Post",
-       "The Trading Post has plugins, templates and assets ready to use. Open it from the Plugins "
-       "panel (View > Plugins): Visit the Trading Post..."},
+      {"Plugins###Plugins3D", "Plugins", "Market",
+       "The Market has plugins, templates and assets ready to use. Open it from the Plugins "
+       "panel (View > Plugins): Visit the Market..."},
       {"Vault###Vault3D", "Vault", "Vault",
-       "Assets shared between all your claims. Send one there from the Asset Browser's "
+       "Assets shared between all your realms. Send one there from the Asset Browser's "
        "right-click menu."},
       {"", "", "Find anything",
        "Ctrl+Shift+P opens the command palette. Window > Layouts saves panel arrangements; Help > "
@@ -159,8 +159,8 @@ const std::vector<WalkStep>& walkthrough_steps(bool three_d) {
 
 const std::vector<SettingsSection>& settings_sections() {
   static const std::vector<SettingsSection> s = {
-      {"Territory", "Where claims are kept on disk"},
-      {"Rider", "Your name and dev login"},
+      {"Territory", "Where realms are kept on disk"},
+      {"Wanderer", "Your name and dev login"},
       {"Lamplight", "Theme"},
       {"Supply Run", "Update checks"},
       {"Tools", "Blender, script editor, Source content folders"},

@@ -7,15 +7,15 @@
 //    an enable toggle, reorder and remove (draw_script_stack);
 //  * Inspector > Add Component > New Script... writes scripts/<stem>.<ext>
 //    from a template (Blank / Gate / Pickup / Sign / Ticker in every
-//    language) and attaches it; Add Component > Script lists the claim's
+//    language) and attaches it; Add Component > Script lists the realm's
 //    scripts with a search box (AddScriptMenu);
 //  * scripts drag from the Asset Browser or the Scripts panel onto an
 //    entity (payload kScriptPayload: the project-relative path, NUL ended);
 //  * "Open in Visual Studio" / "Open in VS Code": installs are detected
-//    (vswhere; code on PATH, the registry or the usual folders), the claim
+//    (vswhere; code on PATH, the registry or the usual folders), the realm
 //    gets a small IDE setup (.vscode/, <claim>.code-workspace, a C#
 //    .csproj referencing the SDK, compile_commands.json + c_cpp_properties
-//    for C++ against script_sdk.h) and the claim folder opens on the file.
+//    for C++ against script_sdk.h) and the realm folder opens on the file.
 
 #include "scene/SceneData.h"
 
@@ -143,7 +143,7 @@ struct LaunchPlan {
 };
 bool plan_open_in_editor(ExternalEditor which, const std::string& project_dir, const std::string& project_name,
                          const std::string& rel, LaunchPlan* plan, std::string* error);
-// Opens the claim folder on the file in VS Code / Visual Studio, or hands
+// Opens the realm folder on the file in VS Code / Visual Studio, or hands
 // the file to the OS. Auto: the preference, else VS Code, else Visual
 // Studio (C# / C++), else the OS. Graphs always open in the Brand Book.
 // *message: a readable line for the editor's notes either way.
@@ -175,7 +175,7 @@ struct StackResult {
 // one discrete step (enable, reorder, remove, file, reset prop).
 StackResult draw_script_stack(std::vector<ScriptData>& stack, const ScriptStackHost& host);
 
-// Inspector "Add Component" for scripts: a searchable list of the claim's
+// Inspector "Add Component" for scripts: a searchable list of the realm's
 // scripts plus New Script... (a modal: name, language, template).
 struct AddScriptMenu {
   char search[64] = "";
@@ -192,7 +192,7 @@ struct AddScriptMenu {
 };
 
 // The Scripts panel (both editors): write a script in any language from a
-// template, the claim's scripts (drag one onto an entity; double-click
+// template, the realm's scripts (drag one onto an entity; double-click
 // opens it), and the selected file's status, Open / VS Code / Visual
 // Studio buttons and "Attach to <selection>".
 struct ScriptsPanelState {

@@ -382,7 +382,7 @@ bool write_part_gltf(const std::string& path, const std::string& node_name, cons
   Value root = Value::object();
   Value asset = Value::object();
   asset.set("version", Value::string("2.0"));
-  asset.set("generator", Value::string("TombStone Engine"));
+  asset.set("generator", Value::string("Nidavellir Engine"));
   root.set("asset", std::move(asset));
   root.set("scene", Value::number(0));
   Value node = Value::object();

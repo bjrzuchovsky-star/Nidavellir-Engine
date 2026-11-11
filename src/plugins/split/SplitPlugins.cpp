@@ -37,24 +37,24 @@ struct Spec {
 const Spec kSpecs[] = {
     {kJoltId, "Jolt Physics (3D)",
      "3D / VR rigid bodies on Jolt: dynamic and kinematic bodies, triggers as sensors, joints, "
-     "ray and shape casts, impacts, VR grab-and-throw and the rider's character sweep. Off: "
-     "bodies stay put, the rider uses the core box collision.",
+     "ray and shape casts, impacts, VR grab-and-throw and the wanderer's character sweep. Off: "
+     "bodies stay put, the wanderer uses the core box collision.",
      plugin::kType3D | plugin::kTypeVR},
     {kBox2DId, "Box2D Physics (2D)",
      "2D rigid bodies on Box2D v3: dynamic / kinematic bodies, joints, ray casts, hit events and "
      "the Shipyard's Box2D hulls. Off: bodies stay put; riders, tiles and colliders keep the "
      "core collision.",
      plugin::kType2D},
-    {kRider3DId, "Rider 3D (first / third person)",
+    {kRider3DId, "Wanderer (first / third person)",
      "The 3D Player controller: WASD / stick walking, jump, first- or third-person view, look "
      "keys and right stick, mouse look with Sensitivity, Invert Y, Smoothing and cursor "
      "capture. Also rides a VR claim flat on the desktop.",
      plugin::kType3D | plugin::kTypeVR},
-    {kTopDownId, "Top-down Rider (2D)",
+    {kTopDownId, "Top-down Wanderer (2D)",
      "The 2D top-down Player controller: eight-way stick / WASD movement with wall sliding and "
      "Face mouse aiming (cursor or right stick).",
      plugin::kType2D},
-    {kPlatformerId, "Platformer Rider (2D)",
+    {kPlatformerId, "Platformer Wanderer (2D)",
      "The 2D platformer Player controller: walk, gravity, jump off the ground, ceiling bumps.",
      plugin::kType2D},
 };

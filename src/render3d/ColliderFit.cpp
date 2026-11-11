@@ -38,7 +38,10 @@ ColliderFit resolve_collider_fit(const Model& m, ColliderFit f) {
   if (f != ColliderFit::Auto) return f;
   if (!m.collision_hulls.empty()) return ColliderFit::Convex;
   if (m.skinned()) return ColliderFit::Capsule;
-  return ColliderFit::Obb;
+  // The rendered mesh's axis-aligned bounds. An oriented box is a tighter
+  // fit for a diamond, and it is still there as "obb", but its euler can
+  // sit a little off the mesh. Auto stays on the bounds that are drawn.
+  return ColliderFit::Box;
 }
 
 namespace {

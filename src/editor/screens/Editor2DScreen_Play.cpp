@@ -415,14 +415,14 @@ void Editor2DScreen::draw_play_menu() {
 // Posse UI, contributed by the ts.posse plugin (EditorBuiltinPlugins.cpp).
 void Editor2DScreen::draw_posse_menu_items() {
   ImGui::Separator();
-  if (ux::MenuItem(posse_running() ? "Break Camp (stop posse)###Posse" : "Play with Posse###Posse",
+  if (ux::MenuItem(posse_running() ? "Break camp (stop clan)###Posse" : "Start clan###Posse",
                       nullptr, false, !is_playing())) {
     toggle_posse();
   }
-  if (ux::BeginMenu("Posse Size", !posse_running())) {
+  if (ux::BeginMenu("Clan size", !posse_running())) {
     for (int n = 1; n <= mp::kMaxPosse; ++n) {
       char label[32];
-      std::snprintf(label, sizeof(label), "%d rider%s", n, n == 1 ? "" : "s");
+      std::snprintf(label, sizeof(label), "%d wanderer%s", n, n == 1 ? "" : "s");
       if (ux::MenuItem(label, nullptr, posse_riders_ == n)) set_posse_riders(n);
     }
     ux::EndMenu();
@@ -437,13 +437,13 @@ void Editor2DScreen::draw_posse_toolbar_button() {
   ImGui::SameLine();
   ImGui::BeginDisabled(is_playing());
   bool posse_on = posse_running();
-  if (theme::ToggleButton("Posse", &posse_on, ImVec2(60, 0))) {
+  if (theme::ToggleButton("Clan", &posse_on, ImVec2(60, 0))) {
     toggle_posse();
   }
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
     ux::SetTooltip(posse_running()
-                          ? "Break camp: stop the local server and its riders"
-                          : "Play with posse: a local server + %d rider(s) in this editor, "
+                          ? "Break camp: stop the local server and its wanderers"
+                          : "Start a clan: a local server + %d wanderer(s) in this editor, "
                             "lag sim and Network panel",
                       posse_riders_);
   }
@@ -789,7 +789,7 @@ void Editor2DScreen::draw_inspector_gameplay(std::uint64_t id) {
         }
         char label[160];
         std::snprintf(label, sizeof(label), "%s%s##%llu", other.name.c_str(),
-                      other.player ? "  (rider)" : "",
+                      other.player ? "  (wanderer)" : "",
                       static_cast<unsigned long long>(other.id));
         if (ImGui::Selectable(label, other.id == e->camera->target)) {
           const std::uint64_t pick = other.id;

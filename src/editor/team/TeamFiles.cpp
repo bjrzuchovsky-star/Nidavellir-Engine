@@ -57,7 +57,7 @@ Value SessionBlobStore::handle(bool can_write, const Value& req) {
     return r;
   }
   if (t == "blob_put") {
-    if (!can_write) return fail("Your key is read-only: you can see the posse's files but not place your own.");
+    if (!can_write) return fail("Your key is read-only: you can see the clan's files but not place your own.");
     const std::string sha = req.str("sha");
     if (!vault::is_sha256_hex(sha)) return fail("Not a SHA-256.");
     const std::uint64_t size = static_cast<std::uint64_t>(req.num("size", 0));
@@ -127,7 +127,7 @@ Value SessionBlobStore::handle(bool can_write, const Value& req) {
 
 bool SessionBackend::ping(std::string* info, std::string* error) {
   if (!rpc_ || !rpc_->is_open()) {
-    if (error) *error = "Not riding with a posse.";
+    if (error) *error = "Not in a clan.";
     return false;
   }
   if (info) *info = "team session";
@@ -158,8 +158,11 @@ bool SessionBackend::upload(const std::string& path, const std::string& sha, std
     return false;
   }
   std::uint64_t off = 0;
+  int resumes = 0;
   std::string buf(kTeamBlobChunk, '\0');
   do {
+    f.clear();
+    f.seekg(static_cast<std::streamoff>(off));
     f.read(buf.data(), static_cast<std::streamsize>(buf.size()));
     const std::size_t n = static_cast<std::size_t>(f.gcount());
     Value req = Value::object();
@@ -169,7 +172,16 @@ bool SessionBackend::upload(const std::string& path, const std::string& sha, std
     req.set("off", Value::number(static_cast<double>(off)));
     req.set("data", Value::string(team::base64_encode(buf.substr(0, n))));
     Value r;
-    if (!rpc_->call(std::move(req), &r, kTimeout, error)) return false;
+    if (!rpc_->call(std::move(req), &r, kTimeout, error)) {
+      // The host kept a partial file. Continue from the byte it names.
+      const double have = r.num("have", -1);
+      if (have >= 0 && resumes < 8) {
+        off = static_cast<std::uint64_t>(have);
+        ++resumes;
+        continue;
+      }
+      return false;
+    }
     off += n;
     if (r.flag("done", false)) return true;
     if (n == 0) break;

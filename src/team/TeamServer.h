@@ -50,6 +50,8 @@ struct ServerOptions {
   double save_delay_s = 1.0;
   // Tests: wrap the transport (net::SimTransport for latency).
   std::function<std::unique_ptr<net::Transport>(std::unique_ptr<net::Transport>)> wrap_transport;
+  // When set, used instead of ENet (Steam P2P). wrap_transport still applies.
+  std::function<std::unique_ptr<net::Transport>()> make_transport;
   // Where the claim's project files travel, told to every rider in the
   // welcome (session.files): ts_vault {"via": "vault", "port": <HTTP>},
   // an editor host {"via": "vault", "url": ...} or {"via": "session"}.

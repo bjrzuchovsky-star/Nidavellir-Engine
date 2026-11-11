@@ -1,4 +1,4 @@
-# Windows resources for the shipped executables: VERSIONINFO (TombStone Team,
+# Windows resources for the shipped executables: VERSIONINFO (BORENJO Studios,
 # version from VERSION), the app icon and an application manifest (asInvoker,
 # per-monitor DPI aware, Windows 10/11). No-op off MSVC.
 #   ts_win_resources(<target> "<file description>" [ICON <file.ico> | NO_ICON])
@@ -17,7 +17,7 @@ function(ts_win_resources target description)
     set(TS_RC_ICON_LINE "// no icon: stamped per game by the exporter")
   else()
     if(NOT TWR_ICON)
-      set(TWR_ICON tombstone.ico)
+      set(TWR_ICON nidavellir.ico)
     endif()
     string(REPLACE "/" "\\\\" _ico "${_res}/${TWR_ICON}")
     set(TS_RC_ICON_LINE "1 ICON \"${_ico}\"")

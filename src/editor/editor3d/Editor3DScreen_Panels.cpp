@@ -53,7 +53,7 @@ bool paste_component_values_3d(scene3d::Entity3D& dst, const scene3d::Entity3D& 
   else if (name == "Collider") dst.collider = src.collider;
   else if (name == "Rigid Body") dst.rigid_body = src.rigid_body;
   else if (name == "Joint") dst.joint = src.joint;
-  else if (name == "Player (rider)") dst.player = src.player;
+  else if (name == "Wanderer") dst.player = src.player;
   else if (name == "Camera") dst.camera = src.camera;
   else if (name == "Follow") dst.follow = src.follow;
   else if (name == "Animator") dst.animator = src.animator;
@@ -439,7 +439,7 @@ void Editor3DScreen::draw_inspector() {
       }
     }
   }
-  if (component("Player (rider)", e.player.has_value(), [&] { e.player = scene3d::Player3D{}; },
+  if (component("Wanderer", e.player.has_value(), [&] { e.player = scene3d::Player3D{}; },
                 [&] { e.player.reset(); })) {
     scene3d::Player3D& p = *e.player;
     ImGui::DragFloat("Speed", &p.speed, 0.05f, 0.1f, 50.0f);
@@ -540,9 +540,9 @@ void Editor3DScreen::draw_inspector() {
     }
     if (c.rig != P::Rig::Fixed) {
       const scene3d::Entity3D* tgt = c.follow ? find(c.follow) : nullptr;
-      const std::string cur_t = tgt ? tgt->name : "The rider (Player)";
+      const std::string cur_t = tgt ? tgt->name : "The wanderer (Player)";
       if (ImGui::BeginCombo("Follow", cur_t.c_str())) {
-        if (ImGui::Selectable("The rider (Player)", c.follow == 0)) {
+        if (ImGui::Selectable("The wanderer (Player)", c.follow == 0)) {
           c.follow = 0;
           t.activated = true;
           t.commit = "Camera follow";

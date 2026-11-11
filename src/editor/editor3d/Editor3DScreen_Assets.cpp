@@ -8,10 +8,14 @@ namespace editor {
 void Editor3DScreen::open_asset_browser() {
   AssetBrowserHost host;
   host.before_disk_change = [this] {
+    if (playing()) return;
+    if (team_ && team_->joined() && !team_->hosting()) return;
     std::string err;
-    if (!playing()) save_scene(&err);
+    save_scene(&err);
   };
   host.after_refs_changed = [this] {
+    if (playing()) return;
+    if (team_ && team_->joined() && !team_->hosting()) return;
     std::string err;
     if (!reload_scene(&err)) note("Reload after asset move failed: " + err, runtime::LogLevel::Error);
     rescan_assets();
@@ -66,7 +70,7 @@ void Editor3DScreen::drop_vault_item(const std::string& item, const render3d::Ve
   vault_panel_.pull_then(item, [this, pos](const vaultp::PullResult& r) {
     if (r.kind == "prefab") drop_asset("prefab:" + r.main, pos);
     else if (r.kind == "model" || r.kind == "audio") drop_asset(r.main, pos);
-    else note("Pulled " + r.main + " into the claim");
+    else note("Pulled " + r.main + " into the realm");
   });
 }
 

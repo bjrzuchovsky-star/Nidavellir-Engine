@@ -5,8 +5,8 @@
 // "Fit to mesh" button both come here, so a placed model and a refit agree.
 //
 //   auto       the model's own hulls when it has them, a capsule for a
-//              skinned model, else an oriented box when that is tighter
-//              than the axis-aligned box (a crate stays a plain box)
+//              skinned model, else the axis-aligned box of the rendered
+//              mesh (import scale, up axis and node pivot already baked)
 //   box        axis-aligned tight box (Model::bounds)
 //   obb        oriented tight box
 //   capsule    upright capsule fitted to the rest-pose vertices

@@ -15,7 +15,9 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <mutex>
 #include <sstream>
+#include <thread>
 
 namespace ts {
 namespace tombstone {
@@ -111,18 +113,34 @@ struct LanguageStatus {
   std::string cpp, cs;
   bool cpp_ok = false, cs_ok = false;
 };
-std::shared_future<LanguageStatus>& language_status() {
-  static std::shared_future<LanguageStatus> f = std::async(std::launch::async, [] {
-    LanguageStatus s;
-    std::string why;
-    s.cpp_ok = runtime::native_scripts::toolchain_available(&why);
-    s.cpp = s.cpp_ok ? "ready (cmake + host compiler)" : why;
-    s.cs_ok = runtime::csharp_scripts::sdk_available(&why);
-    s.cs = s.cs_ok ? "ready (.NET SDK " + runtime::csharp_scripts::dotnet_info().sdk + ")"
-                   : std::string("Install the .NET 8 SDK to enable C#");
-    return s;
-  }).share();
-  return f;
+// A detached probe. std::async's future would block process exit until
+// vswhere / dotnet finished, which hung --showcase-shot graph after the PNG.
+struct LanguageSlot {
+  std::mutex mu;
+  bool ready = false;
+  LanguageStatus status;
+};
+LanguageSlot& language_slot() {
+  static LanguageSlot slot;
+  return slot;
+}
+void ensure_language_probe() {
+  static std::once_flag once;
+  std::call_once(once, [] {
+    std::thread([] {
+      LanguageStatus s;
+      std::string why;
+      s.cpp_ok = runtime::native_scripts::toolchain_available(&why);
+      s.cpp = s.cpp_ok ? "ready (cmake + host compiler)" : why;
+      s.cs_ok = runtime::csharp_scripts::sdk_available(&why);
+      s.cs = s.cs_ok ? "ready (.NET SDK " + runtime::csharp_scripts::dotnet_info().sdk + ")"
+                     : std::string("Install the .NET 8 SDK to enable C#");
+      LanguageSlot& slot = language_slot();
+      std::lock_guard<std::mutex> lk(slot.mu);
+      slot.status = std::move(s);
+      slot.ready = true;
+    }).detach();
+  });
 }
 
 }  // namespace
@@ -175,7 +193,7 @@ void BrandBook::open(const std::string& project_dir, const std::string& project_
   project_dir_ = project_dir;
   project_name_ = project_name;
   open_ = true;
-  (void)language_status();
+  ensure_language_probe();
   refresh_list();
   if (rel_.empty() && !graphs_.empty()) load(graphs_.front());
 }
@@ -327,7 +345,7 @@ void BrandBook::draw_sidebar() {
   theme::BrandBlock("Brand Book", "visual scripts", ImGui::GetContentRegionAvail().x);
   theme::SectionHeader("Graphs", "scripts/*.graph.json");
   ImGui::BeginChild("##bb_list", ImVec2(0, 150), ImGuiChildFlags_Borders);
-  if (graphs_.empty()) ImGui::TextDisabled("No graphs on this claim yet.");
+  if (graphs_.empty()) ImGui::TextDisabled("No graphs on this realm yet.");
   for (const std::string& g : graphs_) {
     if (ImGui::Selectable(g.c_str() + 8, g == rel_)) {
       if (g != rel_) load(g);
@@ -384,12 +402,17 @@ void BrandBook::draw_languages() {
   ImGui::TextColored(theme::Success(), "Graph");
   ImGui::SameLine(80);
   ImGui::TextDisabled(".graph.json  ready");
-  auto& st = language_status();
-  if (st.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
-    ImGui::TextDisabled("C++ / C#: checking toolchains...");
-    return;
+  ensure_language_probe();
+  LanguageStatus s;
+  {
+    LanguageSlot& slot = language_slot();
+    std::lock_guard<std::mutex> lk(slot.mu);
+    if (!slot.ready) {
+      ImGui::TextDisabled("C++ / C#: checking toolchains...");
+      return;
+    }
+    s = slot.status;
   }
-  const LanguageStatus& s = st.get();
   ImGui::TextColored(s.cpp_ok ? theme::Success() : theme::Warning(), "C++");
   ImGui::SameLine(80);
   ImGui::PushTextWrapPos(0);
@@ -472,7 +495,7 @@ void BrandBook::draw_canvas() {
     dl->AddLine(ImVec2(origin.x, origin.y + y), ImVec2(origin.x + size.x, origin.y + y),
                 theme::U32(theme::GridLine(), major ? 1.6f : 0.7f));
   }
-  theme::TombstoneMark(dl, ImVec2(origin.x + size.x - 60, origin.y + size.y - 130), 100,
+  theme::RuneMark(dl, ImVec2(origin.x + size.x - 60, origin.y + size.y - 130), 100,
                        theme::U32(theme::Sand(), 0.06f), theme::U32(theme::Charcoal(), 0.10f));
   if (rel_.empty()) {
     theme::DrawSizedText(dl, ImVec2(origin.x + 30, origin.y + 30), 22, theme::U32(theme::TextMuted()),

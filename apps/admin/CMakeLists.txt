@@ -1,5 +1,6 @@
 add_executable(ts_admin
   main.cpp
+  ShowcaseShot.cpp
   SmokeRuntime.cpp
   SmokeCollision.cpp
   SmokeAnimation.cpp
@@ -53,12 +54,14 @@ add_executable(ts_admin
   SmokeUx.cpp
   SmokeUpdate.cpp
   SmokeTeam.cpp
+  SmokeClan.cpp
   SmokeMouseLook.cpp
   SmokePluginSplit.cpp
   VaultCli.cpp
   TerrainShot.cpp
 )
-ts_win_resources(ts_admin "TombStone Engine editor and Project Manager")
+ts_win_resources(ts_admin "Nidavellir Engine editor and Project Manager")
+nidavellir_attach_steam(ts_admin)
 
 
 target_link_libraries(ts_admin

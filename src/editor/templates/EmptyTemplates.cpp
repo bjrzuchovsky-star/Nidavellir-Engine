@@ -52,14 +52,14 @@ std::string readme(const std::string& title, const std::string& what, const std:
                    const std::string& next, const std::vector<std::string>& plugins = {}) {
   const std::string plugin_line =
       plugins.empty()
-          ? "- No optional plugins are on. Turn them on from the Trading Post (or the Outfitter's "
+          ? "- No optional plugins are on. Turn them on from the Market (or the Outfitter's "
             "Wagon) when you need them.\n"
-          : "- On: " + join_ids(plugins) + " (physics and movement for the rider, 0.2.0 Trading "
-            "Post plugins). Turn more on from the Trading Post (or the Outfitter's Wagon) when you "
+          : "- On: " + join_ids(plugins) + " (physics and movement for the wanderer, from the "
+            "Market). Turn more on from the Market (or the Outfitter's Wagon) when you "
             "need them.\n";
   return "# " + title + "\n\n" + what + "\n\n## Play\n\n" + play + "\n\n## Next steps\n\n" + next +
          "\n" + plugin_line +
-         "- Everything in this claim was made by the engine (CC0). Replace it freely.\n";
+         "- Everything in this realm was made by the engine (CC0). Replace it freely.\n";
 }
 
 // --- 2D -----------------------------------------------------------------------
@@ -202,7 +202,7 @@ bool write_2d(const std::string& id, const fs::path& dir, const std::string& nam
     doc.entities.push_back(camera_2d(1, 0));
     doc.entities.push_back(tilemap_2d(2, 32, 18));
     title = "Empty 2D";
-    what = "A 2D claim with a camera (Camera2D), one empty tilemap layer (TileMap, 32 x 18 "
+    what = "A 2D realm with a camera (Camera2D), one empty tilemap layer (TileMap, 32 x 18 "
            "tiles of 32 px) and the 2D lighting off. Nothing else.";
     play = "There is no player yet, so Play shows the camera's view of the empty map.";
     next = "- Paint tiles on the TileMap (Tiles panel) or set a tileset image.\n"
@@ -215,7 +215,7 @@ bool write_2d(const std::string& id, const fs::path& dir, const std::string& nam
     doc.selected_id = 3;
     doc.selection = {3};
     title = "Empty 2D Top-down";
-    what = "A top-down 2D claim: a Player with top-down movement (Player Controller, slot P1, "
+    what = "A top-down 2D realm: a Player with top-down movement (Player Controller, slot P1, "
            "Face mouse on) and a collider, a follow camera (Camera2D) and an empty tilemap layer.";
     play = "WASD / arrow keys / the left stick move the player on both axes, and it turns to "
            "face the mouse cursor (or the right stick). Solid tiles and static colliders block "
@@ -236,7 +236,7 @@ bool write_2d(const std::string& id, const fs::path& dir, const std::string& nam
     doc.selected_id = 3;
     doc.selection = {3};
     title = "Empty 2D Platformer";
-    what = "A side-on 2D claim: a Player with platformer movement (gravity 1400 px/s2, jump "
+    what = "A side-on 2D realm: a Player with platformer movement (gravity 1400 px/s2, jump "
            "560 px/s), two rows of solid ground tiles (Stone) and a follow camera.";
     play = "A / D, the arrows or the left stick walk; W / Up / Space (action) jump while "
            "standing on something solid.";
@@ -361,7 +361,7 @@ bool write_3d(const std::string& id, const fs::path& dir, const std::string& nam
     s.entities.push_back(ground_3d(3));
     script = nullptr;
     title = "Empty 3D";
-    what = "A 3D claim with a camera (Camera component), a sun (directional light), a clear "
+    what = "A 3D realm with a camera (Camera component), a sun (directional light), a clear "
            "sky (Scene environment) and a 40 x 40 m ground plane. No props.";
     play = "There is no player yet, so Play looks through the Camera.";
     next = "- Create > Primitive or drop glTF models from the asset browser.\n"
@@ -378,7 +378,7 @@ bool write_3d(const std::string& id, const fs::path& dir, const std::string& nam
     s.entities.push_back(ground_3d(4));
     s.selection = {1};
     title = "Empty 3D First-person";
-    what = "A first-person 3D claim: an FPS character controller (Player component, View: "
+    what = "A first-person 3D realm: an FPS character controller (Player component, View: "
            "First person, capsule collider), its Camera at eye height (a child of the player), a "
            "sun, a sky and a ground plane.";
     play = "The mouse looks (Play captures the cursor; Esc frees it, click the view to look "
@@ -394,7 +394,7 @@ bool write_3d(const std::string& id, const fs::path& dir, const std::string& nam
     s.entities.push_back(ground_3d(3));
     s.selection = {1};
     title = "Empty 3D Third-person";
-    what = "A third-person 3D claim: a character controller (Player component, capsule mesh "
+    what = "A third-person 3D realm: a character controller (Player component, capsule mesh "
            "and collider) with the orbit camera behind it (Cam distance 5 m, Cam height 2 m), a "
            "sun, a sky and a ground plane.";
     play = "The mouse orbits the camera round the player (Play captures the cursor; Esc frees "
@@ -426,7 +426,7 @@ bool write_3d(const std::string& id, const fs::path& dir, const std::string& nam
     s.editor_camera.distance = 7.0f;
     script = kRigLua;
     title = "Empty VR";
-    what = "A 3D claim with VR on: an XR rig (VR Rig component) with skinned hands "
+    what = "A 3D realm with VR on: an XR rig (VR Rig component) with skinned hands "
            "(assets/hand.gltf), teleport locomotion and 45 degree snap turn, a sun, a sky and a "
            "ground plane.";
     play = "In a headset: push the right stick forward to aim the teleport arc and release to "

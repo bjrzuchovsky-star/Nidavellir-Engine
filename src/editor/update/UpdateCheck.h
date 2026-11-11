@@ -18,9 +18,9 @@ namespace update {
 
 // The GitHub "latest release" endpoint for the engine.
 inline constexpr const char* kLatestReleaseUrl =
-    "https://api.github.com/repos/bjrzuchovsky-star/TombStone_Engine/releases/latest";
+    "https://api.github.com/repos/bjrzuchovsky-star/Nidavellir-Engine/releases/latest";
 inline constexpr const char* kReleasesPageUrl =
-    "https://github.com/bjrzuchovsky-star/TombStone_Engine/releases";
+    "https://github.com/bjrzuchovsky-star/Nidavellir-Engine/releases";
 // At most one check per this many seconds (cached in settings.json).
 inline constexpr std::int64_t kCheckIntervalSeconds = 6 * 60 * 60;
 
@@ -63,9 +63,9 @@ struct ReleaseInfo {
 bool parse_release_json(const std::string& text, ReleaseInfo* out, std::string* error);
 
 enum class AssetKind { None, Update, Setup };
-// TombStone-<ver>-update.exe first, else TombStone-<ver>-setup.exe (ver =
-// the tag without the v; names compare case-insensitively). nullptr when
-// neither is attached.
+// Nidavellir-<ver>-update.exe first, then the 0.2.x TombStone- name, then
+// the matching -setup.exe (ver = the tag without the v; case-insensitive).
+// nullptr when neither prefix is attached.
 const ReleaseAsset* select_update_asset(const ReleaseInfo& r, AssetKind* kind = nullptr);
 const ReleaseAsset* find_sums_asset(const ReleaseInfo& r);  // SHA256SUMS.txt
 // Lowercase hex for `file_name` in a SHA256SUMS.txt ("<hex>  <name>" or

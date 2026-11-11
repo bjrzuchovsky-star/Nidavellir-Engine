@@ -141,7 +141,7 @@ Each hook call has a budget of 20000 steps and a nesting depth limit of 64 (`kMa
 
 Open the editor (`src/editor/scripting/BrandBook.*`) in any of these ways:
 
-- **File > Brand Book... (visual scripts)** in 2D, or **Claim > Brand Book... (visual scripts)** in 3D
+- **File > Brand Book... (visual scripts)** in 2D, or **Realm > Brand Book... (visual scripts)** in 3D
 - by double-clicking a `.graph.json`
 - standalone: `ts_admin --brand-book <project> [graph]`
 
@@ -244,6 +244,8 @@ Both languages sit on one native API (`TsScriptApi`, ABI 4). Names match. C++ us
 `Vector3` has `.X` `.Y` `.Z` (settable), `Zero`, `Up`, `+` and `* float`, and a readable `ToString`.
 
 Grounding in the sample is `Position.Y <= 0.01` plus `Move`. `Move` keeps the capsule on box colliders, on a terrain heightfield and on mesh / fitted convex colliders, including when the physics plugin is off. The sample does not call the Rider plugin.
+
+Facing is the body's rotation. `Transform.Forward` is **-Z**. The sample builds its move from `Transform.Forward` and `Transform.Right`, so it travels the way it looks. The rider does the same: it turns the body so -Z matches the velocity. A glTF whose nose is +Z is corrected on import ([model import](model-import.md#forward-and-up)); set **Forward axis** on the model if a file uses another axis.
 
 ### Not yet (parity with Unity / Unreal)
 

@@ -140,6 +140,8 @@ json::Value default_model_settings(const std::string& path) {
   s.set("scale", Value::number(1));  // placement scale (entity transform)
   s.set("unit_scale", Value::number(source ? 0.0254 : 1.0));
   s.set("up_axis", Value::string(source ? "z" : "auto"));
+  // glTF looks along +Z. Auto turns that onto the engine's -Z forward.
+  s.set("forward_axis", Value::string("auto"));
   s.set("material_path", Value::string(""));
   s.set("lod", Value::number(0));
   s.set("generate_collider", Value::boolean(true));
@@ -162,6 +164,14 @@ ModelImportOptions model_options_from_settings(const json::Value& s, const std::
   if (!(o.unit_scale > 0.0f) || !std::isfinite(o.unit_scale)) o.unit_scale = 1.0f;
   const std::string up = lower(s.has("up_axis") ? s.str("up_axis") : d.str("up_axis"));
   o.up = up == "z" ? UpAxis::Z : up == "y" ? UpAxis::Y : UpAxis::Auto;
+  const std::string fw = lower(s.has("forward_axis") ? s.str("forward_axis") : d.str("forward_axis"));
+  if (fw == "+x" || fw == "x" || fw == "posx") o.forward = ForwardAxis::PosX;
+  else if (fw == "-x" || fw == "negx") o.forward = ForwardAxis::NegX;
+  else if (fw == "+y" || fw == "y" || fw == "posy") o.forward = ForwardAxis::PosY;
+  else if (fw == "-y" || fw == "negy") o.forward = ForwardAxis::NegY;
+  else if (fw == "+z" || fw == "z" || fw == "posz") o.forward = ForwardAxis::PosZ;
+  else if (fw == "-z" || fw == "negz" || fw == "none") o.forward = ForwardAxis::NegZ;
+  else o.forward = ForwardAxis::Auto;
   o.material_paths = split_paths(s.str("material_path"));
   o.lod = std::max(0, static_cast<int>(num("lod")));
   o.animations = s.flag("import_animations", true);
@@ -536,6 +546,53 @@ void bake_import_transform(Model* m, float scale, bool z_up) {
   update_bounds(m);
 }
 
+namespace {
+
+ForwardAxis resolved_forward(const Model& m, ForwardAxis axis) {
+  if (axis != ForwardAxis::Auto) return axis;
+  return m.format == "gltf" ? ForwardAxis::PosZ : ForwardAxis::NegZ;
+}
+
+Quat forward_quat(ForwardAxis axis) {
+  switch (axis) {
+    case ForwardAxis::PosZ: return Quat::axis_angle({0, 1, 0}, kPi);
+    case ForwardAxis::PosX: return Quat::axis_angle({0, 1, 0}, kPi * 0.5f);
+    case ForwardAxis::NegX: return Quat::axis_angle({0, 1, 0}, -kPi * 0.5f);
+    case ForwardAxis::PosY: return Quat::axis_angle({1, 0, 0}, -kPi * 0.5f);
+    case ForwardAxis::NegY: return Quat::axis_angle({1, 0, 0}, kPi * 0.5f);
+    case ForwardAxis::NegZ:
+    case ForwardAxis::Auto: return {};
+  }
+  return {};
+}
+
+}  // namespace
+
+void bake_forward_axis(Model* m, ForwardAxis axis) {
+  if (!m) return;
+  const Quat q = forward_quat(resolved_forward(*m, axis));
+  if (std::fabs(q.x) + std::fabs(q.y) + std::fabs(q.z) < 1.0e-8f) return;
+  const Mat4 c = Mat4::rotate(q);
+  const Mat4 c_inv = c.inverse();
+  for (ModelPrimitive& p : m->primitives) {
+    for (Vertex3D& v : p.mesh.vertices) {
+      v.position = q.rotate(v.position);
+      v.normal = normalize(q.rotate(v.normal));
+      const Vec3 t = q.rotate(Vec3{v.tangent.x, v.tangent.y, v.tangent.z});
+      v.tangent = {t.x, t.y, t.z, v.tangent.w};
+    }
+  }
+  for (Joint& j : m->skeleton.joints) {
+    if (j.parent < 0) j.base = c * j.base;
+    j.inverse_bind = j.inverse_bind * c_inv;
+  }
+  for (auto& hull : m->collision_hulls) {
+    for (Vec3& p : hull) p = q.rotate(p);
+  }
+  for (ModelHitbox& h : m->hitboxes) h.bind = c * h.bind;
+  update_bounds(m);
+}
+
 bool load_model(const std::string& path, Model* out, std::string* error) {
   ModelImportOptions opt;
   read_model_options(path, &opt);
@@ -591,6 +648,7 @@ bool load_model(const std::string& path, const ModelImportOptions& opt, Model* o
   }
   if (!opt.collision) out->collision_hulls.clear();
   bake_import_transform(out, opt.unit_scale, z_up);
+  bake_forward_axis(out, opt.forward);
   limit_skin_joints(out);
   update_bounds(out);
   // Authored clips sit beside the file (hero.gltf -> hero.anim3d.json).

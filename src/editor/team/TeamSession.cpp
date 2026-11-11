@@ -1,5 +1,7 @@
 #include "editor/team/TeamSession.h"
 
+#include "platform/ClanDirectory.h"
+
 #include "editor/settings/Settings.h"
 #include "editor/team/TeamFiles.h"
 
@@ -62,6 +64,45 @@ std::vector<std::string> TeamSession::take_arrived() {
   return out;
 }
 
+std::string TeamSession::clan_mirror_dir(const std::string& project_id, const std::string& claim_id) {
+  std::string safe = claim_id.empty() || claim_id == "*" ? "session" : claim_id;
+  for (char& c : safe) {
+    if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?') c = '_';
+  }
+  std::string who = project_id.empty() ? "realm" : project_id;
+  for (char& c : who) {
+    if (c == '/' || c == '\\' || c == ':') c = '_';
+  }
+  return (std::filesystem::temp_directory_path() / "nidavellir-clan-mirrors" / who / safe).string();
+}
+
+std::string TeamSession::files_root() const {
+  if (hosting() || mirror_root_.empty()) return project_.path;
+  return mirror_root_;
+}
+
+void TeamSession::ensure_mirror() {
+  if (hosting() || !client_.joined()) {
+    mirror_root_.clear();
+    return;
+  }
+  std::string claim = client_.session().str("claim");
+  if (claim.empty() || claim == "*") claim = last_join_.claim;
+  const std::string dir = clan_mirror_dir(project_.id, claim);
+  if (dir == mirror_root_) return;
+  mirror_root_ = dir;
+  std::error_code ec;
+  const std::filesystem::path root = std::filesystem::u8path(mirror_root_);
+  // A new ride gets an empty cache. A leftover from an earlier session in
+  // this folder would already match the next send, so the Vault transfer
+  // (and its byte counter) would never start.
+  if (dir.find("nidavellir-clan-mirrors") != std::string::npos) {
+    std::filesystem::remove_all(root, ec);
+  }
+  std::filesystem::create_directories(root / "assets", ec);
+  std::filesystem::create_directories(root / ".tombstone", ec);
+}
+
 void TeamSession::choose_files_backend() {
   files_chosen_ = true;
   files_error_.clear();
@@ -81,7 +122,7 @@ void TeamSession::choose_files_backend() {
   auto vault = [&](std::string url, const std::string& where) {
     if (key.empty() && settings_fallback) key = settings().vault_api_key;
     if (key.empty()) {
-      files_error_ = "Files can't travel: the posse's files live in the Vault at " + url +
+      files_error_ = "Files can't travel: the clan's files live in the Vault at " + url +
                      ", which needs your Vault API key. Put it in the Team panel's key box (or Settings > "
                      "Vault > API key), then ride out and in again.";
       return;
@@ -114,18 +155,18 @@ void TeamSession::choose_files_backend() {
     assets_ = std::make_shared<SessionBackend>(client_.rpc());
     files_route_ = server_ ? "over the team session (you host them)" : "over the team session (the host keeps them)";
   } else {
-    // An older host (TombStone 0.2.0) does not say where files travel.
+    // An older host (Nidavellir / TombStone 0.2.0) does not say where files travel.
     const std::string url = settings_fallback ? settings().vault_url : std::string();
     if (!url.empty()) {
       vault(url, " (from Settings > Vault)");
     } else {
-      files_error_ = "Files can't travel: this team host doesn't say where the posse's files live (it runs an "
-                     "older TombStone). Type its Vault URL in the Team panel (ts_vault: http://<host>:25565), "
+      files_error_ = "Files can't travel: this team host doesn't say where the clan's files live (it runs an "
+                     "older Nidavellir). Type its Vault URL in the Team panel (ts_vault: http://<host>:25565), "
                      "or update the host.";
     }
   }
   if (assets_ && !client_.can_write()) {
-    files_route_ += "; your key is read-only, so you see the posse's files but yours stay on this PC";
+    files_route_ += "; your key is read-only, so you see the clan's files but yours stay on this PC";
   }
 }
 
@@ -256,7 +297,7 @@ bool TeamSession::join(const TeamJoinSettings& s, std::string* error) {
   o.wrap_transport = s.wrap_transport;
   files_url_ = s.vault_url;
   files_key_ = s.key;
-  // Seeds a session only if nobody is riding this claim yet (ts_vault).
+  // Seeds a session only if nobody is riding this realm yet (ts_vault).
   if (o.claim != "*") o.seed[binding_->scene_key()] = binding_->capture();
   o.rejoin = saved_rejoin_;
   loaded_ = false;
@@ -265,8 +306,181 @@ bool TeamSession::join(const TeamJoinSettings& s, std::string* error) {
   return client_.join(o, error);
 }
 
+bool TeamSession::host_clan(bool invite_only, std::string* error) {
+  if (!steam::clan_backend().available()) {
+    if (error) *error = "Steam is not running. Host by address instead.";
+    return false;
+  }
+  if (active() || via_clan_) leave();
+  steam::ClanMeta meta;
+  meta.engine = TS_ENGINE_VERSION;
+  meta.claim = project_.id;
+  meta.claim_name = project_.name;
+  meta.dim = dim_of(project_);
+  if (!steam::clan_backend().host_clan(invite_only, meta, error)) return false;
+  via_clan_ = true;
+  if (steam::clan_backend().lobby_id().empty()) {
+    clan_host_pending_ = true;
+    return true;
+  }
+  return open_clan_server(error);
+}
+
+bool TeamSession::join_clan(const std::string& lobby_id, std::string* error) {
+  if (!steam::clan_backend().available()) {
+    if (error) *error = "Steam is not running. Join by address instead.";
+    return false;
+  }
+  if (active() || via_clan_) leave();
+  if (!steam::clan_backend().join_clan(lobby_id, error)) return false;
+  via_clan_ = true;
+  if (steam::clan_backend().host_id().empty()) {
+    clan_join_pending_ = true;
+    return true;
+  }
+  return open_clan_client(error);
+}
+
+bool TeamSession::kick_clan_member(const std::string& steam_id, std::string* error) {
+  return steam::clan_backend().kick(steam_id, error);
+}
+
+bool TeamSession::open_clan_server(std::string* error) {
+  const bool p2p = static_cast<bool>(steam::make_clan_transport());
+  server_ = std::make_unique<team::TeamServer>();
+  team::ServerOptions so;
+  so.port = p2p ? 0 : kDefaultPort;
+  so.only_claim = project_.id;
+  so.passcode = ui.pass;
+  so.engine = TS_ENGINE_VERSION;
+  if (p2p) so.make_transport = [] { return steam::make_clan_transport(); };
+  if (!team_dir().empty()) so.state_dir = (std::filesystem::u8path(team_dir()) / "host").string();
+  if (ui.vault_url[0]) {
+    so.files = team::Value::object();
+    so.files.set("via", team::Value::string("vault"));
+    so.files.set("url", team::Value::string(ui.vault_url));
+  } else if (!so.state_dir.empty()) {
+    so.files = team::Value::object();
+    so.files.set("via", team::Value::string("session"));
+    blob_store_ = std::make_shared<SessionBlobStore>(
+        (std::filesystem::u8path(so.state_dir) / "blobs").string());
+    std::shared_ptr<SessionBlobStore> store = blob_store_;
+    so.blobs = [store](const std::string&, bool can_write, const team::Value& req) {
+      return store->handle(can_write, req);
+    };
+  }
+  if (!server_->start(so, error)) {
+    server_.reset();
+    return false;
+  }
+  team::JoinOptions o = base_join();
+  if (p2p) {
+    o.host = steam::clan_backend().my_id();
+    o.port = 1;
+    o.make_transport = [] { return steam::make_clan_transport(); };
+  } else {
+    o.host = "127.0.0.1";
+    o.port = server_->port();
+  }
+  const std::string persona = steam::clan_backend().persona();
+  o.user = ui.user[0] ? ui.user : persona;
+  if (client_.seq() > 0) o.seed = client_.confirmed();
+  else o.seed[binding_->scene_key()] = binding_->capture();
+  o.rejoin = saved_rejoin_;
+  loaded_ = client_.seq() == 0 ? false : loaded_;
+  clan_host_id_ = steam::clan_backend().my_id();
+  last_join_ = o;
+  last_join_host_ = true;
+  if (!client_.join(o, error)) {
+    server_->stop();
+    server_.reset();
+    return false;
+  }
+  return true;
+}
+
+bool TeamSession::open_clan_client(std::string* error) {
+  const std::string mismatch =
+      steam::clan_version_error(TS_ENGINE_VERSION, steam::clan_backend().meta_value("engine"));
+  if (!mismatch.empty()) {
+    steam::clan_backend().leave();
+    via_clan_ = false;
+    clan_join_pending_ = false;
+    if (error) *error = mismatch;
+    ui.last_error = mismatch;
+    return false;
+  }
+  if (!steam::make_clan_transport()) {
+    if (error) *error = "This build has no Steam relay. Join by address instead.";
+    via_clan_ = false;
+    return false;
+  }
+  team::JoinOptions o = base_join();
+  o.host = steam::clan_backend().host_id();
+  o.port = 1;
+  o.make_transport = [] { return steam::make_clan_transport(); };
+  o.user = ui.user[0] ? ui.user : steam::clan_backend().persona();
+  const std::string claim = steam::clan_backend().meta_value("claim");
+  o.claim = claim.empty() ? "*" : claim;
+  o.rejoin = saved_rejoin_;
+  loaded_ = false;
+  clan_host_id_ = o.host;
+  last_join_ = o;
+  last_join_host_ = false;
+  return client_.join(o, error);
+}
+
+void TeamSession::tick_clan() {
+  steam::ClanBackend& clan = steam::clan_backend();
+  clan.poll();
+  if (!via_clan_ && !active() && clan.available()) {
+    const std::string req = clan.take_join_request();
+    if (!req.empty()) {
+      std::string err;
+      if (!join_clan(req, &err) && !err.empty()) ui.last_error = err;
+    }
+  }
+  if (clan_host_pending_ && !clan.lobby_id().empty()) {
+    clan_host_pending_ = false;
+    std::string err;
+    if (!open_clan_server(&err)) ui.last_error = err;
+  }
+  if (!clan.last_error().empty() && (clan_host_pending_ || clan_join_pending_)) {
+    ui.last_error = clan.last_error();
+    clan_host_pending_ = false;
+    clan_join_pending_ = false;
+    via_clan_ = false;
+  }
+  if (clan_join_pending_ && !clan.host_id().empty()) {
+    clan_join_pending_ = false;
+    std::string err;
+    if (!open_clan_client(&err)) ui.last_error = err;
+  }
+  if (via_clan_ && !server_ && !clan_host_pending_ && clan.i_am_host() &&
+      client_.state() != team::TeamClient::State::Connecting) {
+    std::string err;
+    if (!open_clan_server(&err)) ui.last_error = err;
+  } else if (via_clan_ && !clan.i_am_host()) {
+    const std::string host = clan.host_id();
+    if (!host.empty() && host != clan_host_id_ && !clan_join_pending_) {
+      clan_host_id_ = host;
+      client_.leave();
+      std::string err;
+      if (!open_clan_client(&err)) ui.last_error = err;
+    }
+  }
+}
+
 void TeamSession::leave() {
+  if (via_clan_) {
+    std::string next;
+    steam::clan_backend().migrate(&next, nullptr);
+    via_clan_ = false;
+  clan_host_pending_ = false;
+  clan_join_pending_ = false;
+  }
   was_joined_ = false;
+  mirror_root_.clear();
   reconnecting_ = false;
   rejoin_pending_ = false;
   client_.rpc()->close("You rode out.");  // a file transfer waiting on the host gives up
@@ -326,7 +540,7 @@ void TeamSession::start_reconnect() {
   reconnect_tries_ = 0;
   auto it = client_.confirmed().find(binding_->scene_key());
   rejoin_base_ = it == client_.confirmed().end() ? team::SceneDoc{} : it->second;
-  // Ride back in to the claim we were on, as ourselves.
+  // Ride back in to the realm we were on, as ourselves.
   last_join_.claim = client_.session().str("claim", last_join_.claim);
   last_join_.rejoin = client_.rejoin_token();
   asset_sync_.cancel_and_wait();
@@ -341,7 +555,7 @@ void TeamSession::start_reconnect() {
   last_preview_.clear();
   held_.clear();
   loaded_ = false;
-  notes_.push_back("Lost the trail to the posse. Riding back in; keep working, your edits will follow.");
+  notes_.push_back("Lost the clan. Joining again; keep working, your edits will follow.");
 }
 
 void TeamSession::tick_reconnect(double dt) {
@@ -360,7 +574,7 @@ void TeamSession::tick_reconnect(double dt) {
   ++reconnect_tries_;
   team::JoinOptions o = last_join_;
   o.seed.clear();
-  // If the host lost the claim (restarted without its state), ours seeds it.
+  // If the host lost the realm (restarted without its state), ours seeds it.
   o.seed[binding_->scene_key()] = binding_->capture();
   std::string err;
   client_.join(o, &err);
@@ -397,7 +611,7 @@ void TeamSession::rode_back_in(const team::Docs& docs) {
   ++rejoins_;
   notes_.push_back(std::string(client_.rode_back() ? "Rode back in as " : "Rode back in (as a new rider) as ") +
                    client_.my_name() + ": " + std::to_string(mine.size()) + " change(s) from while you were away, " +
-                   std::to_string(theirs.size()) + " from the posse.");
+                   std::to_string(theirs.size()) + " from the clan.");
 }
 
 void TeamSession::set_cursor(float x, float y, float z, bool valid) {
@@ -437,15 +651,15 @@ std::string TeamSession::status_line() const {
            (reconnect_tries_ ? " (try " + std::to_string(reconnect_tries_) + ")" : std::string()) + "...";
   }
   switch (client_.state()) {
-    case S::Idle: return "Riding solo";
-    case S::Connecting: return "Riding out to " + client_.options().host + "...";
+    case S::Idle: return "Not in a clan";
+    case S::Connecting: return "Joining " + client_.options().host + "...";
     case S::Refused: return "Turned away: " + client_.error();
-    case S::Closed: return client_.error().empty() ? "Riding solo" : client_.error();
+    case S::Closed: return client_.error().empty() ? "Not in a clan" : client_.error();
     case S::Joined: break;
   }
-  std::string s = std::string(hosting() ? "Hosting" : "Riding with") + " a posse of " +
+  std::string s = std::string(hosting() ? "Hosting" : "In") + " a clan of " +
                   std::to_string(client_.members().size() + 1);
-  if (client_.pending()) s += " (" + std::to_string(client_.pending()) + " edit(s) in the saddlebag)";
+  if (client_.pending()) s += " (" + std::to_string(client_.pending()) + " edit(s) waiting)";
   return s;
 }
 
@@ -464,12 +678,14 @@ void TeamSession::send_presence(bool force) {
 }
 
 void TeamSession::tick(double dt) {
+  tick_clan();
   if (server_) server_->poll();
   client_.poll();
   if (!client_.joined()) {
     // Lost (not left, not refused): ride back in. The host's own editor
     // never loses its in-process server, so only joiners retry.
-    if (was_joined_ && !server_ && client_.state() == team::TeamClient::State::Closed) start_reconnect();
+    if (was_joined_ && !server_ && !via_clan_ && client_.state() == team::TeamClient::State::Closed)
+      start_reconnect();
     was_joined_ = false;
     if (reconnecting_) tick_reconnect(dt);
     if (server_ && !active()) {
@@ -479,6 +695,7 @@ void TeamSession::tick(double dt) {
     return;
   }
   was_joined_ = true;
+  ensure_mirror();
   const std::string scene = binding_->scene_key();
 
   team::Docs docs;
@@ -515,7 +732,7 @@ void TeamSession::tick(double dt) {
       held_.clear();
       first_asset_pass_ = true;
       asset_clock_ = 2.0;  // first file pass on the next tick
-      notes_.push_back(client_.session().str("claim_name", "the claim") + ": you ride as " +
+      notes_.push_back(client_.session().str("claim_name", "the realm") + ": you ride as " +
                        client_.my_name() + (client_.rode_back() ? " (welcome back)." : "."));
       save_last_ride();
       send_presence(true);
@@ -578,14 +795,28 @@ void TeamSession::tick(double dt) {
   // 3b. Project files through the Vault (a worker does the hauling).
   finish_asset_pass();
   asset_clock_ += dt;
-  if (assets_ && !busy && asset_clock_ >= 2.0 && !asset_sync_.running()) {
+  // Freight keeps moving during a drag. The browser rescan waits (it
+  // reloads the open scene); the file pass does not.
+  if (assets_ && asset_clock_ >= 0.35 && !asset_sync_.running()) {
     asset_clock_ = 0.0;
     sync_assets();
   }
-  // 4. Locks = the selection.
+  // 4. Locks = the selection. A drag sends no committed edit, and the
+  // server releases a lock it has not heard about, which then drops the
+  // rest of the preview. Ask again while the edit is open.
   std::vector<std::string> keys;
   for (std::uint64_t id : binding_->selection()) keys.push_back(team::entity_lock(scene, id));
-  client_.want_locks(std::move(keys));
+  bool refresh_locks = false;
+  if (busy) {
+    lock_touch_clock_ += dt;
+    if (lock_touch_clock_ >= 0.4) {
+      lock_touch_clock_ = 0.0;
+      refresh_locks = true;
+    }
+  } else {
+    lock_touch_clock_ = 0.0;
+  }
+  client_.want_locks(std::move(keys), refresh_locks);
   // 5. Presence at up to 10 Hz, heartbeat every second (keeps locks).
   presence_clock_ += dt;
   heartbeat_clock_ += dt;
@@ -618,14 +849,15 @@ void TeamSession::tick_previews(double dt, bool busy) {
         team::Value arr = team::Value::array();
         for (const team::Op& op : puts) arr.push(team::op_to_json(op));
         const std::string text = team::write_compact(arr);
-        if (text != last_preview_) {
-          last_preview_ = text;
-          client_.send_preview(scene, puts);
-          ++previews_sent_;
-          for (const team::Op& op : puts) {
-            if (std::find(my_preview_ids_.begin(), my_preview_ids_.end(), op.id) == my_preview_ids_.end()) {
-              my_preview_ids_.push_back(op.id);
-            }
+        // Unreliable, so a lost packet is only repaired by the next one.
+        // Skipping an unchanged pose dropped the rest of a drag: B kept the
+        // first preview and never saw the later position.
+        last_preview_ = text;
+        client_.send_preview(scene, puts);
+        ++previews_sent_;
+        for (const team::Op& op : puts) {
+          if (std::find(my_preview_ids_.begin(), my_preview_ids_.end(), op.id) == my_preview_ids_.end()) {
+            my_preview_ids_.push_back(op.id);
           }
         }
       }
@@ -704,8 +936,9 @@ bool TeamSession::sync_assets() {
   finish_asset_pass();
   if (asset_sync_.running()) return false;
   const std::string scene = binding_->scene_key();
+  ensure_mirror();
   TeamAssetPass p;
-  p.root = project_.path;
+  p.root = files_root();
   auto cit = client_.confirmed().find(scene);
   if (cit != client_.confirmed().end()) p.session = cit->second.assets;
   p.files = files_;
@@ -719,6 +952,8 @@ bool TeamSession::sync_assets() {
   p.can_write = client_.can_write();
   if (!asset_sync_.start(std::move(p), assets_)) return false;
   first_asset_pass_ = false;
+  asset_sync_state_ = "sending";
+  asset_sync_detail_.clear();
   return true;
 }
 
@@ -735,12 +970,18 @@ void TeamSession::finish_asset_pass() {
   }
   if (!r.error.empty()) {
     files_error_ = "Files can't travel " + files_route_ + ": " + r.error;
+    asset_sync_state_ = "failed";
+    asset_sync_detail_ = r.error;
   } else if (assets_) {
     files_error_.clear();
+    if (r.up || r.down || r.removed || !r.ops.empty()) {
+      asset_sync_state_ = "synced";
+      asset_sync_detail_.clear();
+    }
   }
   for (const std::string& rel : r.held_back) {
     if (held_noted_.insert(rel).second) {
-      notes_.push_back("Read-only key: " + rel + " stays on this PC (the posse can't see it).");
+      notes_.push_back("Read-only key: " + rel + " stays on this PC (the clan can't see it).");
     }
   }
   assets_up_ += r.up;

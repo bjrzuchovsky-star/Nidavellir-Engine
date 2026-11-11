@@ -1,8 +1,9 @@
 """Draws the TombStone app icons (Dusk palette) and writes multi-size .ico files.
 
-python3 resources/windows/make_icons.py  (Pillow). Outputs tombstone.ico
-(editor, client, server) and tombstone_vault.ico (the Vault server), plus
-tombstone_icon.png (256 px preview).
+python3 resources/windows/make_icons.py  (Pillow). Draws the old Dusk mark.
+The icon shipped with the editor and installer is nidavellir.ico (tombstone.ico
+is the same file, for older paths). Do not overwrite those with this script.
+This script still writes tombstone_vault.ico and tombstone_icon.png (256 px preview).
 """
 from PIL import Image, ImageDraw, ImageFilter
 import os

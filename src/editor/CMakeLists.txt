@@ -158,6 +158,7 @@ target_link_libraries(ts_editor
     ts_export
     ts_vault_lib
     ts_team
+    ts_platform
 )
 
 target_compile_features(ts_editor PUBLIC cxx_std_20)

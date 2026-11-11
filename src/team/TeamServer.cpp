@@ -60,11 +60,14 @@ void TeamServer::log(const std::string& s) const {
 bool TeamServer::start(const ServerOptions& opt, std::string* error) {
   stop();
   opt_ = opt;
-  std::unique_ptr<net::Transport> t = net::make_enet_transport();
+  std::unique_ptr<net::Transport> t =
+      opt_.make_transport ? opt_.make_transport() : net::make_enet_transport();
+  if (!t) t = net::make_enet_transport();
   if (opt_.wrap_transport) t = opt_.wrap_transport(std::move(t));
   if (!t->listen(opt_.port, opt_.max_peers, error)) return false;
   transport_ = std::move(t);
-  log("listening on UDP " + std::to_string(transport_->port()));
+  if (transport_->port() == 0) log(std::string("listening on ") + transport_->name());
+  else log("listening on UDP " + std::to_string(transport_->port()));
   load_sessions();
   return true;
 }

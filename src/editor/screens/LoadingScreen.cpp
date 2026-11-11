@@ -57,7 +57,7 @@ AppState LoadingScreen::on_update(float delta_seconds) {
                         inner_w);
 
     // Footer line pinned to the bottom of the card.
-    const char* footer = "ADMIN EDITOR  //  2D FRONTIER TOOLKIT";
+    const char* footer = "NIDAVELLIR ENGINE  //  WHERE GAMES ARE FORGED";
     const float footer_y =
         ImGui::GetWindowHeight() - ImGui::GetTextLineHeight() - 18.0f;
     if (ImGui::GetCursorPosY() < footer_y) {

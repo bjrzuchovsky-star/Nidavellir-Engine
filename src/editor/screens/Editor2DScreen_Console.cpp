@@ -5,6 +5,7 @@
 
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/ux/EmptyState.h"
+#include "editor/ux/ShotOpts.h"
 #include "editor/ux/FriendlyError.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/plugins/ProfilerPanels.h"
@@ -46,6 +47,7 @@ std::size_t Editor2DScreen::pump_play_logs() {
   }
   std::vector<runtime::LogEntry> lines = play_.world().take_logs();
   for (runtime::LogEntry& e : lines) {
+    if (shot::hide_log_line(e.text)) continue;
     std::cout << "[Telegraph] " << runtime::format_log(e, true) << '\n';
     telegraph_.add(std::move(e));
   }
@@ -101,7 +103,14 @@ void Editor2DScreen::draw_console() {
   ImGui::Checkbox("Auto-scroll", &telegraph_autoscroll_);
 
   ImGui::Separator();
-  const std::vector<std::size_t> rows = log.visible();
+  std::vector<std::size_t> rows = log.visible();
+  if (shot::clean()) {
+    rows.erase(std::remove_if(rows.begin(), rows.end(),
+                              [&](std::size_t i) {
+                                return shot::hide_log_line(log.lines()[i].entry.text);
+                              }),
+               rows.end());
+  }
   const bool cmd_line = plugins_.loaded("ts.profiler");
   ImGui::BeginChild("##tg_lines",
                     ImVec2(0, cmd_line ? -ImGui::GetFrameHeightWithSpacing() : 0.0f),

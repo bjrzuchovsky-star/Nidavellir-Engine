@@ -29,11 +29,11 @@ class PossePlugin final : public plugin::Plugin {
     static const plugin::PluginInfo info = [] {
       plugin::PluginInfo i;
       i.id = "ts.posse";
-      i.name = "Posse (Multiplayer)";
+      i.name = "Clan (Multiplayer)";
       i.description =
-          "Play with posse: a local server and 1-4 riders in the editor, lag "
+          "Play with a clan: a local server and 1-4 wanderers in the editor, lag "
           "sim, the Network panel and ts_client windows.";
-      i.author = "TombStone";
+      i.author = "BORENJO Studios";
       i.version = plugin::Version{1, 0, 0};
       i.category = plugin::PluginCategory::Engine;
       i.project_types = plugin::kType2D;
@@ -58,7 +58,7 @@ class PossePlugin final : public plugin::Plugin {
     plugin::EditorPanel panel;
     panel.id = "posse.network";
     panel.title = "Network";
-    panel.menu_label = "Network (Posse)";
+    panel.menu_label = "Network (Clan)";
     panel.open = &s->show_network_;
     panel.before_begin = [s]() {
       if (s->focus_network_) {

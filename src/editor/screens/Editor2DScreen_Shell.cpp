@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/ux/ShotOpts.h"
 #include "editor/team/TeamPanel.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
@@ -10,6 +11,7 @@
 #include "editor/scripting/BrandBook.h"
 
 #include "editor/audio/EditorAudio.h"
+#include "editor/ui/About.h"
 #include "editor/ui/Brand.h"
 #include "editor/ui/Theme.h"
 #include "plugins/Builtins.h"
@@ -99,7 +101,7 @@ constexpr double kNudgeCoalesceSeconds = 0.6;
 
 void Editor2DScreen::draw_help_menu_contents() {
   ImGui::PushStyleColor(ImGuiCol_Text, theme::Accent());
-  ImGui::TextUnformatted("TombStone Admin -- 2D field kit");
+  ImGui::TextUnformatted("Nidavellir Engine -- 2D");
   ImGui::PopStyleColor();
   ImGui::Separator();
   theme::KeyHint("Ctrl+Z", "Undo");
@@ -165,7 +167,7 @@ void Editor2DScreen::draw_menu_bar() {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float h = ImGui::GetFrameHeight();
-    theme::TombstoneMark(dl, ImVec2(p.x + 7.0f, p.y + 3.0f), h - 6.0f,
+    theme::RuneMark(dl, ImVec2(p.x + 7.0f, p.y + 3.0f), h - 6.0f,
                          theme::U32(theme::Sand()),
                          theme::U32(theme::Charcoal(), 0.85f));
     ImGui::Dummy(ImVec2(16.0f, 0.0f));
@@ -220,7 +222,7 @@ void Editor2DScreen::draw_menus() {
       SpriteSlicerPanel::get().open(project_.path);
     }
     ImGui::Separator();
-    if (ux::MenuItem("Back to Projects")) {
+    if (ux::MenuItem("Back to Realms")) {
       leave_or_ask(false);
     }
     if (ux::MenuItem("Quit", "Alt+F4")) {
@@ -384,6 +386,7 @@ void Editor2DScreen::draw_menus() {
   ux_.draw_window_menu();
 
   if (ux::BeginMenu("Help")) {
+    about::draw_menu_item();
     if (ux::MenuItem("Command Palette...", "Ctrl+Shift+P")) ux_.palette().open();
     ux_.draw_walkthrough_menu_item();
     ImGui::Separator();
@@ -582,7 +585,7 @@ void Editor2DScreen::draw_status_bar() {
   {
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float h = ImGui::GetTextLineHeight();
-    theme::TombstoneMark(dl, ImVec2(p.x + 6.0f, p.y), h, theme::U32(theme::Sand()),
+    theme::RuneMark(dl, ImVec2(p.x + 6.0f, p.y), h, theme::U32(theme::Sand()),
                          theme::U32(theme::Charcoal(), 0.85f));
     ImGui::Dummy(ImVec2(14.0f, h));
     ImGui::SameLine();
@@ -649,7 +652,9 @@ void Editor2DScreen::draw_status_bar() {
     ImGui::TextColored(theme::Copper(), "%s", status_note_.c_str());
   }
   sep();
-  ImGui::TextDisabled("%s", project_.path.c_str());
+  // --shot-clean: the status bar would otherwise print the temp realm path.
+  if (shot::clean()) ImGui::TextDisabled("%s", project_.name.c_str());
+  else ImGui::TextDisabled("%s", project_.path.c_str());
   if (dirty_) {
     ImGui::SameLine();
     ImGui::TextColored(theme::Warning(), "  unsaved");
@@ -1138,7 +1143,7 @@ void Editor2DScreen::setup_field_guide() {
   ux_.refresh_recent([this](const ux::RecentItem& r) {
     if (r.kind == "claim") {
       if (r.path == project_.path) {
-        note("Already riding this claim");
+        note("Already riding this realm");
         return;
       }
       ux::request_open_claim(r.path);
@@ -1151,7 +1156,7 @@ void Editor2DScreen::setup_field_guide() {
 }
 
 // --smoke-ux: every right-click menu body under its scope. Items only record
-// themselves in a harvest, so nothing here changes the claim.
+// themselves in a harvest, so nothing here changes the realm.
 void Editor2DScreen::draw_context_menus_for_audit() {
   const std::uint64_t saved_id = context_id_;
   const bool saved_vp = context_in_viewport_;

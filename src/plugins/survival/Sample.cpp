@@ -99,7 +99,7 @@ bool write_frontier_sample(const std::string& dir, const std::string& name, std:
   cam.color[3] = 0.0f;
   Entity2D rider;
   rider.id = 2;
-  rider.name = "Rider";
+  rider.name = "Wanderer";
   rider.x = 16.0f - 16.0f;
   rider.y = 16.0f - 40.0f;
   rider.w = 32.0f;

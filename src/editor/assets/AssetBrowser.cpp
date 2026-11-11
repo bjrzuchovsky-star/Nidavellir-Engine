@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <filesystem>
 #include "editor/ux/FriendlyError.h"
+#include "editor/ux/ShotOpts.h"
 #include "editor/ux/EmptyState.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
@@ -82,6 +83,27 @@ void AssetBrowser::open(const std::string& project_dir, AssetBrowserHost host) {
     host_.note("Asset metadata moved into .tombstone/meta: " + std::to_string(mr.moved) + " .meta file(s) (GUIDs kept; backup in " +
                mr.backup_dir + ", log in .tombstone/meta.log)");
   }
+  rescan();
+}
+
+void AssetBrowser::retarget(const std::string& project_dir) {
+  auto same_dir = [](std::string a, std::string b) {
+    for (char& c : a)
+      if (c == '\\') c = '/';
+    for (char& c : b)
+      if (c == '\\') c = '/';
+    while (a.size() > 1 && a.back() == '/') a.pop_back();
+    while (b.size() > 1 && b.back() == '/') b.pop_back();
+    return a == b;
+  };
+  if (project_dir.empty() || same_dir(project_dir, db_.project_dir())) return;
+  const std::string sel = selected_;
+  const std::string folder = folder_;
+  db_.open(project_dir);
+  import_settings_ = importsort::load_settings(project_dir);
+  thumbs_.clear();
+  selected_ = sel;
+  folder_ = folder;
   rescan();
 }
 
@@ -373,7 +395,7 @@ void AssetBrowser::draw() {
     ImGui::EndDisabled();
     if (changed) set_import_settings(st);
     ImGui::Separator();
-    ImGui::TextDisabled("Metadata (.meta) lives in .tombstone/meta");
+    if (!shot::clean()) ImGui::TextDisabled("Metadata (.meta) lives in .tombstone/meta");
     ImGui::EndPopup();
   }
   if (gma_dialog_.draw()) {
@@ -403,7 +425,7 @@ void AssetBrowser::draw() {
   if (ImGui::BeginChild("##grid", ImVec2(0, body_h), ImGuiChildFlags_Borders)) draw_grid();
   ImGui::EndChild();
   grid_hovered_ = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-  accept_vault_drop();  // a Vault tile dropped on the grid: pull it into the claim
+  accept_vault_drop();  // a Vault tile dropped on the grid: pull it into the realm
   if (!selected_.empty()) {
     if (ImGui::BeginChild("##details", ImVec2(0, 0), ImGuiChildFlags_Borders)) draw_details();
     ImGui::EndChild();
@@ -424,7 +446,7 @@ void AssetBrowser::draw() {
     orphans_popup_ = false;
   }
   if (ImGui::BeginPopupModal("Orphaned asset metadata", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::TextUnformatted("These .meta files belong to assets that are no longer in the claim:");
+    ImGui::TextUnformatted("These .meta files belong to assets that are no longer in the realm:");
     const std::size_t show = std::min<std::size_t>(orphans_.size(), 12);
     for (std::size_t i = 0; i < show; ++i) ImGui::BulletText("%s", orphans_[i].c_str());
     if (orphans_.size() > show) ImGui::TextDisabled("... and %zu more", orphans_.size() - show);
@@ -455,7 +477,7 @@ void AssetBrowser::draw() {
   if (!confirm_delete_.empty() && !ImGui::IsPopupOpen("Delete asset?###ts_asset_delete"))
     ImGui::OpenPopup("Delete asset?###ts_asset_delete");
   if (ImGui::BeginPopupModal("Delete asset?###ts_asset_delete", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::Text("Delete %s from the claim?", confirm_delete_.c_str());
+    ImGui::Text("Delete %s from the realm?", confirm_delete_.c_str());
     ImGui::TextDisabled("The file and its .meta are removed from disk. Undo can't bring them back.");
     if (theme::DangerButton("Delete")) {
       std::vector<assetdb::Ref> refs;
@@ -825,6 +847,20 @@ void AssetBrowser::draw_settings(const AssetDb::Entry& e) {
         s.set("up_axis", Value::string(up == 1 ? "y" : up == 2 ? "z" : "auto"));
         changed = true;
       }
+      if (ImGui::IsItemHovered()) ux::SetTooltip("Auto uses the file. Z up is turned to Y up.");
+      const std::string fw = s.str("forward_axis", "auto");
+      int fi = fw == "+x" ? 1 : fw == "-x" ? 2 : fw == "+y" ? 3 : fw == "-y" ? 4 : fw == "+z" ? 5 : fw == "-z" ? 6 : 0;
+      const char* fws[] = {"Auto", "+X", "-X", "+Y", "-Y", "+Z (glTF)", "-Z (engine)"};
+      ImGui::SetNextItemWidth(140);
+      if (ImGui::Combo("Forward axis", &fi, fws, 7)) {
+        const char* keys[] = {"auto", "+x", "-x", "+y", "-y", "+z", "-z"};
+        s.set("forward_axis", Value::string(keys[fi]));
+        changed = true;
+      }
+      if (ImGui::IsItemHovered()) {
+        ux::SetTooltip("Which way the mesh noses in the file. It is turned once so that\n"
+                       "axis points along the engine's forward (-Z). Auto does this for glTF.");
+      }
       number("scale", "Placement scale", 0.001f, 1000, "%.3f");
       auto path_field = [&](const char* key, const char* label, char* buf, std::size_t n,
                             std::string* owner, const char* hint) {
@@ -888,7 +924,7 @@ void AssetBrowser::draw_settings(const AssetDb::Entry& e) {
             hulls ? "Auto (model hulls)\0Tight box\0Oriented box\0Capsule\0Convex hull\0Convex pieces\0Mesh\0None\0"
                   : (e.meta.info.flag("skinned", false)
                          ? "Auto (capsule)\0Tight box\0Oriented box\0Capsule\0Convex hull\0Convex pieces\0Mesh\0None\0"
-                         : "Auto (oriented box)\0Tight box\0Oriented box\0Capsule\0Convex hull\0Convex pieces\0Mesh\0None\0");
+                         : "Auto (mesh bounds)\0Tight box\0Oriented box\0Capsule\0Convex hull\0Convex pieces\0Mesh\0None\0");
         int ci = 0;
         const std::string cur = s.flag("generate_collider", true) ? s.str("collider", "auto") : "none";
         for (int k = 0; k < 8; ++k) {

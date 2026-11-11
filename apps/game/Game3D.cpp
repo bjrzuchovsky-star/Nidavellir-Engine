@@ -1,3 +1,4 @@
+#include "core/Brand.h"
 #include "audio/GameAudio.h"
 #include "debugtools/ProfilerWorld3D.h"
 #include "profiler/Profiler.h"
@@ -198,7 +199,7 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
     return 1;
   }
   render3d::hint_gl33_core();
-  GLFWwindow* win = glfwCreateWindow(game::window_width(), game::window_height(), (name + " | TombStone 3D").c_str(), nullptr,
+  GLFWwindow* win = glfwCreateWindow(game::window_width(), game::window_height(), (name + " | " + std::string(brand::kProduct)).c_str(), nullptr,
                                      nullptr);
   if (!win) {
     std::cerr << "[ts_game] could not open a GL 3.3 core window\n";

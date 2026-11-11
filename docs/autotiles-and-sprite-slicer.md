@@ -86,7 +86,7 @@ Engine API (`scene/AutoTile.h`):
 
 ## Sprite slicer
 
-Open **File → Sprite Slicer...** (2D) or **Claim → Sprite Slicer...** (3D), then pick a sheet under `assets/`.
+Open **File → Sprite Slicer...** (2D) or **Realm → Sprite Slicer...** (3D), then pick a sheet under `assets/`.
 
 - **Grid** mode cuts by frame size, offset and spacing. *Skip empty* drops fully transparent cells. For horizontal strips, the first guess is square frames as tall as the image.
 - **Auto-detect** finds each sprite as an 8-connected island of pixels with alpha above the threshold:

@@ -38,7 +38,7 @@ struct VaultHost {
   std::function<void(const std::string&)> note;
   std::string dimension = "2d";                        // default dims tag for uploads
   // Vault manager (Project Manager, no claim open): edit / delete items and
-  // versions, Add files... (loose files and OS drops), Pull into claim...
+  // versions, Add files... (loose files and OS drops), Pull into the realm...
   bool manager = false;
   struct Claim {
     std::string name, path, kind;  // kind: "2D" / "3D" / "VR"
@@ -58,6 +58,9 @@ class VaultPanel {
   VaultPanel& operator=(const VaultPanel&) = delete;
 
   void open(const std::string& project_dir, VaultHost host);
+  // While a clan is joined, pulls land in this folder (the host realm or the
+  // joiner's session cache) instead of the editor's own realm.
+  void set_pull_dir(const std::string& dir) { pull_dir_ = dir; }
   // Per frame (also while hidden): finishes background jobs.
   void update();
   void draw();
@@ -83,7 +86,7 @@ class VaultPanel {
   // Opens the send dialog for files from outside any claim (Add files...,
   // OS drops). Empty = open it to browse / paste paths.
   void add_files(const std::vector<std::string>& paths);
-  // Pull (worker) into a claim folder through the usual pull path.
+  // Pull (worker) into a realm folder through the usual pull path.
   void pull_into(const std::string& claim_dir, const std::string& item, int version = 0);
   // Opens the metadata editor for the selected item (also the screenshot).
   void begin_edit();
@@ -128,6 +131,7 @@ class VaultPanel {
   void start_add_files(const vaultp::PushOptions& opt);
 
   std::string project_dir_;
+  std::string pull_dir_;
   VaultHost host_;
   std::string thumb_dir_;
   gfx::TextureCache thumb_tex_;

@@ -179,7 +179,7 @@ void VaultPanel::refresh() {
     std::size_t updates = 0;
     for (const auto& s : r.status) updates += s.update_available;
     r.message = std::to_string(r.items.size()) + " item(s) in " + backend->label() +
-                (updates ? ", " + std::to_string(updates) + " update(s) for this claim" : "");
+                (updates ? ", " + std::to_string(updates) + " update(s) for this realm" : "");
     return r;
   });
 }
@@ -234,7 +234,7 @@ std::string VaultPanel::origin_label(const std::string& rel) const {
 
 void VaultPanel::pull_then(const std::string& item, std::function<void(const vaultp::PullResult&)> done) {
   auto backend = std::shared_ptr<vault::Backend>(make_backend());
-  const std::string project = project_dir_;
+  const std::string project = pull_dir_.empty() ? project_dir_ : pull_dir_;
   const int version = item == selected_ ? pull_version_ : 0;
   start("Pulling", [backend, project, item, version] {
     JobResult r;
@@ -436,7 +436,7 @@ bool VaultPanel::tile(const vault::Item& it, float size) {
   const ImVec2 vs = ImGui::CalcTextSize(ver.c_str());
   dl->AddRectFilled(ImVec2(t1.x - vs.x - 8, t0.y + 2), ImVec2(t1.x - 2, t0.y + vs.y + 4), theme::U32(theme::Charcoal(), 0.85f), 3.0f);
   dl->AddText(ImVec2(t1.x - vs.x - 5, t0.y + 3), theme::U32(theme::Sand()), ver.c_str());
-  // In this claim / update badges.
+  // In this realm / update badges.
   if (const vaultp::ItemStatus* s = status_of(it.id)) {
     if (s->update_available) {
       const char* up = s->pinned ? "PINNED" : "UPDATE";
@@ -502,7 +502,7 @@ void VaultPanel::draw_grid() {
                                   }
                                 }},
                                {"Vault settings", [this] { open_settings_ = true; }, "Pick a local folder or a shared Vault server"}},
-                     "The Vault keeps assets you share between claims. Add files here, or drop them on this window.");
+                     "The Vault keeps assets you share between realms. Add files here, or drop them on this window.");
     else if (items_.empty())
       ux::EmptyState("vault", {{"Send selected asset", [this] { send_to_vault(host_.selected_asset ? host_.selected_asset() : ""); },
                                 "Send the asset selected in the Asset Browser"},
@@ -542,7 +542,7 @@ void VaultPanel::draw_details() {
   theme::Divider();
   const vaultp::ItemStatus* st = status_of(it.id);
   if (st) {
-    const std::string line = std::string(st->origin == "pushed" ? "Sent from this claim" : "In this claim") +
+    const std::string line = std::string(st->origin == "pushed" ? "Sent from this realm" : "In this realm") +
                              ": v" + std::to_string(st->version) + (st->pinned ? " (pinned)" : "") +
                              (st->modified ? ", changed here" : "");
     if (st->update_available) theme::StatusWarn((line + " - v" + std::to_string(st->latest) + " available").c_str());
@@ -584,8 +584,14 @@ void VaultPanel::draw_details() {
   std::string label;
   if (st && st->version == target) label = "Pull again (v" + std::to_string(target) + ")";
   else if (st) label = "Update to v" + std::to_string(target);
-  else label = "Pull v" + std::to_string(target) + " into this claim";
+  else label = "Pull v" + std::to_string(target) + " into this realm";
   if (theme::PrimaryButton(label.c_str())) pull_then(it.id, {});
+  ImGui::SameLine();
+  if (theme::SecondaryButton("Send to session")) pull_then(it.id, {});
+  if (ImGui::IsItemHovered()) {
+    ux::SetTooltip("Drop this into the clan's shared asset tree. Hosting a clan does not need a Vault server; "
+                   "the library is only a shelf.");
+  }
   if (st) {
     ImGui::SameLine();
     bool pinned = st->pinned;
@@ -614,7 +620,7 @@ void VaultPanel::draw_settings_popup() {
   if (!ImGui::BeginPopupModal("Vault settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
   theme::SectionHeader("Library", "where items live");
   int b = backend_ == "remote" ? 1 : 0;
-  ImGui::RadioButton("Local folder (every claim on this PC)", &b, 0);
+  ImGui::RadioButton("Local folder (every realm on this PC)", &b, 0);
   ImGui::RadioButton("Vault server (ts_vault)", &b, 1);
   backend_ = b == 1 ? "remote" : "local";
   ImGui::SetNextItemWidth(380);
@@ -805,7 +811,7 @@ void VaultPanel::add_files(const std::vector<std::string>& paths) {
 }
 
 void VaultPanel::draw_add_files_body() {
-  ImGui::TextColored(theme::TextMuted(), "Files from anywhere on this PC; no claim needed.");
+  ImGui::TextColored(theme::TextMuted(), "Files from anywhere on this PC; no realm needed.");
   if (ImGui::BeginChild("##upfiles", ImVec2(520, 92), ImGuiChildFlags_Borders)) {
     int remove = -1;
     for (int i = 0; i < static_cast<int>(up_files_.size()); ++i) {
@@ -981,13 +987,13 @@ void VaultPanel::draw_manager_actions(const vault::Item& it) {
     return;
   }
   ImGui::BeginDisabled(job_.valid());
-  // Pull into a claim.
+  // Pull into a realm.
   std::vector<VaultHost::Claim> claims = host_.claims ? host_.claims() : std::vector<VaultHost::Claim>{};
   if (claim_pick_ >= static_cast<int>(claims.size())) claim_pick_ = -1;
   const int target = pull_version_ ? pull_version_ : it.latest;
-  ImGui::TextColored(theme::Accent(), "Pull into claim");
+  ImGui::TextColored(theme::Accent(), "Pull into the realm");
   ImGui::SetNextItemWidth(-1);
-  const std::string preview = claim_pick_ < 0 ? std::string(claims.empty() ? "(no claims yet)" : "Pick a claim...")
+  const std::string preview = claim_pick_ < 0 ? std::string(claims.empty() ? "(no realms yet)" : "Pick a realm...")
                                               : claims[claim_pick_].name + "  (" + claims[claim_pick_].kind + ")";
   if (ImGui::BeginCombo("##claimpick", preview.c_str())) {
     for (int i = 0; i < static_cast<int>(claims.size()); ++i) {
@@ -998,7 +1004,7 @@ void VaultPanel::draw_manager_actions(const vault::Item& it) {
     ImGui::EndCombo();
   }
   ImGui::BeginDisabled(claim_pick_ < 0);
-  const std::string pull_label = "Pull v" + std::to_string(target) + " into claim";
+  const std::string pull_label = "Pull v" + std::to_string(target) + " into the realm";
   if (theme::PrimaryButton(pull_label.c_str())) pull_into(claims[claim_pick_].path, it.id, pull_version_);
   ImGui::EndDisabled();
   theme::Divider();
@@ -1022,7 +1028,7 @@ void VaultPanel::draw_manager_actions(const vault::Item& it) {
   }
   ImGui::EndDisabled();
   ImGui::TextDisabled(it.versions.size() > 1 ? "Pick a version above to delete just that one."
-                                             : "Pulled copies in claims are not touched.");
+                                             : "Pulled copies in realms are not touched.");
 }
 
 void VaultPanel::draw_delete_modal() {
@@ -1033,7 +1039,7 @@ void VaultPanel::draw_delete_modal() {
   if (!ImGui::BeginPopupModal("Delete from the Vault?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
   if (del_version_ == 0) ImGui::Text("Delete \"%s\" and every version from the Vault?", del_name_.c_str());
   else ImGui::Text("Delete v%d of \"%s\" from the Vault?", del_version_, del_name_.c_str());
-  theme::StatusWarn("Claims that already pulled it keep their copies. No coming back.");
+  theme::StatusWarn("Realms that already pulled it keep their copies. No coming back.");
   ImGui::Spacing();
   if (theme::DangerButton("Delete", ImVec2(120, 0))) {
     auto backend = std::shared_ptr<vault::Backend>(make_backend());

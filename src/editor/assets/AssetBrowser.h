@@ -4,7 +4,7 @@
 // tree, thumbnail grid with search and type filter, drag into the scene
 // (the host picks the payload), drag onto a folder to move, rename /
 // delete with "in use" warnings, find references, per-asset import
-// settings (.meta, kept in the claim's .tombstone/meta folder), hot reload
+// settings (.meta, kept in the realm's .tombstone/meta folder), hot reload
 // of changed files, imports from outside (Import... button, files dropped
 // on the window) sorted into type folders (ImportSort.h), orphaned .meta
 // clean-up.
@@ -89,6 +89,11 @@ class AssetBrowser {
   // An asset tile's right-click menu body (also drawn for --smoke-ux).
   void draw_asset_context_items(const assetdb::AssetDb::Entry& e);
   void select(const std::string& rel) { selected_ = rel; }
+  // Show one folder's tiles ("" = every asset). Screenshots use this so the
+  // grid is a populated folder rather than the empty-state prompt.
+  void show_folder(const std::string& folder) { folder_ = folder; }
+  // Point the grid at another realm folder (the clan mirror) and rescan.
+  void retarget(const std::string& project_dir);
 
  private:
   void draw_folders();

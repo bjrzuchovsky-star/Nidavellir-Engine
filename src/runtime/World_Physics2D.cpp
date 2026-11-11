@@ -180,7 +180,7 @@ void World::setup_physics2d() {
         phys2d_warned_ = true;
         post(LogLevel::Warn, "physics",
              "This scene has rigid bodies but no 2D physics plugin is on; they stay put. "
-             "Switch on Box2D Physics (ts.physics.box2d) in the Trading Post.",
+             "Switch on Box2D Physics (ts.physics.box2d) in the Market.",
              0);
       }
       return;

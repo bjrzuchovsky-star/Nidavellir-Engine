@@ -110,7 +110,7 @@ void ProjectManagerScreen::draw_project_card(std::size_t i) {
   if (highlight) {
     const char* hint = vr_enabled(p)
                            ? "Opens the 3D editor; Preview in headset to ride it in VR"
-                           : "Double-click or Open to ride in";
+                           : "Double-click or Open";
     const ImVec2 hs = ImGui::CalcTextSize(hint);
     ImGui::SetCursorPos(ImVec2(ImGui::GetWindowWidth() - hs.x - 16.0f,
                                ImGui::GetWindowHeight() - hs.y - 9.0f));
@@ -175,7 +175,7 @@ void ProjectManagerScreen::draw_update_banner() {
     if (theme::PrimaryButton("Update", ImVec2(96, 0))) update_action_ = UpdateAction::Update;
     if (ImGui::IsItemHovered()) {
       ux::SetTooltip("Downloads the installer, checks it against SHA256SUMS.txt, runs it and closes the editor.\n"
-                        "Your claims, settings and Vault stay put.");
+                        "Your realms, settings and Vault stay put.");
     }
     ImGui::SameLine();
     if (theme::CopperButton("Release notes", ImVec2(130, 0))) update_action_ = UpdateAction::ReleaseNotes;
@@ -222,10 +222,10 @@ void ProjectManagerScreen::open_vault() {
 }
 
 void ProjectManagerScreen::draw_vault_screen() {
-  theme::TitleStrip("The Vault", "Your library, no claim needed");
-  if (theme::SecondaryButton("< Back to Claims", ImVec2(150, 0))) vault_open_ = false;
+  theme::TitleStrip("The Vault", "Your library, no realm needed");
+  if (theme::SecondaryButton("< Back to Realms", ImVec2(150, 0))) vault_open_ = false;
   ImGui::SameLine();
-  ImGui::TextDisabled("Browse, edit and tidy the library, add files from this PC, pull into any claim. Drop files here to add them.");
+  ImGui::TextDisabled("Browse, edit and tidy the library, add files from this PC, pull into any realm. Drop files here to add them.");
   // Files dropped from Explorer go to the Vault while this screen is up.
   if (importsort::os_drop_pending()) vault_->add_files(importsort::take_os_drop());
   ImGui::Spacing();
@@ -242,13 +242,13 @@ void ProjectManagerScreen::draw_ui() {
     return;
   }
 
-  theme::TitleStrip("Project Manager", "Your claims on the frontier");
+  theme::TitleStrip("Project Manager", "Where games are forged");
   draw_update_banner();
   ux::draw_error_modal();
 
   char caption[64];
   std::snprintf(caption, sizeof(caption), "%zu on file", projects_.size());
-  theme::SectionHeader("Claims", caption);
+  theme::SectionHeader("Realms", caption);
   ImGui::TextDisabled("Territory: %s", projects_root_.c_str());
 
   if (!status_message_.empty()) {
@@ -266,7 +266,7 @@ void ProjectManagerScreen::draw_ui() {
     ImGui::Dummy(ImVec2(0, 36));
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 c = ImGui::GetCursorScreenPos();
-    theme::TombstoneMark(dl, ImVec2(c.x + w * 0.5f, c.y), 56.0f,
+    theme::RuneMark(dl, ImVec2(c.x + w * 0.5f, c.y), 56.0f,
                          theme::U32(theme::Border()),
                          theme::U32(theme::Charcoal(), 0.7f));
     ImGui::Dummy(ImVec2(w, 68.0f));
@@ -274,7 +274,7 @@ void ProjectManagerScreen::draw_ui() {
     ImGui::Dummy(ImVec2(0, 4));
     theme::CenteredText("Break ground below: pick a template (blank 2D / 3D or a sample),",
                         ImGui::GetFontSize(), theme::TextMuted(), w);
-    theme::CenteredText("name your claim and ride in.",
+    theme::CenteredText("name your realm.",
                         ImGui::GetFontSize(), theme::TextMuted(), w);
   } else {
     for (std::size_t i = 0; i < projects_.size(); ++i) {
@@ -284,14 +284,14 @@ void ProjectManagerScreen::draw_ui() {
   ImGui::EndChild();
   ImGui::PopStyleColor();
 
-  theme::SectionHeader("Break Ground", "new claim from a template: blank 2D / 3D or a sample");
-  if (theme::PrimaryButton("+ New Claim...", ImVec2(140, 0))) {
+  theme::SectionHeader("Break Ground", "new realm from a template: blank 2D / 3D or a sample");
+  if (theme::PrimaryButton("+ New Realm...", ImVec2(140, 0))) {
     open_template_picker();
   }
   ImGui::SameLine();
   if (theme::CopperButton("Open", ImVec2(80, 0))) {
     if (!highlighted_index_.has_value()) {
-      error_message_ = "Pick a claim first, then Open.";
+      error_message_ = "Pick a realm first, then Open.";
     } else {
       select_project(*highlighted_index_);
     }
@@ -299,7 +299,7 @@ void ProjectManagerScreen::draw_ui() {
   ImGui::SameLine();
   if (theme::DangerButton("Delete", ImVec2(80, 0))) {
     if (!highlighted_index_.has_value()) {
-      error_message_ = "Pick a claim first, then Delete.";
+      error_message_ = "Pick a realm first, then Delete.";
     } else {
       confirm_delete_open_ = true;
       ImGui::OpenPopup("Bury Project?");
@@ -308,7 +308,7 @@ void ProjectManagerScreen::draw_ui() {
   ImGui::SameLine();
   if (theme::SecondaryButton("Save as Template", ImVec2(140, 0))) {
     if (!highlighted_index_.has_value()) {
-      error_message_ = "Pick a claim first, then Save as Template.";
+      error_message_ = "Pick a realm first, then Save as Template.";
     } else {
       const ProjectInfo& hp = projects_[*highlighted_index_];
       std::memset(save_name_buf_, 0, sizeof(save_name_buf_));
@@ -318,22 +318,22 @@ void ProjectManagerScreen::draw_ui() {
     }
   }
   ImGui::SameLine();
-  if (theme::SecondaryButton("Claim Settings", ImVec2(130, 0))) {
+  if (theme::SecondaryButton("Realm Settings", ImVec2(130, 0))) {
     if (!highlighted_index_.has_value()) {
-      error_message_ = "Pick a claim first, then Claim Settings.";
+      error_message_ = "Pick a realm first, then Realm Settings.";
     } else {
       settings_popup_pending_ = true;
     }
   }
   ImGui::SameLine();
-  if (theme::CopperButton("Trading Post", ImVec2(120, 0))) {
+  if (theme::CopperButton("Market", ImVec2(120, 0))) {
     open_trading_post();
   }
   ImGui::SameLine();
   if (theme::CopperButton("Vault", ImVec2(80, 0))) {
     open_vault();
   }
-  if (ImGui::IsItemHovered()) ux::SetTooltip("The Vault: browse, edit and add to your asset library without opening a claim");
+  if (ImGui::IsItemHovered()) ux::SetTooltip("The Vault: browse, edit and add to your asset library without opening a realm");
   ImGui::SameLine(0.0f, 24.0f);
   if (theme::SecondaryButton("Settings", ImVec2(90, 0))) {
     request_settings();
@@ -526,7 +526,7 @@ void ProjectManagerScreen::draw_kind_picker() {
                 theme::U32(theme::Success()), c.line2);
     if (hovered) {
       ux::SetTooltip("%s", c.kind == ProjectKind::TwoD
-                                  ? "The full 2D editor: tiles, sprites, Play, posse."
+                                  ? "The full 2D editor: tiles, sprites, Play, clan."
                               : c.kind == ProjectKind::ThreeD
                                   ? "The 3D editor: glTF, PBR, Lua, Play."
                                   : "The 3D editor with a VR rig: grab, throw, teleport. "

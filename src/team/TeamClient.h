@@ -39,6 +39,8 @@ struct JoinOptions {
   Docs seed;               // used only if the session is new
   std::string rejoin;      // token from an earlier welcome: ride back in as yourself
   std::function<std::unique_ptr<net::Transport>(std::unique_ptr<net::Transport>)> wrap_transport;
+  // When set, used instead of ENet (Steam P2P). wrap_transport still applies.
+  std::function<std::unique_ptr<net::Transport>()> make_transport;
 };
 
 struct RemoteMember {
@@ -108,7 +110,9 @@ class TeamClient {
   std::size_t pending() const { return pending_.size(); }
 
   // Locks: the full set this editor wants (selection / drag / Inspector).
-  void want_locks(std::vector<std::string> keys);
+  // force resends the same set, so a lock the server dropped while a drag
+  // was open (no committed edit to refresh it) is asked for again.
+  void want_locks(std::vector<std::string> keys, bool force = false);
   std::uint32_t lock_owner(const std::string& key) const;
   // Take over locks someone else has left idle (15 s by default). The
   // server says no (a note) while the holder is still using them.

@@ -291,7 +291,8 @@ int Editor2DScreen::palette_count(const Entity2D& e) {
 // --- Sprites / assets ---------------------------------------------------------
 
 std::string Editor2DScreen::asset_path(const std::string& rel) const {
-  return assets::resolve(project_.path, rel);
+  const std::string root = team_ && team_->joined() && !team_->hosting() ? team_->files_root() : project_.path;
+  return assets::resolve(root, rel);
 }
 
 const TextureInfo& Editor2DScreen::texture(const std::string& rel) {

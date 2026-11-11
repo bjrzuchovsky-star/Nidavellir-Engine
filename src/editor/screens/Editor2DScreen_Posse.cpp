@@ -62,8 +62,8 @@ constexpr TrailPreset kPresets[] = {
 bool Editor2DScreen::start_posse() {
   if (posse_running()) return true;
   if (plugins_.is_open() && !plugins_.loaded("ts.posse")) {
-    note("The posse plugin is unhitched: switch on Posse (Multiplayer) in "
-         "the Plugins panel to ride together.");
+    note("The clan plugin is unhitched: switch on Clan (Multiplayer) in "
+         "the Plugins panel to play together.");
     return false;
   }
   if (is_playing()) stop_play();
@@ -83,8 +83,8 @@ bool Editor2DScreen::start_posse() {
   auto posse = std::make_unique<mp::LocalPosse>();
   std::string err;
   if (!posse->start(std::move(cfg), &err)) {
-    note("The posse would not ride: " + err);
-    telegraph_.add(runtime::LogLevel::Error, "posse", "Could not ride with the posse: " + err);
+    note("The clan would not start: " + err);
+    telegraph_.add(runtime::LogLevel::Error, "posse", "Could not start the clan: " + err);
     focus_console_ = true;
     return false;
   }
@@ -96,7 +96,7 @@ bool Editor2DScreen::start_posse() {
   focus_network_ = true;
   play_focus_viewport_ = true;
   pump_posse_logs();
-  note("Riding with a posse of " + std::to_string(posse_riders_) + " on UDP " +
+  note("In a clan of " + std::to_string(posse_riders_) + " on UDP " +
        std::to_string(posse_->port()) + ". You're P1: WASD / arrows, E / Space.");
   std::cout << "[Editor2D] posse: server on UDP " << posse_->port() << ", " << posse_riders_
             << " rider(s), lag " << posse_sim_.latency_ms << " ms +-" << posse_sim_.jitter_ms
@@ -111,8 +111,8 @@ void Editor2DScreen::stop_posse() {
   pump_posse_logs();
   posse_.reset();
   posse_quads_.clear();
-  note("Posse broke camp. The edit scene never left.");
-  telegraph_.add(runtime::LogLevel::Info, "posse", "Posse broke camp");
+  note("Clan closed. The edit scene never left.");
+  telegraph_.add(runtime::LogLevel::Info, "posse", "Clan closed");
   apply_plugin_changes_if_idle();
 }
 
@@ -189,7 +189,7 @@ void Editor2DScreen::pump_posse_logs() {
 
 bool Editor2DScreen::open_posse_client_window() {
   if (!posse_running()) {
-    note("Ride with the posse first, then open a client window.");
+    note("Start the clan first, then open a client window.");
     return false;
   }
   const std::string exe = launcher::find_client_executable();
@@ -328,7 +328,7 @@ void Editor2DScreen::draw_posse_map(float height) {
   draw->AddRectFilled(p0, p1, theme::U32(theme::CanvasBg()), theme::metrics::kRadiusCard);
   draw->AddRect(p0, p1, theme::U32(theme::Border()), theme::metrics::kRadiusCard);
   if (!posse_running()) {
-    const char* msg = "No posse riding. Ride with Posse to see the trail.";
+    const char* msg = "No clan yet. Start a clan to see the map.";
     const ImVec2 ts = ImGui::CalcTextSize(msg);
     draw->AddText(ImVec2(p0.x + (w - ts.x) * 0.5f, p0.y + (height - ts.y) * 0.5f),
                   theme::U32(theme::TextMuted()), msg);
@@ -382,19 +382,19 @@ void Editor2DScreen::draw_posse_map(float height) {
 
 void Editor2DScreen::draw_network_panel() {
   const bool running = posse_running();
-  theme::SectionHeader("Posse", "server + riders in this editor");
+  theme::SectionHeader("Clan", "server and wanderers in this editor");
   if (!running) {
     int riders = posse_riders_;
     ImGui::SetNextItemWidth(140.0f);
-    if (ImGui::SliderInt("Riders##Posse", &riders, 1, mp::kMaxPosse)) set_posse_riders(riders);
+    if (ImGui::SliderInt("Wanderers##Posse", &riders, 1, mp::kMaxPosse)) set_posse_riders(riders);
     ImGui::SameLine();
     ImGui::Checkbox("Bot reins for P2-P4", &posse_bots_);
-    if (theme::PrimaryButton("Ride with Posse", ImVec2(150, 0))) start_posse();
+    if (theme::PrimaryButton("Start clan", ImVec2(150, 0))) start_posse();
     if (ImGui::IsItemHovered()) {
-      ux::SetTooltip("Start a local server on a loopback port and %d client(s) in this "
-                        "editor, riding a copy of the scene", posse_riders_);
+      ux::SetTooltip("Start a local server on a loopback port and %d wanderer(s) in this "
+                        "editor, on a copy of the scene", posse_riders_);
     }
-    ImGui::TextDisabled("You ride P1 (WASD / arrows, E / Space). Edits wait until you're back.");
+    ImGui::TextDisabled("You are P1 (WASD / arrows, E / Space). Edits wait until you're back.");
   } else {
     const mp::GameServer& sv = posse_->server();
     ImGui::TextColored(theme::Success(), "Riding");
@@ -428,7 +428,7 @@ void Editor2DScreen::draw_network_panel() {
     ImGui::Checkbox("Bot reins for P2-P4", &posse_bots_);
   }
 
-  theme::SectionHeader("Rough Trail", "lag sim on every rider's line");
+  theme::SectionHeader("Rough trail", "lag sim on every wanderer's line");
   net::LinkSim sim = posse_sim_;
   float loss_pct = sim.loss * 100.0f;
   bool changed = false;
@@ -467,13 +467,13 @@ void Editor2DScreen::draw_network_panel() {
                       static_cast<unsigned long long>(st.leaves),
                       static_cast<unsigned long long>(st.rejected));
 
-  theme::SectionHeader("Riders", "who's in the saddle");
+  theme::SectionHeader("Wanderers", "who is in the clan");
   const auto& clients = posse_->clients();
   if (ImGui::BeginTable("##PosseRiders", 8,
                         ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                             ImGuiTableFlags_SizingFixedFit)) {
     ImGui::TableSetupColumn("Seat");
-    ImGui::TableSetupColumn("Rider");
+    ImGui::TableSetupColumn("Wanderer");
     ImGui::TableSetupColumn("RTT");
     ImGui::TableSetupColumn("Snaps/s");
     ImGui::TableSetupColumn("In KB/s");
@@ -527,7 +527,7 @@ void Editor2DScreen::draw_network_panel() {
     }
     ImGui::EndTable();
   }
-  theme::SectionHeader("Trail Map", "dot = server, ring = chosen rider's view");
+  theme::SectionHeader("Trail map", "dot = server, ring = the chosen wanderer's view");
   draw_posse_map(std::max(140.0f, ImGui::GetContentRegionAvail().y - 8.0f));
 }
 

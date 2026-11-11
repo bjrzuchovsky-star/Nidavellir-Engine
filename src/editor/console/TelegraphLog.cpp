@@ -1,4 +1,5 @@
 #include "editor/console/TelegraphLog.h"
+#include "editor/ux/ShotOpts.h"
 
 #include <cctype>
 #include <utility>
@@ -32,6 +33,9 @@ std::size_t TelegraphLog::slot(runtime::LogLevel level) {
 }
 
 void TelegraphLog::add(runtime::LogEntry entry) {
+  // --shot-clean: keep internal paths (.tombstone/meta and the like) off
+  // the Telegraph so a store screenshot is not a debug log.
+  if (shot::hide_log_line(entry.text)) return;
   const std::size_t s = slot(entry.level);
   Line line;
   line.entry = std::move(entry);

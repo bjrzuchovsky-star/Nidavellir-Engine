@@ -69,7 +69,7 @@ void EditorUx::add_settings_entries(std::function<void(const std::string&)> open
     a.id = std::string("Settings/") + s.title;
     a.label = s.title;
     a.path = "Settings";
-    a.tip = std::string(s.blurb) + ". Opens Settings (the claim is saved first).";
+    a.tip = std::string(s.blurb) + ". Opens Settings (the realm is saved first).";
     a.keywords = std::string("preferences options ") + s.blurb;
     const std::string title = s.title;
     a.run = [open, title] { open(title); };
@@ -83,7 +83,7 @@ void EditorUx::refresh_recent(std::function<void(const RecentItem&)> open) {
     Action a;
     a.id = "Recent/" + r.kind + "/" + r.path;
     a.label = r.label;
-    a.path = r.kind == "claim" ? "Recent claim" : "Recent asset";
+    a.path = r.kind == "claim" ? "Recent realm" : "Recent asset";
     a.tip = r.path;
     a.keywords = "recent open " + r.kind;
     const RecentItem copy = r;
@@ -256,7 +256,7 @@ void EditorUx::draw_layout_popups() {
   ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_Appearing);
   if (ImGui::BeginPopupModal(save_id, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::TextUnformatted("Name this panel arrangement. Layouts are yours, kept with your");
-    ImGui::TextUnformatted("settings (not in the claim), and listed under Window > Layouts.");
+    ImGui::TextUnformatted("settings (not in the realm), and listed under Window > Layouts.");
     if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
     const bool enter = ImGui::InputText("Name##layout", save_name_, sizeof(save_name_),
                                         ImGuiInputTextFlags_EnterReturnsTrue);

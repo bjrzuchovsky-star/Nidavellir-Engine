@@ -89,7 +89,7 @@ PluginsPanelResult draw_plugins_panel(EditorPlugins& plugins,
   std::snprintf(caption, sizeof(caption), "%zu hitched / %zu in the wagon",
                 mgr.load_order().size(), catalog.entries().size());
   theme::SectionHeader("Outfitter's Wagon", caption);
-  ImGui::TextDisabled("Outfit this claim: switch plugins on or off.");
+  ImGui::TextDisabled("Outfit this realm: switch plugins on or off.");
 
   if (plugins.pending()) {
     if (riding) {
@@ -111,7 +111,7 @@ PluginsPanelResult draw_plugins_panel(EditorPlugins& plugins,
 
   // The Trading Post: install more plugins, then hitch them here.
   static TradingPostUi trading_post;
-  if (theme::CopperButton("Visit the Trading Post...", ImVec2(-1.0f, 0))) trading_post.open = true;
+  if (theme::CopperButton("Visit the Market...", ImVec2(-1.0f, 0))) trading_post.open = true;
   {
     TradingPostTarget target;
     target.plugins = &plugins;
@@ -188,7 +188,7 @@ PluginsPanelResult draw_plugins_panel(EditorPlugins& plugins,
       ImGui::TextWrapped("%s", line.c_str());
       ImGui::PopStyleColor();
     } else {
-      chip(fits ? "In the wagon" : "Wrong territory for this claim", theme::TextMuted());
+      chip(fits ? "In the wagon" : "Wrong territory for this realm", theme::TextMuted());
     }
 
     ImGui::PushStyleColor(ImGuiCol_Text, theme::TextMuted());

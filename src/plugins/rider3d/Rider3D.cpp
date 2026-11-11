@@ -49,6 +49,8 @@ class Rider3D final : public world3d::RiderController3D {
     m.want_pitch += std::clamp(cfg.invert_y ? in.stick_y : -in.stick_y, -1.0f, 1.0f) * stick_step;
     clamp_look(m);
     ease_look(m);
+    // Engine forward is -Z (Y up). Yaw 0 looks down -Z, and the body
+    // rotation puts the mesh's -Z (import Forward axis) along travel.
     const float yaw = render3d::radians(m.yaw);
     const Vec3 fwd{-std::sin(yaw), 0.0f, -std::cos(yaw)};
     const Vec3 right{std::cos(yaw), 0.0f, -std::sin(yaw)};

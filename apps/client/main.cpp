@@ -11,6 +11,7 @@
 #include "GameUi.h"
 #include "HudText.h"
 
+#include "core/Brand.h"
 #include "gfx/GlTextureUploader.h"
 #include "mp/GameClient.h"
 #include "mp/PosseSmoke.h"
@@ -280,7 +281,7 @@ int run_window(const Options& opt) {
     std::cerr << "[ts_client] could not start GLFW\n";
     return 1;
   }
-  GLFWwindow* win = glfwCreateWindow(1280, 720, "TombStone Client | riding in", nullptr, nullptr);
+  GLFWwindow* win = glfwCreateWindow(1280, 720, "Nidavellir Engine", nullptr, nullptr);
   if (!win) {
     std::cerr << "[ts_client] could not open a window\n";
     glfwTerminate();
@@ -367,7 +368,7 @@ int run_window(const Options& opt) {
         const mp::ClientStats& s = client.stats();
         char title[384];
         std::snprintf(title, sizeof(title),
-                      "%s | TombStone Client | %s as P%d | %zu riding | RTT %.0f ms | %.0f "
+                      "%s | Nidavellir Engine | %s as P%d | %zu riding | RTT %.0f ms | %.0f "
                       "snapshots/s | %.1f KB/s in",
                       client.project_name().empty() ? "riding in" : client.project_name().c_str(),
                       client.name().c_str(), client.slot() + 1, client.roster().riders.size(),
@@ -400,7 +401,7 @@ int main(int argc, char** argv) {
     std::cout << kUsage;
     return 0;
   }
-  std::cout << "TombStone Client\n";
+  std::cout << ts::tombstone::brand::kProduct << "\n";
   if (opt.smoke) return run_smoke();
   if (opt.connect.empty()) {
     std::cerr << "ts_client needs a server to ride to.\n" << kUsage;

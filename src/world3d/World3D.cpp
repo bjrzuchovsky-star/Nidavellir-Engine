@@ -125,7 +125,7 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
         e.player = scene3d::Player3D{};
         e.player->look = scene3d::Player3D::Look::Keys;  // flat fallback: keys, cursor free
         player_ = e.id;
-        post(LogLevel::Info, "play", "VR scene on the desktop: " + e.name + " (VR Rig) rides as the rider");
+        post(LogLevel::Info, "play", "VR scene on the desktop: " + e.name + " (VR Rig) rides as the wanderer");
         break;
       }
     }
@@ -137,18 +137,18 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
     if (cam) {
       post(LogLevel::Info, "play",
            "No Player component. The scene camera is in charge, and a script can drive a body "
-           "itself. Rider 3D is not required.");
+           "itself. Wanderer is not required.");
     } else {
       post(LogLevel::Warn, "play",
-           "No rider in this scene (give an entity a Player component); the camera stays put");
+           "No wanderer in this scene (give an entity a Player component); the camera stays put");
     }
   }
   if (const Entity3D* p = find(player_)) spawn_ = p->transform.position;
   rider_ctrl_ = RiderControllers3D::instance().get(kRider3DPluginId);
   if (!vr_ && player_ != 0 && !rider_ctrl_) {
     post(LogLevel::Warn, "play",
-         "No movement plugin is on: the rider stands still. Switch on Rider 3D "
-         "(ts.move.rider3d) in the Trading Post to walk and look, or drive the body from a script.");
+         "No movement plugin is on: the player stands still. Switch on Wanderer "
+         "(ts.move.rider3d) in the Market to walk and look, or drive the body from a script.");
   }
   auto compiled_on = [](const Entity3D& e) {
     auto hit = [](const std::string& path) {
@@ -163,8 +163,8 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
   if (!vr_ && player_ != 0 && rider_ctrl_) {
     if (const Entity3D* p = find(player_); p && compiled_on(*p)) {
       post(LogLevel::Warn, "play",
-           p->name + " has a C# or C++ script and the Rider 3D plugin. Both will try to move it. "
-                     "Take the Player component off, or switch Rider 3D off in the Trading Post, "
+           p->name + " has a C# or C++ script and the Wanderer plugin. Both will try to move it. "
+                     "Take the Player component off, or switch Wanderer off in the Market, "
                      "if the script should drive the body.");
     }
   }
@@ -870,7 +870,7 @@ std::uint64_t World3D::script_duplicate(std::uint64_t id, float x, float y) {
 void World3D::script_destroy(std::uint64_t id) {
   if (!live(id)) return;
   if (id == player_) {
-    post(LogLevel::Warn, "script", "Scripts cannot destroy the rider");
+    post(LogLevel::Warn, "script", "Scripts cannot destroy the wanderer");
     return;
   }
   dead_.insert(id);

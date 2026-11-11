@@ -1,3 +1,13 @@
+# Clans (live team editing)
+
+The host realm is the source of truth. A joiner does not write into their own realm: on join they mirror the host's asset tree into a per-session cache, then live changes (adds, edits, renames, deletes) travel both ways. The Vault is a shelf: **Send to session** drops a library item into that shared tree. Hosting does not need a Vault server.
+
+A file that appears under the host's `assets/` (a drag-drop, or a save from another tool) is hashed with its `.meta` and sent to the clan within a fraction of a second. Peers fetch anything missing or changed over the session, check the SHA-256, write it into their cache and hot-reload open references. Deletes and moves (a delete plus a new path) travel the same way. A late joiner diffs the manifest on join. If both sides edit one file, the copy that syncs last is kept and the clan is told. A failed send shows **failed** next to each member, with the reason and **Retry file sync**. **Reload from disk** and **Rescan assets** stay on the Realm menu as manual fallbacks.
+
+Large files go in 48 KB chunks. If a chunk is refused because the host already has part of the file, the sender continues from that byte.
+
+Steam builds carry the same bytes over `ISteamNetworkingMessages` (the relay). Without Steam, they go over the LAN UDP session. The engine version is checked when you join a Steam clan; a mismatch names both versions and does not open the session.
+
 # Live Team Claims (design, 0.2.0)
 
 > Status: **stage 1 done** on `feature/team-claims` (ready for review for 0.2.0, not merged).
@@ -175,7 +185,7 @@ A URL typed in the Team panel always wins (handy for a Vault behind a proxy with
 
 - No key for the Vault: "Files can't travel: the posse's files live in the Vault at ..., which needs your Vault API key. Put it in the Team panel's key box (or Settings > Vault > API key), then ride out and in again."
 - Vault on 127.0.0.1 with a rider on another PC: "... restart ts_vault with --host 0.0.0.0 and allow TCP <port> through its firewall."
-- Older host, no URL: "Files can't travel: this team host doesn't say where the posse's files live (it runs an older TombStone). Type its Vault URL in the Team panel ..."
+- Older host, no URL: "Files can't travel: this team host doesn't say where the posse's files live (it runs an older Nidavellir). Type its Vault URL in the Team panel ..."
 - Vault or host unreachable, key refused: "Files can't travel through the Vault at ...: <the error>" (cleared by the next pass that works).
 - **Read-only key:** the panel says "your key is read-only, so you see the posse's files but yours stay on this PC"; each local file not sent gets a note once ("Read-only key: assets/cactus.png stays on this PC"), and an object you place is put back ("Read-only key: your edit was put back"). Session blobs refuse a read-only rider's upload with "Your key is read-only: you can see the posse's files but not place your own."
 
