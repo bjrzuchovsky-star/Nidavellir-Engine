@@ -115,6 +115,9 @@ void bake_forward_axis(Model* m, ForwardAxis axis);
 // reference, skinned primitives posed by the rest pose (the palette the
 // renderer uses), after the import transform.
 void update_bounds(Model* m);
+// Shift a skinned rest pose so the lowest drawn vertex sits on y = 0.
+// The collider and a placement at the ground then share the soles.
+void plant_skinned_feet(Model* m);
 // The pre-0.1.1 bounds (every vertex, skinned ones unposed). Only for
 // spotting colliders that were sized from them (scene migration).
 Aabb legacy_vertex_bounds(const Model& m);
@@ -171,6 +174,9 @@ bool load_source_mdl(const std::string& path, const ModelImportOptions& opt, Mod
                      std::string* error);
 bool load_assimp_model(const std::string& path, const ModelImportOptions& opt, Model* out,
                        std::string* error);
+// FBX 6.x / ASCII (and any FBX Assimp rejects) via ufbx.
+bool load_ufbx_model(const std::string& path, const ModelImportOptions& opt, Model* out,
+                     std::string* error);
 bool load_blend_model(const std::string& path, const ModelImportOptions& opt, Model* out,
                       std::string* error);
 

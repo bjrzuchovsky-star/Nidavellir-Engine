@@ -442,6 +442,13 @@ int check_errors(Ctx& ctx, const fs::path& root, int* cases) {
   if (ux::telegraph_label("trigger: Rider rode into Gate", false, K::Unknown) != "trigger: Rider rode into Gate")
     return fail("Telegraph tagged an info line");
   // Panel cards.
+  const ux::FriendlyError spaced = ux::explain(
+      "C:/Realms/Models/Unarmed Walk Forward.fbx: Assimp could not open this file (FBX-DOM unsupported, old format version)",
+      K::ImportFailed);
+  if (spaced.kind != K::ImportFailed || spaced.what.find("Unarmed Walk Forward.fbx") == std::string::npos ||
+      spaced.what.find("Models/Unarmed)") != std::string::npos) {
+    return fail("spaced path was truncated: " + spaced.what);
+  }
   if (editor::friendly_vault_error("could not connect to vault.example:7777", true).kind != K::VaultConnection ||
       editor::friendly_vault_error("x", true).fix_label != "Vault settings")
     return fail("Vault error card isn't the friendly one");

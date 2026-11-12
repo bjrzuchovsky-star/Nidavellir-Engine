@@ -314,6 +314,57 @@ void update_bounds(Model* m) {
   m->bounds = any ? b : Aabb{};
 }
 
+void plant_skinned_feet(Model* m) {
+  if (!m || m->primitives.empty() || !m->skinned()) return;
+  update_bounds(m);
+  const float d = m->bounds.min.y;
+  if (!std::isfinite(d) || std::fabs(d) < 1.0e-4f) return;
+  // The rest pose is what the viewport draws. Lifting the root's base moves
+  // every skinned vertex by the same amount, so the soles land on y = 0
+  // without changing the clip's local keys.
+  const Mat4 shift = Mat4::translate({0.0f, -d, 0.0f});
+  for (Joint& j : m->skeleton.joints) {
+    if (j.parent < 0) j.base = shift * j.base;
+  }
+  update_bounds(m);
+}
+
+namespace {
+
+// FBX files are often in centimetres, and Assimp's root correction can
+// leave a metre file a hundred times too tall. Two 0.01 passes cover both
+// (170 cm, or 170 m after a 100x root scale) and leave a real metre rig alone.
+void normalize_fbx_metres(Model* m) {
+  for (int pass = 0; pass < 2; ++pass) {
+    update_bounds(m);
+    float h = m->bounds.max.y - m->bounds.min.y;
+    if (!m->primitives.empty()) {
+      if (!(h > 20.0f) || !std::isfinite(h)) return;
+    } else if (!m->skeleton.joints.empty()) {
+      const std::vector<Vec3> pos = joint_positions(m->skeleton, rest_pose(m->skeleton));
+      float lo = 0.0f, hi = 0.0f;
+      bool any = false;
+      for (const Vec3& p : pos) {
+        if (!std::isfinite(p.y)) continue;
+        if (!any) {
+          lo = hi = p.y;
+          any = true;
+        } else {
+          lo = std::min(lo, p.y);
+          hi = std::max(hi, p.y);
+        }
+      }
+      h = any ? hi - lo : 0.0f;
+      if (!(h > 20.0f)) return;
+    } else {
+      return;
+    }
+    bake_import_transform(m, 0.01f, false);
+  }
+}
+
+}  // namespace
+
 Aabb legacy_vertex_bounds(const Model& m) {
   Aabb b;
   bool any = false;
@@ -803,13 +854,29 @@ bool load_model(const std::string& path, const ModelImportOptions& opt, Model* o
       ok = load_blend_model(path, opt, out, &err);
       out->format = "blend";
     } else if (is_assimp_ext(e)) {
-      if (!assimp_available()) {
+      if (assimp_available()) {
+        ok = load_assimp_model(path, opt, out, &err);
+        if (ok) out->format = e.substr(1);
+      } else if (e != ".fbx") {
         err = model_format_name(path) +
               " needs the Assimp importers (this build has TS_WITH_ASSIMP off); export to glTF";
-      } else {
-        // (Auto up axis: the loader applies the file's own axis metadata.)
-        ok = load_assimp_model(path, opt, out, &err);
-        out->format = e.substr(1);
+      }
+      // FBX 6.x / ASCII: Assimp stops at "FBX-DOM unsupported, old format version".
+      if (!ok && e == ".fbx") {
+        const std::string assimp_err = err;
+        *out = Model{};
+        std::string uerr;
+        if (load_ufbx_model(path, opt, out, &uerr)) {
+          ok = true;
+          err.clear();
+          out->format = "fbx";
+        } else if (!uerr.empty() &&
+                   (assimp_err.find("FBX-DOM") != std::string::npos ||
+                    assimp_err.find("old format") != std::string::npos || assimp_err.empty())) {
+          err = uerr;
+        } else if (err.empty()) {
+          err = uerr;
+        }
       }
     } else {
       err = "no model importer for '" + e + "'";
@@ -826,6 +893,8 @@ bool load_model(const std::string& path, const ModelImportOptions& opt, Model* o
     if (!opt.collision) out->collision_hulls.clear();
     bake_import_transform(out, opt.unit_scale, z_up);
     bake_forward_axis(out, opt.forward);
+    if (out->format == "fbx") normalize_fbx_metres(out);
+    plant_skinned_feet(out);
     limit_skin_joints(out);
     if (import_was_cancelled()) return fail(path + ": Import cancelled.");
     update_bounds(out);
