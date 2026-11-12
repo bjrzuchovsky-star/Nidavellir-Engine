@@ -77,7 +77,7 @@ bool save_layout(bool three_d, const std::string& name, std::string* error) {
       if (error) *error = "Could not write " + tmp.string();
       return false;
     }
-    out << "; TombStone layout \"" << clean << "\" (" << (three_d ? "3D" : "2D") << " editor)\n";
+    out << "; Nidavellir layout \"" << clean << "\" (" << (three_d ? "3D" : "2D") << " editor)\n";
     out.write(ini, static_cast<std::streamsize>(n));
     if (!out) {
       if (error) *error = "Could not write " + tmp.string();

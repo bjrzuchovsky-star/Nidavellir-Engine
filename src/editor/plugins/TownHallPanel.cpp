@@ -168,7 +168,7 @@ void draw_riders(TownHallState& s, const Snapshot& snap) {
   if (ImGui::BeginTable("##riders", 9, ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_ScrollY |
                                           ImGuiTableFlags_SizingStretchProp)) {
     ImGui::TableSetupScrollFreeze(0, 1);
-    for (const char* h : {"Rider", "Account", "Zone", "Position", "RTT", "Sees", "Strikes", "Items", ""})
+    for (const char* h : {"Wanderer", "Account", "Zone", "Position", "RTT", "Sees", "Strikes", "Items", ""})
       ImGui::TableSetupColumn(h);
     ImGui::TableHeadersRow();
     for (const auto& r : snap.riders) {
@@ -337,7 +337,7 @@ void draw_town_hall_panel(TownHallState& s) {
       draw_map(s, snap);
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem("Riders")) {
+    if (ImGui::BeginTabItem("Wanderers")) {
       draw_riders(s, snap);
       ImGui::EndTabItem();
     }

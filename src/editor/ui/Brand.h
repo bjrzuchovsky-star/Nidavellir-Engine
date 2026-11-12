@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/Brand.h"
+
 #include <cstddef>
 
 namespace ts {
@@ -7,22 +9,21 @@ namespace tombstone {
 namespace editor {
 namespace brand {
 
-// One voice for every screen: short, dry, frontier. No exclamation marks.
-inline constexpr const char* kProduct = "TOMBSTONE";
-inline constexpr const char* kAdminTitle = "TombStone Admin";
-inline constexpr const char* kTagline = "Four riders. One frontier. Build it right.";
-// ASCII only: some Windows title bars mangle UTF-8 from GLFW.
-inline constexpr const char* kWindowTitle = "TombStone Admin | Frontier Editor";
-inline constexpr const char* kWindowTitlePrefix = "TombStone Admin | ";
+// Aliases of src/core/Brand.h so every screen shares one product name.
+inline constexpr const char* kProduct = ts::tombstone::brand::kProduct;
+inline constexpr const char* kAdminTitle = ts::tombstone::brand::kProduct;
+inline constexpr const char* kTagline = ts::tombstone::brand::kTagline;
+inline constexpr const char* kWindowTitle = ts::tombstone::brand::kWindowTitle;
+inline constexpr const char* kWindowTitlePrefix = ts::tombstone::brand::kWindowTitlePrefix;
 
 // Loading splash status lines, picked by progress.
 inline const char* LoadingLine(float progress) {
   static constexpr const char* kLines[] = {
-      "Surveying the territory",
-      "Laying track",
-      "Loading the chambers",
-      "Lighting the lanterns",
-      "Opening the gates",
+      "Stoking the forge",
+      "Laying the anvil",
+      "Reading the runes",
+      "Quenching the steel",
+      "Opening the hall",
   };
   constexpr std::size_t kCount = sizeof(kLines) / sizeof(kLines[0]);
   if (progress < 0.0f) {

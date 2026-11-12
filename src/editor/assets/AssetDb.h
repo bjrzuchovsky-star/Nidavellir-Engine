@@ -4,7 +4,7 @@
 // supported format - glTF, Source .mdl, FBX / OBJ / DAE... see
 // render3d/ModelImport.h - sounds, fonts) gets a .meta holding a stable
 // GUID, its import settings and what the importer found. The .meta files
-// live in the claim's hidden metadata folder, mirroring the asset paths
+// live in the realm's hidden metadata folder, mirroring the asset paths
 // (core/AssetMeta.h):
 //
 //   assets/Textures/crate.png  ->  .tombstone/meta/assets/Textures/crate.png.meta
@@ -55,7 +55,8 @@ inline constexpr const char* kMetaExt = ".meta";
 // Model importer revision stored in .meta info ("importer_version"); a
 // lower one is reimported on the next scan (2 = bounds fix, 3 = Source
 // materials through the content search folders, 4 = fitted collider cache).
-inline constexpr int kModelImporterVersion = 4;
+// 5: large-file import (texture edge, sampled colliders, cancellable load).
+inline constexpr int kModelImporterVersion = 5;
 
 Kind kind_for(const std::string& path);   // by extension
 const char* kind_name(Kind k);            // "texture" / "model" / ...
@@ -101,6 +102,7 @@ class AssetDb {
     std::filesystem::file_time_type mtime{};
     std::uintmax_t size = 0;
     bool import_ok = true;
+    bool import_pending = false;  // heavy import handed to a worker
     std::string import_error;
   };
   struct ScanReport {
@@ -133,7 +135,15 @@ class AssetDb {
   };
 
   void set_importer(Importer importer) { importer_ = std::move(importer); }
-  // Opens the claim and runs migrate() (legacy sidecars -> metadata folder).
+  // Model files at least this big are marked import_pending instead of
+  // imported on the calling thread. 0 disables it (smokes, the worker).
+  void set_defer_import_bytes(std::uintmax_t bytes) { defer_bytes_ = bytes; }
+  // Flag a model so the next scan leaves it for the background import.
+  bool mark_import_pending(const std::string& rel);
+  // Record a failed or cancelled import and clear import_pending so a scan
+  // does not start the job again. The error is kept for the asset panel.
+  bool fail_import(const std::string& rel, const std::string& why);
+  // Opens the realm and runs migrate() (legacy sidecars -> metadata folder).
   void open(const std::string& project_dir);
   // Moves sidecar .meta files next to assets into .tombstone/meta (GUIDs
   // kept), with a backup and a log. Safe to call again (no-op).
@@ -196,6 +206,7 @@ class AssetDb {
   std::vector<std::string> extra_folders_;
   Importer importer_;
   MigrationReport migration_;
+  std::uintmax_t defer_bytes_ = 0;
 };
 
 }  // namespace assetdb

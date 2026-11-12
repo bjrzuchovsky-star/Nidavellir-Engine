@@ -39,31 +39,61 @@ bool model_words(const std::string& l) {
   return has(l, {"model", "mesh", ".glb", ".gltf", ".obj", ".fbx", ".mdl", ".blend", ".dae", ".ply", ".stl"});
 }
 
-// The first thing that looks like a file path ("scripts/gate.lua",
-// "C:\x\y.png") or a quoted name ('ts.example').
+// A path may contain spaces ("Unarmed Walk Forward.fbx"). The title shows
+// the file name, not the folder the old scanner stopped on at the first space.
 std::string pull_subject(const std::string& raw) {
+  const std::string low = lower(raw);
+  static const char* kExt[] = {".fbx",  ".gltf", ".glb",  ".obj", ".blend", ".dae", ".mdl", ".png",
+                               ".jpg",  ".jpeg", ".tga",  ".bmp", ".vtf",   ".dds", ".lua", ".json",
+                               ".anim", ".wav",  ".ogg"};
+  std::size_t at = std::string::npos;
+  std::size_t ext_n = 0;
+  bool modelish = false;
+  for (const char* ext : kExt) {
+    const std::size_t p = low.find(ext);
+    if (p == std::string::npos) continue;
+    if (at != std::string::npos && p >= at) continue;
+    at = p;
+    ext_n = std::char_traits<char>::length(ext);
+    modelish = ext[1] != 'l' || std::string(ext) != ".lua";
+    if (std::string(ext) == ".json" || std::string(ext) == ".anim") modelish = false;
+  }
+  if (at != std::string::npos) {
+    std::size_t start = at;
+    auto sep = [](char c) {
+      return c == '\n' || c == '\r' || c == '"' || c == '\'' || c == '(' || c == ')' || c == ',' || c == ';';
+    };
+    while (start > 0) {
+      const char prev = raw[start - 1];
+      if (sep(prev)) break;
+      if (prev == ':') {
+        // "C:\..." stays; "path: reason" stops before the colon.
+        if (start >= 2 && std::isalpha(static_cast<unsigned char>(raw[start - 2])) &&
+            (start == 2 || sep(raw[start - 3]) || raw[start - 3] == ' ')) {
+          start -= 2;
+        }
+        break;
+      }
+      --start;
+    }
+    while (start < raw.size() && raw[start] == ' ') ++start;
+    std::size_t end = at + ext_n;
+    if (end < raw.size() && raw[end] == ':' && end + 1 < raw.size() &&
+        std::isdigit(static_cast<unsigned char>(raw[end + 1]))) {
+      ++end;
+      while (end < raw.size() && std::isdigit(static_cast<unsigned char>(raw[end]))) ++end;
+    }
+    std::string path = raw.substr(start, end - start);
+    if (modelish) {
+      const std::size_t slash = path.find_last_of("/\\");
+      if (slash != std::string::npos && slash + 1 < path.size()) path = path.substr(slash + 1);
+    }
+    if (path.size() > 2) return path;
+  }
   const auto q = raw.find('\'');
   if (q != std::string::npos) {
     const auto e = raw.find('\'', q + 1);
-    if (e != std::string::npos && e > q + 1 && e - q < 120) return raw.substr(q + 1, e - q - 1);
-  }
-  std::size_t i = 0;
-  while (i < raw.size()) {
-    while (i < raw.size() && (raw[i] == ' ' || raw[i] == '(' || raw[i] == '"' || raw[i] == ',')) ++i;
-    std::size_t j = i;
-    while (j < raw.size() && raw[j] != ' ' && raw[j] != '"' && raw[j] != ',' && raw[j] != ')' && raw[j] != '\n') ++j;
-    std::string tok = raw.substr(i, j - i);
-    while (!tok.empty() && (tok.back() == ':' || tok.back() == '.' || tok.back() == ';')) tok.pop_back();
-    const bool sep = tok.find('/') != std::string::npos || tok.find('\\') != std::string::npos;
-    const auto dot = tok.rfind('.');
-    const bool ext = dot != std::string::npos && dot > 0 && dot + 1 < tok.size() && tok.size() - dot <= 6 &&
-                     std::isalpha(static_cast<unsigned char>(tok[dot + 1]));
-    if ((sep || ext) && tok.find("://") == std::string::npos && tok.size() > 2) {
-      // "scripts/gate.lua:12" -> keep the line number, it helps.
-      return tok;
-    }
-    if (tok.find("://") != std::string::npos) return tok;  // a URL is a fine subject too
-    i = j + 1;
+    if (e != std::string::npos && e > q + 1 && e - q < 180) return raw.substr(q + 1, e - q - 1);
   }
   return {};
 }
@@ -129,10 +159,14 @@ ErrorKind classify(const std::string& raw, ErrorKind hint) {
               "script engine fell over", "stack overflow", "nullreferenceexception", "exception in"}))
     return ErrorKind::ScriptRuntime;
   if (has(l, {"import failed", "could not import", "import error"}) || hint == ErrorKind::ImportFailed) {
+    if (has(l, {"no mesh", "no triangle", "no animation", "assimp could not", "animation only", "animation-only"}))
+      return ErrorKind::ImportFailed;
     if (missing_words(l) && texture_words(l)) return ErrorKind::MissingTexture;
     if (missing_words(l) && model_words(l) && !has(l, {"blender"})) return ErrorKind::MissingModel;
     return ErrorKind::ImportFailed;
   }
+  if (has(l, {"no mesh", "no triangle", "no animation", "assimp could not", "animation-only"}))
+    return ErrorKind::ImportFailed;
   if (has(l, {"script not found"})) return ErrorKind::MissingFile;
   if (missing_words(l)) {
     if (texture_words(l)) return ErrorKind::MissingTexture;
@@ -155,15 +189,15 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
   switch (f.kind) {
     case ErrorKind::MissingFile:
       f.title = "A file is missing";
-      f.what = "TombStone went looking for a file" + s + " and it wasn't there.";
-      f.why = "It was probably moved, renamed or deleted outside the editor, or the claim was copied without it.";
+      f.what = "Nidavellir went looking for a file" + s + " and it wasn't there.";
+      f.why = "It was probably moved, renamed or deleted outside the editor, or the realm was copied without it.";
       f.fix = "Put the file back, or point the thing that uses it at the new file. Asset Browser > Rescan picks "
               "up files moved by hand.";
       break;
     case ErrorKind::MissingTexture:
       f.title = "A texture couldn't be loaded";
       f.what = "An image" + s + " couldn't be opened, so a placeholder is drawn instead.";
-      f.why = "The file was moved or deleted, or it's in a format TombStone can't read (PNG, JPG, TGA, BMP and "
+      f.why = "The file was moved or deleted, or it's in a format Nidavellir can't read (PNG, JPG, TGA, BMP and "
               "VTF are fine).";
       f.fix = "Re-import the image (right-click it in the Asset Browser > Reimport), or pick another texture in "
               "the Inspector.";
@@ -175,14 +209,36 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
       f.fix = "Re-import the model from the Asset Browser, or keep the .gltf, .bin and textures together in one "
               "folder and import again.";
       break;
-    case ErrorKind::ImportFailed:
+    case ErrorKind::ImportFailed: {
+      const std::string l = lower(raw);
       f.title = "Import didn't work";
-      f.what = "The file" + s + " couldn't be brought into the claim.";
-      f.why = "The file may be damaged, still being written by another program, or in a format TombStone doesn't "
-              "import.";
-      f.fix = "Check the file opens in the program that made it, save it again (PNG for images, glTF/GLB or OBJ "
-              "for models), then use Import file... again.";
+      f.what = "The file" + s + " couldn't be brought into the realm.";
+      if (has(l, {"out of memory"})) {
+        f.why = "The model or its textures needed more memory than this PC had free. The editor is still open.";
+        f.fix = "Lower Texture size on the asset (or in the import), close other programs, or decimate the mesh "
+                "in Blender and export glTF.";
+      } else if (has(l, {"timed out", "timeout"})) {
+        f.why = "Blender was still exporting when the time limit ran out, so it was stopped. The editor is still open.";
+        f.fix = "Export glTF from Blender yourself (File > Export > glTF) and import that. A smaller texture size "
+                "in Blender helps a very large file.";
+      } else if (has(l, {"no mesh", "no triangle", "no animation", "assimp could not", "animation only",
+                         "animation-only"})) {
+        f.why = raw.size() > 420 ? raw.substr(0, 420) : raw;
+        f.fix = "A Mixamo FBX exported Without Skin is an animation clip: drop it on a skinned character, "
+                "or onto Animation in the Inspector. A mesh file needs triangles (glTF, GLB, FBX or OBJ).";
+      } else if (has(l, {"import cancelled", "cancelled"})) {
+        f.title = "Import cancelled";
+        f.what = "The import was cancelled. Nothing else was changed.";
+        f.why = "Cancel stops Blender and the rest of the import so you can keep working.";
+        f.fix = "Import the file again when you want to. Exporting glTF from Blender is the sure path for a huge .blend.";
+      } else {
+        f.why = "The file may be damaged, still being written by another program, or in a format Nidavellir doesn't "
+                "import.";
+        f.fix = "Check the file opens in the program that made it, save it again (PNG for images, glTF/GLB or OBJ "
+                "for models), then use Import file... again.";
+      }
       break;
+    }
     case ErrorKind::ScriptCompile:
       f.title = "A script has a mistake in it";
       f.what = "The script" + s + " couldn't be read, so it won't run until it's fixed.";
@@ -200,11 +256,11 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
       break;
     case ErrorKind::PluginMissing:
       f.title = "A plugin is missing";
-      f.what = "This claim asks for a plugin" + s + " that isn't installed, so it rides on without it.";
-      f.why = "The claim was made on another PC, or the plugin was uninstalled or failed to download.";
-      f.fix = "Open the Trading Post and install (hitch) the plugin, or switch it off for this claim.";
+      f.what = "This realm asks for a plugin" + s + " that isn't installed, so it runs on without it.";
+      f.why = "The realm was made on another PC, or the plugin was uninstalled or failed to download.";
+      f.fix = "Open the Market and install the plugin, or switch it off for this realm.";
       f.fix_action = "Panel/Trading Post";
-      f.fix_label = "Open Trading Post";
+      f.fix_label = "Open Market";
       break;
     case ErrorKind::ExportFailed:
       f.title = "Export didn't finish";
@@ -224,7 +280,7 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
       break;
     case ErrorKind::BlenderNotFound:
       f.title = "Blender wasn't found";
-      f.what = "This file needs Blender to import, and TombStone couldn't find Blender on this PC.";
+      f.what = "This file needs Blender to import, and Nidavellir couldn't find Blender on this PC.";
       f.why = ".blend files (and some other formats) are converted by Blender in the background.";
       f.fix = "Install Blender, or set its path in Settings > Tools > Blender executable. You can also export "
               "glTF from Blender yourself and import that.";
@@ -233,7 +289,7 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
       break;
     case ErrorKind::UpdateCheck:
       f.title = "Couldn't check for updates";
-      f.what = "TombStone couldn't reach the release server" + s + ". Nothing has changed on this PC.";
+      f.what = "Nidavellir couldn't reach the release server" + s + ". Nothing has changed on this PC.";
       f.why = "Usually no internet connection, a proxy or firewall, or the server is busy.";
       f.fix = "Try again later. You can turn update checks off in Settings > Supply Run.";
       f.fix_action = "Settings/Supply Run";
@@ -245,15 +301,15 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
         f.title = two ? "This is a 2D scene" : "This is a 3D scene";
         f.what = std::string("This claim's scene.json was made by the ") + (two ? "2D" : "3D") +
                  " editor, so this editor didn't open it.";
-        f.why = "The scene file was copied in from another claim, or the claim's kind was changed by hand.";
+        f.why = "The scene file was copied in from another realm, or the realm's kind was changed by hand.";
         f.fix = std::string("Open it from a ") + (two ? "2D" : "3D") +
-                " claim, or move scene.json out of the way to start this claim fresh.";
+                " claim, or move scene.json out of the way to start this realm fresh.";
         break;
       }
-      f.title = "This scene is from a newer TombStone";
-      f.what = "The scene" + s + " was saved by a newer version of TombStone than this one, so it wasn't opened.";
+      f.title = "This scene is from a newer Nidavellir";
+      f.what = "The scene" + s + " was saved by a newer version of Nidavellir than this one, so it wasn't opened.";
       f.why = "Newer versions add things older ones can't read. Opening it here could lose them.";
-      f.fix = "Update TombStone (the Project Manager shows a banner when a newer version is out), then open the "
+      f.fix = "Update Nidavellir (the Project Manager shows a banner when a newer version is out), then open the "
               "claim again. Saving is switched off for this scene, so your file hasn't been touched.";
       break;
     case ErrorKind::SaveFailed:
@@ -265,7 +321,7 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
       break;
     case ErrorKind::Unknown:
       f.title = "Something went wrong";
-      f.what = "TombStone hit a problem it doesn't have a plain explanation for yet.";
+      f.what = "Nidavellir hit a problem it doesn't have a plain explanation for yet.";
       f.why = "See Details for the exact message.";
       f.fix = "Try again. If it keeps happening, use Copy details and include it when you report the bug.";
       break;
@@ -276,7 +332,7 @@ FriendlyError explain(const std::string& raw, ErrorKind hint, const std::string&
 std::string FriendlyError::summary() const { return what + "\nWhy: " + why + "\nWhat to do: " + fix; }
 
 std::string FriendlyError::copy_text() const {
-  return "TombStone error: " + title + " [" + to_string(kind) + "]\n" + summary() + "\n\nDetails:\n" + details + "\n";
+  return "Nidavellir error: " + title + " [" + to_string(kind) + "]\n" + summary() + "\n\nDetails:\n" + details + "\n";
 }
 
 // ---- modal ------------------------------------------------------------
@@ -428,7 +484,7 @@ const char* short_title(ErrorKind k) {
     case ErrorKind::VaultConnection: return "can't reach the Vault";
     case ErrorKind::BlenderNotFound: return "Blender not found";
     case ErrorKind::UpdateCheck: return "update check failed";
-    case ErrorKind::SceneVersion: return "scene from a newer TombStone";
+    case ErrorKind::SceneVersion: return "scene from a newer Nidavellir";
     case ErrorKind::SaveFailed: return "couldn't save";
     case ErrorKind::Unknown: return "";
   }

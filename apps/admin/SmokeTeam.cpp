@@ -6,6 +6,7 @@
 
 #include "editor/editor3d/Editor3DScreen.h"
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/team/TeamFiles.h"
 #include "editor/team/TeamSession.h"
 #include "net/Net.h"
 #include "net/SimTransport.h"
@@ -45,6 +46,8 @@ int fail(const std::string& what) {
   std::cerr << "[smoke] team FAILED: " << what << '\n';
   return 1;
 }
+
+fs::path sync_root(const ed::TeamSession& t);
 
 ed::ProjectInfo fresh(const std::string& id, ed::ProjectKind kind) {
   const fs::path dir = fs::absolute(fs::path("TombStoneProjects") / id);
@@ -510,8 +513,6 @@ int check_assets() {
     a.on_enter();
     b.on_enter();
     const fs::path pa(a.team().project().path), pb(b.team().project().path);
-    fs::create_directories(pa / "assets", ec);
-    std::ofstream(pa / "assets" / "wanted.txt", std::ios::binary) << "WANTED: one ghost, dead or alive";
     std::vector<Tick> ticks = {[&](float) { server.poll(); }, [&](float dt) { a.tick_team(dt); },
                                [&](float dt) { b.tick_team(dt); }};
     ed::TeamJoinSettings j;
@@ -524,17 +525,26 @@ int check_assets() {
     j.claim = "*";
     j.user = "Wyatt";
     if (!b.team().join(j, &err) || !pump(ticks, [&] { return b.team().joined(); }, 5)) return fail("asset B join");
-    const fs::path got = pb / "assets" / "wanted.txt";
-    if (!pump(ticks, [&] { return fs::exists(got) && slurp(got) == slurp(pa / "assets" / "wanted.txt"); }, 10)) {
-      rc = fail("asset reached B through the Vault");
+    // Joiners share through the per-session cache. The open realms stay put.
+    const fs::path ma = sync_root(a.team());
+    const fs::path mb = sync_root(b.team());
+    if (ma == pa || mb == pb) return fail("vault ride-in should use the session cache");
+    fs::create_directories(ma / "assets", ec);
+    std::ofstream(ma / "assets" / "wanted.txt", std::ios::binary) << "WANTED: one ghost, dead or alive";
+    const fs::path got = mb / "assets" / "wanted.txt";
+    if (!pump(ticks, [&] { return fs::exists(got) && slurp(got) == slurp(ma / "assets" / "wanted.txt"); }, 10)) {
+      rc = fail("asset reached B's session mirror through the Vault (" + a.team().files_error() + " / " +
+                b.team().files_error() + ")");
+    } else if (fs::exists(pb / "assets" / "wanted.txt")) {
+      rc = fail("B's own realm was overwritten by the clan file");
     }
-    const std::string sha = tv::sha256_file((pa / "assets" / "wanted.txt").string());
+    const std::string sha = tv::sha256_file((ma / "assets" / "wanted.txt").string());
     if (!rc && !fs::exists(vroot / "blobs" / sha.substr(0, 2) / sha)) rc = fail("blob stored by SHA-256");
     // B changes it; A gets the new version.
     if (!rc) {
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
       std::ofstream(got, std::ios::binary | std::ios::trunc) << "REWARD: 500 dollars";
-      if (!pump(ticks, [&] { return slurp(pa / "assets" / "wanted.txt") == "REWARD: 500 dollars"; }, 10)) {
+      if (!pump(ticks, [&] { return slurp(ma / "assets" / "wanted.txt") == "REWARD: 500 dollars"; }, 10)) {
         rc = fail("changed asset reached A");
       }
     }
@@ -548,7 +558,7 @@ int check_assets() {
       b.team().set_asset_backend(std::make_shared<SlowBackend>(
           std::make_shared<tv::RemoteBackend>(url, key), 700));
       {
-        std::ofstream big(pa / "assets" / "canyon.bin", std::ios::binary);
+        std::ofstream big(ma / "assets" / "canyon.bin", std::ios::binary);
         std::string chunk(1 << 16, 'x');
         for (int i = 0; i < 48; ++i) {
           chunk[0] = static_cast<char>(i);
@@ -570,9 +580,9 @@ int check_assets() {
                                      saw_progress = true;
                                    }
                                  }};
-      const fs::path big_b = pb / "assets" / "canyon.bin";
+      const fs::path big_b = mb / "assets" / "canyon.bin";
       if (!pump(timed, [&] { return fs::exists(big_b) && fs::file_size(big_b) == (3u << 20); }, 20)) {
-        rc = fail("3 MB file reached B through the slow Vault");
+        rc = fail("3 MB file reached B's session mirror through the slow Vault");
       } else if (!saw_progress) {
         rc = fail("transfer progress shown (files / bytes)");
       } else if (worst_ms > 150.0) {
@@ -582,10 +592,10 @@ int check_assets() {
     // Deletes: A removes the wanted poster; B's copy goes (kept in the trash).
     if (!rc) {
       settle(ticks, 2.5);  // both sides agree the file is in step
-      fs::remove(pa / "assets" / "wanted.txt", ec);
+      fs::remove(ma / "assets" / "wanted.txt", ec);
       if (!pump(ticks, [&] { return !fs::exists(got); }, 15)) {
         rc = fail("asset delete reached B");
-      } else if (!fs::exists(pb / ".tombstone" / "team" / "trash" / "assets" / "wanted.txt")) {
+      } else if (!fs::exists(mb / ".tombstone" / "team" / "trash" / "assets" / "wanted.txt")) {
         rc = fail("deleted asset kept in B's team trash");
       } else {
         const tc::Docs* d = server.docs("_team_assets");
@@ -647,6 +657,10 @@ void gltf_file(const fs::path& file, float scale) {
 fs::path meta_file(const fs::path& claim, const std::string& rel) {
   return fs::u8path(ts::tombstone::core::asset_meta::meta_path(claim.string(), rel));
 }
+
+// Where a clan member reads and writes shared files (the open realm for the
+// host, the per-session cache for a joiner).
+fs::path sync_root(const ed::TeamSession& t) { return fs::u8path(t.files_root()); }
 
 // Same bytes in both claims (file and its .meta).
 bool same_file(const fs::path& a, const fs::path& b, const std::string& rel) {
@@ -723,6 +737,14 @@ int check_ride_in_vault() {
     j.port = server.port();
     j.key = k_annie;
     j.claim = "_team_ridein";
+    {
+      // A is a joiner, so the shared copy lives in the session cache, not in A's realm.
+      const fs::path seed = fs::u8path(ed::TeamSession::clan_mirror_dir(a.team().project().id, "_team_ridein"));
+      fs::create_directories((seed / ghost).parent_path(), ec);
+      fs::create_directories(meta_file(seed, ghost).parent_path(), ec);
+      fs::copy_file(pa / ghost, seed / ghost, fs::copy_options::overwrite_existing, ec);
+      fs::copy_file(meta_file(pa, ghost), meta_file(seed, ghost), fs::copy_options::overwrite_existing, ec);
+    }
     if (!a.team().join(j, &err) || !pump(ticks, [&] { return a.team().joined(); }, 5)) return fail("ride-in A join");
     // A's own files go up to the posse.
     if (!pump(ticks, [&] {
@@ -741,9 +763,11 @@ int check_ride_in_vault() {
       j.key = k_wyatt;
       j.claim = "*";
       if (!b.team().join(j, &err) || !pump(ticks, [&] { return b.team().joined(); }, 5)) return fail("ride-in B join");
-      if (!pump(ticks, [&] { return same_file(pa, pb, ghost) && same_meta(pa, pb, ghost) && has_sprite(b, "Ghost", ghost); },
+      if (!pump(ticks, [&] { return same_file(sync_root(a.team()), sync_root(b.team()), ghost) &&
+                                    same_meta(sync_root(a.team()), sync_root(b.team()), ghost) &&
+                                    has_sprite(b, "Ghost", ghost) && !fs::exists(pb / ghost); },
                 15)) {
-        rc = fail("B got A's texture, its .meta and the sprite (" + b.team().files_error() + ")");
+        rc = fail("B got A's texture into the session cache (" + b.team().files_error() + ")");
       }
     }
     if (!rc) {
@@ -760,11 +784,12 @@ int check_ride_in_vault() {
       fs::remove_all(in, ec);
       png_file(in / "horse.png", 4, 4, 33);
       const auto r = b.asset_browser().import_files({(in / "horse.png").string()}, "assets/sprites");
-      if (!fs::exists(pb / horse)) rc = fail("B imported horse.png");
+      if (!fs::exists(sync_root(b.team()) / horse)) rc = fail("B imported horse.png into the cache");
       b.workspace().create_sprite_entity("Horse", horse, 40, 0, 16, 16);
     }
-    if (!rc && !pump(ticks, [&] { return same_file(pa, pb, horse) && same_meta(pa, pb, horse) && has_sprite(a, "Horse", horse) &&
-                                         a.asset_browser().db().by_path(horse); },
+    if (!rc && !pump(ticks, [&] { return same_file(sync_root(a.team()), sync_root(b.team()), horse) &&
+                                          same_meta(sync_root(a.team()), sync_root(b.team()), horse) &&
+                                          has_sprite(a, "Horse", horse) && a.asset_browser().db().by_path(horse); },
                      15)) {
       rc = fail("A got B's imported texture, its .meta and the placed sprite (" + b.team().files_error() + ")");
     }
@@ -772,8 +797,10 @@ int check_ride_in_vault() {
     if (!rc) {
       j.key = k_watch;
       if (!c.team().join(j, &err) || !pump(ticks, [&] { return c.team().joined(); }, 5)) return fail("ride-in C join");
-      if (!pump(ticks, [&] { return same_file(pa, pc, ghost) && same_file(pa, pc, horse) && same_meta(pa, pc, horse) &&
-                                    has_sprite(c, "Horse", horse); },
+      if (!pump(ticks, [&] { return same_file(sync_root(a.team()), sync_root(c.team()), ghost) &&
+                                    same_file(sync_root(a.team()), sync_root(c.team()), horse) &&
+                                    same_meta(sync_root(a.team()), sync_root(c.team()), horse) &&
+                                    has_sprite(c, "Horse", horse) && !fs::exists(pc / ghost); },
                 15)) {
         rc = fail("read-only rider sees the posse's files (" + c.team().files_error() + ")");
       } else if (c.team().files_route().find("read-only") == std::string::npos) {
@@ -842,11 +869,15 @@ int check_ride_in_lan() {
   j.pass = "dusk";
   j.user = "Hickok";
   if (!b.team().join(j, &err) || !pump(ticks, [&] { return b.team().joined(); }, 5)) return fail("LAN join");
+  const fs::path mb = sync_root(b.team());
   int rc = 0;
-  if (!pump(ticks, [&] { return same_file(pa, pb, crate) && same_file(pa, pb, crate_bin) && same_meta(pa, pb, crate) &&
+  if (mb == pb) rc = fail("LAN joiner should use a session cache");
+  else if (!pump(ticks, [&] { return same_file(pa, mb, crate) && same_file(pa, mb, crate_bin) && same_meta(pa, mb, crate) &&
                                 b.find(placed) != nullptr; },
             15)) {
     rc = fail("LAN rider got the host's model, .bin, .meta and object (" + b.team().files_error() + ")");
+  } else if (fs::exists(pb / crate)) {
+    rc = fail("LAN joiner realm was overwritten");
   } else if (b.team().files_route().find("over the team session") == std::string::npos) {
     rc = fail("LAN files route: " + b.team().files_route());
   } else {
@@ -863,11 +894,11 @@ int check_ride_in_lan() {
     fs::remove_all(in, ec);
     gltf_file(in / "barrel.gltf", 2.0f);
     b.asset_browser().import_files({(in / "barrel.gltf").string()}, "assets/models");
-    if (!fs::exists(pb / barrel)) rc = fail("LAN rider imported barrel.gltf");
+    if (!fs::exists(mb / barrel)) rc = fail("LAN rider imported barrel.gltf into the cache");
     else theirs = b.drop_asset(barrel, {2, 0, 0});
     if (!rc && !theirs) rc = fail("LAN rider placed the barrel");
   }
-  if (!rc && !pump(ticks, [&] { return same_file(pa, pb, barrel) && same_meta(pa, pb, barrel) && a.find(theirs) != nullptr &&
+  if (!rc && !pump(ticks, [&] { return same_file(pa, mb, barrel) && same_meta(pa, mb, barrel) && a.find(theirs) != nullptr &&
                                        a.asset_browser().db().by_path(barrel); },
                    15)) {
     rc = fail("host got the rider's model, .meta and object (" + b.team().files_error() + ")");
@@ -901,7 +932,7 @@ int check_ride_in_old_host() {
   j.claim = "_team_old";
   int rc = 0;
   if (!a.team().join(j, &err) || !pump(ticks, [&] { return a.team().joined(); }, 5)) rc = fail("old host join");
-  else if (a.team().files_error().find("older TombStone") == std::string::npos) {
+  else if (a.team().files_error().find("older Nidavellir") == std::string::npos) {
     rc = fail("readable error for a host that doesn't carry files: " + a.team().files_error());
   }
   a.team().leave();
@@ -1152,10 +1183,123 @@ int check_persist() {
   return 0;
 }
 
+// Chunked session blobs: a partial upload resumes from the host's byte count,
+// then the stored file matches the SHA-256.
+int check_blob_resume() {
+  const fs::path dir = fs::absolute("TombStoneProjects/_asset_sync_blobs");
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  std::string bytes(100000, 'x');
+  for (std::size_t i = 0; i < bytes.size(); i += 97) bytes[i] = static_cast<char>(i & 0xff);
+  const fs::path src = dir / "src.bin";
+  spit(src, bytes);
+  const std::string sha = ts::tombstone::vault::sha256_file(src.string());
+  ed::SessionBlobStore store((dir / "store").string());
+  auto put = [&](std::uint64_t off, std::size_t n) {
+    tc::Value req = tc::Value::object();
+    req.set("t", tc::Value::string("blob_put"));
+    req.set("sha", tc::Value::string(sha));
+    req.set("size", tc::Value::number(static_cast<double>(bytes.size())));
+    req.set("off", tc::Value::number(static_cast<double>(off)));
+    req.set("data", tc::Value::string(tc::base64_encode(bytes.substr(off, n))));
+    return store.handle(true, req);
+  };
+  const std::size_t chunk = ed::kTeamBlobChunk;
+  tc::Value first = put(0, chunk);
+  if (!first.flag("ok", false) || first.flag("done", false)) return fail("first chunk should be accepted, not finished");
+  tc::Value bad = put(1, chunk);
+  if (bad.flag("ok", false)) return fail("a skipped offset must be refused");
+  const auto have = static_cast<std::uint64_t>(bad.num("have", -1));
+  if (have != chunk) return fail("host should report the bytes it kept");
+  std::uint64_t off = have;
+  while (off < bytes.size()) {
+    const std::size_t n = std::min<std::size_t>(chunk, bytes.size() - static_cast<std::size_t>(off));
+    tc::Value r = put(off, n);
+    if (!r.flag("ok", false)) return fail("resume chunk refused: " + r.str("error"));
+    off += n;
+    if (r.flag("done", false)) break;
+  }
+  const fs::path stored = fs::u8path(store.blob_path(sha));
+  if (!fs::exists(stored) || ts::tombstone::vault::sha256_file(stored.string()) != sha) {
+    return fail("resumed blob does not match its SHA-256");
+  }
+  std::cout << "[smoke] asset-sync: chunk resume OK (" << bytes.size() << " bytes)\n";
+  return 0;
+}
+
+// Two editors on loopback. A file dropped into one realm arrives on the other
+// with the same bytes, and a delete follows. No manual rescan.
+int check_two_peers() {
+  ed::Editor3DScreen a(fresh("_asset_sync_a", ed::ProjectKind::ThreeD));
+  const fs::path pa(a.team().project().path);
+  const std::string crate = "assets/models/crate.gltf";
+  gltf_file(pa / crate, 1.0f);
+  a.on_enter();
+  a.asset_browser().rescan();
+  ed::Editor3DScreen b(fresh("_asset_sync_b", ed::ProjectKind::ThreeD));
+  b.on_enter();
+  const fs::path pb(b.team().project().path);
+  std::string err;
+  ed::TeamHostSettings hs;
+  hs.port = 0;
+  hs.pass = "forge";
+  hs.user = "Brynhild";
+  if (!a.team().host(hs, &err)) return fail("asset-sync host: " + err);
+  std::vector<Tick> ticks = {[&](float dt) { a.tick_team(dt); }, [&](float dt) { b.tick_team(dt); }};
+  if (!pump(ticks, [&] { return a.team().joined(); }, 5)) return fail("asset-sync host joined itself");
+  ed::TeamJoinSettings j;
+  j.port = a.team().server()->port();
+  j.pass = "forge";
+  j.user = "Eir";
+  if (!b.team().join(j, &err) || !pump(ticks, [&] { return b.team().joined(); }, 5)) return fail("asset-sync join");
+  const fs::path mb = sync_root(b.team());
+  if (mb == pb) return fail("joiner should mirror into a cache, not their own realm");
+  if (!pump(ticks, [&] { return same_file(pa, mb, crate) && same_meta(pa, mb, crate); }, 15)) {
+    return fail("late joiner did not receive the host's file (" + b.team().files_error() + ")");
+  }
+  if (fs::exists(pb / crate)) return fail("joiner realm was overwritten by the host tree");
+  const std::string extra = "assets/models/anvil.gltf";
+  gltf_file(pa / extra, 3.0f);
+  if (!pump(ticks, [&] { return same_file(pa, mb, extra); }, 15)) {
+    return fail("a file that appears on the host did not reach the peer");
+  }
+  std::error_code ec;
+  fs::remove(pa / extra, ec);
+  fs::remove(meta_file(pa, extra), ec);
+  if (!pump(ticks, [&] { return !fs::exists(mb / extra); }, 15)) {
+    return fail("a deleted file stayed on the peer");
+  }
+  fs::create_directories((pa / "assets/models/renamed").parent_path(), ec);
+  fs::rename(pa / crate, pa / "assets/models/crate-renamed.gltf", ec);
+  fs::rename(meta_file(pa, crate), meta_file(pa, "assets/models/crate-renamed.gltf"), ec);
+  if (!pump(ticks, [&] {
+        return same_file(pa, mb, "assets/models/crate-renamed.gltf") && !fs::exists(mb / crate);
+      }, 15)) {
+    return fail("a renamed file did not follow to the joiner cache");
+  }
+  if (a.team().asset_sync_state() == "failed" || b.team().asset_sync_state() == "failed") {
+    return fail("file sync failed: " + a.team().asset_sync_detail() + " / " + b.team().asset_sync_detail());
+  }
+  b.team().leave();
+  a.team().leave();
+  std::cout << "[smoke] asset-sync: two peers OK\n";
+  return 0;
+}
+
 }  // namespace
 
 namespace ts {
 namespace tombstone {
+
+int run_asset_sync_smoke() {
+  if (!net::net_startup()) return fail("net startup");
+  ed::TeamSession::settings_fallback = false;
+  int rc = check_blob_resume();
+  if (rc == 0) rc = check_two_peers();
+  net::net_shutdown();
+  return rc;
+}
 
 int run_team_smoke() {
   if (!net::net_startup()) return fail("net startup");

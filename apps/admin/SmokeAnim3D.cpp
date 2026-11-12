@@ -2,8 +2,13 @@
 
 #include "editor/editor3d/Editor3DScreen.h"
 #include "render3d/Animator.h"
+#include "runtime/GraphScript.h"
+#include "render3d/ClipFile.h"
+#include "render3d/ColliderFit.h"
 #include "render3d/GlRenderer3D.h"
 #include "render3d/Gltf.h"
+#include "render3d/ModelImport.h"
+#include "render3d/Retarget.h"
 #include "render3d/HiddenGl.h"
 #include "render3d/Scene3D.h"
 #include "render3d/SceneView.h"
@@ -11,10 +16,12 @@
 #include "world3d/World3D.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -437,6 +444,29 @@ end
       w.animator(hank)->param("speed") != 4.5f) {
     return fail("graph bridge anim.set_param: " + err);
   }
+  if (!w.script_plugin_call("anim", "set_float",
+                            {ts::tombstone::ScriptValue::of_number(static_cast<double>(hank)),
+                             ts::tombstone::ScriptValue::of_text("speed"),
+                             ts::tombstone::ScriptValue::of_number(2.25)},
+                            &res, &err) ||
+      !near(w.animator(hank)->param("speed"), 2.25f)) {
+    return fail("graph bridge anim.set_float: " + err);
+  }
+  if (!w.script_plugin_call("anim", "set_bool",
+                            {ts::tombstone::ScriptValue::of_number(static_cast<double>(hank)),
+                             ts::tombstone::ScriptValue::of_text("grounded"),
+                             ts::tombstone::ScriptValue::of_bool(false)},
+                            &res, &err) ||
+      w.animator(hank)->param("grounded") > 0.5f) {
+    return fail("graph bridge anim.set_bool: " + err);
+  }
+  if (!w.script_plugin_call("anim", "trigger",
+                            {ts::tombstone::ScriptValue::of_number(static_cast<double>(hank)),
+                             ts::tombstone::ScriptValue::of_text("jump")},
+                            &res, &err) ||
+      w.animator(hank)->param("jump") < 0.5f) {
+    return fail("graph bridge anim.trigger: " + err);
+  }
   // Ride north: the controller feeds speed; the blend space runs.
   w3::Input3D north;
   north.move_forward = 1.0f;
@@ -460,6 +490,34 @@ end
   if (!warnings.empty()) return fail("warnings: " + warnings.front());
   // Lua handle method play() (2D API) also works on 3D animators.
   if (!w.script_play(hank, "jump", false) || w.animator(hank)->state(0) != "jump") return fail("script_play");
+  // C# / C++ go through script_query (the same calls as PlayAnimation / SetAnimFloat).
+  auto ask = [&](const char* op, const std::string& args) {
+    char buf[160];
+    const int n = w.script_query(op, args.c_str(), buf, static_cast<int>(sizeof(buf)));
+    if (n < 0) return std::string();
+    return std::string(buf, buf + std::min(n, static_cast<int>(sizeof(buf))));
+  };
+  const std::string hid = std::to_string(hank);
+  if (ask("anim.set", hid + "\tspeed\t2.25") != "1") return fail("script anim.set");
+  if (!near(static_cast<float>(std::atof(ask("anim.param", hid + "\tspeed").c_str())), 2.25f)) {
+    return fail("script anim.param " + ask("anim.param", hid + "\tspeed"));
+  }
+  if (ask("anim.set", hid + "\tgrounded\tfalse") != "1" || w.animator(hank)->param("grounded") > 0.5f) {
+    return fail("script anim.set bool");
+  }
+  if (ask("anim.trigger", hid + "\tjump") != "1" || w.animator(hank)->param("jump") < 0.5f) {
+    return fail("script anim.trigger");
+  }
+  if (ask("anim.play", hid + "\twave\t0.2\t1") != "1" || ask("anim.state", hid + "\t2") != "clip:wave") {
+    return fail("script anim.play/state " + ask("anim.state", hid + "\t2"));
+  }
+  if (ask("anim.crossfade", hid + "\tlocomotion\t0.3") != "1" || w.animator(hank)->state(0) != "locomotion") {
+    return fail("script anim.crossfade " + w.animator(hank)->state(0));
+  }
+  if (ask("anim.stop", hid + "\t2\t0.05") != "1") return fail("script anim.stop");
+  if (ask("anim", hid + "\tjump") != "1" || w.animator(hank)->state(0) != "jump") return fail("script anim legacy");
+  const std::string frame = ask("anim.frame", hid);
+  if (frame.rfind("jump", 0) != 0) return fail("script anim.frame " + frame);
   std::cout << "[smoke] anim3d world OK (2 animators, rider speed " << run_speed
             << " m/s ran, " << steps->number << " footsteps via on_anim_event, jump + landing, "
             << "Lua anim.play/set_param/param/state, graph bridge set_param)\n";
@@ -574,6 +632,344 @@ int gpu_render(const fs::path& dir) {
   return 0;
 }
 
+// Authored clips (.anim3d.json) merge onto a rigged import, and bone lines
+// follow the same palette the GPU skins with.
+int sidecar_and_bones(const fs::path& dir) {
+  const r3::Skeleton sk = two_bones();
+  const std::vector<r3::BoneSegment> rest = r3::bone_segments(sk, r3::rest_pose(sk));
+  if (rest.size() != 2 || rest[1].parent != 0 || !near3(rest[1].from, {0, 0, 0}) ||
+      !near3(rest[1].to, {0, 1, 0})) {
+    return fail("rest bone line");
+  }
+  r3::Pose lifted = r3::rest_pose(sk);
+  lifted[1].t = {0, 2, 0};
+  const std::vector<r3::Vec3> up = r3::joint_positions(sk, lifted);
+  if (!near3(up[1], {0, 2, 0})) return fail("lifted joint " + str(up[1]));
+  std::vector<r3::Mat4> pal;
+  r3::skin_palette(sk, lifted, &pal);
+  const std::vector<r3::Vec3> from_pal = r3::joint_positions(sk, pal);
+  if (!near3(from_pal[0], up[0]) || !near3(from_pal[1], up[1])) return fail("palette joint origin");
+
+  r3::Clip bend;
+  bend.name = "bend";
+  r3::Channel rot;
+  rot.joint = 1;
+  rot.path = r3::ChannelPath::Rotation;
+  rot.interp = r3::Interp::Linear;
+  const r3::Quat q90 = r3::Quat::axis_angle({0, 0, 1}, r3::radians(90.0f));
+  const float ident[4] = {0, 0, 0, 1};
+  const float bent[4] = {q90.x, q90.y, q90.z, q90.w};
+  if (r3::upsert_key(&rot, 0.0f, ident) != 0 || r3::upsert_key(&rot, 1.0f, bent) != 1) return fail("upsert");
+  r3::set_channel_interp(&rot, r3::Interp::Step);
+  float held[4];
+  r3::sample_channel(rot, 0.9f, held);
+  if (!near(held[3], 1.0f) || !near(held[2], 0.0f)) return fail("step holds the first key");
+  r3::set_channel_interp(&rot, r3::Interp::Linear);
+  if (r3::move_key(&rot, 1, 0.5f) != 1) return fail("move key");
+  if (!r3::erase_key(&rot, 1) || rot.times.size() != 1) return fail("erase key");
+  r3::upsert_key(&rot, 1.0f, bent);
+  bend.channels.push_back(rot);
+  r3::clip_duration(&bend);
+  if (!near(bend.duration, 1.0f)) return fail("clip duration");
+
+  const std::string json = r3::clips_to_json(sk, {bend});
+  std::vector<r3::Clip> back;
+  std::string err;
+  if (!r3::clips_from_json(json, sk, &back, &err) || back.size() != 1 || back[0].channels.size() != 1) {
+    return fail("clip json round trip: " + err);
+  }
+  r3::Pose pose = r3::rest_pose(sk);
+  r3::sample_clip(back[0], 1.0f, false, &pose);
+  if (!near(pose[1].r.z, q90.z, 1e-4f) || !near(pose[1].r.w, q90.w, 1e-4f)) return fail("sampled bend");
+
+  // A rigged glTF plus a sidecar: "bend" overrides the file, "extra" is new,
+  // and an unknown joint is reported without dropping the good channel.
+  r3::GltfPart part;
+  part.mesh = r3::make_cube(1.0f);
+  part.mesh.name = "bar";
+  part.material.name = "red";
+  part.material.base_color[0] = 0.9f;
+  part.material.base_color[1] = 0.08f;
+  part.material.base_color[2] = 0.06f;
+  for (r3::Vertex3D& v : part.mesh.vertices) v.position = r3::mul(v.position, {0.3f, 2.0f, 0.3f}) + r3::Vec3{0, 1, 0};
+  part.mesh.skin.resize(part.mesh.vertices.size());
+  for (std::size_t i = 0; i < part.mesh.vertices.size(); ++i) {
+    const bool top = part.mesh.vertices[i].position.y > 1.5f;
+    part.mesh.skin[i].joints[0] = top ? 1.0f : 0.0f;
+    part.mesh.skin[i].weights[0] = 1.0f;
+  }
+  r3::Clip keep;
+  keep.name = "keep";
+  r3::Channel hold;
+  hold.joint = 1;
+  hold.path = r3::ChannelPath::Translation;
+  hold.times = {0.0f, 1.0f};
+  hold.values = {0, 1, 0, 0, 1, 0};
+  keep.channels = {hold};
+  keep.duration = 1.0f;
+  r3::Clip file_bend = bend;
+  file_bend.channels[0].values = {0, 0, 0, 1, 0, 0, 0, 1};  // stays identity
+  const fs::path gltf = dir / "bar.gltf";
+  if (!r3::write_skinned_gltf(gltf.string(), {part}, sk, {keep, file_bend}, &err)) return fail(err);
+  r3::Clip extra;
+  extra.name = "extra";
+  r3::Channel slide = hold;
+  slide.values = {0, 1, 0, 0, 1, 1};
+  extra.channels = {slide};
+  extra.duration = 1.0f;
+  r3::Clip side_bend = bend;
+  const char* ghost_json =
+      R"({"version":1,"clips":[{"name":"nod","channels":[{"joint":"ghost","path":"scale","interp":"linear","keys":[{"t":0,"v":[2,2,2]}]},{"joint":"arm","path":"translation","interp":"linear","keys":[{"t":0,"v":[0,1,0]},{"t":1,"v":[0,2,0]}]}]}]})";
+  std::vector<r3::Clip> ghost_clips;
+  if (!r3::clips_from_json(ghost_json, sk, &ghost_clips, &err) || ghost_clips.size() != 1 ||
+      ghost_clips[0].channels.size() != 1 || err.find("ghost") == std::string::npos) {
+    return fail("unknown joint should be dropped and named: " + err);
+  }
+  pose = r3::rest_pose(sk);
+  r3::sample_clip(ghost_clips[0], 1.0f, false, &pose);
+  if (!near3(pose[1].t, {0, 2, 0})) return fail("kept channel after an unknown joint");
+  if (!r3::save_clip_file(r3::clip_sidecar_path(gltf.string()), sk, {side_bend, extra}, &err)) {
+    return fail("save sidecar: " + err);
+  }
+  r3::Model loaded;
+  err.clear();
+  if (!r3::load_model(gltf.string(), &loaded, &err)) return fail("load sidecar model: " + err);
+  if (!err.empty()) return fail("clean sidecar warned: " + err);
+  if (loaded.find_clip("keep") < 0 || loaded.find_clip("extra") < 0 || loaded.find_clip("bend") < 0) {
+    return fail("merged clip names");
+  }
+  pose = r3::rest_pose(loaded.skeleton);
+  r3::sample_clip(loaded.clips[static_cast<std::size_t>(loaded.find_clip("bend"))], 1.0f, false, &pose);
+  r3::skin_palette(loaded.skeleton, pose, &pal);
+  const float j1[4] = {1, 0, 0, 0}, w1[4] = {1, 0, 0, 0};
+  const r3::Vec3 tip = r3::skin_point(pal, j1, w1, {0, 2, 0});
+  // glTF import yaws +Z forward onto engine -Z, so the bend that was -X lands on +X.
+  if (!near3(tip, {1, 1, 0}, 1e-3f)) return fail("sidecar bend skin " + str(tip));
+  // The file's own "keep" clip is still the imported one (arm stays at y=1).
+  pose = r3::rest_pose(loaded.skeleton);
+  r3::sample_clip(loaded.clips[static_cast<std::size_t>(loaded.find_clip("keep"))], 1.0f, false, &pose);
+  if (!near3(pose[1].t, {0, 1, 0})) return fail("imported clip was replaced");
+
+  // A sidecar that does not parse leaves the imported clips alone.
+  {
+    std::ofstream out(r3::clip_sidecar_path(gltf.string()), std::ios::binary);
+    out << "{ not json";
+  }
+  r3::Model broken;
+  err.clear();
+  if (!r3::load_model(gltf.string(), &broken, &err)) return fail("bad sidecar should still import: " + err);
+  if (broken.find_clip("keep") < 0 || broken.find_clip("bend") < 0 || broken.find_clip("extra") >= 0) {
+    return fail("bad sidecar changed the imported clips");
+  }
+  if (err.empty()) return fail("bad sidecar should warn");
+  std::error_code ec;
+  fs::remove(r3::clip_sidecar_path(gltf.string()), ec);
+
+  std::cout << "[smoke] anim3d rigged sidecar OK (bone lines, palette origins, "
+               "clip round trip, import merge, GPU skinning palette)\n";
+  return 0;
+}
+
+r3::Skeleton humanoid(const char* hips, const char* up, const char* lo, const char* foot, const char* extra,
+                       float hip_y, float thigh, float shin) {
+  r3::Skeleton sk;
+  auto add = [&](const char* name, int parent, r3::Vec3 t) {
+    r3::Joint j;
+    j.name = name;
+    j.parent = parent;
+    j.t = t;
+    sk.joints.push_back(j);
+  };
+  add(hips, -1, {0, hip_y, 0});
+  add(up, 0, {0.1f, -0.05f, 0});
+  add(lo, 1, {0, -thigh, 0});
+  add(foot, 2, {0, -shin, 0});
+  add(extra, 0, {0, 0.1f, -0.2f});
+  return sk;
+}
+
+r3::GltfPart skin_cube() {
+  r3::GltfPart part;
+  part.mesh = r3::make_cube(1.0f);
+  part.mesh.name = "body";
+  part.material.name = "cloth";
+  part.mesh.skin.resize(part.mesh.vertices.size());
+  for (r3::SkinVertex& s : part.mesh.skin) {
+    s.joints[0] = 0;
+    s.weights[0] = 1;
+  }
+  return part;
+}
+
+// A Mixamo-style clip retargets onto a longer rig, a blend space mixes two
+// clips, clip events fire, and a few thousand joints stay cheap to pose.
+int retarget_blend(const fs::path& dir) {
+  const r3::HumanoidMap mixamo = r3::map_humanoid([&] {
+    r3::Skeleton s;
+    r3::Joint j;
+    j.name = "mixamorig:LeftUpLeg";
+    s.joints.push_back(j);
+    j.name = "mixamorig:Hips";
+    j.parent = -1;
+    s.joints.insert(s.joints.begin(), j);
+    s.joints[1].parent = 0;
+    return s;
+  }());
+  if (mixamo.get(r3::HumanSlot::Hips) != 0 || mixamo.get(r3::HumanSlot::UpperLegL) != 1) {
+    return fail("mixamo names did not map");
+  }
+  const r3::Skeleton src = humanoid("mixamorig:Hips", "mixamorig:LeftUpLeg", "mixamorig:LeftLeg",
+                                    "mixamorig:LeftFoot", "Tail", 1.0f, 0.4f, 0.4f);
+  const r3::Skeleton dst = humanoid("hips", "upper_leg.L", "lower_leg.L", "foot.L", "Cape", 2.0f, 0.7f, 0.7f);
+  r3::Clip run;
+  run.name = "running";
+  r3::Channel rot;
+  rot.joint = 1;
+  rot.path = r3::ChannelPath::Rotation;
+  const r3::Quat q45 = r3::Quat::axis_angle({1, 0, 0}, r3::radians(45.0f));
+  const float ident[4] = {0, 0, 0, 1}, bent[4] = {q45.x, q45.y, q45.z, q45.w};
+  r3::upsert_key(&rot, 0.0f, ident);
+  r3::upsert_key(&rot, 1.0f, bent);
+  r3::Channel slide;
+  slide.joint = 0;
+  slide.path = r3::ChannelPath::Translation;
+  const float a[3] = {0, 1, 0}, b[3] = {0, 1, 1};
+  r3::upsert_key(&slide, 0.0f, a);
+  r3::upsert_key(&slide, 1.0f, b);
+  r3::Channel tail;
+  tail.joint = 4;
+  tail.path = r3::ChannelPath::Rotation;
+  r3::upsert_key(&tail, 0.0f, ident);
+  run.channels = {rot, slide, tail};
+  run.events = {{0.5f, "foot"}};
+  r3::clip_duration(&run);
+  r3::RetargetReport report;
+  const std::vector<r3::Clip> mapped = r3::retarget_clips(src, {run}, dst, &report);
+  if (mapped.size() != 1 || mapped[0].name != "running" || mapped[0].events.size() != 1 || report.dropped < 1) {
+    return fail("retarget report " + report.detail);
+  }
+  r3::Pose pose = r3::rest_pose(dst);
+  r3::sample_clip(mapped[0], 1.0f, false, &pose);
+  if (!near(pose[1].r.x, q45.x, 1e-3f) || !near(pose[1].r.w, q45.w, 1e-3f)) return fail("retarget rotation");
+  // Legs 0.8 -> 1.4, so a 1 m stride becomes 1.75 m. The tail is not copied.
+  if (!near(pose[0].t.z, 1.75f, 1e-3f) || !near(pose[0].t.y, 2.0f, 1e-3f)) {
+    return fail("retarget hip travel " + str(pose[0].t));
+  }
+  if (pose[4].r.x != 0.0f || pose[4].r.w != 1.0f) return fail("unmapped tail should stay in rest");
+
+  // Dense curves are resampled instead of locking the editor on every key.
+  r3::Channel dense;
+  dense.joint = 1;
+  dense.path = r3::ChannelPath::Rotation;
+  for (int i = 0; i < 8000; ++i) {
+    const float t = static_cast<float>(i) / 7999.0f;
+    r3::upsert_key(&dense, t, ident);
+  }
+  r3::Clip heavy;
+  heavy.name = "dense";
+  heavy.channels = {dense};
+  r3::clip_duration(&heavy);
+  const r3::Clip light = r3::retarget_clip(src, heavy, dst, nullptr);
+  int keys = 0;
+  for (const r3::Channel& ch : light.channels) keys += static_cast<int>(ch.times.size());
+  if (keys == 0 || keys > r3::kMaxRetargetKeys) return fail("dense retarget was not capped");
+
+  r3::Skeleton crowd;
+  for (int i = 0; i < 3000; ++i) {
+    r3::Joint j;
+    j.name = "bone" + std::to_string(i);
+    j.parent = i == 0 ? -1 : i - 1;
+    j.t = {0, 0.01f, 0};
+    crowd.joints.push_back(j);
+  }
+  const auto t0 = std::chrono::steady_clock::now();
+  const std::vector<r3::Vec3> at = r3::joint_positions(crowd, r3::rest_pose(crowd));
+  const std::vector<r3::BoneSegment> segs = r3::bone_segments(crowd, r3::rest_pose(crowd));
+  const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+  if (at.size() != 3000 || segs.size() != 3000 || ms > 250.0) {
+    return fail("large rig pose " + std::to_string(ms) + " ms");
+  }
+
+  // 1D blend at the midpoint, a crossfade, and a clip event.
+  r3::Model rig;
+  r3::Joint hip;
+  hip.name = "hips";
+  rig.skeleton.joints = {hip};
+  r3::Clip idle;
+  idle.name = "idle";
+  idle.duration = 1.0f;
+  r3::Channel hold;
+  hold.joint = 0;
+  hold.path = r3::ChannelPath::Rotation;
+  hold.times = {0.0f, 1.0f};
+  hold.values = {0, 0, 0, 1, 0, 0, 0, 1};
+  idle.channels = {hold};
+  r3::Clip sprint = idle;
+  sprint.name = "run";
+  sprint.channels[0].values = {0, 0, 0, 1, q45.x, q45.y, q45.z, q45.w};
+  sprint.events = {{0.5f, "foot"}};
+  rig.clips = {idle, sprint};
+  s3::Animator3D anim;
+  anim.params = {{"speed", s3::AnimParam3D::Type::Float, 2.0f}};
+  s3::AnimLayer3D layer;
+  layer.entry = "move";
+  s3::AnimState3D move;
+  move.name = "move";
+  move.blend = {{"idle", 0.0f}, {"run", 4.0f}};
+  move.blend_param = "speed";
+  s3::AnimState3D wave;
+  wave.name = "wave";
+  wave.clip = "run";
+  layer.states = {move, wave};
+  anim.layers = {layer};
+  r3::AnimatorRuntime rt;
+  std::string problems;
+  if (!rt.bind(anim, &rig, &problems)) return fail("blend bind " + problems);
+  rt.set_param("speed", 2.0f);
+  rt.update(0.0f);
+  float idle_w = 0, run_w = 0;
+  for (const auto& [n, k] : rt.state_weights(0)) {
+    if (n == "idle") idle_w = k;
+    if (n == "run") run_w = k;
+  }
+  if (!near(idle_w, 0.5f, 1e-3f) || !near(run_w, 0.5f, 1e-3f)) return fail("blend weights");
+  if (!rt.play("wave", 0.4f, false)) return fail("crossfade play");
+  rt.update(0.2f);
+  if (!near(rt.fade_progress(0), 0.5f, 1e-3f)) return fail("crossfade progress");
+  rt.update(0.4f);
+  const auto fired = rt.take_events();
+  bool foot = false;
+  for (const auto& ev : fired)
+    if (ev.name == "foot") foot = true;
+  if (!foot) return fail("clip event did not fire");
+
+  // glTF import of a rigged clip, then retarget onto a second imported rig.
+  std::string err;
+  const fs::path src_file = dir / "mixamo.gltf";
+  const fs::path dst_file = dir / "hero.gltf";
+  if (!r3::write_skinned_gltf(src_file.string(), {skin_cube()}, src, {run}, &err)) return fail(err);
+  if (!r3::write_skinned_gltf(dst_file.string(), {skin_cube()}, dst, {}, &err)) return fail(err);
+  r3::Model loaded_src, loaded_dst;
+  if (!r3::load_model(src_file.string(), &loaded_src, &err) || !loaded_src.skinned() ||
+      loaded_src.find_clip("running") < 0) {
+    return fail("import rigged clip: " + err);
+  }
+  if (!r3::load_model(dst_file.string(), &loaded_dst, &err) || loaded_dst.skeleton.find("upper_leg.L") < 0) {
+    return fail("import target rig: " + err);
+  }
+  const std::vector<r3::Clip> from_file =
+      r3::retarget_clips(loaded_src.skeleton, loaded_src.clips, loaded_dst.skeleton, nullptr);
+  if (from_file.size() != 1) return fail("imported clip did not retarget");
+  pose = r3::rest_pose(loaded_dst.skeleton);
+  r3::sample_clip(from_file[0], 1.0f, false, &pose);
+  const int leg = loaded_dst.skeleton.find("upper_leg.L");
+  if (leg < 0 || !near(pose[static_cast<std::size_t>(leg)].r.x, q45.x, 1e-3f)) {
+    return fail("imported retarget rotation");
+  }
+  std::cout << "[smoke] anim3d retarget OK (" << report.detail << ", large rig " << ms << " ms)\n";
+  return 0;
+}
+
 // The editor's animation preview poses the selection in the edit view (null
 // renderer: counts skinned draws) without touching the authored scene.
 int editor_preview(const fs::path& dir) {
@@ -608,8 +1004,537 @@ int editor_preview(const fs::path& dir) {
   if (!(e.scene().entities == before.entities) || e.scene().find(hank->id)->skin_palette) {
     return fail("editor: preview changed the authored scene");
   }
+  // Bones follow the preview palette (the overlay draws these positions).
+  const int hand = m->skeleton.find("hand.R");
+  e.set_show_bones(true);
+  e.set_bone_joint(hand);
+  if (!e.show_bones() || e.bone_joint() != hand) return fail("editor: bone overlay toggle");
+  const r3::FrameStats boned = e.render_frame(160, 120);
+  if (boned.skinned < 10) return fail("editor: bones overlay skinned draws");
+  const std::vector<r3::Vec3> posed = r3::joint_positions(m->skeleton, *copy.skin_palette);
+  const std::vector<r3::Vec3> rest = r3::joint_positions(m->skeleton, r3::rest_pose(m->skeleton));
+  if (hand < 0 || near3(posed[static_cast<std::size_t>(hand)], rest[static_cast<std::size_t>(hand)], 1e-3f)) {
+    return fail("editor: preview bones did not follow the wave");
+  }
+  // Key a new clip, save it beside the rig, and pose the forearm from it.
+  const int shoulder = m->skeleton.find("upper_arm.R");
+  const int forearm = m->skeleton.find("lower_arm.R");
+  if (shoulder < 0 || forearm < 0) return fail("editor: arm bones");
+  if (!e.timeline_bind(hank->id) || !e.timeline_new_clip("nod") || e.timeline_clips().size() != 1) {
+    return fail("editor: timeline clip");
+  }
+  const r3::Pose rest_pose = r3::rest_pose(m->skeleton);
+  r3::JointPose jp = rest_pose[static_cast<std::size_t>(shoulder)];
+  if (!e.timeline_key("nod", shoulder, 0.0f, jp)) return fail("editor: key rest");
+  jp.r = r3::Quat::axis_angle({1, 0, 0}, r3::radians(40.0f));
+  if (!e.timeline_key("nod", shoulder, 0.4f, jp)) return fail("editor: key bend");
+  if (!e.timeline_set_interp("nod", shoulder, r3::ChannelPath::Rotation, r3::Interp::Step)) {
+    return fail("editor: key interp");
+  }
+  // The bend sits before the clip ends. Looping preview wraps a time equal to
+  // the duration back to 0, and step holds the earlier key until this one.
+  if (!e.timeline_move_key("nod", shoulder, r3::ChannelPath::Rotation, 1, 0.2f)) return fail("editor: move key");
+  std::string terr;
+  if (!e.timeline_save(&terr)) return fail("editor: save clips " + terr);
+  const r3::Model* again = e.entity_model(*e.scene().find(hank->id));
+  if (!again || again->find_clip("nod") < 0) return fail("editor: sidecar did not merge on reload");
+  e.anim_preview().clip = "nod";
+  e.anim_preview().time = 0.3f;
+  e.anim_preview().playing = false;
+  s3::Entity3D keyed = *e.scene().find(hank->id);
+  if (!e.anim_preview_pose(&keyed) || !keyed.skin_palette) return fail("editor: keyed pose");
+  const std::vector<r3::Vec3> bent = r3::joint_positions(again->skeleton, *keyed.skin_palette);
+  const std::vector<r3::Vec3> straight = r3::joint_positions(again->skeleton, r3::rest_pose(again->skeleton));
+  if (near3(bent[static_cast<std::size_t>(forearm)], straight[static_cast<std::size_t>(forearm)], 1e-3f)) {
+    return fail("editor: keyed rotation did not move the forearm");
+  }
+  if (!e.timeline_erase_key("nod", shoulder, r3::ChannelPath::Rotation, 1)) return fail("editor: erase key");
+  if (!e.timeline_add_event("nod", 0.25f, "step")) return fail("editor: add event");
+  const fs::path running = dir / "assets" / "running.gltf";
+  const r3::Skeleton src = humanoid("mixamorig:Hips", "mixamorig:LeftUpLeg", "mixamorig:LeftLeg",
+                                    "mixamorig:LeftFoot", "Tail", 1.0f, 0.4f, 0.4f);
+  r3::Clip run;
+  run.name = "running";
+  r3::Channel rot;
+  rot.joint = 1;
+  rot.path = r3::ChannelPath::Rotation;
+  const r3::Quat q = r3::Quat::axis_angle({1, 0, 0}, r3::radians(45.0f));
+  const float z[4] = {0, 0, 0, 1}, bentq[4] = {q.x, q.y, q.z, q.w};
+  r3::upsert_key(&rot, 0.0f, z);
+  r3::upsert_key(&rot, 1.0f, bentq);
+  run.channels = {rot};
+  r3::clip_duration(&run);
+  if (!r3::write_skinned_gltf(running.string(), {skin_cube()}, src, {run}, &terr)) return fail(terr);
+  if (!e.timeline_apply_file(running.string(), &terr)) return fail("editor: retarget file " + terr);
+  const r3::Clip* applied = nullptr;
+  for (const r3::Clip& c : e.timeline_clips())
+    if (c.name == "running") applied = &c;
+  const int leg = again->skeleton.find("upper_leg.L");
+  if (!applied || leg < 0) return fail("editor: running clip missing");
+  bool leg_channel = false;
+  for (const r3::Channel& ch : applied->channels)
+    if (ch.joint == leg && ch.path == r3::ChannelPath::Rotation) leg_channel = true;
+  if (!leg_channel) return fail("editor: running was not mapped onto upper_leg.L");
+  if (!e.timeline_save(&terr)) return fail("editor: save retarget " + terr);
+  const r3::Model* saved = e.entity_model(*e.scene().find(hank->id));
+  if (!saved || saved->find_clip("running") < 0 || saved->find_clip("nod") < 0) {
+    return fail("editor: saved sidecar missing running or nod");
+  }
+  const r3::Clip& nod = saved->clips[static_cast<std::size_t>(saved->find_clip("nod"))];
+  if (nod.events.size() != 1 || nod.events[0].name != "step") return fail("editor: event was not saved");
+  const std::uint64_t cube = e.create_primitive("cube", {3.0f, 0.0f, 0.0f});
+  std::string cube_err;
+  if (e.apply_animation_asset(cube, running.string(), &cube_err)) return fail("editor: a cube accepted a clip");
+  if (cube_err.find("no skeleton") == std::string::npos) return fail("editor: cube reason: " + cube_err);
   e.on_exit();
   std::cout << "[smoke] anim3d editor preview OK (wave at 0.25 s, " << st.skinned << " skinned draws)\n";
+  return 0;
+}
+
+int animation_only_import(const fs::path& dir) {
+  r3::Skeleton unreal;
+  auto joint = [](r3::Skeleton* s, const char* name, int parent) {
+    r3::Joint j;
+    j.name = name;
+    j.parent = parent;
+    s->joints.push_back(j);
+  };
+  joint(&unreal, "pelvis", -1);
+  joint(&unreal, "spine_01", 0);
+  joint(&unreal, "clavicle_l", 1);
+  joint(&unreal, "upperarm_l", 2);
+  joint(&unreal, "thigh_l", 0);
+  joint(&unreal, "calf_l", 4);
+  joint(&unreal, "foot_l", 5);
+  joint(&unreal, "ball_l", 6);
+  const r3::HumanoidMap um = r3::map_humanoid(unreal);
+  if (um.get(r3::HumanSlot::Hips) != 0 || um.get(r3::HumanSlot::Spine) != 1 ||
+      um.get(r3::HumanSlot::ShoulderL) != 2 || um.get(r3::HumanSlot::UpperArmL) != 3 ||
+      um.get(r3::HumanSlot::UpperLegL) != 4 || um.get(r3::HumanSlot::LowerLegL) != 5 ||
+      um.get(r3::HumanSlot::FootL) != 6 || um.get(r3::HumanSlot::ToesL) != 7) {
+    return fail("unreal mannequin names did not map");
+  }
+  r3::Skeleton rigify;
+  joint(&rigify, "DEF-spine", -1);
+  joint(&rigify, "DEF-thigh.L", 0);
+  joint(&rigify, "DEF-shin.L", 1);
+  joint(&rigify, "DEF-foot.L", 2);
+  joint(&rigify, "ORG-toe.L", 3);
+  const r3::HumanoidMap rm = r3::map_humanoid(rigify);
+  r3::Skeleton daz;
+  joint(&daz, "hip", -1);
+  joint(&daz, "abdomenLower", 0);
+  joint(&daz, "lShldrBend", 1);
+  joint(&daz, "lThigh", 0);
+  const r3::HumanoidMap dm = r3::map_humanoid(daz);
+  if (dm.get(r3::HumanSlot::Hips) != 0 || dm.get(r3::HumanSlot::Spine) != 1 ||
+      dm.get(r3::HumanSlot::UpperArmL) != 2 || dm.get(r3::HumanSlot::UpperLegL) != 3) {
+    return fail("daz / genesis names did not map");
+  }
+  const std::string miss = r3::missing_humanoid_slots(daz);
+  if (miss.find("Head") == std::string::npos || miss.find("Hips") != std::string::npos) {
+    return fail("missing slots: " + miss);
+  }
+  if (rm.get(r3::HumanSlot::Spine) != 0 || rm.get(r3::HumanSlot::UpperLegL) != 1 ||
+      rm.get(r3::HumanSlot::LowerLegL) != 2 || rm.get(r3::HumanSlot::FootL) != 3 ||
+      rm.get(r3::HumanSlot::ToesL) != 4) {
+    return fail("rigify names did not map");
+  }
+
+  r3::Skeleton src;
+  joint(&src, "mixamorig:Hips", -1);
+  src.joints[0].t = {0, 1, 0};
+  r3::Clip slide;
+  slide.name = "slide";
+  r3::Channel tr;
+  tr.joint = 0;
+  tr.path = r3::ChannelPath::Translation;
+  const float a[3] = {0, 1, 0}, b[3] = {1, 1, 0};
+  r3::upsert_key(&tr, 0.0f, a);
+  r3::upsert_key(&tr, 1.0f, b);
+  slide.channels = {tr};
+  r3::clip_duration(&slide);
+  r3::Skeleton dst;
+  joint(&dst, "root", -1);
+  joint(&dst, "hips", 0);
+  dst.joints[1].t = {0, 1, 0};
+  std::vector<r3::AvatarOverride> over{{"Hips", "root"}};
+  const r3::Clip mapped = r3::retarget_clip(src, slide, dst, nullptr, &over);
+  bool on_root = false;
+  for (const r3::Channel& ch : mapped.channels)
+    if (ch.joint == 0 && ch.path == r3::ChannelPath::Translation) on_root = true;
+  if (!on_root) return fail("avatar override did not retarget hips onto root");
+
+  const fs::path gltf = dir / "clip-only.gltf";
+  const fs::path bin = dir / "clip.bin";
+  float bytes[10] = {0, 1, 0, 0, 0, 1, 0, 0, 0, 1};
+  const float s = std::sin(0.78539816339f), c = std::cos(0.78539816339f);
+  bytes[6] = s;
+  bytes[9] = c;
+  {
+    std::ofstream out(bin, std::ios::binary);
+    out.write(reinterpret_cast<const char*>(bytes), sizeof(bytes));
+    if (!out) return fail("clip bin");
+  }
+  {
+    std::ofstream out(gltf);
+    out << R"({
+      "asset": {"version": "2.0"},
+      "scene": 0,
+      "scenes": [{"nodes": [0]}],
+      "nodes": [
+        {"name": "mixamorig:Hips", "translation": [0, 1, 0], "children": [1]},
+        {"name": "mixamorig:LeftUpLeg", "translation": [0.1, -0.4, 0]}
+      ],
+      "animations": [{
+        "name": "run",
+        "samplers": [{"input": 0, "output": 1, "interpolation": "LINEAR"}],
+        "channels": [{"sampler": 0, "target": {"node": 1, "path": "rotation"}}]
+      }],
+      "accessors": [
+        {"bufferView": 0, "componentType": 5126, "count": 2, "type": "SCALAR", "min": [0], "max": [1]},
+        {"bufferView": 1, "componentType": 5126, "count": 2, "type": "VEC4"}
+      ],
+      "bufferViews": [
+        {"buffer": 0, "byteOffset": 0, "byteLength": 8},
+        {"buffer": 0, "byteOffset": 8, "byteLength": 32}
+      ],
+      "buffers": [{"uri": "clip.bin", "byteLength": 40}]
+    })";
+    if (!out) return fail("clip gltf");
+  }
+  r3::Model clip;
+  std::string err;
+  if (!r3::load_model(gltf.string(), &clip, &err)) return fail("anim-only gltf: " + err);
+  if (!clip.animation_only() || clip.clips.empty() || !clip.primitives.empty()) {
+    return fail("anim-only gltf was not an animation asset");
+  }
+  if (clip.skeleton.find("mixamorig:Hips") < 0 || clip.skeleton.find("mixamorig:LeftUpLeg") < 0) {
+    return fail("anim-only gltf lost mixamo joint names");
+  }
+  if (clip.find_clip("run") < 0) return fail("anim-only gltf lost the run clip");
+
+  const fs::path junk = dir / "not-a-model.gltf";
+  {
+    std::ofstream out(junk);
+    out << "this is not a gltf";
+  }
+  r3::Model bad;
+  std::string why;
+  if (r3::load_model(junk.string(), &bad, &why)) return fail("garbage gltf imported");
+  if (why == junk.string() + ": could not be read") return fail("import error is still bare 'could not be read'");
+  if (why.empty()) return fail("garbage gltf had an empty error");
+
+  const char* env = std::getenv("TS_MIXAMO_FBX");
+  fs::path fbx = env && env[0] ? fs::path(env) : fs::path("/tmp/running-fbx/Running.fbx");
+  if (r3::assimp_available() && fs::exists(fbx)) {
+    r3::Model mix;
+    std::string merr;
+    if (!r3::load_model(fbx.string(), &mix, &merr)) return fail(std::string("mixamo fbx: ") + merr);
+    if (!mix.primitives.empty()) return fail("mixamo fbx imported a mesh; expected animation-only");
+    if (mix.clips.empty() || mix.skeleton.empty()) return fail("mixamo fbx has no clip or skeleton");
+    bool hips = false;
+    for (const r3::Joint& j : mix.skeleton.joints) {
+      if (j.name.find("Hips") != std::string::npos || j.name.find("hips") != std::string::npos) hips = true;
+    }
+    if (!hips) {
+      std::string names;
+      for (std::size_t i = 0; i < mix.skeleton.joints.size() && i < 6; ++i) names += mix.skeleton.joints[i].name + " ";
+      return fail("mixamo fbx has no hips bone (" + names + ")");
+    }
+    std::cout << "[smoke] mixamo " << fbx.string() << ": " << mix.clips.size() << " clips, "
+              << mix.skeleton.joints.size() << " joints\n";
+  }
+
+  std::cout << "[smoke] anim3d animation-only import OK\n";
+  return 0;
+}
+
+// A character split into parts, with Rigify / DAZ bone names, still takes a
+// clip dropped on the empty parent or on a child of a part.
+int multipart_drop(const fs::path& dir) {
+  namespace ed = ts::tombstone::editor;
+  fs::create_directories(dir / "assets");
+  r3::Skeleton sk;
+  r3::Joint j;
+  j.name = "hips";
+  j.parent = -1;
+  j.t = {0, 1, 0};
+  sk.joints.push_back(j);
+  j.name = "DEF-thigh.L";
+  j.parent = 0;
+  j.t = {0.1f, -0.4f, 0};
+  sk.joints.push_back(j);
+  r3::GltfPart body = skin_cube();
+  body.mesh.name = "Body";
+  r3::GltfPart head = skin_cube();
+  head.mesh.name = "Head";
+  for (r3::SkinVertex& s : head.mesh.skin) s.joints[0] = 1;
+  std::string err;
+  const fs::path hero = dir / "assets" / "hero.gltf";
+  if (!r3::write_skinned_gltf(hero.string(), {body, head}, sk, {}, &err)) return fail("hero: " + err);
+  r3::Skeleton src;
+  j.name = "mixamorig:Hips";
+  j.parent = -1;
+  j.t = {0, 1, 0};
+  src.joints.push_back(j);
+  j.name = "mixamorig:LeftUpLeg";
+  j.parent = 0;
+  j.t = {0, -0.4f, 0};
+  src.joints.push_back(j);
+  r3::Clip run;
+  run.name = "running";
+  r3::Channel rot;
+  rot.joint = 1;
+  rot.path = r3::ChannelPath::Rotation;
+  const r3::Quat q = r3::Quat::axis_angle({1, 0, 0}, r3::radians(50.0f));
+  const float ident[4] = {0, 0, 0, 1}, bent[4] = {q.x, q.y, q.z, q.w};
+  r3::upsert_key(&rot, 0.0f, ident);
+  r3::upsert_key(&rot, 1.0f, bent);
+  run.channels = {rot};
+  r3::clip_duration(&run);
+  r3::GltfPart donor = skin_cube();
+  const fs::path clip = dir / "assets" / "run.gltf";
+  if (!r3::write_skinned_gltf(clip.string(), {donor}, src, {run}, &err)) return fail("run: " + err);
+
+  ed::ProjectInfo info;
+  info.id = "_parts";
+  info.name = "Parts";
+  info.kind = ed::ProjectKind::ThreeD;
+  info.path = dir.string();
+  ed::Editor3DScreen e(info);
+  e.on_enter();
+  e.rescan_assets();
+  const std::uint64_t parent = e.place_model_parts("assets/hero.gltf", {0, 0, 0}, false, false);
+  if (!parent) return fail("place parts");
+  const s3::Entity3D* root = e.scene().find(parent);
+  if (!root || root->mesh) return fail("part root should have no mesh of its own");
+  std::uint64_t child = 0;
+  int skinned_parts = 0;
+  for (const s3::Entity3D& en : e.scene().entities) {
+    if (en.parent != parent || !en.mesh) continue;
+    const r3::Model* m = e.entity_model(en);
+    if (!m || !m->skinned() || m->skeleton.find("DEF-thigh.L") < 0) return fail("part lost its skeleton");
+    if (!child) child = en.id;
+    ++skinned_parts;
+  }
+  if (skinned_parts < 2) return fail("expected two skinned parts");
+  std::string aerr;
+  if (!e.apply_animation_asset(parent, "assets/run.gltf", &aerr)) return fail("drop on parent: " + aerr);
+  const std::uint64_t cube = e.create_primitive("cube", {2, 0, 0});
+  if (!e.set_parent(cube, child)) return fail("parent cube to part");
+  if (!e.apply_animation_asset(cube, "assets/run.gltf", &aerr)) return fail("drop on a child of a part: " + aerr);
+  if (!e.apply_clip_to_model("assets/run.gltf", "assets/hero.gltf", &aerr)) return fail("drop on asset tile: " + aerr);
+  const s3::Entity3D* played = e.scene().find(e.primary());
+  if (!played) return fail("nothing selected after the drop");
+  const r3::Model* posed_model = e.entity_model(*played);
+  if (!posed_model || posed_model->find_clip("running") < 0) return fail("running clip did not land on the part");
+  const int thigh = posed_model->skeleton.find("DEF-thigh.L");
+  std::vector<r3::Mat4> rest;
+  r3::skin_palette(posed_model->skeleton, r3::rest_pose(posed_model->skeleton), &rest);
+  s3::Entity3D copy = *played;
+  e.anim_preview().open = true;
+  e.anim_preview().clip = "running";
+  e.anim_preview().time = 0.5f;
+  e.anim_preview().playing = false;
+  if (!e.anim_preview_pose(&copy) || !copy.skin_palette) return fail("part did not pose");
+  bool moved = false;
+  const r3::Mat4& a = rest[static_cast<std::size_t>(thigh)];
+  const r3::Mat4& b = (*copy.skin_palette)[static_cast<std::size_t>(thigh)];
+  for (int i = 0; i < 16; ++i) moved = moved || std::fabs(a.m[i] - b.m[i]) > 1e-3f;
+  if (!moved) return fail("clip did not move DEF-thigh.L");
+  e.on_exit();
+  std::cout << "[smoke] anim3d multi-part drop OK (" << skinned_parts << " skinned parts)\n";
+  return 0;
+}
+
+// Capsule soles match the bind-pose feet, and an in-place clip cannot lift them.
+int graph_compat() {
+  ts::tombstone::runtime::Graph g;
+  std::string err;
+  const char* old =
+      R"({"graph":1,"note":"kept","nodes":[{"id":1,"type":"anim.set_param","x":10,"y":20,"inputs":{"name":"speed","value":0.1}}],"links":[]})";
+  if (!ts::tombstone::runtime::find_graph_node("anim.set_float") ||
+      !ts::tombstone::runtime::find_graph_node("anim.set_bool") ||
+      !ts::tombstone::runtime::find_graph_node("anim.trigger") ||
+      !ts::tombstone::runtime::find_graph_node("anim.set_param")) {
+    return fail("anim parameter nodes missing from the script catalog");
+  }
+  if (!ts::tombstone::runtime::parse_graph(old, &g, &err) || g.nodes.size() != 1 || g.nodes[0].type != "anim.set_param" ||
+      g.nodes[0].x != 10.0f) {
+    return fail("old graph json: " + err);
+  }
+  std::vector<std::string> problems;
+  if (!ts::tombstone::runtime::check_graph(g, &problems))
+    return fail("old anim.set_param graph: " + (problems.empty() ? err : problems.front()));
+  ts::tombstone::json::Value j;
+  const char* anim =
+      R"({"layout":{"entry":[1,2]},"params":[{"name":"speed","type":"float","value":0}],"layers":[{"name":"Base","entry":"idle","states":[{"name":"idle","clip":"idle","blend":[{"clip":"idle","at":0},{"clip":"run","at":4.5}],"blend_param":"speed"}],"transitions":[{"from":"*","to":"idle","param":"speed","op":">","value":0.1,"duration":0.2}]}]})";
+  if (!ts::tombstone::json::parse(anim, &j, &err)) return fail("animator json: " + err);
+  const s3::Animator3D a = r3::animator_from_json(j);
+  if (a.layers.size() != 1 || a.layers[0].entry != "idle" || a.layers[0].states.size() != 1 ||
+      a.layers[0].states[0].blend.size() != 2 || a.layers[0].transitions.size() != 1 ||
+      a.layers[0].transitions[0].param != "speed" || !near(a.layers[0].transitions[0].value, 0.1f, 1e-3f)) {
+    return fail("animator json with an extra layout field");
+  }
+  const s3::Animator3D back = r3::animator_from_json(r3::animator_to_json(a));
+  if (back.layers[0].entry != "idle" || back.layers[0].states[0].blend_param != "speed" ||
+      !near(back.layers[0].transitions[0].value, 0.1f, 1e-3f)) {
+    return fail("animator round trip dropped the blend or the Speed condition");
+  }
+  std::cout << "[smoke] anim graph json OK\n";
+  return 0;
+}
+
+int feet_on_ground() {
+  r3::Model m;
+  m.bounds = {{-0.25f, 0.35f, -0.12f}, {0.25f, 1.85f, 0.12f}};
+  s3::Collider3D col;
+  if (!r3::fit_collider(m, r3::ColliderFit::Capsule, &col)) return fail("fit capsule");
+  const float bottom = col.offset.y - col.size.y * 0.5f;
+  if (std::fabs(bottom - m.bounds.min.y) > 0.02f) {
+    return fail("capsule bottom " + std::to_string(bottom) + " is not the bind-pose feet");
+  }
+  const float ground = 0.0f;
+  const float planted = ground - m.bounds.min.y;
+  if (std::fabs(planted + m.bounds.min.y - ground) > 0.02f) return fail("planted feet left the ground");
+
+  r3::Skeleton sk;
+  r3::Joint hip;
+  hip.name = "hips";
+  hip.parent = -1;
+  hip.t = {0.0f, 0.95f, 0.0f};
+  sk.joints.push_back(hip);
+  r3::Clip lift;
+  lift.name = "run";
+  r3::Channel tr;
+  tr.joint = 0;
+  tr.path = r3::ChannelPath::Translation;
+  const float restk[3] = {0.0f, 0.95f, 0.0f};
+  const float up[3] = {0.0f, 1.95f, 0.0f};
+  r3::upsert_key(&tr, 0.0f, restk);
+  r3::upsert_key(&tr, 1.0f, up);
+  lift.channels = {tr};
+  r3::clip_duration(&lift);
+  m.skeleton = sk;
+  m.clips = {lift};
+  s3::Animator3D cfg;
+  s3::AnimState3D st;
+  st.name = "run";
+  st.clip = "run";
+  st.loop = false;
+  s3::AnimLayer3D layer;
+  layer.entry = "run";
+  layer.states = {st};
+  cfg.layers = {layer};
+  cfg.root_motion = false;
+  r3::AnimatorRuntime rt;
+  if (!rt.bind(cfg, &m)) return fail("bind in-place run");
+  rt.update(0.5f);
+  if (std::fabs(rt.pose()[0].t.y - hip.t.y) > 0.02f) {
+    return fail("in-place clip lifted the hips to " + std::to_string(rt.pose()[0].t.y));
+  }
+
+  // A skinned rest pose whose soles sit above the origin is shifted onto y = 0.
+  r3::Model raised;
+  r3::Joint root;
+  root.name = "hips";
+  raised.skeleton.joints.push_back(root);
+  r3::ModelPrimitive prim;
+  r3::Vertex3D a, b, c;
+  a.position = {0.0f, 1.60f, 0.0f};
+  b.position = {0.20f, 1.60f, 0.0f};
+  c.position = {0.0f, 1.80f, 0.10f};
+  prim.mesh.vertices = {a, b, c};
+  prim.mesh.indices = {0, 1, 2};
+  r3::SkinVertex sw;
+  sw.weights[0] = 1.0f;
+  prim.mesh.skin = {sw, sw, sw};
+  raised.primitives.push_back(std::move(prim));
+  r3::plant_skinned_feet(&raised);
+  if (std::fabs(raised.bounds.min.y) > 0.02f) {
+    return fail("planted skinned feet at " + std::to_string(raised.bounds.min.y));
+  }
+
+  // Play: the rider starts 1.6 m up and must be on the floor, then stay there.
+  s3::Scene3D scene;
+  s3::Entity3D floor;
+  floor.id = 1;
+  floor.name = "Floor";
+  s3::Collider3D box;
+  box.shape = s3::Collider3D::Shape::Box;
+  box.size = {8.0f, 0.2f, 8.0f};
+  box.offset = {0.0f, -0.1f, 0.0f};
+  floor.collider = box;
+  s3::Entity3D rider;
+  rider.id = 2;
+  rider.name = "Rider";
+  rider.player = s3::Player3D{};
+  rider.transform.position = {0.0f, 1.6f, 0.0f};
+  s3::Collider3D cap;
+  cap.shape = s3::Collider3D::Shape::Capsule;
+  cap.size = {0.3f, 1.7f, 0.3f};
+  cap.offset = {0.0f, 0.85f, 0.0f};
+  rider.collider = cap;
+  scene.entities = {floor, rider};
+  w3::World3D play;
+  std::string err;
+  if (!play.start(scene, ".", &err)) return fail("play feet: " + err);
+  auto feet_of = [](const s3::Entity3D& e) {
+    return e.transform.position.y + (e.collider->offset.y - e.collider->size.y * 0.5f);
+  };
+  const s3::Entity3D* stood = play.find(2);
+  if (!stood || std::fabs(feet_of(*stood)) > 0.08f) {
+    return fail("play start left the rider at " + (stood ? std::to_string(feet_of(*stood)) : std::string("missing")));
+  }
+  w3::Input3D idle;
+  play.run_ticks(45, idle);
+  stood = play.find(2);
+  if (!stood || std::fabs(feet_of(*stood)) > 0.08f) {
+    return fail("play left the rider hovering at " + (stood ? std::to_string(feet_of(*stood)) : std::string("missing")));
+  }
+  std::cout << "[smoke] anim3d feet on ground OK\n";
+  return 0;
+}
+
+fs::path fbx6100_fixture() {
+  const fs::path name = fs::path("apps") / "admin" / "testdata" / "fbx6100_anim.fbx";
+#ifdef TS_REPO_DIR
+  if (fs::exists(fs::path(TS_REPO_DIR) / name)) return fs::path(TS_REPO_DIR) / name;
+#endif
+  fs::path dir = fs::current_path();
+  for (int i = 0; i < 6; ++i) {
+    if (fs::exists(dir / name)) return dir / name;
+    if (!dir.has_parent_path() || dir.parent_path() == dir) break;
+    dir = dir.parent_path();
+  }
+  return {};
+}
+
+int fbx6100_import() {
+  const fs::path f = fbx6100_fixture();
+  if (f.empty()) return fail("fbx 6100 fixture not found");
+  r3::Model m;
+  std::string err;
+  if (!r3::load_model(f.string(), &m, &err)) return fail("fbx 6100: " + err);
+  if (m.clips.empty() || m.skeleton.joints.empty()) {
+    return fail("fbx 6100 has no clip or skeleton (" + std::to_string(m.clips.size()) + " clips)");
+  }
+  std::cout << "[smoke] fbx 6100 OK (" << m.clips.size() << " clips, " << m.skeleton.joints.size()
+            << " joints, " << m.primitives.size() << " meshes)\n";
+  if (const char* extra = std::getenv("TS_OLD_FBX"); extra && extra[0] && fs::exists(extra)) {
+    r3::Model old;
+    std::string oerr;
+    if (!r3::load_model(extra, &old, &oerr)) return fail(std::string("old fbx: ") + oerr);
+    if (old.clips.empty() || old.skeleton.joints.empty()) return fail("old fbx has no clip or skeleton");
+    if (!old.primitives.empty() && !old.animation_only() && old.bounds.max.y - old.bounds.min.y > 8.0f) {
+      return fail("old fbx still looks like centimetres (" + std::to_string(old.bounds.max.y - old.bounds.min.y) + " m)");
+    }
+    std::cout << "[smoke] old fbx " << extra << ": " << old.clips.size() << " clips, " << old.skeleton.joints.size()
+              << " joints, meshes " << old.primitives.size()
+              << (old.animation_only() ? " (animation only)" : "")
+              << " feet " << old.bounds.min.y << " height " << (old.bounds.max.y - old.bounds.min.y) << "\n";
+  }
   return 0;
 }
 
@@ -621,13 +1546,20 @@ int run_anim3d_smoke() {
   fs::remove_all(dir, ec);
   fs::create_directories(dir, ec);
   if (skin_math() != 0 || sampling() != 0 || blend_weights() != 0) return 1;
+  if (sidecar_and_bones(dir) != 0) return 1;
+  if (retarget_blend(dir) != 0) return 1;
+  if (animation_only_import(dir) != 0) return 1;
   r3::Model drifter;
   if (assets(dir, &drifter) != 0) return 1;
   if (animator(drifter) != 0) return 1;
   if (scene_roundtrip() != 0) return 1;
   if (gpu_render(dir) != 0) return 1;
   if (world(dir / "town") != 0) return 1;
+  if (graph_compat() != 0) return 1;
+  if (feet_on_ground() != 0) return 1;
+  if (fbx6100_import() != 0) return 1;
   if (editor_preview(dir / "editor") != 0) return 1;
+  if (multipart_drop(dir / "parts") != 0) return 1;
   std::cout << "[smoke] anim3d OK (skin math vs reference, linear/step/cubic + slerp, 1D blend weights, "
                "animator: blend space, crossfade, jump trigger, upper-body mask, events, root motion; "
                "scene v12 round trip)\n";

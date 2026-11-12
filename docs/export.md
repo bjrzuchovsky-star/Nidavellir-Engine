@@ -4,7 +4,7 @@ Source: `src/export/` (`Exporter.*`, `Validate.cpp`, `Zip.*`, `WinIcon.*`), `src
 
 ## Exporting from the editor
 
-Open the Freight Office with **File > Export... (Freight Office)** in 2D, or **Claim > Export... (Freight Office)** in 3D / VR.
+Open the Freight Office with **File > Export... (Freight Office)** in 2D, or **Realm > Export... (Freight Office)** in 3D / VR.
 
 ## Exporting from the command line
 

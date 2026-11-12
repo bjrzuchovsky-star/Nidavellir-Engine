@@ -7,6 +7,9 @@
 #define STBI_NO_HDR
 #define STBI_NO_LINEAR
 #define STBI_FAILURE_USERMSG
+// A corrupt header must not allocate a multi-gigabyte bitmap. 8192 is the
+// same hard cap as render3d::kHardMaxTextureEdge.
+#define STBI_MAX_DIMENSIONS 8192
 #if defined(_MSC_VER)
 #pragma warning(push, 0)
 #endif

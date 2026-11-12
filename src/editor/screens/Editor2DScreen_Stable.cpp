@@ -228,7 +228,26 @@ void Editor2DScreen::draw_stable() {
         stable_set_timing(stable_clip_, c.fps, static_cast<AnimMode>(mode));
       }
       if (!c.ms.empty()) {
-        ImGui::TextDisabled("Per-frame ms set in the file override FPS.");
+        ImGui::TextDisabled("Per-frame holds below override FPS.");
+      }
+      // One hold per frame. Empty ms means every frame is 1000/fps.
+      if (c.frame_count() > 0 && c.frame_count() <= 24) {
+        const int fallback = std::clamp(static_cast<int>(std::lround(1000.0 / std::max(c.fps, 0.1f))), 1, 60000);
+        ImGui::TextDisabled("Hold");
+        for (int f = 0; f < c.frame_count(); ++f) {
+          if (f > 0) ImGui::SameLine();
+          const int cur = f < static_cast<int>(c.ms.size()) && c.ms[static_cast<std::size_t>(f)] > 0
+                              ? c.ms[static_cast<std::size_t>(f)]
+                              : fallback;
+          ImGui::PushID(f);
+          ImGui::SetNextItemWidth(52.0f);
+          int ms = cur;
+          if (ImGui::DragInt("##ms", &ms, 1.0f, 1, 60000, "%d")) {
+            stable_set_frame_ms(stable_clip_, f, ms);
+          }
+          if (ImGui::IsItemHovered()) ux::SetTooltip("How long this frame stays up, in milliseconds.");
+          ImGui::PopID();
+        }
       }
       if (!c.grid) {
         ImGui::TextDisabled("Hand-cut frames (%d rects). Picking cells "

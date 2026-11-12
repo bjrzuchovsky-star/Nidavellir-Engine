@@ -212,6 +212,7 @@ std::string file_hash(const std::string& abs_path) {
   std::uint64_t h = 1469598103934665603ULL;
   char buf[65536];
   while (in) {
+    if (render3d::import_was_cancelled()) return {};
     in.read(buf, sizeof(buf));
     const std::streamsize n = in.gcount();
     for (std::streamsize i = 0; i < n; ++i) {
@@ -389,7 +390,7 @@ AssetDb::MigrationReport AssetDb::migrate() {
   }
   std::sort(sidecars.begin(), sidecars.end());
   adopt_sidecars(sidecars, &rep);
-  // Layout stamp: the claim's metadata now lives in the folder.
+  // Layout stamp: the realm's metadata now lives in the folder.
   const fs::path stamp = root / fs::u8path(am::kLayoutFile);
   std::string text;
   Value v;
@@ -458,10 +459,21 @@ void AssetDb::import_entry(Entry* e) {
     if (!importer_(abs(e->rel), e->meta.kind, e->meta.settings, &info, &err)) {
       e->import_ok = false;
       e->import_error = err.empty() ? "import failed" : err;
+      const std::string file = abs(e->rel);
+      const std::string leaf = fs::path(e->rel).filename().string();
+      if (e->import_error.find(file) == std::string::npos && e->import_error.find(leaf) == std::string::npos) {
+        e->import_error = file + ": " + e->import_error;
+      }
       info = Value::object();
       info.set("error", Value::string(e->import_error));
+      // A recorded failure. The next scan must not treat a missing
+      // importer_version as "try again" or the import loops forever.
+      info.set("import_failed", Value::boolean(true));
+      info.set("import_pending", Value::boolean(false));
+      if (e->meta.kind == Kind::Model) info.set("importer_version", Value::number(kModelImporterVersion));
     }
   }
+  e->import_pending = false;
   e->meta.info = info;
 }
 
@@ -538,6 +550,7 @@ AssetDb::ScanReport AssetDb::scan() {
   std::set<std::string> guids;
   std::set<std::string> moved_from;
   for (const std::string& rel : files) {
+    if (render3d::import_was_cancelled()) return rep;
     Entry e;
     e.rel = rel;
     const std::string a = abs(rel);
@@ -567,7 +580,9 @@ AssetDb::ScanReport AssetDb::scan() {
         dirty = true;
       }
       const std::string h = unchanged_stat ? old->second.meta.hash : asset_hash(a);
-      if (h != m.hash) {
+      if (h.empty() && render3d::import_was_cancelled()) return rep;
+      const bool hash_changed = h != m.hash;
+      if (hash_changed) {
         m.hash = h;
         reimport = dirty = true;
         if (!m.hash.empty() && old != known.end()) rep.changed.push_back(rel);
@@ -576,11 +591,19 @@ AssetDb::ScanReport AssetDb::scan() {
         m.kind = kind;
         dirty = reimport = true;
       }
-      if (kind == Kind::Model && m.info.num("importer_version", 1) < kModelImporterVersion) {
+      if (kind == Kind::Model && !m.info.flag("import_failed", false) &&
+          m.info.num("importer_version", 1) < kModelImporterVersion) {
         dirty = reimport = true;  // info from an older importer (bounds)
+      }
+      // A worker owns this file. Don't import it again on the UI thread,
+      // and don't treat a missing importer_version as a fresh import.
+      // A changed file falls through and is deferred again below.
+      if (defer_bytes_ > 0 && kind == Kind::Model && m.info.flag("import_pending", false) && !hash_changed) {
+        reimport = false;
       }
     } else {
       const std::string h = asset_hash(a);
+      if (h.empty() && render3d::import_was_cancelled()) return rep;
       auto usable = [&](const Orphan& o) { return !o.used && o.meta.kind == kind && !guids.count(o.meta.guid); };
       // 1) Same content (moved / renamed outside the editor).
       auto orphan = std::find_if(orphans.begin(), orphans.end(),
@@ -633,13 +656,26 @@ AssetDb::ScanReport AssetDb::scan() {
       dirty = true;
     }
     e.meta = std::move(m);
-    if (reimport) {
+    e.import_pending = e.meta.info.flag("import_pending", false);
+    if (reimport && defer_bytes_ > 0 && kind == Kind::Model && e.size >= defer_bytes_) {
+      e.import_pending = true;
+      e.import_ok = false;
+      e.import_error.clear();
+      e.meta.info.set("import_pending", Value::boolean(true));
+      dirty = true;
+    } else if (reimport) {
       import_entry(&e);
+      e.import_pending = e.meta.info.flag("import_pending", false);
     } else if (old != known.end()) {
-      e.import_ok = old->second.import_ok;
-      e.import_error = old->second.import_error;
+      if (old->second.import_pending && !e.import_pending) {
+        e.import_ok = !e.meta.info.has("error");
+        e.import_error = e.meta.info.str("error");
+      } else {
+        e.import_ok = old->second.import_ok;
+        e.import_error = old->second.import_error;
+      }
     } else {
-      e.import_ok = !e.meta.info.has("error");
+      e.import_ok = !e.import_pending && !e.meta.info.has("error");
       e.import_error = e.meta.info.str("error");
     }
     if (dirty || reimport) {
@@ -725,6 +761,46 @@ bool AssetDb::set_settings(const std::string& rel, const Value& settings, std::s
     return write_meta(meta_abs(e.rel), e.meta, error);
   }
   if (error) *error = "unknown asset " + rel;
+  return false;
+}
+
+bool AssetDb::fail_import(const std::string& rel, const std::string& why) {
+  for (Entry& e : entries_) {
+    if (e.rel != clean_rel(rel)) continue;
+    e.import_pending = false;
+    e.import_ok = false;
+    std::string msg = why.empty() ? "import failed" : why;
+    const std::string file = abs(e.rel);
+    const std::string leaf = fs::path(e.rel).filename().string();
+    if (msg.find(file) == std::string::npos && msg.find(leaf) == std::string::npos) msg = file + ": " + msg;
+    e.import_error = msg;
+    Value info = Value::object();
+    info.set("error", Value::string(msg));
+    info.set("import_failed", Value::boolean(true));
+    info.set("import_pending", Value::boolean(false));
+    if (e.meta.kind == Kind::Model) info.set("importer_version", Value::number(kModelImporterVersion));
+    e.meta.info = std::move(info);
+    std::error_code ec;
+    fs::create_directories(fs::u8path(meta_abs(e.rel)).parent_path(), ec);
+    write_meta(meta_abs(e.rel), e.meta);
+    return true;
+  }
+  return false;
+}
+
+bool AssetDb::mark_import_pending(const std::string& rel) {
+  for (Entry& e : entries_) {
+    if (e.rel != clean_rel(rel)) continue;
+    e.import_pending = true;
+    e.import_ok = false;
+    e.import_error.clear();
+    e.meta.info.set("import_pending", Value::boolean(true));
+    e.meta.info.set("import_failed", Value::boolean(false));
+    std::error_code ec;
+    fs::create_directories(fs::u8path(meta_abs(e.rel)).parent_path(), ec);
+    write_meta(meta_abs(e.rel), e.meta);
+    return true;
+  }
   return false;
 }
 

@@ -136,6 +136,9 @@ class Script {
   virtual void on_reload() {}
   virtual void on_destroy() {}
   virtual void on_hand(const std::string& /*hook*/, const std::string& /*hand*/, double /*n*/) {}
+  // Clip events (on_anim_event). Fired as well as on_hand, so a script can
+  // override either one.
+  virtual void OnAnimEvent(const std::string& /*name*/, float /*time*/) {}
   // Plugin events (ts.quests / ts.dialogue / ts.saves, ...). The default
   // on_event routes the story hooks to the virtuals below; override on_event
   // to see every event, including ones from other plugins.
@@ -174,6 +177,36 @@ class Script {
   void set_collider(Entity e, bool on) { api_->set_collider(api_->world, e, on ? 1 : 0); }
   bool PlayAnimation(const std::string& clip) {
     return Query("anim", std::to_string(self_) + "\t" + clip) == "1";
+  }
+  // 3D: a state or a clip on the animator. 2D: a sprite clip (`hold` keeps
+  // the rider from picking walk/idle over it). `fade` is the crossfade in
+  // seconds (3D only). Layer numbers below are 1-based.
+  bool PlayAnimation(const std::string& clip, float fade, bool hold = false) {
+    return Query("anim.play", std::to_string(self_) + "\t" + clip + "\t" + std::to_string(fade) + "\t" +
+                                 (hold ? "1" : "0")) == "1";
+  }
+  bool CrossfadeAnimation(const std::string& state_or_clip, float fade = 0.25f) {
+    return Query("anim.crossfade", std::to_string(self_) + "\t" + state_or_clip + "\t" + std::to_string(fade)) == "1";
+  }
+  bool SetAnimFloat(const std::string& name, float value) {
+    return Query("anim.set", std::to_string(self_) + "\t" + name + "\t" + std::to_string(value)) == "1";
+  }
+  bool SetAnimBool(const std::string& name, bool value) {
+    return Query("anim.set", std::to_string(self_) + "\t" + name + "\t" + (value ? "true" : "false")) == "1";
+  }
+  bool SetAnimTrigger(const std::string& name) {
+    return Query("anim.trigger", std::to_string(self_) + "\t" + name) == "1";
+  }
+  float AnimFloat(const std::string& name) const {
+    const std::string s = Query("anim.param", std::to_string(self_) + "\t" + name);
+    return static_cast<float>(std::atof(s.c_str()));
+  }
+  std::string AnimState(int layer1 = 1) const {
+    return Query("anim.state", std::to_string(self_) + "\t" + std::to_string(layer1));
+  }
+  bool StopAnimation(int layer1 = 1, float fade = 0.2f) {
+    return Query("anim.stop", std::to_string(self_) + "\t" + std::to_string(layer1) + "\t" + std::to_string(fade)) ==
+           "1";
   }
   bool SetFov(Entity camera, float degrees) {
     return Query("fov", std::to_string(camera) + "\t" + std::to_string(degrees)) == "1";
@@ -657,7 +690,13 @@ TS_SCRIPT_EXPORT void ts_script_call(void* sp, int hook, uint64_t e, double n, c
     case TS_HOOK_INTERACT: s->on_interact(e); break;
     case TS_HOOK_RELOAD: s->on_reload(); break;
     case TS_HOOK_DESTROY: s->OnDisable(); s->on_destroy(); break;
-    case TS_HOOK_HAND: s->on_hand(t.substr(0, tab), tab == std::string::npos ? "" : t.substr(tab + 1), n); break;
+    case TS_HOOK_HAND: {
+      const std::string hook = t.substr(0, tab);
+      const std::string rest = tab == std::string::npos ? "" : t.substr(tab + 1);
+      s->on_hand(hook, rest, n);
+      if (hook == "on_anim_event") s->OnAnimEvent(rest, static_cast<float>(n));
+      break;
+    }
     case TS_HOOK_UI: s->on_ui(t.substr(0, tab), e != 0, n, tab == std::string::npos ? "" : t.substr(tab + 1)); break;
     case TS_HOOK_EVENT: s->on_event(t.substr(0, tab), tab == std::string::npos ? "" : t.substr(tab + 1), n); break;
     default: break;

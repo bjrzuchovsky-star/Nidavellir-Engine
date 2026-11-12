@@ -125,7 +125,7 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
         e.player = scene3d::Player3D{};
         e.player->look = scene3d::Player3D::Look::Keys;  // flat fallback: keys, cursor free
         player_ = e.id;
-        post(LogLevel::Info, "play", "VR scene on the desktop: " + e.name + " (VR Rig) rides as the rider");
+        post(LogLevel::Info, "play", "VR scene on the desktop: " + e.name + " (VR Rig) rides as the wanderer");
         break;
       }
     }
@@ -137,18 +137,18 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
     if (cam) {
       post(LogLevel::Info, "play",
            "No Player component. The scene camera is in charge, and a script can drive a body "
-           "itself. Rider 3D is not required.");
+           "itself. Wanderer is not required.");
     } else {
       post(LogLevel::Warn, "play",
-           "No rider in this scene (give an entity a Player component); the camera stays put");
+           "No wanderer in this scene (give an entity a Player component); the camera stays put");
     }
   }
   if (const Entity3D* p = find(player_)) spawn_ = p->transform.position;
   rider_ctrl_ = RiderControllers3D::instance().get(kRider3DPluginId);
   if (!vr_ && player_ != 0 && !rider_ctrl_) {
     post(LogLevel::Warn, "play",
-         "No movement plugin is on: the rider stands still. Switch on Rider 3D "
-         "(ts.move.rider3d) in the Trading Post to walk and look, or drive the body from a script.");
+         "No movement plugin is on: the player stands still. Switch on Wanderer "
+         "(ts.move.rider3d) in the Market to walk and look, or drive the body from a script.");
   }
   auto compiled_on = [](const Entity3D& e) {
     auto hit = [](const std::string& path) {
@@ -163,13 +163,14 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
   if (!vr_ && player_ != 0 && rider_ctrl_) {
     if (const Entity3D* p = find(player_); p && compiled_on(*p)) {
       post(LogLevel::Warn, "play",
-           p->name + " has a C# or C++ script and the Rider 3D plugin. Both will try to move it. "
-                     "Take the Player component off, or switch Rider 3D off in the Trading Post, "
+           p->name + " has a C# or C++ script and the Wanderer plugin. Both will try to move it. "
+                     "Take the Player component off, or switch Wanderer off in the Market, "
                      "if the script should drive the body.");
     }
   }
   rebuild_statics();
   phys_build();
+  settle_rider();
   // Camera starts behind the rider, looking the way the editor camera did.
   cam_yaw_ = want_yaw_ = scene.editor_camera.yaw;
   cam_pitch_ = want_pitch_ = 0.0f;
@@ -352,6 +353,82 @@ void World3D::rebuild_statics() {
   }
 }
 
+namespace {
+
+bool tri_floor_y(const Vec3& a, const Vec3& b, const Vec3& c, float x, float z, float* y) {
+  const Vec3 ab = b - a, ac = c - a;
+  const Vec3 n = render3d::cross(ab, ac);
+  if (n.y <= 1e-4f) return false;
+  const float yy = a.y - (n.x * (x - a.x) + n.z * (z - a.z)) / n.y;
+  const Vec3 p{x - a.x, yy - a.y, z - a.z};
+  const float d00 = render3d::dot(ab, ab), d01 = render3d::dot(ab, ac), d11 = render3d::dot(ac, ac);
+  const float d20 = render3d::dot(p, ab), d21 = render3d::dot(p, ac);
+  const float den = d00 * d11 - d01 * d01;
+  if (std::fabs(den) < 1e-12f) return false;
+  const float v = (d11 * d20 - d01 * d21) / den;
+  const float w = (d00 * d21 - d01 * d20) / den;
+  const float u = 1.0f - v - w;
+  if (u < -1e-3f || v < -1e-3f || w < -1e-3f) return false;
+  *y = yy;
+  return true;
+}
+
+}  // namespace
+
+void World3D::settle_rider() {
+  Entity3D* p = live(player_);
+  if (!p || !p->collider) return;
+  float radius = 0.4f, bottom = 0.0f;
+  {
+    float r = p->collider->shape == scene3d::Collider3D::Shape::Capsule
+                  ? p->collider->size.x
+                  : 0.5f * std::max(p->collider->size.x, p->collider->size.z);
+    float h = p->collider->shape == scene3d::Collider3D::Shape::Capsule
+                  ? std::max(p->collider->size.y, 2.0f * r)
+                  : p->collider->size.y;
+    const float sy = std::max(1.0e-4f, std::fabs(p->transform.scale.y));
+    const float sh = std::max({1.0e-4f, std::fabs(p->transform.scale.x), std::fabs(p->transform.scale.z)});
+    r *= sh;
+    h *= sy;
+    const float off_y = p->collider->offset.y * p->transform.scale.y;
+    bottom = off_y - h * 0.5f;
+    radius = r;
+  }
+  const float feet = p->transform.position.y + bottom;
+  float ground = -1.0e30f;
+  bool any = false;
+  auto take = [&](float y) {
+    if (y <= feet + 0.05f && feet - y <= 4.0f && y > ground) {
+      ground = y;
+      any = true;
+    }
+  };
+  auto sample = [&](float x, float z) {
+    float h = 0.0f;
+    if (terrain_solid_height(x, z, &h, nullptr)) take(h);
+    for (const Static& s : statics_) {
+      if (s.volume) {
+        if (x >= s.box.min.x && x <= s.box.max.x && z >= s.box.min.z && z <= s.box.max.z) take(s.box.max.y);
+        continue;
+      }
+      for (const SurfTri& t : s.tris) {
+        float ty = 0.0f;
+        if (tri_floor_y(t.a, t.b, t.c, x, z, &ty)) take(ty);
+      }
+    }
+  };
+  sample(p->transform.position.x, p->transform.position.z);
+  for (int k = 0; k < 4; ++k) {
+    const float a = static_cast<float>(k) * 1.5707963f;
+    sample(p->transform.position.x + std::cos(a) * radius * 0.6f,
+           p->transform.position.z + std::sin(a) * radius * 0.6f);
+  }
+  if (!any || !(feet > ground + 0.02f)) return;
+  p->transform.position.y -= feet - ground;
+  if (phys_ && phys_->has_character()) phys_->set_character_position(p->transform.position);
+  vel_ = {};
+}
+
 void World3D::follow_camera(bool snap) {
   const Entity3D* p = find(player_);
   if (!p) return;
@@ -465,6 +542,13 @@ void World3D::move_player(const Input3D& in) {
                                                                   : 0.5f * std::max(p->collider->size.x, p->collider->size.z);
     h = p->collider->size.y;
     off = p->collider->offset;
+    const float sy = std::max(1.0e-4f, std::fabs(p->transform.scale.y));
+    const float sh = std::max({1.0e-4f, std::fabs(p->transform.scale.x), std::fabs(p->transform.scale.z)});
+    r *= sh;
+    h *= sy;
+    off.x *= p->transform.scale.x;
+    off.y *= p->transform.scale.y;
+    off.z *= p->transform.scale.z;
   }
   const float half = std::max(0.0f, h * 0.5f - r);
   grounded_ = false;
@@ -870,7 +954,7 @@ std::uint64_t World3D::script_duplicate(std::uint64_t id, float x, float y) {
 void World3D::script_destroy(std::uint64_t id) {
   if (!live(id)) return;
   if (id == player_) {
-    post(LogLevel::Warn, "script", "Scripts cannot destroy the rider");
+    post(LogLevel::Warn, "script", "Scripts cannot destroy the wanderer");
     return;
   }
   dead_.insert(id);

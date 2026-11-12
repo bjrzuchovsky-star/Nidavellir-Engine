@@ -462,7 +462,7 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
   std::vector<std::pair<std::string, std::string>> gs = {
       {"name", name},           {"version", version},  {"dimension", dimension},
       {"start_scene", "scene.json"}, {"icon", icon},   {"pak", "game.tspak"},
-      {"profile", profile},     {"engine", "TombStone Engine"},
+      {"profile", profile},     {"engine", "Nidavellir Engine"},
       {"vr", vr ? "true" : "false"}, {"plugins", runtime_plugins}};
   if (!write_all(game_dir / "game.json",
                  json_num_object(gs, {{"window_width", ww}, {"window_height", wh}}))) {
@@ -473,7 +473,7 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
 #if !defined(_WIN32)
   {
     const std::string sh =
-        "#!/bin/sh\n# " + name + " " + version + " (TombStone Engine export)\n"
+        "#!/bin/sh\n# " + name + " " + version + " (Nidavellir Engine export)\n"
         "HERE=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\n"
         "export LD_LIBRARY_PATH=\"$HERE/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n"
         "exec \"$HERE/" + exe_name + "\"" + (dev ? " --log \"$HERE/telegraph.log\"" : "") + " \"$@\"\n";
@@ -528,7 +528,7 @@ bool export_project(const ExportOptions& opt, ExportResult* out, const Progress&
 
   // README + report.
   std::ostringstream readme;
-  readme << name << " " << version << "\nBuilt with TombStone Engine (" << profile << " export).\n\n"
+  readme << name << " " << version << "\nBuilt with Nidavellir Engine (" << profile << " export).\n\n"
          << "Run: " << exe_name
 #if !defined(_WIN32)
          << " (or ./" << slug << ".sh, which sets LD_LIBRARY_PATH for lib/)"

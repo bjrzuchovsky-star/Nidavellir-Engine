@@ -1337,7 +1337,7 @@ bool write_ghost_town_sample(const std::string& project_dir,
   if (!write_text(dir / "scripts" / "bell.lua", kBellLua, error)) return false;
   if (!write_text(dir / "scripts" / "town.lua", kTownLua, error)) return false;
   if (!write_text(dir / "scripts" / "hank.lua", kHankLua, error)) return false;
-  if (!write_text(dir / "scripts" / "rider.lua", kRiderLua, error)) return false;
+  if (!write_text(dir / "scripts" / "wanderer.lua", kRiderLua, error)) return false;
   fs::create_directories(dir / "ai", ec);
   if (!write_text(dir / "ai" / "hank.bt.json", kHankBt, error)) return false;
   if (!write_text(dir / "quests" / "bell.quest.json", kBellQuest, error)) return false;
@@ -1425,7 +1425,8 @@ bool write_ghost_town_sample(const std::string& project_dir,
   r.collider->offset = {0.0f, 0.95f, 0.0f};
   r.animator = default_locomotion_animator();
   r.script = ScriptData{};
-  r.script->path = "scripts/rider.lua";
+  r.name = "Wanderer";
+  r.script->path = "scripts/wanderer.lua";
   s.entities.push_back(r);
   // Old Hank idles by the saloon and waves (upper-body layer) at riders.
   Entity3D hank;

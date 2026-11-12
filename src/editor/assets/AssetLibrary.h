@@ -27,7 +27,7 @@ std::vector<std::string> list_images(const std::string& project_dir);
 bool is_audio_path(const std::string& path);
 // Sorted project-relative paths of every sound under assets/ (recursive).
 std::vector<std::string> list_sounds(const std::string& project_dir);
-// Copy an outside image into assets/Textures/ (assets/ when the claim
+// Copy an outside image into assets/Textures/ (assets/ when the realm
 // turned sorted imports off; name_2.png etc. on collision).
 // rel_out receives the project-relative path.
 bool import_image(const std::string& project_dir, const std::string& source,

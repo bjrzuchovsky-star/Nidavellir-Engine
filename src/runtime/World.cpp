@@ -425,8 +425,8 @@ void World::move_rider(Actor& a, const PlayerInput& in) {
     post(LogLevel::Warn, "play",
          a.data.name + std::string(" has a ") + (platformer ? "platformer" : "top-down") +
              " Player but no movement plugin is on; it stays put. Switch on " +
-             (platformer ? "Platformer Rider (ts.move.platformer)" : "Top-down Rider (ts.move.topdown)") +
-             " in the Trading Post.",
+             (platformer ? "Platformer Wanderer (ts.move.platformer)" : "Top-down Wanderer (ts.move.topdown)") +
+             " in the Market.",
          a.data.id);
   }
 }

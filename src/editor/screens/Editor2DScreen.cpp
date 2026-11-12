@@ -1,5 +1,6 @@
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/ux/FriendlyError.h"
+#include "editor/ux/ShotOpts.h"
 #include "editor/plugins/PluginNeeds.h"
 
 #include "editor/assets/AssetLibrary.h"
@@ -86,7 +87,7 @@ void Editor2DScreen::on_enter() {
     workspace_.reset_defaults();
     scene_locked_ = true;
     scene_locked_why_ = err;
-    ux::show_error(ux::explain(err, ux::ErrorKind::SceneVersion, "Opening claim " + project_.name));
+    ux::show_error(ux::explain(err, ux::ErrorKind::SceneVersion, "Opening realm " + project_.name));
   } else {
     if (!err.empty()) {
       std::cout << "[Editor2D] no scene.json yet (" << err << ") -- seeding defaults\n";
@@ -240,6 +241,7 @@ bool Editor2DScreen::save_scene(std::string* error_out) {
 }
 
 void Editor2DScreen::note(std::string message) {
+  if (shot::hide_log_line(message)) return;
   std::cout << "[Editor2D] " << message << '\n';
   // Every status note also goes down the wire to the Telegraph.
   telegraph_.add(runtime::LogLevel::Info, "editor", message);
@@ -584,7 +586,7 @@ AppState Editor2DScreen::on_update(float delta_seconds) {
       prefab_poll();
     }
     vault_panel_.update();
-    // Hold the browser's rescan while the Vault worker writes into the claim.
+    // Hold the browser's rescan while the Vault worker writes into the realm.
     if (!is_playing() && !vault_panel_.busy()) asset_browser_.poll(ImGui::GetTime());
     draw_ui();
   }
@@ -597,7 +599,7 @@ AppState Editor2DScreen::on_update(float delta_seconds) {
   }
   if (settings_requested_) {
     settings_requested_ = false;
-    return AppState::Settings;  // AppFlow comes back to this claim afterwards
+    return AppState::Settings;  // AppFlow comes back to this realm afterwards
   }
   return AppState::Editor2D;
 }

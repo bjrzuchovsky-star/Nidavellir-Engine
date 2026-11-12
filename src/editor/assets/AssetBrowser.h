@@ -4,13 +4,14 @@
 // tree, thumbnail grid with search and type filter, drag into the scene
 // (the host picks the payload), drag onto a folder to move, rename /
 // delete with "in use" warnings, find references, per-asset import
-// settings (.meta, kept in the claim's .tombstone/meta folder), hot reload
+// settings (.meta, kept in the realm's .tombstone/meta folder), hot reload
 // of changed files, imports from outside (Import... button, files dropped
 // on the window) sorted into type folders (ImportSort.h), orphaned .meta
 // clean-up.
 
 #include "editor/assets/AssetDb.h"
 #include "editor/assets/GmaImport.h"
+#include "editor/assets/ImportJob.h"
 #include "editor/assets/ImportSort.h"
 #include "editor/ui/FolderBrowser.h"
 #include "gfx/TextureCache.h"
@@ -54,6 +55,15 @@ struct AssetBrowserHost {
   // itself (no scene undo). recentre: pivot at each part's centre.
   std::function<bool(const std::string& rel, bool recentre, bool fit)> split_model;
   std::function<bool(const std::string& rel, bool recentre, bool fit)> place_parts;
+  // Double-click a model. The 3D editor previews an animation on the
+  // selected character (or the last one that played a clip).
+  std::function<void(const std::string& rel)> preview_model;
+  // An animation tile dropped onto a model tile (clip rel, model rel).
+  std::function<void(const std::string& clip_rel, const std::string& model_rel)> apply_clip_to;
+  // A model import failed or was cancelled: stop uploading those files.
+  std::function<void(const std::vector<std::string>& rels)> on_import_stopped;
+  // Retry import: that file may be sent to the team session again.
+  std::function<void(const std::string& rel)> on_import_retry;
 };
 
 class AssetBrowser {
@@ -75,6 +85,8 @@ class AssetBrowser {
   // Copy outside files / folders in (dest_folder "" = sorted by type, see
   // ImportSort.h), then rescan so they get their .meta. Returns the result.
   importsort::Result import_files(const std::vector<std::string>& sources, const std::string& dest_folder = {});
+  // Same copy as import_files, but the read / Blender export / collider fit
+  // run off the UI thread. import_files stays synchronous for smokes.
   const importsort::Settings& import_settings() const { return import_settings_; }
   void set_import_settings(const importsort::Settings& s);
   // Orphaned .meta files from the last scan (asset paths).
@@ -89,6 +101,11 @@ class AssetBrowser {
   // An asset tile's right-click menu body (also drawn for --smoke-ux).
   void draw_asset_context_items(const assetdb::AssetDb::Entry& e);
   void select(const std::string& rel) { selected_ = rel; }
+  // Show one folder's tiles ("" = every asset). Screenshots use this so the
+  // grid is a populated folder rather than the empty-state prompt.
+  void show_folder(const std::string& folder) { folder_ = folder; }
+  // Point the grid at another realm folder (the clan mirror) and rescan.
+  void retarget(const std::string& project_dir);
 
  private:
   void draw_folders();
@@ -100,11 +117,15 @@ class AssetBrowser {
   void accept_move_into(const std::string& folder);
   void accept_vault_drop();
   void take_os_drop(const std::string& folder);
+  void queue_import(const std::vector<std::string>& sources, const std::string& dest_folder);
+  void kick_pending();
+  void pump_import();
   void draw_import_popup();
   void draw_split_popup();
   bool split_here(const std::string& rel, bool recentre, bool fit);
 
   assetdb::AssetDb db_;
+  ImportJob import_job_;
   AssetBrowserHost host_;
   gfx::TextureCache thumbs_;
   std::string folder_ = "";  // "" = everything

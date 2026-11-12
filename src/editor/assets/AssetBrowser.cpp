@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <filesystem>
 #include "editor/ux/FriendlyError.h"
+#include "editor/ux/ShotOpts.h"
 #include "editor/ux/EmptyState.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
@@ -12,6 +13,7 @@
 
 #include "editor/assets/AssetImport.h"
 #include "editor/ui/Theme.h"
+#include "render3d/ImportLimits.h"
 #include "render3d/ModelImport.h"
 
 #include <imgui.h>
@@ -72,6 +74,7 @@ const char* const kPayloads[] = {kAssetAnyPayload, "TS_ASSET_IMAGE", "TS_ASSET3D
 void AssetBrowser::open(const std::string& project_dir, AssetBrowserHost host) {
   host_ = std::move(host);
   db_.set_importer(assetdb::import_asset);
+  db_.set_defer_import_bytes(render3d::kDeferImportBytes);
   db_.open(project_dir);  // moves legacy sidecar .meta files into .tombstone/meta
   import_settings_ = importsort::load_settings(project_dir);
   thumbs_.clear();
@@ -82,6 +85,27 @@ void AssetBrowser::open(const std::string& project_dir, AssetBrowserHost host) {
     host_.note("Asset metadata moved into .tombstone/meta: " + std::to_string(mr.moved) + " .meta file(s) (GUIDs kept; backup in " +
                mr.backup_dir + ", log in .tombstone/meta.log)");
   }
+  rescan();
+}
+
+void AssetBrowser::retarget(const std::string& project_dir) {
+  auto same_dir = [](std::string a, std::string b) {
+    for (char& c : a)
+      if (c == '\\') c = '/';
+    for (char& c : b)
+      if (c == '\\') c = '/';
+    while (a.size() > 1 && a.back() == '/') a.pop_back();
+    while (b.size() > 1 && b.back() == '/') b.pop_back();
+    return a == b;
+  };
+  if (project_dir.empty() || same_dir(project_dir, db_.project_dir())) return;
+  const std::string sel = selected_;
+  const std::string folder = folder_;
+  db_.open(project_dir);
+  import_settings_ = importsort::load_settings(project_dir);
+  thumbs_.clear();
+  selected_ = sel;
+  folder_ = folder;
   rescan();
 }
 
@@ -139,7 +163,86 @@ importsort::Result AssetBrowser::import_files(const std::vector<std::string>& al
 
 void AssetBrowser::take_os_drop(const std::string& folder) {
   const std::vector<std::string> paths = importsort::take_os_drop();
-  if (!paths.empty()) import_files(paths, folder);
+  if (!paths.empty()) queue_import(paths, folder);
+}
+
+void AssetBrowser::queue_import(const std::vector<std::string>& sources, const std::string& dest_folder) {
+  if (sources.empty()) return;
+  if (import_job_.state().running) {
+    if (host_.note) host_.note("An import is already running. Cancel it before starting another.");
+    return;
+  }
+  ImportJob::Request req;
+  req.project_dir = db_.project_dir();
+  req.sources = sources;
+  req.dest_folder = dest_folder;
+  req.settings = import_settings_;
+  req.split = split_on_import_;
+  req.split_recenter = split_recenter_;
+  req.split_fit = split_fit_parts_;
+  import_job_.start(std::move(req));
+  if (host_.note) host_.note("Importing in the background. You can keep working, or press Cancel.");
+}
+
+void AssetBrowser::kick_pending() {
+  if (import_job_.state().running) return;
+  std::vector<std::string> rels;
+  for (const AssetDb::Entry& e : db_.entries()) {
+    if (e.import_pending) rels.push_back(e.rel);
+  }
+  if (rels.empty()) return;
+  ImportJob::Request req;
+  req.project_dir = db_.project_dir();
+  req.reimport_rels = std::move(rels);
+  import_job_.start(std::move(req));
+}
+
+void AssetBrowser::pump_import() {
+  ImportJob::State done;
+  if (!import_job_.take(&done)) return;
+  if (done.cancelled) {
+    const std::string why = done.error.empty() ? "Import cancelled." : done.error;
+    for (const std::string& rel : done.rels) db_.fail_import(rel, why);
+    if (host_.on_import_stopped) host_.on_import_stopped(done.rels);
+    render3d::clear_import_cancel();
+    rescan();
+    if (host_.note) host_.note(why);
+    return;
+  }
+  if (!done.ok) {
+    const std::string why = done.error.empty() ? "Import failed." : done.error;
+    for (const std::string& rel : done.rels) {
+      if (const assetdb::AssetDb::Entry* e = db_.by_path(rel); !e || e->import_pending) db_.fail_import(rel, why);
+    }
+    if (host_.on_import_stopped) host_.on_import_stopped(done.rels);
+    rescan();
+    if (host_.note) host_.note(why);
+    ux::show_error(ux::explain(why, ux::ErrorKind::ImportFailed, "Importing a model"));
+    return;
+  }
+  if (done.split) {
+    for (const std::string& rel : done.copied.mains) {
+      const AssetDb::Entry* e = db_.by_path(rel);
+      if (!e || e->meta.kind != assetdb::Kind::Model) continue;
+      if (host_.split_model) host_.split_model(rel, done.split_recenter, done.split_fit);
+      else split_here(rel, done.split_recenter, done.split_fit);
+    }
+  }
+  if (host_.note) {
+    if (!done.copied.mains.empty()) {
+      host_.note("Imported " + std::to_string(done.copied.mains.size()) + " asset(s).");
+    } else if (!done.copied.files.empty()) {
+      host_.note("Imported " + std::to_string(done.copied.files.size()) + " file(s).");
+    } else {
+      host_.note("Import finished.");
+    }
+    for (const std::string& n : done.copied.notes) host_.note("Import: " + n);
+  }
+  if (!done.copied.mains.empty()) {
+    selected_ = done.copied.mains.front();
+    const auto slash = selected_.find_last_of('/');
+    if (!folder_.empty() && slash != std::string::npos) folder_ = selected_.substr(0, slash);
+  }
 }
 
 void AssetBrowser::draw_import_popup() {
@@ -174,11 +277,12 @@ void AssetBrowser::draw_import_popup() {
   }
   if (import_picker_.draw(import_pick_folder_ ? "Import folder##assets" : "Import file##assets")) {
     const std::string picked = import_picker_.take_result();
-    if (!picked.empty()) import_files({picked}, folder_);
+    if (!picked.empty()) queue_import({picked}, folder_);
   }
 }
 
 AssetDb::ScanReport AssetBrowser::rescan() {
+  if (import_job_.state().running) return {};
   // Moves outside the editor rewrite files on disk: save the open scene
   // first only when needed (we learn that from the scan itself, which does
   // not touch references).
@@ -209,10 +313,13 @@ AssetDb::ScanReport AssetBrowser::rescan() {
     host_.note("Reimported " + std::to_string(rep.changed.size()) + " changed asset(s)");
   }
   if (!changed.empty() && host_.on_assets_changed) host_.on_assets_changed(changed);
+  kick_pending();
   return rep;
 }
 
 void AssetBrowser::poll(double now, double interval) {
+  pump_import();
+  if (import_job_.state().running) return;
   if (now - last_poll_ < interval) return;
   last_poll_ = now;
   rescan();
@@ -272,6 +379,18 @@ void AssetBrowser::accept_vault_drop() {
 }
 
 void AssetBrowser::reimport(const std::string& rel) {
+  if (host_.on_import_retry) host_.on_import_retry(rel);
+  const AssetDb::Entry* e = db_.by_path(rel);
+  if (e && e->meta.kind == assetdb::Kind::Model && e->size >= render3d::kDeferImportBytes) {
+    if (import_job_.state().running) {
+      if (host_.note) host_.note("An import is already running.");
+      return;
+    }
+    db_.mark_import_pending(rel);
+    kick_pending();
+    if (host_.note) host_.note("Reimporting " + rel + " in the background.");
+    return;
+  }
   db_.reimport(rel);
   thumbs_.invalidate(db_.abs(rel));
   if (host_.on_assets_changed) host_.on_assets_changed({rel});
@@ -325,7 +444,15 @@ void AssetBrowser::draw_split_popup() {
 }
 
 void AssetBrowser::draw() {
+  pump_import();
   thumbs_.poll_changes(ImGui::GetTime());
+  const ImportJob::State job = import_job_.state();
+  if (job.running) {
+    ImGui::TextUnformatted(job.phase.empty() ? "Importing..." : job.phase.c_str());
+    theme::BrandProgress(job.percent / 100.0f, ImVec2(std::max(80.0f, ImGui::GetContentRegionAvail().x - 90.0f), 16.0f));
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) import_job_.cancel();
+  }
   // Toolbar.
   ImGui::SetNextItemWidth(180);
   ImGui::InputTextWithHint("##assetsearch", "Search assets...", search_, sizeof(search_));
@@ -373,7 +500,7 @@ void AssetBrowser::draw() {
     ImGui::EndDisabled();
     if (changed) set_import_settings(st);
     ImGui::Separator();
-    ImGui::TextDisabled("Metadata (.meta) lives in .tombstone/meta");
+    if (!shot::clean()) ImGui::TextDisabled("Metadata (.meta) lives in .tombstone/meta");
     ImGui::EndPopup();
   }
   if (gma_dialog_.draw()) {
@@ -403,7 +530,7 @@ void AssetBrowser::draw() {
   if (ImGui::BeginChild("##grid", ImVec2(0, body_h), ImGuiChildFlags_Borders)) draw_grid();
   ImGui::EndChild();
   grid_hovered_ = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-  accept_vault_drop();  // a Vault tile dropped on the grid: pull it into the claim
+  accept_vault_drop();  // a Vault tile dropped on the grid: pull it into the realm
   if (!selected_.empty()) {
     if (ImGui::BeginChild("##details", ImVec2(0, 0), ImGuiChildFlags_Borders)) draw_details();
     ImGui::EndChild();
@@ -424,7 +551,7 @@ void AssetBrowser::draw() {
     orphans_popup_ = false;
   }
   if (ImGui::BeginPopupModal("Orphaned asset metadata", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::TextUnformatted("These .meta files belong to assets that are no longer in the claim:");
+    ImGui::TextUnformatted("These .meta files belong to assets that are no longer in the realm:");
     const std::size_t show = std::min<std::size_t>(orphans_.size(), 12);
     for (std::size_t i = 0; i < show; ++i) ImGui::BulletText("%s", orphans_[i].c_str());
     if (orphans_.size() > show) ImGui::TextDisabled("... and %zu more", orphans_.size() - show);
@@ -455,7 +582,7 @@ void AssetBrowser::draw() {
   if (!confirm_delete_.empty() && !ImGui::IsPopupOpen("Delete asset?###ts_asset_delete"))
     ImGui::OpenPopup("Delete asset?###ts_asset_delete");
   if (ImGui::BeginPopupModal("Delete asset?###ts_asset_delete", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::Text("Delete %s from the claim?", confirm_delete_.c_str());
+    ImGui::Text("Delete %s from the realm?", confirm_delete_.c_str());
     ImGui::TextDisabled("The file and its .meta are removed from disk. Undo can't bring them back.");
     if (theme::DangerButton("Delete")) {
       std::vector<assetdb::Ref> refs;
@@ -547,6 +674,19 @@ bool AssetBrowser::tile(const AssetDb::Entry& e, float size) {
   ImGui::BeginGroup();
   const ImVec2 p0 = ImGui::GetCursorScreenPos();
   const bool clicked = ImGui::InvisibleButton("##tile", ImVec2(size, size + 18));
+  if (e.meta.kind == Kind::Model && ImGui::BeginDragDropTarget()) {
+    const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("TS_ASSET3D");
+    if (!payload) payload = ImGui::AcceptDragDropPayload("TS_ASSET_ANY");
+    if (payload && payload->Data && host_.apply_clip_to) {
+      const std::string clip(static_cast<const char*>(payload->Data));
+      const AssetDb::Entry* dragged = db_.by_path(clip);
+      if (dragged && dragged->rel != e.rel && dragged->meta.kind == Kind::Model &&
+          (dragged->meta.info.flag("animation_only", false) || dragged->meta.info.num("clips", 0) > 0)) {
+        host_.apply_clip_to(clip, e.rel);
+      }
+    }
+    ImGui::EndDragDropTarget();
+  }
   const bool hovered = ImGui::IsItemHovered();
   ImDrawList* dl = ImGui::GetWindowDrawList();
   const bool sel = selected_ == e.rel;
@@ -576,7 +716,8 @@ bool AssetBrowser::tile(const AssetDb::Entry& e, float size) {
     theme::DrawSizedText(dl, ImVec2((t0.x + t1.x - ts.x) * 0.5f, (t0.y + t1.y - ts.y) * 0.5f), px,
                          kind_color(e.meta.kind), g);
   }
-  if (!e.import_ok) dl->AddText(ImVec2(t0.x + 2, t0.y), ImGui::GetColorU32(theme::Danger()), "!");
+  if (e.import_pending) dl->AddText(ImVec2(t0.x + 2, t0.y), ImGui::GetColorU32(theme::Accent()), "...");
+  else if (!e.import_ok) dl->AddText(ImVec2(t0.x + 2, t0.y), ImGui::GetColorU32(theme::Danger()), "!");
   // Vault origin: a marker for pulled / sent assets, a copper "UPD" when a newer version waits.
   if (const int vb = host_.vault_badge ? host_.vault_badge(e.rel) : 0) {
     const char* mark = vb == 2 ? "UPD" : "V";
@@ -602,9 +743,24 @@ bool AssetBrowser::tile(const AssetDb::Entry& e, float size) {
     ImGui::Text("%s", e.rel.c_str());
     ImGui::EndDragDropSource();
   }
+  if (e.meta.kind == Kind::Model && e.meta.info.flag("animation_only", false)) {
+    const char* mark = "ANIM";
+    const ImVec2 ms = ImGui::CalcTextSize(mark);
+    dl->AddRectFilled(ImVec2(t0.x + 1, t0.y + 1), ImVec2(t0.x + ms.x + 7, t0.y + ms.y + 3),
+                      ImGui::GetColorU32(theme::Accent()), 3.0f);
+    dl->AddText(ImVec2(t0.x + 4, t0.y + 2), ImGui::GetColorU32(theme::TextOnAccent()), mark);
+  }
   if (hovered) {
-    ux::SetTooltip("%s\n%s  %s\nGUID %s", e.rel.c_str(), assetdb::kind_name(e.meta.kind),
-                      assetdb::info_summary(e.meta.info, e.meta.kind).c_str(), e.meta.guid.c_str());
+    const char* how = (e.meta.kind == Kind::Model && e.meta.info.flag("animation_only", false))
+                          ? "\nAnimation clip — drag onto a character, or double-click to preview"
+                          : "";
+    ux::SetTooltip("%s\n%s  %s%s\nGUID %s", e.rel.c_str(), assetdb::kind_name(e.meta.kind),
+                   assetdb::info_summary(e.meta.info, e.meta.kind).c_str(), how, e.meta.guid.c_str());
+  }
+  if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && e.meta.kind == Kind::Model &&
+      host_.preview_model &&
+      (e.meta.info.flag("animation_only", false) || e.meta.info.num("clips", 0) > 0)) {
+    host_.preview_model(e.rel);
   }
   if (ImGui::BeginPopupContextItem("##ctx")) {
     selected_ = e.rel;
@@ -825,6 +981,20 @@ void AssetBrowser::draw_settings(const AssetDb::Entry& e) {
         s.set("up_axis", Value::string(up == 1 ? "y" : up == 2 ? "z" : "auto"));
         changed = true;
       }
+      if (ImGui::IsItemHovered()) ux::SetTooltip("Auto uses the file. Z up is turned to Y up.");
+      const std::string fw = s.str("forward_axis", "auto");
+      int fi = fw == "+x" ? 1 : fw == "-x" ? 2 : fw == "+y" ? 3 : fw == "-y" ? 4 : fw == "+z" ? 5 : fw == "-z" ? 6 : 0;
+      const char* fws[] = {"Auto", "+X", "-X", "+Y", "-Y", "+Z (glTF)", "-Z (engine)"};
+      ImGui::SetNextItemWidth(140);
+      if (ImGui::Combo("Forward axis", &fi, fws, 7)) {
+        const char* keys[] = {"auto", "+x", "-x", "+y", "-y", "+z", "-z"};
+        s.set("forward_axis", Value::string(keys[fi]));
+        changed = true;
+      }
+      if (ImGui::IsItemHovered()) {
+        ux::SetTooltip("Which way the mesh noses in the file. It is turned once so that\n"
+                       "axis points along the engine's forward (-Z). Auto does this for glTF.");
+      }
       number("scale", "Placement scale", 0.001f, 1000, "%.3f");
       auto path_field = [&](const char* key, const char* label, char* buf, std::size_t n,
                             std::string* owner, const char* hint) {
@@ -888,7 +1058,7 @@ void AssetBrowser::draw_settings(const AssetDb::Entry& e) {
             hulls ? "Auto (model hulls)\0Tight box\0Oriented box\0Capsule\0Convex hull\0Convex pieces\0Mesh\0None\0"
                   : (e.meta.info.flag("skinned", false)
                          ? "Auto (capsule)\0Tight box\0Oriented box\0Capsule\0Convex hull\0Convex pieces\0Mesh\0None\0"
-                         : "Auto (oriented box)\0Tight box\0Oriented box\0Capsule\0Convex hull\0Convex pieces\0Mesh\0None\0");
+                         : "Auto (mesh bounds)\0Tight box\0Oriented box\0Capsule\0Convex hull\0Convex pieces\0Mesh\0None\0");
         int ci = 0;
         const std::string cur = s.flag("generate_collider", true) ? s.str("collider", "auto") : "none";
         for (int k = 0; k < 8; ++k) {
@@ -912,11 +1082,53 @@ void AssetBrowser::draw_settings(const AssetDb::Entry& e) {
         if (ImGui::IsItemHovered()) {
           ux::SetTooltip("Convex pieces cuts a concave mesh into this many hulls, for a dynamic prop.");
         }
+        int tex = static_cast<int>(s.num("max_texture", render3d::kDefaultMaxTextureEdge));
+        ImGui::SetNextItemWidth(140);
+        if (ImGui::SliderInt("Texture size", &tex, 256, render3d::kHardMaxTextureEdge)) {
+          s.set("max_texture", Value::number(tex));
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+        if (ImGui::IsItemHovered()) {
+          ux::SetTooltip("Longest edge kept for this model's textures. Larger images are scaled down on import.");
+        }
         const int part_n = static_cast<int>(e.meta.info.num("parts", 0));
         if (part_n > 1) ImGui::TextDisabled("%d parts — right-click to split them apart", part_n);
       }
       ImGui::SameLine();
       flag("import_animations", "Animations");
+      flag("animation_only", "Animation only");
+      if (ImGui::IsItemHovered()) {
+        ux::SetTooltip("Import the skeleton and clips, and drop the mesh. A Mixamo\n"
+                       "FBX exported Without Skin is detected on its own.");
+      }
+      flag("loop", "Loop");
+      ImGui::SameLine();
+      flag("play_on_start", "Play on start");
+      flag("root_motion", "Root motion");
+      ImGui::SameLine();
+      flag("in_place", "In place");
+      if (ImGui::IsItemHovered()) {
+        ux::SetTooltip("Keep the hips planted when this clip is dropped on a character.\n"
+                       "Root motion lets the clip move the object instead.");
+      }
+      number("clip_start", "From (s)", 0.0f, 600.0f, "%.2f");
+      number("clip_end", "To (s)", 0.0f, 600.0f, "%.2f");
+      if (ImGui::IsItemHovered()) ux::SetTooltip("Frame range in seconds. To = 0 keeps the whole clip.");
+      {
+        const std::string rig = s.str("retarget_rig", "auto");
+        int ri = rig == "mixamo" ? 1 : rig == "unreal" ? 2 : rig == "rigify" ? 3 : 0;
+        const char* rigs[] = {"Auto", "Mixamo", "Unreal mannequin", "Blender Rigify"};
+        ImGui::SetNextItemWidth(160);
+        if (ImGui::Combo("Retarget source", &ri, rigs, 4)) {
+          const char* keys[] = {"auto", "mixamo", "unreal", "rigify"};
+          s.set("retarget_rig", Value::string(keys[ri]));
+          changed = true;
+        }
+        if (ImGui::IsItemHovered()) {
+          ux::SetTooltip("Which rig this clip was authored on. Auto reads Mixamo,\n"
+                         "Unreal and Rigify bone names. Fix a miss in the character's Avatar map.");
+        }
+      }
       if (e.meta.info.num("hitboxes", 0) > 0) {
         ImGui::TextDisabled("%d hitboxes (set \"%s\"): View > Hitboxes shows them",
                             static_cast<int>(e.meta.info.num("hitboxes", 0)), e.meta.info.str("hitbox_set").c_str());
@@ -979,7 +1191,11 @@ void AssetBrowser::draw_details() {
     if (entry.import_ok) {
       ImGui::Text("%s", assetdb::info_summary(entry.meta.info, entry.meta.kind).c_str());
     } else {
-      theme::StatusError(entry.import_error.c_str());
+      theme::StatusError(entry.import_error.empty() ? "Import failed." : entry.import_error.c_str());
+      if (ImGui::Button("Retry import")) reimport(entry.rel);
+      if (ImGui::IsItemHovered()) {
+        ux::SetTooltip("Try this file again. A failed import stays failed until you press this.");
+      }
     }
     ImGui::SetNextItemWidth(-90);
     ImGui::InputText("##rename", rename_, sizeof(rename_));

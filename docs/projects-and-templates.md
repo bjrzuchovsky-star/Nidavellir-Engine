@@ -10,14 +10,14 @@ Source: `src/editor/projects/ProjectStore.*`, `src/editor/ProjectInfo.h`, `src/e
 ```
 
 - **`dimension`** is `"2d"` or `"3d"`. 2D claims open the 2D editor and 3D claims open the 3D editor. A file with no `dimension` loads as 2D.
-- **`vr`** turns a 3D project into a VR project. The legacy value `"dimension": "vr"` loads as 3D with VR on. You can flip VR in the create flow or in **Claim Settings**.
+- **`vr`** turns a 3D project into a VR project. The legacy value `"dimension": "vr"` loads as 3D with VR on. You can flip VR in the create flow or in **Realm Settings**.
 - **`plugins`** is the list of plugins enabled for this project (see below).
 
 Each project is a folder under `projects_root` (default `./TombStoneProjects/`). It holds `project.json`, `scene.json`, `assets/`, `scripts/` and optionally `ui/`.
 
 ## Claim templates
 
-**+ New Claim...** opens the template picker (the **Break Ground** dialog). You can filter by All, 2D, 3D, VR or Mine, or search by name, tag or plugin. Cards are grouped:
+**+ New Realm...** opens the template picker (the **Break Ground** dialog). You can filter by All, 2D, 3D, VR or Mine, or search by name, tag or plugin. Cards are grouped:
 
 1. **Empty**: clean starting points with no sample content and no optional plugins.
 2. **Samples**: playable sample claims to learn from.
@@ -75,7 +75,7 @@ Templates are searched in this order:
 
 - `ts_admin --bake-templates <dir>` regenerates the baked `project/` folders from the generators.
 - `ts_admin --bake-thumbnails <dir>` re-renders every `thumbnail.png` with the engine. 2D thumbnails use the runtime draw list with the claim's plugins loaded. 3D thumbnails use the GL renderer and need a display or Xvfb.
-- `ts_admin --templates-shot <png>` saves a screenshot of the New Claim dialog. It uses a temporary projects root and never writes `imgui.ini`.
+- `ts_admin --templates-shot <png>` saves a screenshot of the New Realm dialog. It uses a temporary projects root and never writes `imgui.ini`.
 - `ts_admin --smoke-templates` checks the groups, the thumbnails and that the empty templates have no optional plugins (only the physics / movement plugins their player needs). It then creates a claim from **every** template (both dimensions of `truly-blank`) in temp folders, opens it in its editor and runs Play headless for a few frames. Checks include:
   - nothing gets seeded;
   - the top-down player walks;

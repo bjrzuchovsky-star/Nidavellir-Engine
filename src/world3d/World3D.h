@@ -477,6 +477,8 @@ class World3D final : public runtime::ScriptWorld {
   void vr_drive_held(float dt);
   // Physics glue (World3D_Physics.cpp).
   void phys_build();
+  // Drop a rider whose feet are hovering onto the floor under them (play start).
+  void settle_rider();
   bool phys_wants_body(const Entity3D& e) const;
   void phys_add(const Entity3D& e);
   void phys_remove(std::uint64_t id);

@@ -141,7 +141,7 @@ Each hook call has a budget of 20000 steps and a nesting depth limit of 64 (`kMa
 
 Open the editor (`src/editor/scripting/BrandBook.*`) in any of these ways:
 
-- **File > Brand Book... (visual scripts)** in 2D, or **Claim > Brand Book... (visual scripts)** in 3D
+- **File > Brand Book... (visual scripts)** in 2D, or **Realm > Brand Book... (visual scripts)** in 3D
 - by double-clicking a `.graph.json`
 - standalone: `ts_admin --brand-book <project> [graph]`
 
@@ -245,6 +245,8 @@ Both languages sit on one native API (`TsScriptApi`, ABI 4). Names match. C++ us
 
 Grounding in the sample is `Position.Y <= 0.01` plus `Move`. `Move` keeps the capsule on box colliders, on a terrain heightfield and on mesh / fitted convex colliders, including when the physics plugin is off. The sample does not call the Rider plugin.
 
+Facing is the body's rotation. `Transform.Forward` is **-Z**. The sample builds its move from `Transform.Forward` and `Transform.Right`, so it travels the way it looks. The rider does the same: it turns the body so -Z matches the velocity. A glTF whose nose is +Z is corrected on import ([model import](model-import.md#forward-and-up)); set **Forward axis** on the model if a file uses another axis.
+
 ### Not yet (parity with Unity / Unreal)
 
 Designed on the ABI 4 `query` slot, not finished in this patch:
@@ -253,7 +255,7 @@ Designed on the ABI 4 `query` slot, not finished in this patch:
 - `GetComponent` / `AddComponent` / `RemoveComponent` for collider, rigidbody, renderer, audio, camera and animator, and for other scripts in the same language. `Instantiate` clones a named entity or a `.prefab.json`. `Destroy(id, seconds)` waits, then removes it. `FindWithTag` / `SetTag` use the optional scene `tag` field. Layers and parenting from script are not yet.
 - Public fields and `[SerializeField]` show in the Inspector, with `[Header]`, `[Range]` and `[Tooltip]` (C++ puts the same tags in comments above the field). Vectors, colours, enums and entity references are included. Custom property drawers are not.
 - `Physics.Raycast` and `Overlap` (C#) and `Raycast` / `Overlap` (C++) hit solid colliders without a physics plugin. Sweep casts are not yet.
-- Coroutines: C# `StartCoroutine` / `WaitForSeconds`, C++ `After(seconds, fn)`, and a small `ScriptEvent` / `Event`. `PlayAnimation(clip)`, `SetFov` and `Sound` are wired. Loading another scene, the full `anim.*` parameter graph, in-game UI builders, save helpers and networking hooks are not yet.
+- Coroutines: C# `StartCoroutine` / `WaitForSeconds`, C++ `After(seconds, fn)`, and a small `ScriptEvent` / `Event`. `PlayAnimation(clip)`, `PlayAnimation(clip, fade, hold)`, `CrossfadeAnimation`, `SetAnimFloat` / `SetAnimBool` / `SetAnimTrigger`, `AnimFloat`, `AnimState(layer)` and `StopAnimation` drive the 3D animator (and, for play / state / frame, a 2D sprite clip). `OnAnimEvent(name, time)` receives clip events. `SetFov` and `Sound` are wired. Loading another scene, in-game UI builders, save helpers and networking hooks are not yet.
 - Attaching the Visual Studio or VS Code debugger to a C# assembly or a C++ script DLL during Play.
 - Editor scripting (custom Inspector / menu tools).
 

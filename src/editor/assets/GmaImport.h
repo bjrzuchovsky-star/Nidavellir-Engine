@@ -6,11 +6,11 @@
 // open() reads the archive (LZMA-compressed downloads too), checks every
 // file's CRC32 and lists the contents by category (models / materials /
 // sound / other) for the picker. extract() writes the selected files into
-// the claim under assets/Models/<Addon>/ keeping their Source-relative
+// the realm under assets/Models/<Addon>/ keeping their Source-relative
 // paths (models/..., materials/..., sound/...), so the model importer
 // finds materials next to the models (render3d/import/SourceMaterials.h).
 // A selected .mdl brings its .vvd / .vtx / .phy / .ani siblings. Existing
-// files are never overwritten. Every written file is tagged in the claim's
+// files are never overwritten. Every written file is tagged in the realm's
 // provenance ledger (origin "gma:<addon>", author) - see
 // export/Provenance.h. The next Asset Browser scan imports the models,
 // .vtf textures and sounds.

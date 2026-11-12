@@ -1,8 +1,11 @@
 #include "plugins/rider3d/Rider3D.h"
 #include "plugins/split/Split.h"
 #include "core/Engine.h"
+#include "platform/SteamService.h"
+#include "platform/ClanDirectory.h"
 #include "profiler/Profiler.h"
 #include "editor/ux/FriendlyError.h"
+#include "editor/ux/ShotOpts.h"
 #include "editor/ux/Walkthrough.h"
 #include "editor/audio/EditorAudio.h"
 #include "editor/tools/AutoTilePanel.h"
@@ -29,6 +32,7 @@
 #include "Smoke3D.h"
 #include "SmokeAssets.h"
 #include "SmokeBounds.h"
+#include "SmokeBigModel.h"
 #include "SmokeMeta.h"
 #include "SmokeModels.h"
 #include "SmokeMeshParts.h"
@@ -72,12 +76,14 @@
 #include "SmokeTerrain.h"
 #include "VaultCli.h"
 #include "SmokeUpdate.h"
+#include "SmokeClan.h"
 #include "SmokeTeam.h"
 #include "SmokeMouseLook.h"
 #include "SmokePluginSplit.h"
 #include "SmokeUx.h"
 #include "editor/vault/VaultPanel.h"
 int run_terrain_shot(const std::string& png);
+int run_showcase_shot(const std::string& scene, const std::string& png);
 #include "store/TradingPost.h"
 
 #include <imgui.h>
@@ -106,6 +112,22 @@ int run_terrain_shot(const std::string& png);
 
 namespace {
 
+// --shot-size replaces each capture's historical window. Only then do we
+// ask for a 1:1 framebuffer, so an unset flag leaves Mac retina shots as
+// they were.
+void shot_window_px(int fallback_w, int fallback_h, int* w, int* h) {
+  ts::tombstone::editor::shot::resolve(fallback_w, fallback_h, w, h);
+  if (ts::tombstone::editor::shot::size_set()) {
+#ifdef GLFW_COCOA_RETINA_FRAMEBUFFER
+    glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_FALSE);
+#endif
+  }
+}
+
+}  // namespace
+
+namespace {
+
 using namespace ts::tombstone;
 using editor::AppFlow;
 using editor::AppState;
@@ -114,6 +136,13 @@ using editor::SettingsStore;
 
 void apply_theme(const Settings& settings) {
   editor::theme::Apply(settings.theme);
+  // A panel dragged out of the main window is its own OS window. Those
+  // windows cannot be translucent, and rounded corners leave a halo.
+  if (ImGui::GetCurrentContext() && (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable)) {
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowRounding = 0.0f;
+    style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+  }
 }
 
 // Tiny uncompressed 32-bit TGA writer so --smoke can make test images
@@ -150,7 +179,7 @@ bool write_test_tga(const std::filesystem::path& path, int w, int h,
 int run_console_smoke() {
   namespace fs = std::filesystem;
 
-  std::cout << "TombStone Admin (--smoke console path)\n";
+  std::cout << "Nidavellir Admin (--smoke console path)\n";
 
   const fs::path smoke_root = "./TombStoneProjects";
   const fs::path smoke_config = "./TombStoneConfig";
@@ -1259,26 +1288,26 @@ int run_console_smoke() {
   // (see Smoke3D.cpp / Smoke3DEditor.cpp).
   // AI toolkit + the ts.ai plugin (see SmokeAI.cpp / SmokeAIWorld.cpp).
   if (run_ai_smoke() != 0) {
-    std::cerr << "TombStone Admin smoke FAILED (AI)\n";
+    std::cerr << "Nidavellir Admin smoke FAILED (AI)\n";
     return 1;
   }
   // Story plugins: quests, dialogue, saves (see SmokeStory.cpp).
   if (run_story_smoke() != 0) {
-    std::cerr << "TombStone Admin smoke FAILED (story)\n";
+    std::cerr << "Nidavellir Admin smoke FAILED (story)\n";
     return 1;
   }
   // Profiler + debug tools (see SmokeProfiler.cpp).
   if (run_profiler_smoke() != 0) {
-    std::cerr << "TombStone Admin smoke FAILED (profiler)\n";
+    std::cerr << "Nidavellir Admin smoke FAILED (profiler)\n";
     return 1;
   }
   // Persistent world (see SmokeMmo.cpp).
   if (run_mmo_smoke() != 0) {
-    std::cerr << "TombStone Admin smoke FAILED (mmo)\n";
+    std::cerr << "Nidavellir Admin smoke FAILED (mmo)\n";
     return 1;
   }
   if (run_anim3d_smoke() != 0) {
-    std::cerr << "TombStone Admin smoke FAILED (3D animation)\n";
+    std::cerr << "Nidavellir Admin smoke FAILED (3D animation)\n";
     return 1;
   }
   if (run_3d_smoke() != 0) {
@@ -1330,6 +1359,10 @@ int run_console_smoke() {
   if (run_mesh_parts_smoke() != 0) {
     return 1;
   }
+  // Large procedural model: no crash, bounded memory, UI thread stays free.
+  if (run_big_model_smoke() != 0) {
+    return 1;
+  }
   // Source engine formats: .gma / .vtf / .vmt, search order, rights (see SmokeGmod.cpp).
   if (ts::tombstone::run_gmod_smoke() != 0) {
     return 1;
@@ -1370,6 +1403,12 @@ int run_console_smoke() {
   if (ts::tombstone::run_update_smoke() != 0) {
     return 1;
   }
+  if (ts::tombstone::run_clan_smoke() != 0) {
+    return 1;
+  }
+  if (ts::tombstone::run_asset_sync_smoke() != 0) {
+    return 1;
+  }
   if (ts::tombstone::run_team_smoke() != 0) {
     return 1;
   }
@@ -1400,7 +1439,7 @@ int run_console_smoke() {
     return 1;
   }
 
-  std::cout << "TombStone Admin smoke complete\n";
+  std::cout << "Nidavellir Admin smoke complete\n";
   return flow.current_state() == AppState::Quit ? 0 : 1;
 }
 
@@ -1417,7 +1456,7 @@ int run_brand_book_app(const std::string& project, const std::string& graph) {
 #if defined(__APPLE__)
   glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
-  GLFWwindow* window = glfwCreateWindow(1440, 860, "TombStone Brand Book", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(1440, 860, "Nidavellir Brand Book", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -1465,7 +1504,7 @@ int run_brand_book_app(const std::string& project, const std::string& graph) {
 
 
 // A throwaway project for --tiles-shot demo: two terrains, a sprite sheet
-// and en / fr / ja strings with a few gaps.
+// and en / fr / ja strings, every key filled so the Strings panel is not red.
 std::string make_tiles_demo_project() {
   namespace fs = std::filesystem;
   const fs::path dir = fs::temp_directory_path() / "ts_tiles_demo";
@@ -1506,20 +1545,23 @@ std::string make_tiles_demo_project() {
     }
   }
   fs::create_directories(dir / "assets");
-  write_png_rgba((dir / "assets/rider.png").string(), W, H, px);
+  write_png_rgba((dir / "assets/wanderer.png").string(), W, H, px);
   auto put_file = [&](const char* rel, const std::string& text) {
     std::ofstream(dir / rel, std::ios::binary) << text;
   };
   put_file("strings/en.json",
            "{\"language.name\": \"English\", \"menu.start\": \"Ride out\", \"menu.quit\": \"Leave town\","
-           " \"hud.gold\": \"Gold: {0}\", \"ui.pause.resume\": \"Resume\", \"npc.sheriff.greet\": \"Howdy, {0}.\"}");
+           " \"hud.gold\": \"Gold: {0}\", \"ui.pause.resume\": \"Resume\","
+           " \"npc.sheriff.greet\": \"Howdy, {0}.\", \"npc.deputy.greet\": \"Evening, {0}.\"}");
   put_file("strings/strings.csv",
            "key,fr,ja\n"
            "language.name,Fran\xC3\xA7" "ais,\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E\n"
            "menu.start,En selle,\xE5\x87\xBA\xE7\x99\xBA\n"
-           "menu.quit,Quitter la ville,\n"
+           "menu.quit,Quitter la ville,\xE7\x94\xBA\xE3\x82\x92\xE5\x87\xBA\xE3\x82\x8B\n"
            "hud.gold,Or : {0},\xE9\x87\x91: {0}\n"
-           "ui.pause.resume,Reprendre,\xE5\x86\x8D\xE9\x96\x8B\n");
+           "ui.pause.resume,Reprendre,\xE5\x86\x8D\xE9\x96\x8B\n"
+           "npc.sheriff.greet,Salut, {0}.,\xE3\x82\x88\xE3\x81\x86\xE3\x81\x93\xE3\x81\x9D, {0}\n"
+           "npc.deputy.greet,Bonsoir, {0}.,\xE3\x81\x93\xE3\x82\x93\xE3\x81\xB0\xE3\x82\x93\xE3\x81\xAF, {0}\n");
   put_file("scripts/sheriff.lua", "function on_start() toast(tr('npc.sheriff.greet', 'stranger')) "
                                   "log(tr('npc.deputy.greet')) end\n");
   (void)a;
@@ -1538,8 +1580,9 @@ int run_tiles_shot(std::string project, const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-  const int W = 1600, H = 940;
-  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Tiles", nullptr, nullptr);
+  int W = 0, H = 0;
+  shot_window_px(1600, 940, &W, &H);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Tiles", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -1567,8 +1610,8 @@ int run_tiles_shot(std::string project, const std::string& png) {
     tiles.paint_demo();
   }
   editor::SpriteSlicerPanel& slicer = editor::SpriteSlicerPanel::get();
-  slicer.open(project, std::filesystem::exists(std::filesystem::path(project) / "assets/rider.png")
-                           ? "assets/rider.png"
+  slicer.open(project, std::filesystem::exists(std::filesystem::path(project) / "assets/wanderer.png")
+                           ? "assets/wanderer.png"
                            : "");
   slicer.set_auto_detect(true);
   if (slicer.clips().size() >= 2) {
@@ -1648,7 +1691,9 @@ int run_gizmo_shot(const std::string& which, const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(1600, 940, "TombStone Gizmos", nullptr, nullptr);
+  int W = 0, H = 0;
+  shot_window_px(1600, 940, &W, &H);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Gizmos", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -1795,7 +1840,9 @@ int run_camera_shot(const std::string& which, const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(1600, 940, "TombStone Cameras", nullptr, nullptr);
+  int W = 0, H = 0;
+  shot_window_px(1600, 940, &W, &H);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Cameras", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -1929,7 +1976,9 @@ int run_ux_shot(const std::string& which, const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(1600, 940, "TombStone Field Guide", nullptr, nullptr);
+  int W = 0, H = 0;
+  shot_window_px(1600, 940, &W, &H);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Field Guide", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2036,7 +2085,9 @@ int run_scripts_shot(const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(1600, 1000, "TombStone Scripts", nullptr, nullptr);
+  int W = 0, H = 0;
+  shot_window_px(1600, 1000, &W, &H);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Scripts", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2147,8 +2198,9 @@ int run_templates_shot(const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  const int W = 1280, H = 1000;
-  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone New Claim", nullptr, nullptr);
+  int W = 0, H = 0;
+  shot_window_px(1280, 1000, &W, &H);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Engine | New Realm", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2245,8 +2297,9 @@ int run_freight_shot(std::string project, const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  const int W = 720, H = 940;
-  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Freight Office", nullptr, nullptr);
+  int W = 0, H = 0;
+  shot_window_px(720, 940, &W, &H);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Freight Office", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2324,8 +2377,9 @@ int run_team_shot(const std::string& png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  const int W = 1280, H = 800;
-  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Team Claims", nullptr, nullptr);
+  int W = 0, H = 0;
+  shot_window_px(1280, 800, &W, &H);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Engine | Clan", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2473,8 +2527,9 @@ int run_vault_shot(const char* png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  const int W = 1280, H = 720;
-  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Vault", nullptr, nullptr);
+  int W = 0, H = 0;
+  shot_window_px(1280, 720, &W, &H);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Vault", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2575,8 +2630,9 @@ int run_vault_pm_shot(const char* png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  const int W = 1280, H = 760;
-  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Vault", nullptr, nullptr);
+  int W = 0, H = 0;
+  shot_window_px(1280, 760, &W, &H);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Vault", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2699,8 +2755,9 @@ int run_trading_post_shot(const char* png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  const int W = 1280, H = 760;
-  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Trading Post", nullptr, nullptr);
+  int W = 0, H = 0;
+  shot_window_px(1280, 760, &W, &H);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Market", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2780,6 +2837,26 @@ int run_trading_post_shot(const char* png) {
 int run_assets_shot(const char* png) {
   namespace fs = std::filesystem;
   const std::string project = make_sorted_demo_claim((fs::temp_directory_path() / "ts_assets_shot").string());
+  // A folder of real images even if the sorted import missed one, so the
+  // grid is tiles rather than the empty-state prompt.
+  {
+    const fs::path tex = fs::u8path(project) / "assets" / "Textures";
+    std::error_code ec;
+    fs::create_directories(tex, ec);
+    const unsigned char colours[][3] = {{176, 120, 64}, {120, 40, 30}, {80, 60, 140},
+                                        {200, 180, 150}, {90, 140, 70},  {40, 90, 160},
+                                        {210, 160, 40}, {70, 70, 80}};
+    for (int i = 0; i < 8; ++i) {
+      std::vector<unsigned char> px(64 * 64 * 4);
+      for (int p = 0; p < 64 * 64; ++p) {
+        px[p * 4 + 0] = colours[i][0];
+        px[p * 4 + 1] = colours[i][1];
+        px[p * 4 + 2] = colours[i][2];
+        px[p * 4 + 3] = 255;
+      }
+      write_png_rgba((tex / ("swatch_" + std::to_string(i) + ".png")).string(), 64, 64, px);
+    }
+  }
   if (!glfwInit()) {
     std::cerr << "glfwInit failed\n";
     return 1;
@@ -2788,8 +2865,9 @@ int run_assets_shot(const char* png) {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-  const int W = 1280, H = 720;
-  GLFWwindow* window = glfwCreateWindow(W, H, "TombStone Asset Browser", nullptr, nullptr);
+  int W = 0, H = 0;
+  shot_window_px(1280, 720, &W, &H);
+  GLFWwindow* window = glfwCreateWindow(W, H, "Nidavellir Asset Browser", nullptr, nullptr);
   if (!window) {
     std::cerr << "glfwCreateWindow failed\n";
     glfwTerminate();
@@ -2813,23 +2891,33 @@ int run_assets_shot(const char* png) {
     editor::AssetBrowserHost host;
     host.note = [&](const std::string& n) { notes.push_back(n); };
     browser.open(project, host);
-    browser.select("assets/Models/lantern/lantern.gltf");
+    browser.rescan();
+    browser.show_folder("assets/Textures");
+    browser.select("assets/Textures/swatch_0.png");
     for (int frame = 0; frame < 30 && !glfwWindowShouldClose(window); ++frame) {
       glfwPollEvents();
       glfwGetFramebufferSize(window, &fw, &fh);
       ImGui_ImplOpenGL3_NewFrame();
       ImGui_ImplGlfw_NewFrame();
       ImGui::NewFrame();
+      std::vector<std::string> shown;
+      for (const std::string& n : notes) {
+        if (!editor::shot::hide_log_line(n)) shown.push_back(n);
+      }
+      const float bar = shown.empty() ? 0.0f : 70.0f;
       ImGui::SetNextWindowPos(ImVec2(0, 0));
-      ImGui::SetNextWindowSize(ImVec2(static_cast<float>(fw), static_cast<float>(fh) - 70));
+      ImGui::SetNextWindowSize(ImVec2(static_cast<float>(fw), static_cast<float>(fh) - bar));
       ImGui::Begin("Asset Browser", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
       browser.draw();
       ImGui::End();
-      ImGui::SetNextWindowPos(ImVec2(0, static_cast<float>(fh) - 70));
-      ImGui::SetNextWindowSize(ImVec2(static_cast<float>(fw), 70));
-      ImGui::Begin("Telegraph", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
-      for (std::size_t k = notes.size() > 2 ? notes.size() - 2 : 0; k < notes.size(); ++k) ImGui::TextUnformatted(notes[k].c_str());
-      ImGui::End();
+      if (!shown.empty()) {
+        ImGui::SetNextWindowPos(ImVec2(0, static_cast<float>(fh) - bar));
+        ImGui::SetNextWindowSize(ImVec2(static_cast<float>(fw), bar));
+        ImGui::Begin("Telegraph", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+        const std::size_t begin = shown.size() > 2 ? shown.size() - 2 : 0;
+        for (std::size_t k = begin; k < shown.size(); ++k) ImGui::TextUnformatted(shown[k].c_str());
+        ImGui::End();
+      }
       ImGui::Render();
       glViewport(0, 0, fw, fh);
       const ImVec4 clear = editor::theme::Charcoal();
@@ -2867,6 +2955,13 @@ int run_assets_shot(const char* png) {
 }
 
 int run_imgui_app() {
+  struct SteamGuard {
+    SteamGuard() { ok = ts::tombstone::steam::SteamService::instance().init(); }
+    ~SteamGuard() { ts::tombstone::steam::SteamService::instance().shutdown(); }
+    bool ok = true;
+  } steam_guard;
+  if (!steam_guard.ok) return 0;
+
   if (!glfwInit()) {
     std::cerr << "glfwInit failed\n";
     return 1;
@@ -2938,7 +3033,11 @@ int run_imgui_app() {
       glfwSetWindowShouldClose(window, GLFW_FALSE);
     }
     profiler::Profiler::get().begin_frame();
+    // Secondary viewports share this context. A previous frame leaves GL
+    // current on the last platform window; the scene FBO belongs on the main one.
+    glfwMakeContextCurrent(window);
     glfwPollEvents();
+    ts::tombstone::steam::SteamService::instance().run_callbacks();
 
     editor::StringsPanel::apply_pending_fonts();  // non-Latin glyphs for the Strings panel
     ImGui_ImplOpenGL3_NewFrame();
@@ -2958,11 +3057,15 @@ int run_imgui_app() {
       last_theme = flow.settings().theme;
     }
 
-    // Window title follows the open project ("TombStone Admin | My Claim").
+    // Window title follows the open realm. A Steam build adds the persona.
     std::string title = editor::brand::kWindowTitle;
     if (flow.current_state() == AppState::Editor2D && flow.active_project()) {
       title = std::string(editor::brand::kWindowTitlePrefix) +
               flow.active_project()->name;
+    }
+    if (const char* who = ts::tombstone::steam::SteamService::instance().persona(); who && *who) {
+      title += " | ";
+      title += who;
     }
     if (title != last_title) {
       glfwSetWindowTitle(window, title.c_str());
@@ -2981,6 +3084,13 @@ int run_imgui_app() {
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+      // Same GL profile as the main window, or the shared context fails to create.
+      glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+      glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+      glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#if defined(__APPLE__)
+      glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+#endif
       GLFWwindow* backup_current_context = glfwGetCurrentContext();
       ImGui::UpdatePlatformWindows();
       ImGui::RenderPlatformWindowsDefault();
@@ -3019,6 +3129,35 @@ ts::tombstone::plugins::ProviderHold& smoke_provider_hold() {
 }
 
 int main(int argc, char** argv) {
+  // Global capture flags, stripped so they can sit anywhere on the command
+  // line without being read as a shot's project path or output file.
+  {
+    namespace shot = ts::tombstone::editor::shot;
+    int kept = 1;
+    for (int i = 1; i < argc; ++i) {
+      if (std::strcmp(argv[i], "--shot-clean") == 0) {
+        shot::g_clean = true;
+        continue;
+      }
+      if (std::strcmp(argv[i], "--shot-size") == 0) {
+        if (i + 1 >= argc || !shot::parse_size(argv[i + 1], &shot::g_width, &shot::g_height)) {
+          std::cerr << "--shot-size wants WxH, for example 1920x1080 (64 to 8192 on each side)\n";
+          return 1;
+        }
+        ++i;
+        continue;
+      }
+      argv[kept++] = argv[i];
+    }
+    argc = kept;
+  }
+
+  for (int i = 1; i < argc; ++i) {
+    if (std::strcmp(argv[i], "+connect_lobby") == 0 && i + 1 < argc) {
+      ts::tombstone::steam::note_connect_lobby(argv[++i]);
+    }
+  }
+
   bool smoke = false;
   // The 3D halves of the physics / movement plugins (2D ones come with the
   // built-in catalog). Offered only; claims switch them on.
@@ -3050,7 +3189,7 @@ int main(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     if (std::strcmp(argv[i], "--version") == 0) {
       // The repo's VERSION file, baked in at configure time.
-      std::printf("TombStone Engine %s\n", TS_ENGINE_VERSION);
+      std::printf("%s %s\n", ts::tombstone::brand::kProduct, TS_ENGINE_VERSION);
       return 0;
     }
     if (std::strcmp(argv[i], "--export") == 0) {
@@ -3092,6 +3231,12 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-vault") == 0) {
       return ts::tombstone::run_vault_smoke();
     }
+    if (std::strcmp(argv[i], "--smoke-clan") == 0) {
+      return ts::tombstone::run_clan_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-asset-sync") == 0) {
+      return ts::tombstone::run_asset_sync_smoke();
+    }
     if (std::strcmp(argv[i], "--smoke-team") == 0) {
       // Live Team Claims: server + headless editors, convergence, locks.
       return ts::tombstone::run_team_smoke();
@@ -3130,6 +3275,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--terrain-shot") == 0 && i + 1 < argc) {
       return run_terrain_shot(argv[i + 1]);
+    }
+    if (std::strcmp(argv[i], "--showcase-shot") == 0 && i + 2 < argc) {
+      return run_showcase_shot(argv[i + 1], argv[i + 2]);
     }
     if (std::strcmp(argv[i], "--smoke-tiles") == 0) {
       return run_tiles_smoke();
@@ -3208,6 +3356,9 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-mesh-parts") == 0) {
       // Split multi-part models and mesh-fitted colliders.
       return run_mesh_parts_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-bigmodel") == 0) {
+      return run_big_model_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-assets") == 0) {
       // Just the asset pipeline checks (database, importers, browser ops).

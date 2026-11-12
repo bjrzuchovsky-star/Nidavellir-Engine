@@ -35,6 +35,7 @@ add_library(ts_editor
   assets/AssetImport.cpp
   assets/ImportSort.cpp
   assets/AssetBrowser.cpp
+  assets/ImportJob.cpp
   assets/ModelSplit.cpp
   assets/GmaImport.cpp
   screens/Editor2DScreen_Assets.cpp
@@ -77,6 +78,7 @@ add_library(ts_editor
   editor3d/Editor3DScreen_Scripts.cpp
   editor3d/Editor3DScreen_VR.cpp
   editor3d/Editor3DScreen_Anim.cpp
+  editor3d/Editor3DScreen_Timeline.cpp
   editor3d/Editor3DScreen_Tools.cpp
   editor3d/Editor3DScreen_Camera.cpp
   editor3d/Editor3DScreen_Attach.cpp
@@ -157,6 +159,7 @@ target_link_libraries(ts_editor
     ts_export
     ts_vault_lib
     ts_team
+    ts_platform
 )
 
 target_compile_features(ts_editor PUBLIC cxx_std_20)

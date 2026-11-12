@@ -1,5 +1,6 @@
 #pragma once
 #include <map>
+#include <optional>
 #include "debugtools/DebugTools.h"
 #include "editor/plugins/ProfilerPanels.h"
 
@@ -23,7 +24,7 @@
 // hide, align, drop to ground, Alt+drag copies, context menus.
 // Every edit is one undo step (Ctrl+Z / Ctrl+Y) and autosaves scene.json
 // (v9). Play (F5) rides the scene in a World3D copy; Stop restores it.
-// VR claims ("dimension": "vr", Editor3DScreen_VR.cpp): Play runs the
+// VR realms ("dimension": "vr", Editor3DScreen_VR.cpp): Play runs the
 // scene in VR mode through the desktop simulator, "Preview in headset"
 // through OpenXR (falls back to the simulator), with a Headset Mirror
 // window showing both eyes; inspector has the VR Rig / Grabbable
@@ -45,6 +46,7 @@
 #include "editor/screens/IScreen.h"
 #include "editor/ui/PlayUi.h"
 #include "render3d/Renderer3D.h"
+#include "render3d/Skeleton.h"
 #include "render3d/Attach3D.h"
 #include "render3d/Scene3D.h"
 #include "render3d/SceneView.h"
@@ -148,6 +150,11 @@ class Editor3DScreen final : public IScreen {
   bool fit_collider_to_mesh(std::uint64_t id, const std::string& fit);
   bool show_hitboxes() const { return show_hitboxes_; }
   void set_show_hitboxes(bool on) { show_hitboxes_ = on; }
+  // View > Bones. The overlay follows the animation preview or, in Play, the animator.
+  bool show_bones() const { return show_bones_; }
+  void set_show_bones(bool on) { show_bones_ = on; }
+  int bone_joint() const { return bone_joint_; }
+  void set_bone_joint(int joint) { bone_joint_ = joint; }
   std::uint64_t drop_asset(const std::string& rel, const render3d::Vec3& pos,
                            std::uint64_t target = 0);
   // One asset per mesh node, with its own .meta. Undo removes the new files.
@@ -180,6 +187,8 @@ class Editor3DScreen final : public IScreen {
 
   // ---- Viewport (pixels in a vw x vh view) ---------------------------------
   render3d::Camera3D editor_camera() const;
+  // Orbit camera for headless shots. Yaw and pitch are degrees.
+  void look_at(const render3d::Vec3& target, float yaw, float pitch, float distance);
   // Screen position and size of the view drawn last frame.
   void viewport_screen_rect(float* x, float* y, float* w, float* h) const {
     *x = viewport_x_;
@@ -400,12 +409,47 @@ class Editor3DScreen final : public IScreen {
   struct AnimPreview {
     bool open = false;
     bool playing = true;
+    bool loop = true;
+    bool in_place = false;
+    bool root_motion = false;
     float speed = 1.0f;
     float time = 0.0f;
     std::string clip;
   };
   AnimPreview& anim_preview() { return anim_preview_; }
   void anim_preview_tick(float dt);
+  // In-engine clip authoring (Editor3DScreen_Timeline.cpp). Edits live in
+  // memory until timeline_save writes <model>.anim3d.json. The preview
+  // poses an authored clip of the same name over the imported one.
+  bool timeline_open() const { return timeline_.open; }
+  void set_timeline_open(bool on) { timeline_.open = on; }
+  bool timeline_bind(std::uint64_t entity);
+  bool timeline_new_clip(const std::string& name, const std::string& copy_from = {});
+  bool timeline_key(const std::string& clip, int joint, float time, const render3d::JointPose& pose);
+  bool timeline_key_path(const std::string& clip, int joint, float time, render3d::ChannelPath path,
+                         const float* value);
+  bool timeline_erase_key(const std::string& clip, int joint, render3d::ChannelPath path, int index);
+  bool timeline_move_key(const std::string& clip, int joint, render3d::ChannelPath path, int index,
+                         float time);
+  bool timeline_set_interp(const std::string& clip, int joint, render3d::ChannelPath path,
+                           render3d::Interp interp);
+  bool timeline_save(std::string* error = nullptr);
+  bool timeline_add_event(const std::string& clip, float time, const std::string& name);
+  bool timeline_erase_event(const std::string& clip, int index);
+  // Load a rigged file (glTF, FBX, DAE, .blend) and retarget its clips onto
+  // the selected character. They stay in the timeline until Save.
+  bool timeline_apply_file(const std::string& path, std::string* error = nullptr);
+  // Drop an animation asset onto a character: retarget, save, and preview.
+  bool apply_animation_asset(std::uint64_t entity, const std::string& rel, std::string* error = nullptr);
+  // The skinned character a drop should play on: this entity, a child part,
+  // or a parent. 0 when the whole family is rigid.
+  std::uint64_t resolve_skinned_entity(std::uint64_t id) const;
+  // Drop a clip onto a model in the Asset Browser (the character's tile).
+  bool apply_clip_to_model(const std::string& clip_rel, const std::string& model_rel, std::string* error = nullptr);
+  // True when the drop replaced the live entity (the caller should re-copy it).
+  bool draw_animation_slot(scene3d::Entity3D& e, bool* touched, const char** commit);
+  const render3d::Clip* authored_clip(const std::string& name) const;
+  const std::vector<render3d::Clip>& timeline_clips() const { return timeline_.clips; }
   // The selected entity posed at the preview time (sets skin_palette);
   // false when nothing to preview.
   bool anim_preview_pose(scene3d::Entity3D* e);
@@ -507,6 +551,8 @@ class Editor3DScreen final : public IScreen {
   void draw_assets();
   void draw_environment();
   void draw_anim_preview();
+  void draw_anim_graph();
+  void draw_anim_timeline();
   void draw_telegraph();
   void handle_shortcuts();
   world3d::Input3D poll_play_input() const;
@@ -550,7 +596,7 @@ class Editor3DScreen final : public IScreen {
   void open_asset_browser();
   // Pull a Vault item dropped on the viewport, then place it there.
   void drop_vault_item(const std::string& item, const render3d::Vec3& pos);
-  // The Vault (asset library shared by every claim).
+  // The Vault (asset library shared by every realm).
   VaultPanel vault_panel_;
   bool show_vault_ = true;
   bool show_prefabs_ = true;
@@ -616,6 +662,41 @@ class Editor3DScreen final : public IScreen {
   std::vector<std::string> sounds_;  // project sounds (Audio Source picker)
   bool show_mixer_ = false;
   AnimPreview anim_preview_;
+  std::uint64_t last_anim_target_ = 0;
+  // Animator graph (View > Animator Graph). Node positions last for the
+  // session; the states themselves live on the Animator component.
+  struct AnimGraphUi {
+    bool open = false;
+    int layer = 0;
+    std::string selected;
+    std::string link_from;
+    int dragging = -1;
+    float grab_x = 0.0f;
+    float grab_y = 0.0f;
+    float pan_x = 48.0f;
+    float pan_y = 36.0f;
+    float zoom = 1.0f;
+    int selected_tr = -1;  // transition under the selection, or -1
+    std::map<std::string, std::pair<float, float>> pos;
+    std::optional<scene3d::Scene3D> before;
+  };
+  AnimGraphUi anim_graph_;
+  struct AnimTimeline {
+    bool open = false;
+    bool loaded = false;
+    bool dirty = false;
+    std::string model_rel;
+    std::vector<render3d::Clip> clips;
+    int path = 0;       // ChannelPath
+    int drag_key = -1;  // index being dragged on the dopesheet (-1 = none)
+    int drag_event = -1;
+    std::string apply_path;
+    std::string bone_filter;
+    char event_name[48] = "footstep";
+  };
+  AnimTimeline timeline_;
+  render3d::Clip* timeline_find(const std::string& name);
+  std::string entity_model_rel(const scene3d::Entity3D& e) const;
   // Sound while riding (Play or VR preview); null otherwise.
   std::unique_ptr<audio::SoundStage> sound_stage_;
   std::unique_ptr<audio::SoundStage3D> sound3d_;
@@ -640,6 +721,8 @@ class Editor3DScreen final : public IScreen {
   bool viewport_focused_ = false;
   bool show_colliders_ = true;
   bool show_hitboxes_ = false;  // View > Hitboxes (Source $hbox)
+  bool show_bones_ = true;      // View > Bones (skeleton overlay)
+  int bone_joint_ = -1;         // highlighted joint on the selection (-1 = none)
   bool show_physics_ = false;  // Physics Settings window
   void draw_physics_settings();
   float viewport_w_ = 1280.0f, viewport_h_ = 720.0f;
@@ -691,12 +774,11 @@ class Editor3DScreen final : public IScreen {
   std::unique_ptr<TeamSession> team_;
 };
 
-// Animator inspector body (Editor3DScreen_Anim.cpp): params, layers with
-// masks, states (clip / blend space), transitions, events, root motion.
-// `after(label)` follows each drag/text widget; discrete edits set
-// *commit. `model` (may be null) lists clip and bone names.
+// Compact Animator inspector. States and transitions are edited in the graph.
+// `after(label)` follows each drag/text widget; discrete edits set *commit.
 void draw_animator_fields(scene3d::Animator3D& a, const render3d::Model* model,
-                          const std::function<void(const char*)>& after, const char** commit);
+                          const std::function<void(const char*)>& after, const char** commit,
+                          const std::function<void()>& open_graph);
 
 }  // namespace editor
 }  // namespace tombstone

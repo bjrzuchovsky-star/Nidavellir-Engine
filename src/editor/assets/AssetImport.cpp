@@ -4,15 +4,18 @@
 #include "gfx/TextureCache.h"
 #include "render3d/Gltf.h"
 #include "render3d/HullFit.h"
+#include "render3d/ImportLimits.h"
 #include "render3d/MeshSplit.h"
 #include "render3d/ModelImport.h"
 #include "render3d/import/SourceFormats.h"
 
+#include <exception>
 #include <cctype>
 #include <cstdio>
 #include <iterator>
 #include <filesystem>
 #include <fstream>
+#include <new>
 #include <vector>
 
 namespace ts {
@@ -89,6 +92,11 @@ bool read_font_info(const std::string& abs_path, std::string* family, int* glyph
 
 bool import_asset(const std::string& abs_path, Kind kind, const Value& settings, Value* info,
                   std::string* error) {
+  if (render3d::import_was_cancelled()) {
+    if (error) *error = "Import cancelled.";
+    return false;
+  }
+  try {
   Value o = Value::object();
   switch (kind) {
     case Kind::Texture: {
@@ -118,6 +126,10 @@ bool import_asset(const std::string& abs_path, Kind kind, const Value& settings,
       }
       bool alpha = false;
       for (std::size_t i = 3; i < rgba.size(); i += 4) {
+        if ((i & 0xfffffu) == 3 && render3d::import_was_cancelled()) {
+          if (error) *error = abs_path + ": Import cancelled.";
+          return false;
+        }
         if (rgba[i] != 255) {
           alpha = true;
           break;
@@ -127,7 +139,22 @@ bool import_asset(const std::string& abs_path, Kind kind, const Value& settings,
       o.set("height", Value::number(h));
       o.set("alpha", Value::boolean(alpha));
       const double max_size = settings.num("max_size", 4096);
-      if (w > max_size || h > max_size) o.set("warning", Value::string("larger than max_size"));
+      if ((w > max_size || h > max_size) && max_size >= 16) {
+        render3d::Image im;
+        im.width = w;
+        im.height = h;
+        im.rgba = std::move(rgba);
+        const int edge = static_cast<int>(max_size);
+        if (render3d::downscale_image(&im, edge)) {
+          o.set("warning", Value::string("downscaled from " + std::to_string(w) + "x" + std::to_string(h) +
+                                         " to fit max_size " + std::to_string(edge)));
+          rgba = std::move(im.rgba);
+          w = im.width;
+          h = im.height;
+          o.set("width", Value::number(w));
+          o.set("height", Value::number(h));
+        }
+      }
       break;
     }
     case Kind::Model: {
@@ -150,6 +177,7 @@ bool import_asset(const std::string& abs_path, Kind kind, const Value& settings,
       o.set("materials", Value::number(static_cast<double>(m.materials.size())));
       o.set("textures", Value::number(static_cast<double>(m.textures)));
       o.set("skinned", Value::boolean(m.skinned()));
+      o.set("animation_only", Value::boolean(m.animation_only()));
       o.set("clips", Value::number(static_cast<double>(m.clips.size())));
       const float sz[3] = {m.bounds.max.x - m.bounds.min.x, m.bounds.max.y - m.bounds.min.y,
                            m.bounds.max.z - m.bounds.min.z};
@@ -172,9 +200,16 @@ bool import_asset(const std::string& abs_path, Kind kind, const Value& settings,
       o.set("parts", Value::number(render3d::model_part_count(m)));
       // Fitted hulls travel in the .meta, so a load (and the posse) does not
       // rebuild them. A later reimport changes the mesh fingerprint.
+      render3d::import_report(80, "Fitting collider");
       const render3d::FitParams fp = render3d::fit_params_from_settings(settings);
       if (render3d::ensure_fitted(&m, fp) && m.fitted.valid()) {
         o.set("fitted", render3d::fitted_to_json(m.fitted));
+      }
+      if (m.triangles() > render3d::kColliderFullTriangleLimit) {
+        const std::string note = "collider simplified to a convex hull (" + std::to_string(m.triangles()) +
+                                 " triangles is over " + std::to_string(render3d::kColliderFullTriangleLimit) + ")";
+        const std::string prev = o.str("warning");
+        o.set("warning", Value::string(prev.empty() ? note : prev + " " + note));
       }
       if (!m.hitboxes.empty()) {
         o.set("hitboxes", Value::number(static_cast<double>(m.hitboxes.size())));
@@ -211,7 +246,10 @@ bool import_asset(const std::string& abs_path, Kind kind, const Value& settings,
         o.set("missing_materials", Value::number(missing));
       }
       if (m.format == "source-mdl") o.set("origin", Value::string("source-engine"));
-      if (!warn.empty()) o.set("warning", Value::string(warn));
+      if (!warn.empty()) {
+        const std::string prev = o.str("warning");
+        o.set("warning", Value::string(prev.empty() ? warn : prev + " " + warn));
+      }
       break;
     }
     case Kind::Audio: {
@@ -235,6 +273,13 @@ bool import_asset(const std::string& abs_path, Kind kind, const Value& settings,
   }
   *info = std::move(o);
   return true;
+  } catch (const std::bad_alloc&) {
+    if (error) *error = abs_path + ": out of memory while importing";
+    return false;
+  } catch (const std::exception& ex) {
+    if (error) *error = std::string(abs_path) + ": import failed (" + ex.what() + ")";
+    return false;
+  }
 }
 
 std::string info_summary(const Value& info, Kind kind) {
@@ -246,6 +291,11 @@ std::string info_summary(const Value& info, Kind kind) {
                     info.flag("alpha", false) ? ", alpha" : "");
       return buf;
     case Kind::Model:
+      if (info.flag("animation_only", false)) {
+        std::snprintf(buf, sizeof(buf), "Animation: %d clips, %d bones", int(info.num("clips", 0)),
+                      int(info.num("bones", 0)));
+        return buf;
+      }
       std::snprintf(buf, sizeof(buf), "%s%s%d prim, %d tris%s%s%s%s", info.str("format").c_str(),
                     info.str("format").empty() ? "" : ": ", int(info.num("primitives", 0)),
                     int(info.num("triangles", 0)), info.flag("skinned", false) ? ", skinned" : "",

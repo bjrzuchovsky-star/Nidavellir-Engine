@@ -220,6 +220,27 @@ int lua_anim_crossfade(lua_State* L) {
   return 1;
 }
 
+// anim.set_float(e, name, number) — always a float, even if the parameter was a bool.
+int lua_anim_set_float(lua_State* L) {
+  AnimatorRuntime* rt = world(L).animator(entity_arg(L, 1));
+  const char* name = luaL_checkstring(L, 2);
+  const lua_Number n = luaL_checknumber(L, 3);
+  if (rt && std::isfinite(n)) rt->set_float(name, static_cast<float>(n));
+  return 0;
+}
+
+// anim.set_bool(e, name, bool | number)
+int lua_anim_set_bool(lua_State* L) {
+  AnimatorRuntime* rt = world(L).animator(entity_arg(L, 1));
+  const char* name = luaL_checkstring(L, 2);
+  if (!rt) return 0;
+  bool v = false;
+  if (lua_type(L, 3) == LUA_TNUMBER) v = lua_tonumber(L, 3) > 0.5;
+  else v = lua_toboolean(L, 3) != 0;
+  rt->set_bool(name, v);
+  return 0;
+}
+
 // anim.set_param(e, name, number | bool)
 int lua_anim_set_param(lua_State* L) {
   AnimatorRuntime* rt = world(L).animator(entity_arg(L, 1));
@@ -268,10 +289,16 @@ int lua_anim_stop(lua_State* L) {
 }  // namespace
 
 void World3D::anim_open_lua(lua_State* L, int sandbox) {
-  const luaL_Reg fns[] = {{"play", lua_anim_play},       {"crossfade", lua_anim_crossfade},
-                          {"set_param", lua_anim_set_param}, {"param", lua_anim_param},
-                          {"trigger", lua_anim_trigger}, {"state", lua_anim_state},
-                          {"stop", lua_anim_stop},       {nullptr, nullptr}};
+  const luaL_Reg fns[] = {{"play", lua_anim_play},
+                          {"crossfade", lua_anim_crossfade},
+                          {"set_param", lua_anim_set_param},
+                          {"set_float", lua_anim_set_float},
+                          {"set_bool", lua_anim_set_bool},
+                          {"param", lua_anim_param},
+                          {"trigger", lua_anim_trigger},
+                          {"state", lua_anim_state},
+                          {"stop", lua_anim_stop},
+                          {nullptr, nullptr}};
   lua_newtable(L);
   lua_pushlightuserdata(L, this);
   luaL_setfuncs(L, fns, 1);

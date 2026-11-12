@@ -399,6 +399,8 @@ class Editor2DScreen final : public IScreen {
   bool stable_delete_clip(int index);
   bool stable_set_range(int index, int start, int count);
   bool stable_set_timing(int index, float fps, AnimMode mode);
+  // Per-frame hold in milliseconds. Other frames keep 1000/fps until set.
+  bool stable_set_frame_ms(int index, int frame, int ms);
   bool stable_set_default(const std::string& clip);
   int stable_clip() const { return stable_clip_; }
   void stable_select_clip(int index);
@@ -582,7 +584,7 @@ class Editor2DScreen final : public IScreen {
   void open_asset_browser();
   // Pull a Vault item dropped on the viewport, then place it there.
   void drop_vault_item(const std::string& item, float wx, float wy);
-  // The Vault (asset library shared by every claim).
+  // The Vault (asset library shared by every realm).
   VaultPanel vault_panel_;
   bool show_vault_ = true;
   bool show_prefabs_ = true;

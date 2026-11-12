@@ -367,7 +367,7 @@ void draw_render_memory_panel() {
 void draw_net_panel() {
   const auto frames = live_frames();
   if (counter_names(frames, "net.").empty()) {
-    ImGui::TextDisabled("No posse on the wire. Ride with a Posse (host or join) while recording.");
+    ImGui::TextDisabled("No clan on the wire. Join a clan (host or join) while recording.");
     return;
   }
   const auto client = counter_names(frames, "net.");

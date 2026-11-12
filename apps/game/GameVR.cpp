@@ -7,6 +7,7 @@
 #include "GpuCheck.h"
 #include "GameUi.h"
 
+#include "core/Brand.h"
 #include "core/JsonMini.h"
 #include "core/MemImages.h"
 #include "render3d/GlApi.h"
@@ -295,7 +296,7 @@ int run_window_vr(const std::string& dir, const std::string& name, long frames, 
     return 1;
   }
   render3d::hint_gl33_core();
-  GLFWwindow* win = glfwCreateWindow(game::window_width(), game::window_height(), (name + " | TombStone VR").c_str(), nullptr, nullptr);
+  GLFWwindow* win = glfwCreateWindow(game::window_width(), game::window_height(), (name + " | " + std::string(brand::kProduct)).c_str(), nullptr, nullptr);
   if (!win) {
     std::cerr << "[ts_game] could not open a GL 3.3 core window\n";
     game::show_gpu_error(name, game::last_glfw_error());

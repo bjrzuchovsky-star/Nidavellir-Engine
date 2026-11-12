@@ -28,10 +28,18 @@ bool Editor2DScreen::reload_scene_from_disk() {
 void Editor2DScreen::open_asset_browser() {
   AssetBrowserHost host;
   host.before_disk_change = [this] {
+    // The clan mirror is not this realm's scene.json. Saving or reloading
+    // it mid-drag commits the preview and ends the move.
+    if (is_playing() || workspace_.move_active() || workspace_.edit_open()) return;
+    if (team_ && team_->joined() && !team_->hosting()) return;
     std::string err;
-    if (!is_playing()) save_scene(&err);
+    save_scene(&err);
   };
-  host.after_refs_changed = [this] { reload_scene_from_disk(); };
+  host.after_refs_changed = [this] {
+    if (workspace_.move_active() || workspace_.edit_open()) return;
+    if (team_ && team_->joined() && !team_->hosting()) return;
+    reload_scene_from_disk();
+  };
   host.on_assets_changed = [this](const std::vector<std::string>& rels) {
     for (const std::string& rel : rels) {
       textures_.invalidate(asset_path(rel));
@@ -40,6 +48,13 @@ void Editor2DScreen::open_asset_browser() {
   };
   host.payload_type = [](const assetdb::AssetDb::Entry& e) -> std::string {
     return e.meta.kind == assetdb::Kind::Texture ? assets::kDragPayload : kAssetAnyPayload;
+  };
+  host.on_import_stopped = [this](const std::vector<std::string>& rels) {
+    if (!team_) return;
+    for (const std::string& rel : rels) team_->hold_asset_upload(rel);
+  };
+  host.on_import_retry = [this](const std::string& rel) {
+    if (team_) team_->release_asset_upload(rel);
   };
   host.note = [this](const std::string& m) { note(m); };
   host.send_to_vault = [this](const std::string& rel) {

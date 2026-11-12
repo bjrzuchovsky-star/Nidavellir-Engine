@@ -103,13 +103,14 @@ std::string sha256_hex(std::string_view bytes) {
   return s.hex();
 }
 
-std::string sha256_file(const std::string& path, std::uint64_t* size_out) {
+std::string sha256_file(const std::string& path, std::uint64_t* size_out, bool (*cancelled)()) {
   std::ifstream in(std::filesystem::u8path(path), std::ios::binary);
   if (!in) return {};
   Sha256 s;
   std::uint64_t total = 0;
   static thread_local char buf[1 << 16];
   while (in) {
+    if (cancelled && cancelled()) return {};
     in.read(buf, sizeof(buf));
     const std::streamsize n = in.gcount();
     if (n > 0) {

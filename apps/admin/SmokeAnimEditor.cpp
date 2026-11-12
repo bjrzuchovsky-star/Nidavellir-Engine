@@ -245,6 +245,18 @@ int run_animation_editor_smoke() {
       scr.stable_set().clips.size() != 8 || scr.stable_clip() != 0) {
     return fail("stable_open on the rider set");
   }
+  if (!scr.stable_set_frame_ms(0, 0, 250) || scr.stable_set().clips[0].ms.empty() ||
+      scr.stable_set().clips[0].ms[0] != 250) {
+    return fail("per-frame hold");
+  }
+  const AnimSample held = sample_clip(scr.stable_set().clips[0], 0.2);
+  const AnimSample next = sample_clip(scr.stable_set().clips[0], 0.3);
+  if (held.frame != 0 || next.frame == 0) return fail("a 250 ms hold should still be frame 0 at 0.2 s");
+  AnimSet holds;
+  if (!anim_json::load_file((dir / kSet).string(), &holds, &err) || holds.clips[0].ms.empty() ||
+      holds.clips[0].ms[0] != 250) {
+    return fail("frame hold was not written to the set");
+  }
   scr.on_exit();
   fs::remove_all(dir, ec);
   std::cout << "[smoke] animation editor OK (seeded rider sheet + set, "

@@ -1,6 +1,8 @@
 // Asset Browser wiring for the 3D editor (see editor/assets/AssetBrowser.h).
 #include "editor/editor3d/Editor3DScreen.h"
 
+#include <filesystem>
+
 namespace ts {
 namespace tombstone {
 namespace editor {
@@ -8,10 +10,14 @@ namespace editor {
 void Editor3DScreen::open_asset_browser() {
   AssetBrowserHost host;
   host.before_disk_change = [this] {
+    if (playing()) return;
+    if (team_ && team_->joined() && !team_->hosting()) return;
     std::string err;
-    if (!playing()) save_scene(&err);
+    save_scene(&err);
   };
   host.after_refs_changed = [this] {
+    if (playing()) return;
+    if (team_ && team_->joined() && !team_->hosting()) return;
     std::string err;
     if (!reload_scene(&err)) note("Reload after asset move failed: " + err, runtime::LogLevel::Error);
     rescan_assets();
@@ -38,6 +44,39 @@ void Editor3DScreen::open_asset_browser() {
   };
   host.place_parts = [this](const std::string& rel, bool recentre, bool fit) {
     return place_model_parts(rel, {}, recentre, fit) != 0;
+  };
+  host.preview_model = [this](const std::string& rel) {
+    std::uint64_t id = primary();
+    auto skinned = [&](std::uint64_t i) {
+      const scene3d::Entity3D* e = find(i);
+      if (!e) return false;
+      const render3d::Model* m = entity_model(*e);
+      return m && m->skinned();
+    };
+    if (!skinned(id) && skinned(last_anim_target_)) id = last_anim_target_;
+    if (!skinned(id)) {
+      for (const scene3d::Entity3D& e : scene_.entities) {
+        if (skinned(e.id)) { id = e.id; break; }
+      }
+    }
+    if (!skinned(id)) {
+      note(std::filesystem::path(rel).stem().string() +
+           " is an animation. Select a skinned character, then double-click it or drop it on them.");
+      return;
+    }
+    std::string err;
+    apply_animation_asset(id, rel, &err);
+  };
+  host.on_import_stopped = [this](const std::vector<std::string>& rels) {
+    if (!team_) return;
+    for (const std::string& rel : rels) team_->hold_asset_upload(rel);
+  };
+  host.on_import_retry = [this](const std::string& rel) {
+    if (team_) team_->release_asset_upload(rel);
+  };
+  host.apply_clip_to = [this](const std::string& clip, const std::string& model) {
+    std::string err;
+    apply_clip_to_model(clip, model, &err);
   };
   host.open_script = [this](const std::string& rel, int which) {
     std::string msg;
@@ -66,7 +105,7 @@ void Editor3DScreen::drop_vault_item(const std::string& item, const render3d::Ve
   vault_panel_.pull_then(item, [this, pos](const vaultp::PullResult& r) {
     if (r.kind == "prefab") drop_asset("prefab:" + r.main, pos);
     else if (r.kind == "model" || r.kind == "audio") drop_asset(r.main, pos);
-    else note("Pulled " + r.main + " into the claim");
+    else note("Pulled " + r.main + " into the realm");
   });
 }
 

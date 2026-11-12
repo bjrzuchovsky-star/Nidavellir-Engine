@@ -5,6 +5,7 @@
 // them) with up to four weights per vertex, and node animations on the
 // skeleton's joints. Rigid meshes get their node transforms baked; skinned
 // meshes are posed by the skeleton (rest pose = bind pose). Assimp is BSD-3 (fetched by hash, importers only).
+#include "render3d/ImportLimits.h"
 #include "render3d/ModelImport.h"
 #include "render3d/import/SourceFormats.h"
 
@@ -125,10 +126,13 @@ struct TextureLoader {
       if (t->mHeight == 0) {
         std::string err;
         if (load_image_memory(reinterpret_cast<const unsigned char*>(t->pcData), t->mWidth, im.get(), &err)) img = im;
+      } else if (t->mWidth > static_cast<unsigned>(kHardMaxTextureEdge) ||
+                 t->mHeight > static_cast<unsigned>(kHardMaxTextureEdge)) {
+        img.reset();
       } else {
         im->width = static_cast<int>(t->mWidth);
         im->height = static_cast<int>(t->mHeight);
-        im->rgba.resize(static_cast<std::size_t>(t->mWidth) * t->mHeight * 4);
+        im->rgba.resize(static_cast<std::uint64_t>(t->mWidth) * t->mHeight * 4u);
         for (std::size_t i = 0, n = static_cast<std::size_t>(t->mWidth) * t->mHeight; i < n; ++i) {
           const aiTexel& x = t->pcData[i];
           im->rgba[i * 4] = x.r;
@@ -137,6 +141,7 @@ struct TextureLoader {
           im->rgba[i * 4 + 3] = x.a;
         }
         img = im;
+        if (img) clamp_imported_image(im.get());
       }
     } else {
       fs::path p;
@@ -247,10 +252,23 @@ bool load_assimp_model(const std::string& path, const ModelImportOptions& opt, M
                          aiProcess_SortByPType | aiProcess_FlipUVs | aiProcess_CalcTangentSpace |
                          aiProcess_ValidateDataStructure;
   const aiScene* sc = imp.ReadFile(fs::u8path(path).string(), flags);
-  if (!sc || !sc->mRootNode || (sc->mFlags & AI_SCENE_FLAGS_INCOMPLETE)) {
-    if (error) *error = path + ": " + (imp.GetErrorString()[0] ? imp.GetErrorString() : "could not be read");
+  if (import_was_cancelled()) {
+    if (sc) imp.FreeScene();
+    if (error) *error = path + ": Import cancelled.";
     return false;
   }
+  if (!sc || !sc->mRootNode) {
+    const char* why = imp.GetErrorString();
+    const std::string detail = (why && why[0]) ? why : "Assimp returned no scene";
+    if (error) {
+      *error = path + ": Assimp could not open this file (" + detail +
+               "). A Mixamo FBX exported as FBX 7.4 binary, with or without a mesh, is supported.";
+    }
+    return false;
+  }
+  // Animation-only exports (Mixamo "Without Skin") are marked incomplete
+  // because they have no mesh. They still carry a node tree and clips.
+  const bool incomplete = (sc->mFlags & AI_SCENE_FLAGS_INCOMPLETE) != 0;
   std::string warn;
   TextureLoader tl;
   tl.scene = sc;
@@ -308,6 +326,20 @@ bool load_assimp_model(const std::string& path, const ModelImportOptions& opt, M
     for (const aiNode* n : chain) {
       joints.insert(n);
       if (n == top) break;
+    }
+  }
+  // No skin weights (animation-only FBX): the animated nodes are the skeleton.
+  bool anim_only = false;
+  if (joints.empty() && sc->mNumAnimations > 0) {
+    anim_only = true;
+    for (unsigned a = 0; a < sc->mNumAnimations; ++a) {
+      const aiAnimation* an = sc->mAnimations[a];
+      for (unsigned c = 0; c < an->mNumChannels; ++c) {
+        auto it = by_name.find(an->mChannels[c]->mNodeName.C_Str());
+        if (it == by_name.end()) continue;
+        joints.insert(it->second);
+        for (const aiNode* n = it->second->mParent; n && n != sc->mRootNode; n = n->mParent) joints.insert(n);
+      }
     }
   }
   std::map<std::string, int> joint_index;
@@ -454,12 +486,25 @@ bool load_assimp_model(const std::string& path, const ModelImportOptions& opt, M
     append(&warn, "Blender FBX: " + std::to_string(bone_fixes) +
                       " bone-parented meshes placed relative to the armature (exporter quirk)");
   }
+  if (anim_only) {
+    append(&warn, "animation-only file (no mesh): " + std::to_string(out->skeleton.joints.size()) + " joints");
+  }
+  if (incomplete && !anim_only && sc->mNumMeshes > 0) {
+    append(&warn, "the file is marked incomplete; some meshes may be missing");
+  }
 
   // Meshes.
+  bool too_big = false;
   std::function<void(const aiNode*)> meshes = [&](const aiNode* n) {
     for (unsigned k = 0; k < n->mNumMeshes; ++k) {
       const aiMesh* am = sc->mMeshes[n->mMeshes[k]];
       if (!(am->mPrimitiveTypes & aiPrimitiveType_TRIANGLE) || am->mNumVertices == 0) continue;
+      if (am->mNumVertices > kMaxImportVertices || am->mNumFaces > kMaxImportTriangles) {
+        append(&warn, std::string(am->mName.C_Str()) + " has " + std::to_string(am->mNumVertices) +
+                          " vertices, over the import limit");
+        too_big = true;
+        continue;
+      }
       ModelPrimitive p;
       p.mesh.name = am->mName.length ? am->mName.C_Str() : n->mName.C_Str();
       for (const aiNode* q = n; q && q != sc->mRootNode; q = q->mParent) {
@@ -467,6 +512,8 @@ bool load_assimp_model(const std::string& path, const ModelImportOptions& opt, M
         p.node = p.node.empty() ? nm : nm + "/" + p.node;
       }
       p.material = am->mMaterialIndex < out->materials.size() ? static_cast<int>(am->mMaterialIndex) : -1;
+      p.mesh.vertices.reserve(am->mNumVertices);
+      p.mesh.indices.reserve(static_cast<std::size_t>(am->mNumFaces) * 3);
       const bool skinned = am->mNumBones > 0 && !joint_index.empty();
       const Mat4& g = skinned ? skin_space : global[n];
       const Mat4 nm = g.inverse();  // normals: inverse transpose
@@ -597,6 +644,24 @@ bool load_assimp_model(const std::string& path, const ModelImportOptions& opt, M
       append(&warn, "file units are centimetres (set Unit scale to 0.01 for metres)");
     }
   }
+  if (out->primitives.empty() && too_big) {
+    if (error) *error = path + ": mesh is over the import limit (" + std::to_string(kMaxImportVertices) +
+                        " vertices). Decimate it and export glTF.";
+    out->primitives.clear();
+    imp.FreeScene();
+    return false;
+  }
+  if (out->primitives.empty() && out->clips.empty()) {
+    if (error) {
+      *error = path + ": no mesh and no animation clips were found";
+      if (incomplete) *error += " (the file is marked incomplete)";
+      if (sc->mNumAnimations > 0) *error += ". The file has animations, but none of them target a node in the hierarchy";
+      *error += ".";
+    }
+    imp.FreeScene();
+    return false;
+  }
+  imp.FreeScene();
   if (error) *error = warn;
   return true;
 }

@@ -14,9 +14,12 @@
 #include "render3d/Scene3D.h"
 #include "terrain/TerrainView.h"
 
+#include <atomic>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace ts {
@@ -30,6 +33,9 @@ struct SceneViewOptions {
   bool colliders = false;       // wire boxes for colliders
   bool light_gizmos = false;    // small crosses at point lights
   bool hitboxes = false;        // per-bone hit boxes (Source $hbox) of models
+  bool bones = false;            // skeleton overlay (rest pose, or the skin palette)
+  std::uint64_t bone_entity = 0; // which entity's bone_joint is highlighted
+  int bone_joint = -1;
   std::vector<std::uint64_t> highlight;  // selection outlines
 };
 
@@ -43,6 +49,10 @@ class SceneView {
   void set_project_dir(const std::string& dir);
   const std::string& project_dir() const { return dir_; }
   Renderer3D* renderer() const { return r_; }
+  // Bytes of mesh/texture data one frame may upload. 0 uploads the whole
+  // model in the frame that needs it (shots, small meshes).
+  void set_upload_budget(std::size_t bytes) { upload_budget_ = bytes; }
+  std::size_t upload_budget() const { return upload_budget_; }
 
   // Drop every cached GPU / CPU resource (files changed on disk).
   void clear();
@@ -81,6 +91,9 @@ class SceneView {
   void draw_box(const Mat4& world, const Aabb& local, const float* rgba, bool on_top);
   // An entity model's hit boxes (posed by its skin palette when it has one).
   void draw_hitboxes(const scene3d::Entity3D& e);
+  // Skeleton lines. `highlight` is a joint index on this entity (-1 = none).
+  // A skin palette poses the bones; otherwise the rest pose is drawn.
+  void draw_bones(const scene3d::Entity3D& e, int highlight);
   void draw_circle(const Mat4& world, const Vec3& c, float r, int plane, const float* rgba);
   // Physics gizmos: collider shapes (compound parts included) coloured by
   // body motion, and joints (anchor -> target, hinge / slider axis).
@@ -89,13 +102,31 @@ class SceneView {
                   const std::vector<scene3d::Entity3D>& entities);
 
  private:
+  struct PendingModel {
+    std::atomic<bool> cancel{false};
+    std::atomic<bool> done{false};
+    std::mutex mu;
+    std::unique_ptr<Model> model;
+    std::string error;
+  };
+  struct GpuPiece {
+    MeshHandle mesh;
+    int prim = 0;
+  };
   struct ModelEntry {
     bool tried = false;
+    bool loading = false;
     std::unique_ptr<Model> model;
-    std::vector<MeshHandle> meshes;      // per primitive
+    std::shared_ptr<PendingModel> pending;
+    std::thread loader;
+    std::vector<GpuPiece> pieces;
     std::vector<MaterialHandle> materials;  // per model material (+1 default)
     std::vector<Mat4> rest_palette;         // skinned models: the rest pose
     bool uploaded = false;
+    bool upload_stopped = false;  // Cancel: do not keep uploading this model
+    std::size_t prim_cursor = 0;
+    std::size_t index_cursor = 0;
+    std::size_t mat_cursor = 0;
   };
   struct MaterialEntry {
     MaterialHandle handle;
@@ -103,6 +134,7 @@ class SceneView {
   };
 
   ModelEntry& entry(const std::string& source);
+  void stop_load(ModelEntry& m);
   void upload(ModelEntry& m);
   MaterialHandle material_for(const scene3d::Material3D& m);
   std::shared_ptr<const Image> image(const std::string& rel);
@@ -120,6 +152,8 @@ class SceneView {
   std::unique_ptr<terrain::TerrainView> terrain_;
   float time_ = 0.0f;
   bool fixed_time_ = false;
+  std::size_t upload_budget_ = 0;
+  std::size_t upload_used_ = 0;
 };
 
 }  // namespace render3d

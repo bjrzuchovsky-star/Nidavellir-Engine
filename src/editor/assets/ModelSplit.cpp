@@ -75,7 +75,8 @@ bool split_model_asset(assetdb::AssetDb& db, const std::string& rel, const Model
     if (!fit) mode = "none";
     else if (mode == "none") mode = "auto";
     s.set("collider", json::Value::string(mode));
-    s.set("import_animations", json::Value::boolean(false));
+    // Skinned parts keep the rig, so a clip sidecar beside the part can play.
+    s.set("import_animations", json::Value::boolean(model.skinned()));
     s.set("hull_vertices", json::Value::number(settings.num("hull_vertices", 64)));
     s.set("decompose_max", json::Value::number(settings.num("decompose_max", 8)));
     s.set("pivot", json::Value::string(opt.recentre ? "recenter" : "keep"));

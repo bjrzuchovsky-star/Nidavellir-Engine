@@ -101,6 +101,7 @@ struct TeamUiState {
   char user[64] = "";
   char vault_url[160] = "";  // optional: files travel through this Vault
   int mode = 0;  // 0 = join, 1 = host
+  bool clan_invite_only = false;
   std::string last_error;
 };
 
@@ -114,6 +115,11 @@ class TeamSession {
 
   bool host(const TeamHostSettings& s, std::string* error);
   bool join(const TeamJoinSettings& s, std::string* error);
+  // Steam clan. False when Steam is off or not running (use host/join).
+  bool host_clan(bool invite_only, std::string* error);
+  bool join_clan(const std::string& lobby_id, std::string* error);
+  bool kick_clan_member(const std::string& steam_id, std::string* error);
+  bool via_clan() const { return via_clan_; }
   void leave();
   // Tests: vanish without saying goodbye (a crashed editor).
   void drop_now();
@@ -147,12 +153,24 @@ class TeamSession {
   void set_asset_backend(std::shared_ptr<vault::Backend> backend) { assets_ = std::move(backend); }
   bool has_asset_backend() const { return assets_ != nullptr; }
   bool sync_assets();
+  // A failed or cancelled model import: do not upload this file, and stop
+  // a pass that is sending it now.
+  void hold_asset_upload(const std::string& rel);
+  void release_asset_upload(const std::string& rel);
+  // "sending", "synced" or "failed". Shown beside each clan member.
+  const std::string& asset_sync_state() const { return asset_sync_state_; }
+  const std::string& asset_sync_detail() const { return asset_sync_detail_; }
   bool assets_busy() const { return asset_sync_.running(); }
   TeamAssetProgress asset_progress() const { return asset_sync_.progress(); }
   // Where files travel for this ride, in words ("through the Vault at
   // http://...", "over the team session"), and why they can't ("" = fine).
   const std::string& files_route() const { return files_route_; }
   const std::string& files_error() const { return files_error_; }
+  // Host: the open realm. Joiner: a per-session cache so the joiner's own
+  // realm is never overwritten. Empty until the clan welcome arrives.
+  std::string files_root() const;
+  // <temp>/nidavellir-clan-mirrors/<project id>/<claim>. Smokes can seed it.
+  static std::string clan_mirror_dir(const std::string& project_id, const std::string& claim_id);
   // Project paths the file passes wrote or removed since the last call: the
   // editor drops its cached textures / models for them and rescans assets.
   std::vector<std::string> take_arrived();
@@ -228,13 +246,18 @@ class TeamSession {
   std::set<std::string> held_noted_;            // read-only: files we said stay here
   std::string files_url_, files_key_;           // typed in the Team panel (override)
   std::string files_route_, files_error_;
+  std::string mirror_root_;
+  void ensure_mirror();
   bool files_chosen_ = false;
   std::shared_ptr<SessionBlobStore> blob_store_;  // hosting: files over the session
   double asset_clock_ = 0.0;
   bool first_asset_pass_ = true;  // joining: the session's files win
   std::uint64_t assets_up_ = 0, assets_down_ = 0, assets_removed_ = 0;
+  std::string asset_sync_state_ = "synced";
+  std::string asset_sync_detail_;
   // Mid-drag previews.
   double preview_clock_ = 0.0;
+  double lock_touch_clock_ = 0.0;
   std::string last_preview_;
   std::vector<std::uint64_t> my_preview_ids_;
   struct RemotePreview {
@@ -256,6 +279,13 @@ class TeamSession {
   std::uint64_t rejoins_ = 0;
   std::string saved_rejoin_;     // token from last.json (editor restart)
   bool has_last_ride_ = false, last_ride_host_ = false;
+  bool via_clan_ = false;
+  bool clan_host_pending_ = false;
+  bool clan_join_pending_ = false;
+  std::string clan_host_id_;
+  bool open_clan_server(std::string* error);
+  bool open_clan_client(std::string* error);
+  void tick_clan();
   TeamAssetSync asset_sync_;  // last member: joined before the rest go
 };
 

@@ -1,6 +1,7 @@
 #include "editor/team/TeamPanel.h"
 #include "editor/tools/SpriteSlicerPanel.h"
 #include "editor/ux/EmptyState.h"
+#include "editor/ux/ShotOpts.h"
 #include "editor/ux/FriendlyError.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
@@ -15,6 +16,7 @@
 
 #include "ui/UiScript.h"
 #include "editor/audio/EditorAudio.h"
+#include "editor/ui/About.h"
 #include "editor/ui/Theme.h"
 
 #include <imgui.h>
@@ -204,6 +206,20 @@ void Editor3DScreen::draw_ui() {
     if (ImGui::Begin("Animation Preview", &anim_preview_.open)) draw_anim_preview();
     ImGui::End();
   }
+  if (timeline_.open) {
+    ImGui::SetNextWindowSize(ImVec2(420, 460), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Animation Timeline", &timeline_.open)) draw_anim_timeline();
+    ImGui::End();
+  }
+  if (anim_graph_.open) {
+    ImGui::SetNextWindowSize(ImVec2(920, 560), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Animator Graph", &anim_graph_.open)) {
+      ImGui::BeginDisabled(locked);
+      draw_anim_graph();
+      ImGui::EndDisabled();
+    }
+    ImGui::End();
+  }
   ui_preview_.draw(&show_ui_preview_, project_.path);
   draw_vr_mirror();
   FreightOffice::get().draw();
@@ -222,7 +238,7 @@ void Editor3DScreen::draw_menu_bar() {
 }
 
 void Editor3DScreen::draw_menus() {
-  if (ux::BeginMenu("Claim")) {
+  if (ux::BeginMenu("Realm")) {
     if (ux::MenuItem("Save scene", "Ctrl+S")) {
       std::string err;
       if (save_scene(&err)) note("Saved scene.json");
@@ -242,7 +258,7 @@ void Editor3DScreen::draw_menus() {
     if (ux::MenuItem("Strings... (localisation)")) StringsPanel::get().open(project_.path, project_.name);
     if (ux::MenuItem("Sprite Slicer...")) SpriteSlicerPanel::get().open(project_.path);
     ImGui::Separator();
-    if (ux::MenuItem("Back to Claims")) leave_or_ask(false);
+    if (ux::MenuItem("Back to Realms")) leave_or_ask(false);
     if (ux::MenuItem("Quit", "Alt+F4")) leave_or_ask(true);
     ux::EndMenu();
   }
@@ -309,6 +325,7 @@ void Editor3DScreen::draw_menus() {
     ux::MenuItem("Grid", "'", &scene_.show_grid);
     ux::MenuItem("Colliders + joints", nullptr, &show_colliders_);
     ux::MenuItem("Hitboxes (model $hbox)", nullptr, &show_hitboxes_);
+    ux::MenuItem("Bones", nullptr, &show_bones_);
     ux::MenuItem("Physics Settings", nullptr, &show_physics_);
     ux::MenuItem("Terrain + Foliage", nullptr, &show_terrain_);
     if (ux::MenuItem("Physics debug draw (Play)", nullptr, scene_.physics.debug_draw, !playing())) {
@@ -319,6 +336,8 @@ void Editor3DScreen::draw_menus() {
     ux::MenuItem("Saloon Band (Mixer)", nullptr, &show_mixer_);
     ux::MenuItem("UI Preview", nullptr, &show_ui_preview_);
     ux::MenuItem("Animation Preview", nullptr, &anim_preview_.open);
+    ux::MenuItem("Animation Timeline", nullptr, &timeline_.open);
+    ux::MenuItem("Animator Graph", nullptr, &anim_graph_.open);
     ux::MenuItem("Prefabs", nullptr, &show_prefabs_);
     ux::MenuItem("Asset Browser", nullptr, &show_asset_browser_);
     ux::MenuItem("Vault", nullptr, &show_vault_);
@@ -336,6 +355,7 @@ void Editor3DScreen::draw_menus() {
   }
   ux_.draw_window_menu();
   if (ux::BeginMenu("Help")) {
+    about::draw_menu_item();
     if (ux::MenuItem("Command Palette...", "Ctrl+Shift+P")) ux_.palette().open();
     ux_.draw_walkthrough_menu_item();
     ImGui::Separator();
@@ -445,12 +465,12 @@ void Editor3DScreen::draw_status_bar() {
   // Play state: the VR rig has no "grounded" (the headset floor is the
   // ground), so VR previews say where the picture goes instead.
   std::string play_state;
-  if (vr_previewing()) {
+  if (vr_previewing() && !shot::clean()) {
     const bool sim = vr_session_ && vr_session_->simulated();
     play_state = sim ? " | VR preview: desktop simulator"
                      : " | VR preview: headset (" + vr_status_ + ")";
   } else if (playing()) {
-    play_state = world_.grounded() ? " | rider grounded" : " | rider airborne";
+    play_state = world_.grounded() ? " | Wanderer grounded" : " | Wanderer airborne";
     if (world_.mouse_look() && !free_camera_in_play_) {
       play_state += look_captured_ ? " | mouse look (Esc frees the cursor)"
                     : world_.wants_cursor_capture() ? " | click the view to look"
@@ -659,7 +679,7 @@ void Editor3DScreen::draw_viewport() {
         ux::SetTooltip("Drop on an entity to attach the script");
       }
     }
-    // A Vault tile: pull it into the claim, then place it at the drop point.
+    // A Vault tile: pull it into the realm, then place it at the drop point.
     if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kVaultItemPayload)) {
       Vec3 at = scene_.editor_camera.target;
       ground_point(mx, my, vw, vh, &at);
@@ -993,7 +1013,7 @@ void Editor3DScreen::draw_hierarchy_row(const scene3d::Entity3D& e, int depth) {
   ImGui::SameLine(0.0f, 4.0f);
 
   std::string label = e.name;
-  if (e.player) label += "  (rider)";
+  if (e.player) label += "  (wanderer)";
   else if (e.camera) label += play_camera_id() == e.id ? "  (camera, active)" : "  (camera)";
   else if (e.light) label += "  (light)";
   else if (e.script) label += "  (script)";
@@ -1071,7 +1091,7 @@ void Editor3DScreen::draw_hierarchy_row(const scene3d::Entity3D& e, int depth) {
 void Editor3DScreen::paste_components_3d() {
   if (!comp_clip_ || playing()) return;
   const scene3d::Scene3D before = scene_;
-  static const char* kNames[] = {"Mesh", "Material", "Light", "Collider", "Rigid Body", "Joint", "Player (rider)",
+  static const char* kNames[] = {"Mesh", "Material", "Light", "Collider", "Rigid Body", "Joint", "Wanderer",
                                  "Camera", "Follow", "Animator", "VR Rig", "Grabbable", "Audio Source", "Particles"};
   for (std::uint64_t id : selection()) {
     scene3d::Entity3D* d = scene_.find(id);
@@ -1256,6 +1276,7 @@ void Editor3DScreen::draw_telegraph() {
   if (log_.empty()) ux::EmptyState("telegraph", {{"Play (F5)", [this] { if (!playing()) play_start(); }, nullptr, !playing()}});
   int row = 0;
   for (const runtime::LogEntry& e : log_) {
+    if (shot::hide_log_line(e.text)) continue;
     const ImVec4 col = e.level == runtime::LogLevel::Error  ? theme::Danger()
                        : e.level == runtime::LogLevel::Warn ? theme::Warning()
                                                             : theme::TextMuted();
@@ -1311,7 +1332,7 @@ void Editor3DScreen::setup_field_guide() {
   ux_.refresh_recent([this](const ux::RecentItem& r) {
     if (r.kind == "claim") {
       if (r.path == project_.path) {
-        note("Already riding this claim");
+        note("Already riding this realm");
         return;
       }
       ux::request_open_claim(r.path);

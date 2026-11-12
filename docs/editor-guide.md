@@ -8,7 +8,7 @@ The app moves through these screens:
 
 1. **Loading** (`LoadingScreen`): splash, then it advances to Login on its own.
 2. **Login** (`LoginScreen`): username / password, **Dev login**, Settings.
-3. **Project Manager** (`ProjectManagerScreen`, `ProjectManager_Templates.cpp`): the list of claims, **+ New Claim...**, Open, delete ("Bury Project?"), **Trading Post**, Settings and Logout.
+3. **Project Manager** (`ProjectManagerScreen`, `ProjectManager_Templates.cpp`): the list of claims, **+ New Realm...**, Open, delete ("Bury Project?"), **Trading Post**, Settings and Logout.
 4. **Settings** (`SettingsScreen`): `projects_root` (**Browse** opens an in-app folder picker), theme (**Dusk** dark, **Parchment** light, under "Lamplight"), `auto_login_dev` and username. **Apply** validates the settings, writes them and reloads the project list.
 5. **Editor**: `Editor2DScreen` for 2D claims, `Editor3DScreen` for 3D and VR claims.
 

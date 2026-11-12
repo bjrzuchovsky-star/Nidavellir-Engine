@@ -68,8 +68,8 @@ std::string asset_json(const std::string& name, const std::string& url, std::siz
 }
 
 std::string release_json(const std::string& tag, const std::string& assets) {
-  return "{\"url\":\"https://api.github.com/repos/bjrzuchovsky-star/TombStone_Engine/releases/1\","
-         "\"html_url\":\"https://github.com/bjrzuchovsky-star/TombStone_Engine/releases/tag/" + tag + "\","
+  return "{\"url\":\"https://api.github.com/repos/bjrzuchovsky-star/Nidavellir-Engine/releases/1\","
+         "\"html_url\":\"https://github.com/bjrzuchovsky-star/Nidavellir-Engine/releases/tag/" + tag + "\","
          "\"id\":1,\"tag_name\":\"" + tag + "\",\"name\":\"TombStone Engine " + tag + "\","
          "\"draft\":false,\"prerelease\":false,\"published_at\":\"2026-11-01T00:00:00Z\","
          "\"assets\":[" + assets + "],\"body\":\"Notes with \\\"quotes\\\" and \\u00e9.\"}";
@@ -107,7 +107,7 @@ void pure_checks() {
   std::string err;
   check(up::parse_release_json(both, &r, &err), "parse release JSON: " + err);
   check(r.tag == "v0.2.0" && r.version == "0.2.0" && r.assets.size() == 4, "release fields");
-  check(r.html_url == "https://github.com/bjrzuchovsky-star/TombStone_Engine/releases/tag/v0.2.0", "html_url");
+  check(r.html_url == "https://github.com/bjrzuchovsky-star/Nidavellir-Engine/releases/tag/v0.2.0", "html_url");
   up::AssetKind kind = up::AssetKind::None;
   const up::ReleaseAsset* a = up::select_update_asset(r, &kind);
   check(a && a->name == "TombStone-0.2.0-update.exe" && kind == up::AssetKind::Update, "prefers -update.exe");

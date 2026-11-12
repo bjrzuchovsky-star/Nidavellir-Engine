@@ -93,7 +93,7 @@ characters for text without spaces (Chinese / Japanese).
 ## The Strings panel (editor)
 
 Open it from **File → Strings... (localisation)** in the 2D editor or
-**Claim → Strings...** in the 3D editor.
+**Realm → Strings...** in the 3D editor.
 
 - A grid shows one row per key and one column per language. Empty cells are red (**missing**). A key that scripts or UI use but no table defines is also red, marked *undefined*. The panel finds these keys by scanning `scripts/` and `ui/` for `tr("...")`, `Tr("...")` and `"text_key"`.
 - Column headers show how many keys each language is missing. **Missing only** filters to rows with gaps.

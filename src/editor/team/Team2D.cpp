@@ -208,10 +208,18 @@ TeamSession& Editor2DScreen::team() {
 void Editor2DScreen::tick_team(float dt) {
   if (!team_) return;
   team_->tick(dt);
+  vault_panel_.set_pull_dir(team_->joined() ? team_->files_root() : std::string());
   for (const std::string& n : team_->take_notes()) {
     note(n);
     telegraph_.add(runtime::LogLevel::Info, "team", n);
   }
+  // A mirror rescan reloads scene.json and clears an open move (the drag
+  // preview then sticks on the first position). Wait until the edit ends.
+  // Also wait out a file pass: rescanning here would hold the frame until
+  // the Vault transfer had already finished, so the byte counter never shows.
+  if (team_->binding().busy() || team_->assets_busy()) return;
+  if (team_->joined() && !team_->hosting()) asset_browser_.retarget(team_->files_root());
+  else asset_browser_.retarget(project_.path);
   // Files the posse sent (or removed): drop cached textures, rescan the
   // Asset Browser, so sprites that point at them show up straight away.
   const std::vector<std::string> arrived = team_->take_arrived();

@@ -1,5 +1,5 @@
 // Project Manager: the template picker ("Break Ground"), Save as Template
-// and Claim Settings (the VR switch on 3D claims).
+// and Claim Settings (the VR switch on 3D realms).
 
 #include "editor/screens/ProjectManagerScreen.h"
 #include "editor/ux/Tooltip.h"
@@ -61,7 +61,7 @@ ImU32 mix(const ImVec4& a, const ImVec4& b, float t, float alpha = 1.0f) {
 }
 
 std::string plugin_short(const std::string& id) {
-  if (id == "ts.posse") return "Posse";
+  if (id == "ts.posse") return "Clan";
   if (id == "ts.frontier") return "Frontier";
   if (id == "ts.shipyard") return "Shipyard";
   if (id == "ts.tumbleweed") return "Tumbleweed";
@@ -74,8 +74,8 @@ std::string plugin_short(const std::string& id) {
 std::string ProjectManagerScreen::default_claim_name(const ProjectTemplate& t) const {
   if (t.blank() || t.empty_group()) {
     const bool two_d = t.has_alt && picker_dim_ >= 0 ? picker_dim_ == 0 : t.kind == ProjectKind::TwoD;
-    if (two_d) return "New 2D Claim";
-    return t.vr ? "New VR Claim" : "New 3D Claim";
+    if (two_d) return "New 2D Realm";
+    return t.vr ? "New VR Realm" : "New 3D Realm";
   }
   return "My " + t.name;
 }
@@ -106,7 +106,7 @@ void ProjectManagerScreen::open_template_picker(std::string preselect_id) {
     pick_template(t->id);
   } else {
     std::memset(picker_name_buf_, 0, sizeof(picker_name_buf_));
-    std::snprintf(picker_name_buf_, sizeof(picker_name_buf_), "%s", "New Claim");
+    std::snprintf(picker_name_buf_, sizeof(picker_name_buf_), "%s", "New Realm");
   }
 }
 
@@ -117,7 +117,7 @@ void ProjectManagerScreen::request_new_from_template(std::string name, std::stri
   pending_template_vr_ = vr;
   pending_template_dim_ = dimension;
   template_create_requested_ = true;
-  std::cout << "[ProjectManager] New claim from template \"" << pending_template_id_
+  std::cout << "[ProjectManager] New realm from template \"" << pending_template_id_
             << "\": \"" << pending_new_project_name_ << "\"\n";
 }
 
@@ -130,7 +130,7 @@ void ProjectManagerScreen::clear_template_create_request() {
 
 void ProjectManagerScreen::request_save_as_template(std::string name, std::string description) {
   if (!highlighted_index_.has_value()) {
-    error_message_ = "Pick a claim first, then Save as Template.";
+    error_message_ = "Pick a realm first, then Save as Template.";
     return;
   }
   pending_template_name_ = std::move(name);
@@ -141,7 +141,7 @@ void ProjectManagerScreen::request_save_as_template(std::string name, std::strin
 
 void ProjectManagerScreen::request_set_vr(bool on) {
   if (!highlighted_index_.has_value()) {
-    error_message_ = "Pick a claim first.";
+    error_message_ = "Pick a realm first.";
     return;
   }
   pending_vr_ = on;
@@ -357,7 +357,7 @@ void ProjectManagerScreen::draw_template_picker() {
   std::size_t total = templates_ ? templates_->templates().size() : 0;
   char caption[64];
   std::snprintf(caption, sizeof(caption), "%zu template%s", total, total == 1 ? "" : "s");
-  theme::SectionHeader("Pick a Claim Pattern", caption);
+  theme::SectionHeader("Pick a Realm", caption);
 
   static const char* kFilters[] = {"All", "2D", "3D", "VR", "Mine"};
   for (int i = 0; i < 5; ++i) {
@@ -389,7 +389,7 @@ void ProjectManagerScreen::draw_template_picker() {
       if (g == "empty") {
         draw_template_group("Empty", "clean starting points: no samples, no plugins", g);
       } else if (g == "samples") {
-        draw_template_group("Samples", "playable sample claims to learn from", g);
+        draw_template_group("Samples", "playable sample realms to learn from", g);
       } else {
         draw_template_group("Mine", "saved with Save as Template", g);
       }
@@ -430,7 +430,7 @@ void ProjectManagerScreen::draw_template_picker() {
     ImGui::TextDisabled("Pick a template above.");
   }
   ImGui::SetNextItemWidth(300.0f);
-  ImGui::InputTextWithHint("##tplname", "Name your claim", picker_name_buf_, sizeof(picker_name_buf_));
+  ImGui::InputTextWithHint("##tplname", "Name your realm", picker_name_buf_, sizeof(picker_name_buf_));
   ImGui::SameLine();
   const bool three_d = picked && !picked_2d;
   ImGui::BeginDisabled(!three_d);
@@ -438,7 +438,7 @@ void ProjectManagerScreen::draw_template_picker() {
   if (ImGui::Checkbox("VR (headset rig, grab, teleport)", &vr)) picker_vr_ = vr;
   ImGui::EndDisabled();
   if (!three_d && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ux::SetTooltip("VR is a switch on 3D claims.");
+    ux::SetTooltip("VR is a switch on 3D realms.");
   }
   ImGui::SameLine();
   ImGui::BeginDisabled(!picked);
@@ -475,7 +475,7 @@ void ProjectManagerScreen::draw_save_template_popup() {
                              ? &projects_[*highlighted_index_]
                              : nullptr;
   ImGui::Text("Save \"%s\" as a template", p ? p->name.c_str() : "(none)");
-  ImGui::TextDisabled("Copies the claim (scenes, scripts, assets, plugins) into your templates.");
+  ImGui::TextDisabled("Copies the realm (scenes, scripts, assets, plugins) into your templates.");
   ImGui::SetNextItemWidth(360.0f);
   ImGui::InputText("Name", save_name_buf_, sizeof(save_name_buf_));
   ImGui::SetNextItemWidth(360.0f);
@@ -492,10 +492,10 @@ void ProjectManagerScreen::draw_save_template_popup() {
 
 void ProjectManagerScreen::draw_claim_settings_popup() {
   if (settings_popup_pending_) {
-    ImGui::OpenPopup("Claim Settings");
+    ImGui::OpenPopup("Realm Settings");
     settings_popup_pending_ = false;
   }
-  if (!ImGui::BeginPopupModal("Claim Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (!ImGui::BeginPopupModal("Realm Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
     return;
   }
   const ProjectInfo* p = highlighted_index_ && *highlighted_index_ < projects_.size()
@@ -508,7 +508,7 @@ void ProjectManagerScreen::draw_claim_settings_popup() {
     ImGui::TextDisabled("%s", p->path.c_str());
     ImGui::Spacing();
     if (p->kind == ProjectKind::TwoD) {
-      ImGui::TextDisabled("VR is a switch on 3D claims.");
+      ImGui::TextDisabled("VR is a switch on 3D realms.");
     } else {
       bool vr = vr_enabled(*p);
       if (ImGui::Checkbox("VR", &vr)) request_set_vr(vr);

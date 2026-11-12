@@ -20,6 +20,7 @@
 #include "GpuCheck.h"
 #include "HudText.h"
 
+#include "core/Brand.h"
 #include "core/JsonMini.h"
 #include "gfx/GlTextureUploader.h"
 #include "gfx/TextureCache.h"
@@ -148,7 +149,7 @@ std::string project_name(const std::string& dir) {
   const fs::path p = fs::path(dir).lexically_normal();
   const std::string leaf =
       (p.has_filename() ? p.filename() : p.parent_path().filename()).string();
-  return leaf.empty() ? std::string("TombStone") : leaf;
+  return leaf.empty() ? std::string(ts::tombstone::brand::kProduct) : leaf;
 }
 
 // The Telegraph on the wire: every world log line (scripts, toasts,
@@ -596,7 +597,7 @@ int run_window(const Options& opt, Telegraph& telegraph) {
   }
   // Default (compatibility) context: the renderer is fixed-function GL.
   GLFWwindow* win = glfwCreateWindow(game::window_width(), game::window_height(),
-                                     (name + " | TombStone").c_str(),
+                                     (name + " | " + ts::tombstone::brand::kProduct).c_str(),
                                      nullptr, nullptr);
   if (!win) {
     std::cerr << "[ts_game] could not open a window\n";
@@ -740,7 +741,7 @@ int run_window(const Options& opt, Telegraph& telegraph) {
                     std::to_string(ev->tick) + ")";
           }
           std::snprintf(title, sizeof(title),
-                        "%s | TombStone | %s | %.0f ticks/s | P1 %.0f, %.0f%s%s",
+                        "%s | Nidavellir Engine | %s | %.0f ticks/s | P1 %.0f, %.0f%s%s",
                         name.c_str(),
                         g.session.paused() ? "HOLDING UP (P)" : "riding",
                         g.session.ticks_per_second(),
@@ -810,7 +811,7 @@ int main(int argc, char** argv) {
     std::cerr << err << '\n';
     return 2;
   }
-  std::cout << "TombStone Game\n";
+  std::cout << ts::tombstone::brand::kProduct << "\n";
   // Physics and rider movement are Trading Post plugins (0.2.0): offer the
   // 3D halves; the 2D path switches them on through its PluginManager, the
   // 3D / VR path (no manager) holds the claim's list here.

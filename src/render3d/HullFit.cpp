@@ -1,6 +1,7 @@
 #include "render3d/HullFit.h"
 
 #include "core/AssetMeta.h"
+#include "render3d/ImportLimits.h"
 #include "render3d/ModelImport.h"
 
 #include <algorithm>
@@ -9,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <new>
 #include <queue>
 #include <sstream>
 #include <unordered_map>
@@ -271,8 +273,40 @@ HullBuild build_hull(std::vector<Vec3> pts) {
   return out;
 }
 
+std::vector<Vec3> thin_cloud(const std::vector<Vec3>& src, int limit) {
+  // Extremes first so the hull still covers the mesh, then a stride.
+  int ex[6] = {0, 0, 0, 0, 0, 0};
+  for (int i = 0; i < static_cast<int>(src.size()); ++i) {
+    const Vec3& p = src[static_cast<std::size_t>(i)];
+    if (p.x < src[static_cast<std::size_t>(ex[0])].x) ex[0] = i;
+    if (p.x > src[static_cast<std::size_t>(ex[1])].x) ex[1] = i;
+    if (p.y < src[static_cast<std::size_t>(ex[2])].y) ex[2] = i;
+    if (p.y > src[static_cast<std::size_t>(ex[3])].y) ex[3] = i;
+    if (p.z < src[static_cast<std::size_t>(ex[4])].z) ex[4] = i;
+    if (p.z > src[static_cast<std::size_t>(ex[5])].z) ex[5] = i;
+  }
+  std::vector<char> used(src.size(), 0);
+  std::vector<Vec3> out;
+  out.reserve(static_cast<std::size_t>(limit));
+  for (int e : ex) {
+    if (used[static_cast<std::size_t>(e)]) continue;
+    used[static_cast<std::size_t>(e)] = 1;
+    out.push_back(src[static_cast<std::size_t>(e)]);
+  }
+  const std::size_t room = static_cast<std::size_t>(limit) > out.size() ? static_cast<std::size_t>(limit) - out.size() : 0;
+  const std::size_t step = std::max<std::size_t>(1, room ? src.size() / room : src.size());
+  for (std::size_t i = 0; i < src.size() && out.size() < static_cast<std::size_t>(limit); i += step) {
+    if (used[i]) continue;
+    out.push_back(src[i]);
+  }
+  return out;
+}
+
 std::vector<Vec3> limit_cloud(std::vector<Vec3> src, int limit) {
   if (limit <= 0 || static_cast<int>(src.size()) <= limit) return src;
+  // Dropping one point per pass is quadratic. A high-poly mesh never
+  // finishes it; sample instead once the cloud leaves the small-prop range.
+  if (src.size() > kHullQualityPointLimit) return thin_cloud(src, std::max(limit, 4));
   const int keep = std::max(limit, 4);
   while (static_cast<int>(src.size()) > keep) {
     float best = std::numeric_limits<float>::max();
@@ -638,11 +672,131 @@ bool read_hulls(const json::Value& a, std::vector<std::vector<Vec3>>* out) {
   return !out->empty();
 }
 
+std::vector<Mat4> pose_rest(const Model& m) {
+  std::vector<Mat4> rest;
+  if (m.skinned()) skin_palette(m.skeleton, rest_pose(m.skeleton), &rest);
+  return rest;
+}
+
+void pose_positions(const Model& m, const ModelPrimitive& p, const std::vector<Mat4>& rest,
+                    std::vector<Vec3>* out) {
+  out->resize(p.mesh.vertices.size());
+  if (!p.mesh.skinned() || rest.empty()) {
+    for (std::size_t v = 0; v < p.mesh.vertices.size(); ++v) (*out)[v] = p.mesh.vertices[v].position;
+    return;
+  }
+  std::vector<Mat4> pal;
+  primitive_palette(p, rest, &pal);
+  for (std::size_t v = 0; v < p.mesh.vertices.size(); ++v) {
+    const SkinVertex& s = v < p.mesh.skin.size() ? p.mesh.skin[v] : SkinVertex{};
+    (*out)[v] = skin_point(pal, s.joints, s.weights, p.mesh.vertices[v].position);
+  }
+}
+
+std::size_t triangle_count(const Model& m) {
+  std::size_t n = 0;
+  for (const ModelPrimitive& p : m.primitives) n += p.mesh.indices.size() / 3;
+  return n;
+}
+
+// A few thousand points spread over the rest pose, plus the extremes.
+// Enough for one convex hull; not a copy of every triangle.
+std::vector<Vec3> sample_rest_points(const Model& m, std::size_t cap) {
+  const std::vector<Mat4> rest = pose_rest(m);
+  std::size_t total = 0;
+  for (const ModelPrimitive& p : m.primitives) total += p.mesh.indices.size();
+  const std::size_t step = std::max<std::size_t>(1, cap ? total / cap : total);
+  std::vector<Vec3> pts;
+  pts.reserve(std::min(total, cap) + 8);
+  Vec3 mn{1.0e30f, 1.0e30f, 1.0e30f}, mx{-1.0e30f, -1.0e30f, -1.0e30f};
+  bool any = false;
+  std::vector<Vec3> pos;
+  std::size_t seen = 0;
+  for (const ModelPrimitive& p : m.primitives) {
+    pose_positions(m, p, rest, &pos);
+    for (std::uint32_t i : p.mesh.indices) {
+      if (i >= pos.size()) continue;
+      const Vec3& v = pos[i];
+      if (!std::isfinite(v.x) || !std::isfinite(v.y) || !std::isfinite(v.z)) continue;
+      if (!any) {
+        mn = mx = v;
+        any = true;
+      }
+      mn = vmin(mn, v);
+      mx = vmax(mx, v);
+      if (seen % step == 0 && pts.size() < cap) pts.push_back(v);
+      ++seen;
+    }
+  }
+  if (any) {
+    const Vec3 box[8] = {{mn.x, mn.y, mn.z}, {mx.x, mn.y, mn.z}, {mn.x, mx.y, mn.z}, {mx.x, mx.y, mn.z},
+                         {mn.x, mn.y, mx.z}, {mx.x, mn.y, mx.z}, {mn.x, mx.y, mx.z}, {mx.x, mx.y, mx.z}};
+    for (const Vec3& c : box) pts.push_back(c);
+  }
+  return pts;
+}
+
 FittedCollision compute_fitted(const Model& m, const FitParams& params) {
   FittedCollision f;
   const FitParams p = clamp_fit_params(params);
   std::vector<Tri> tris;
   std::vector<Vec3> pts;
+  const std::size_t tri_n = triangle_count(m);
+  if (tri_n > kColliderFullTriangleLimit) {
+    // Full decomposition walks every triangle and then thins the cloud one
+    // point at a time. Past the threshold that is the freeze: one hull
+    // from a sample, and the same hull as the only convex piece.
+    const std::vector<Vec3> sampled = sample_rest_points(m, 4096);
+    if (sampled.size() < 4) return f;
+    f.fingerprint = mesh_fingerprint(m);
+    f.vertex_limit = p.hull_vertices;
+    f.decompose_max = p.decompose_max;
+    const std::vector<Vec3> unique = dedup_points(sampled);
+    const HullBuild hull = build_hull(limit_cloud(unique, p.hull_vertices));
+    if (hull.points.size() >= 4) f.convex.push_back(hull.points);
+    else if (unique.size() >= 4) f.convex.push_back(limit_cloud(unique, p.hull_vertices));
+    Vec3 mean;
+    for (const Vec3& v : unique) mean += v;
+    if (!unique.empty()) mean = mean * (1.0f / static_cast<float>(unique.size()));
+    float c[3][3] = {};
+    for (const Vec3& v : unique) {
+      const Vec3 d = v - mean;
+      const float xyz[3] = {d.x, d.y, d.z};
+      for (int r = 0; r < 3; ++r)
+        for (int col = 0; col < 3; ++col) c[r][col] += xyz[r] * xyz[col];
+    }
+    float rot[3][3];
+    jacobi(c, rot);
+    Vec3 ax{rot[0][0], rot[1][0], rot[2][0]};
+    Vec3 ay{rot[0][1], rot[1][1], rot[2][1]};
+    Vec3 az{rot[0][2], rot[1][2], rot[2][2]};
+    ax = normalize(ax);
+    ay = normalize(ay);
+    az = cross(ax, ay);
+    if (length(az) < 1.0e-6f) az = {0, 0, 1};
+    az = normalize(az);
+    ay = normalize(cross(az, ax));
+    if (dot(cross(ax, ay), az) < 0.0f) az = az * -1.0f;
+    Vec3 omn{1.0e30f, 1.0e30f, 1.0e30f}, omx{-1.0e30f, -1.0e30f, -1.0e30f};
+    for (const Vec3& v : unique) {
+      const Vec3 d = v - mean;
+      const float lx = dot(d, ax), ly = dot(d, ay), lz = dot(d, az);
+      omn.x = std::min(omn.x, lx);
+      omn.y = std::min(omn.y, ly);
+      omn.z = std::min(omn.z, lz);
+      omx.x = std::max(omx.x, lx);
+      omx.y = std::max(omx.y, ly);
+      omx.z = std::max(omx.z, lz);
+    }
+    const Vec3 mid = (omn + omx) * 0.5f;
+    f.obb_center = mean + ax * mid.x + ay * mid.y + az * mid.z;
+    f.obb_extents = {std::max(0.02f, omx.x - omn.x), std::max(0.02f, omx.y - omn.y),
+                     std::max(0.02f, omx.z - omn.z)};
+    f.obb_rotation = quat_from_axes(ax, ay, az);
+    f.has_obb = true;
+    if (!f.convex.empty()) f.pieces = f.convex;
+    return f;
+  }
   if (!collect_mesh(m, &tris, &pts)) return f;
   f.fingerprint = mesh_fingerprint(m);
   f.vertex_limit = p.hull_vertices;
@@ -732,27 +886,50 @@ FitParams fit_params_from_settings(const json::Value& settings) {
 }
 
 std::uint64_t mesh_fingerprint(const Model& m) {
-  MeshData mesh;
-  rest_pose_mesh(m, &mesh);
+  // Hash the posed positions in place. rest_pose_mesh copied every vertex
+  // (and the skin) just to mix a few integers; that copy was a second full
+  // mesh sitting next to the import.
+  const std::vector<Mat4> rest = pose_rest(m);
   std::uint64_t h = 0xcbf29ce484222325ull;
-  h = fnv_mix(h, mesh.indices.size());
-  for (std::uint32_t i : mesh.indices) {
-    if (i >= mesh.vertices.size()) continue;
-    const Vec3& p = mesh.vertices[i].position;
-    h = fnv_mix(h, static_cast<std::uint32_t>(quant(p.x)));
-    h = fnv_mix(h, static_cast<std::uint32_t>(quant(p.y)));
-    h = fnv_mix(h, static_cast<std::uint32_t>(quant(p.z)));
+  std::size_t nidx = 0;
+  for (const ModelPrimitive& p : m.primitives) nidx += p.mesh.indices.size();
+  h = fnv_mix(h, nidx);
+  std::vector<Vec3> pos;
+  for (const ModelPrimitive& p : m.primitives) {
+    pose_positions(m, p, rest, &pos);
+    for (std::uint32_t i : p.mesh.indices) {
+      if (i >= pos.size()) continue;
+      const Vec3& v = pos[i];
+      h = fnv_mix(h, static_cast<std::uint32_t>(quant(v.x)));
+      h = fnv_mix(h, static_cast<std::uint32_t>(quant(v.y)));
+      h = fnv_mix(h, static_cast<std::uint32_t>(quant(v.z)));
+    }
   }
   return h;
+}
+
+FittedCollision fitted_preview(const Model& m, const FitParams& params) {
+  const FitParams p = clamp_fit_params(params);
+  try {
+    if (m.fitted.matches(mesh_fingerprint(m), p.hull_vertices, p.decompose_max)) return m.fitted;
+    return compute_fitted(m, p);
+  } catch (const std::bad_alloc&) {
+    return {};
+  }
 }
 
 bool ensure_fitted(Model* m, const FitParams& params) {
   if (!m) return false;
   const FitParams p = clamp_fit_params(params);
-  const std::uint64_t fp = mesh_fingerprint(*m);
-  if (m->fitted.matches(fp, p.hull_vertices, p.decompose_max)) return true;
-  m->fitted = compute_fitted(*m, p);
-  return m->fitted.valid();
+  try {
+    const std::uint64_t fp = mesh_fingerprint(*m);
+    if (m->fitted.matches(fp, p.hull_vertices, p.decompose_max)) return true;
+    m->fitted = compute_fitted(*m, p);
+    return m->fitted.valid();
+  } catch (const std::bad_alloc&) {
+    m->fitted = {};
+    return false;
+  }
 }
 
 json::Value fitted_to_json(const FittedCollision& f) {

@@ -52,8 +52,9 @@ struct Image {
   int height = 0;
   std::vector<unsigned char> rgba;
   bool valid() const {
-    return width > 0 && height > 0 &&
-           rgba.size() == static_cast<std::size_t>(width) * height * 4;
+    if (width <= 0 || height <= 0) return false;
+    const auto bytes = static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height) * 4ull;
+    return rgba.size() == bytes;
   }
 };
 

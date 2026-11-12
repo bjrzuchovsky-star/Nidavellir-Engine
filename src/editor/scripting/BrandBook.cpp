@@ -1,4 +1,6 @@
 #include "editor/scripting/BrandBook.h"
+
+#include "editor/scripting/GraphCanvas.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
 
@@ -15,7 +17,9 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <mutex>
 #include <sstream>
+#include <thread>
 
 namespace ts {
 namespace tombstone {
@@ -59,11 +63,6 @@ ImVec4 value_color(const ScriptValue& v) {
     case ScriptValue::Type::Number: break;
   }
   return theme::Sand();
-}
-
-std::string upper(std::string s) {
-  for (char& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-  return s;
 }
 
 constexpr float kNodeW = 196.0f;
@@ -111,18 +110,34 @@ struct LanguageStatus {
   std::string cpp, cs;
   bool cpp_ok = false, cs_ok = false;
 };
-std::shared_future<LanguageStatus>& language_status() {
-  static std::shared_future<LanguageStatus> f = std::async(std::launch::async, [] {
-    LanguageStatus s;
-    std::string why;
-    s.cpp_ok = runtime::native_scripts::toolchain_available(&why);
-    s.cpp = s.cpp_ok ? "ready (cmake + host compiler)" : why;
-    s.cs_ok = runtime::csharp_scripts::sdk_available(&why);
-    s.cs = s.cs_ok ? "ready (.NET SDK " + runtime::csharp_scripts::dotnet_info().sdk + ")"
-                   : std::string("Install the .NET 8 SDK to enable C#");
-    return s;
-  }).share();
-  return f;
+// A detached probe. std::async's future would block process exit until
+// vswhere / dotnet finished, which hung --showcase-shot graph after the PNG.
+struct LanguageSlot {
+  std::mutex mu;
+  bool ready = false;
+  LanguageStatus status;
+};
+LanguageSlot& language_slot() {
+  static LanguageSlot slot;
+  return slot;
+}
+void ensure_language_probe() {
+  static std::once_flag once;
+  std::call_once(once, [] {
+    std::thread([] {
+      LanguageStatus s;
+      std::string why;
+      s.cpp_ok = runtime::native_scripts::toolchain_available(&why);
+      s.cpp = s.cpp_ok ? "ready (cmake + host compiler)" : why;
+      s.cs_ok = runtime::csharp_scripts::sdk_available(&why);
+      s.cs = s.cs_ok ? "ready (.NET SDK " + runtime::csharp_scripts::dotnet_info().sdk + ")"
+                     : std::string("Install the .NET 8 SDK to enable C#");
+      LanguageSlot& slot = language_slot();
+      std::lock_guard<std::mutex> lk(slot.mu);
+      slot.status = std::move(s);
+      slot.ready = true;
+    }).detach();
+  });
 }
 
 }  // namespace
@@ -175,7 +190,7 @@ void BrandBook::open(const std::string& project_dir, const std::string& project_
   project_dir_ = project_dir;
   project_name_ = project_name;
   open_ = true;
-  (void)language_status();
+  ensure_language_probe();
   refresh_list();
   if (rel_.empty() && !graphs_.empty()) load(graphs_.front());
 }
@@ -327,7 +342,7 @@ void BrandBook::draw_sidebar() {
   theme::BrandBlock("Brand Book", "visual scripts", ImGui::GetContentRegionAvail().x);
   theme::SectionHeader("Graphs", "scripts/*.graph.json");
   ImGui::BeginChild("##bb_list", ImVec2(0, 150), ImGuiChildFlags_Borders);
-  if (graphs_.empty()) ImGui::TextDisabled("No graphs on this claim yet.");
+  if (graphs_.empty()) ImGui::TextDisabled("No graphs on this realm yet.");
   for (const std::string& g : graphs_) {
     if (ImGui::Selectable(g.c_str() + 8, g == rel_)) {
       if (g != rel_) load(g);
@@ -384,12 +399,17 @@ void BrandBook::draw_languages() {
   ImGui::TextColored(theme::Success(), "Graph");
   ImGui::SameLine(80);
   ImGui::TextDisabled(".graph.json  ready");
-  auto& st = language_status();
-  if (st.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
-    ImGui::TextDisabled("C++ / C#: checking toolchains...");
-    return;
+  ensure_language_probe();
+  LanguageStatus s;
+  {
+    LanguageSlot& slot = language_slot();
+    std::lock_guard<std::mutex> lk(slot.mu);
+    if (!slot.ready) {
+      ImGui::TextDisabled("C++ / C#: checking toolchains...");
+      return;
+    }
+    s = slot.status;
   }
-  const LanguageStatus& s = st.get();
   ImGui::TextColored(s.cpp_ok ? theme::Success() : theme::Warning(), "C++");
   ImGui::SameLine(80);
   ImGui::PushTextWrapPos(0);
@@ -472,7 +492,7 @@ void BrandBook::draw_canvas() {
     dl->AddLine(ImVec2(origin.x, origin.y + y), ImVec2(origin.x + size.x, origin.y + y),
                 theme::U32(theme::GridLine(), major ? 1.6f : 0.7f));
   }
-  theme::TombstoneMark(dl, ImVec2(origin.x + size.x - 60, origin.y + size.y - 130), 100,
+  theme::RuneMark(dl, ImVec2(origin.x + size.x - 60, origin.y + size.y - 130), 100,
                        theme::U32(theme::Sand(), 0.06f), theme::U32(theme::Charcoal(), 0.10f));
   if (rel_.empty()) {
     theme::DrawSizedText(dl, ImVec2(origin.x + 30, origin.y + 30), 22, theme::U32(theme::TextMuted()),
@@ -590,7 +610,6 @@ void BrandBook::draw_canvas() {
     if (!a || !b) continue;
     const ImVec2 p0 = pin_pos(*a, l.from_pin, true), p1 = pin_pos(*b, l.to_pin, false);
     const bool exec = is_exec_out(graph_, l.from_node, l.from_pin);
-    const float dx = std::max(40.0f * z, std::fabs(p1.x - p0.x) * 0.5f);
     ImU32 col = exec ? theme::U32(theme::Text(), 0.85f) : theme::U32(theme::Sand(), 0.85f);
     if (!exec) {
       const GraphNodeDef* d = runtime::find_graph_node(b->type);
@@ -599,7 +618,7 @@ void BrandBook::draw_canvas() {
       }
     }
     if (selected_ && (l.from_node == selected_ || l.to_node == selected_)) col = theme::U32(theme::Accent());
-    dl->AddBezierCubic(p0, ImVec2(p0.x + dx, p0.y), ImVec2(p1.x - dx, p1.y), p1, col, (exec ? 3.2f : 2.0f) * z);
+    graphcanvas::draw_wire(dl, p0, p1, col, (exec ? 3.2f : 2.0f) * z);
   }
   if (linking_) {
     const GraphNode* a = graph_.node(link_from_.node);
@@ -617,22 +636,9 @@ void BrandBook::draw_canvas() {
     const std::string cat = l.def ? l.def->category : "Unknown";
     const ImVec4 fam = l.def ? family_color(cat) : theme::Danger();
     const ImVec2 a = to_screen(n.x, n.y), b = to_screen(n.x + kNodeW, n.y + l.h);
-    const float r = 6.0f * z;
-    dl->AddRectFilled(ImVec2(a.x + 4 * z, a.y + 5 * z), ImVec2(b.x + 4 * z, b.y + 5 * z),
-                      IM_COL32(0, 0, 0, 70), r);  // shadow
-    dl->AddRectFilled(a, b, theme::U32(theme::PanelBg()), r);
-    dl->AddRectFilled(a, ImVec2(b.x, a.y + kHeaderH * z), theme::U32(fam), r, ImDrawFlags_RoundCornersTop);
-    dl->AddRectFilled(ImVec2(a.x, a.y + kHeaderH * z - 3 * z), ImVec2(b.x, a.y + kHeaderH * z),
-                      theme::U32(theme::Charcoal(), 0.35f));  // header rule
     const bool sel = n.id == selected_;
-    dl->AddRect(a, b, sel ? theme::U32(theme::Accent()) : theme::U32(theme::Border()), r, 0, sel ? 2.5f : 1.0f);
     const std::string title = l.def ? l.def->title : n.type;
-    theme::DrawSizedText(dl, ImVec2(a.x + 9 * z, a.y + 7 * z), 15.0f * z, theme::U32(theme::TextOnAccent()),
-                         title.c_str());
-    const std::string fam_label = upper(cat);
-    const ImVec2 fl = theme::MeasureText(9.5f * z, fam_label.c_str());
-    theme::DrawSizedText(dl, ImVec2(b.x - fl.x - 8 * z, a.y + 10 * z), 9.5f * z,
-                         theme::U32(theme::TextOnAccent(), 0.65f), fam_label.c_str());
+    graphcanvas::draw_node_card(dl, a, b, z, title.c_str(), cat.c_str(), fam, sel);
     for (int side = 0; side < 2; ++side) {
       const auto& col = side ? l.right : l.left;
       for (const auto& [name, exec] : col) {

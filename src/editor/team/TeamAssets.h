@@ -11,12 +11,12 @@
 
 #include <atomic>
 #include <cstdint>
-#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace ts {
@@ -47,7 +47,7 @@ std::string team_meta_asset(const std::string& rel);  // its asset ("assets/..."
 
 struct TeamAssetPass {
   // In (copies: the pass never touches the session).
-  std::string root;                                   // claim folder
+  std::string root;                                   // realm folder
   std::map<std::string, team::AssetRef> session;      // confirmed assets
   std::map<std::string, TeamLocalFile> files;         // last scan
   std::map<std::string, std::string> synced;          // path -> sha the session confirmed here
@@ -79,6 +79,12 @@ class TeamAssetSync {
   // Ask the running pass to stop after the current file and wait for it.
   void cancel_and_wait();
   void wait();
+  // Do not upload this project path (a failed or cancelled import). The
+  // running pass skips it; later passes skip it until release().
+  void hold(const std::string& rel);
+  void release(const std::string& rel);
+  bool held(const std::string& rel) const;
+  bool stopping() const { return cancel_.load(); }
   TeamAssetProgress progress() const;
 
   // The pass itself (runs on the worker; public for tests).
@@ -86,10 +92,18 @@ class TeamAssetSync {
 
  private:
   void set_progress(const TeamAssetProgress& p);
-  std::future<TeamAssetPass> job_;
+  std::thread thread_;
   mutable std::mutex mu_;
   TeamAssetProgress progress_;
+  TeamAssetPass result_;
+  bool has_result_ = false;
+  // running_: the worker is inside the pass. done_: the pass is finished
+  // and not taken yet. Neither uses std::future::wait_for, which can report
+  // deferred and leave the pass unstarted (no error, no bytes).
+  std::atomic<bool> running_{false};
+  std::atomic<bool> done_{false};
   std::atomic<bool> cancel_{false};
+  std::set<std::string> held_;
 };
 
 }  // namespace editor

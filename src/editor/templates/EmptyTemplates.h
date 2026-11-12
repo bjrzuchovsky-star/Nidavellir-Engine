@@ -29,7 +29,7 @@ namespace empty_templates {
 const std::vector<std::string>& ids();
 bool handles(const std::string& id);
 
-// Writes the claim into `dir` (created if missing). False with the reason.
+// Writes the realm into `dir` (created if missing). False with the reason.
 bool write(const std::string& id, const std::string& dir, const std::string& name,
            std::string* error);
 

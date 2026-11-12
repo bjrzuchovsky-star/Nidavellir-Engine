@@ -136,11 +136,11 @@ void FreightOffice::draw_rights() {
   for (const auto& s : third_party_) open += s.acknowledged ? 0 : 1;
   ImGui::PushStyleColor(ImGuiCol_Text, open ? theme::Warning() : theme::TextMuted());
   ImGui::TextWrapped("%zu imported third-party file(s) (Source engine formats / .gma addons) will ship. "
-                     "You need the rights to ship these. TombStone is not affiliated with Valve or Facepunch.",
+                     "You need the rights to ship these. Nidavellir is not affiliated with Valve or Facepunch.",
                      third_party_.size());
   ImGui::PopStyleColor();
   bool changed = false;
-  if (ImGui::Checkbox("I have the rights to ship all of these (this claim)", &rights_all_)) {
+  if (ImGui::Checkbox("I have the rights to ship all of these (this realm)", &rights_all_)) {
     exporter::provenance::acknowledge(project_dir_, "", rights_all_);
     changed = true;
   }

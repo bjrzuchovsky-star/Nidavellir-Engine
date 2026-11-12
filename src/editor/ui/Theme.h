@@ -9,9 +9,10 @@ namespace tombstone {
 namespace editor {
 namespace theme {
 
-// TombStone Admin look -- western-frontier grit without cartoon:
-// deep charcoal, warm stone/sand, amber/gold primary, rust/copper secondary.
-// Two variants: "dark" (Dusk, default) and "light" (Parchment).
+// Editor looks. Colours live in Theme.cpp.
+//   "forge" (default) — iron greys, molten orange #E8792B
+//   "dusk" or "dark"  — the 0.2.x Dusk palette (still selectable)
+//   "light"           — Parchment
 // Call Apply once at startup and whenever Settings.theme changes.
 void Apply(const std::string& theme_name);
 bool IsLight();
@@ -74,6 +75,9 @@ void TitleStrip(const char* title, const char* subtitle);
 // plinth.
 void TombstoneMark(ImDrawList* dl, const ImVec2& top_center, float height,
                    ImU32 stone, ImU32 engrave);
+// Hammer-and-anvil mark used on the splash, title strip and About block.
+void RuneMark(ImDrawList* dl, const ImVec2& top_center, float height, ImU32 steel,
+              ImU32 ember);
 
 // Text at an explicit pixel size (title / hero text without extra fonts).
 ImVec2 MeasureText(float px, const char* text);

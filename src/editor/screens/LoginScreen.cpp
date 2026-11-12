@@ -50,12 +50,12 @@ void LoginScreen::draw_ui() {
   theme::BeginCard("LoginPanel", panel_w, panel_h);
 
   const float inner_w = ImGui::GetContentRegionAvail().x;
-  theme::BrandBlock(brand::kAdminTitle, "Sign the ledger. Ride in.", inner_w);
+  theme::BrandBlock(brand::kAdminTitle, "Sign the ledger.", inner_w);
   ImGui::Dummy(ImVec2(0, 6.0f));
   theme::SectionHeader("Credentials", "who goes there");
 
   ImGui::SetNextItemWidth(-1);
-  ImGui::InputTextWithHint("##user", "Rider name", username_buf_,
+  ImGui::InputTextWithHint("##user", "Wanderer name", username_buf_,
                            sizeof(username_buf_));
   ImGui::SetNextItemWidth(-1);
   ImGui::InputTextWithHint("##pass", "Password", password_buf_,

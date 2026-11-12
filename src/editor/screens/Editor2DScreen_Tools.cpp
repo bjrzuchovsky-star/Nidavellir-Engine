@@ -414,7 +414,7 @@ void Editor2DScreen::draw_entity_context_menu(std::uint64_t clicked) {
       };
       if (ux::MenuItem("Empty entity", nullptr, false, !is_playing())) make("Entity", nullptr);
       if (ux::MenuItem("Collider box", nullptr, false, !is_playing())) make("Wall", "Collider");
-      if (ux::MenuItem("Player", nullptr, false, !is_playing())) make("Rider", "Player");
+      if (ux::MenuItem("Player", nullptr, false, !is_playing())) make("Wanderer", "Player");
       if (ux::MenuItem("Camera", nullptr, false, !is_playing())) make("Camera", "Camera");
       if (ux::MenuItem("Spawn point", nullptr, false, !is_playing())) make("Spawn", "Spawn");
       ux::EndMenu();

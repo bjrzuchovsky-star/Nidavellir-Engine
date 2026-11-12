@@ -60,10 +60,18 @@ struct Channel {
   int width() const { return path == ChannelPath::Rotation ? 4 : 3; }
 };
 
+// A named moment on a clip (a footstep). The animator fires it as
+// on_anim_event, the same as an Animator component event.
+struct ClipEvent {
+  float time = 0.0f;
+  std::string name;
+};
+
 struct Clip {
   std::string name;
   float duration = 0.0f;  // last key time
   std::vector<Channel> channels;
+  std::vector<ClipEvent> events;
 };
 
 Pose rest_pose(const Skeleton& skel);

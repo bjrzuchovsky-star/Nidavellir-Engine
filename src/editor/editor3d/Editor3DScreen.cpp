@@ -1,5 +1,6 @@
 #include "editor/editor3d/Editor3DScreen.h"
 #include "editor/ux/FriendlyError.h"
+#include "editor/ux/ShotOpts.h"
 #include "editor/plugins/PluginNeeds.h"
 #include "terrain/TerrainView.h"
 #include "plugins/profiler/ProfilerPlugin.h"
@@ -20,6 +21,7 @@
 #include "editor/assets/ModelSplit.h"
 #include "render3d/ColliderFit.h"
 #include "render3d/HullFit.h"
+#include "render3d/ImportLimits.h"
 #include "render3d/ModelImport.h"
 
 #include <GLFW/glfw3.h>
@@ -50,6 +52,7 @@ Editor3DScreen::~Editor3DScreen() {
 }
 
 void Editor3DScreen::note(const std::string& text, LogLevel level) {
+  if (shot::hide_log_line(text)) return;
   runtime::LogEntry e;
   e.level = level;
   e.channel = "editor";
@@ -69,6 +72,7 @@ void Editor3DScreen::on_enter() {
                   e.level = level;
                   e.channel = "plugins";
                   e.text = text;
+                  if (shot::hide_log_line(e.text)) return;
                   log_.push_back(std::move(e));
                 });
   std::string err;
@@ -82,9 +86,9 @@ void Editor3DScreen::on_enter() {
     } else {
       // The starter rider / grabbables ride with Rider 3D + Jolt (0.2.0).
       if (!plugins_.follow_needs(plugin_needs(scene_)).empty()) plugins_.apply();
-      note(vr_project() ? "Staked a fresh VR claim: ground, crate, lamp, a table of things to "
+      note(vr_project() ? "Staked a fresh VR realm: ground, crate, lamp, a table of things to "
                           "grab and the VR rig"
-                        : "Staked a fresh 3D claim: ground, crate, lamp and a rider");
+                        : "Staked a fresh 3D realm: ground, crate, lamp and a wanderer");
     }
   } else if (!scene3d::load_file(path, &scene_, &err)) {
     note(err, LogLevel::Error);
@@ -93,7 +97,7 @@ void Editor3DScreen::on_enter() {
       scene_locked_ = true;  // keep the newer file exactly as it is
       scene_locked_why_ = err;
     }
-    ux::show_error(ux::explain(err, ux::ErrorKind::MissingFile, "Opening claim " + project_.name));
+    ux::show_error(ux::explain(err, ux::ErrorKind::MissingFile, "Opening realm " + project_.name));
   } else {
     migrate_cameras_on_open(path);  // pre-v18: the follow camera becomes an entity
   }
@@ -155,6 +159,7 @@ void Editor3DScreen::ensure_renderer() {
   }
   renderer_->set_offscreen(true);
   view_ = std::make_unique<render3d::SceneView>(renderer_.get());
+  view_->set_upload_budget(render3d::kUploadBudgetBytes);
   view_->set_project_dir(project_.path);
 }
 
@@ -194,7 +199,7 @@ AppState Editor3DScreen::on_update(float delta_seconds) {
   }
   asset_poll_clock_ += delta_seconds;
   vault_panel_.update();
-  // Hold the browser's rescan while the Vault worker writes into the claim.
+  // Hold the browser's rescan while the Vault worker writes into the realm.
   if (asset_poll_clock_ > 1.5 && !playing() && !vault_panel_.busy()) {
     asset_poll_clock_ = 0.0;
     asset_browser_.rescan();
@@ -207,7 +212,7 @@ AppState Editor3DScreen::on_update(float delta_seconds) {
   if (back_requested_) return AppState::ProjectManager;
   if (settings_requested_) {
     settings_requested_ = false;
-    return AppState::Settings;  // AppFlow comes back to this claim afterwards
+    return AppState::Settings;  // AppFlow comes back to this realm afterwards
   }
   return AppState::Editor3D;
 }
@@ -486,14 +491,34 @@ std::uint64_t Editor3DScreen::drop_asset(const std::string& rel, const Vec3& pos
   std::transform(ext.begin(), ext.end(), ext.begin(),
                  [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   if (render3d::is_model_file(rel)) {  // glTF, Source .mdl, FBX / OBJ / DAE..., .blend
-    if (view_ && !view_->model(rel)) {
+    const render3d::Model* dropped = view_ ? view_->model(rel) : nullptr;
+    if (view_ && !dropped) {
       collect_problems();
-      note("Could not place " + rel + " (see above)", LogLevel::Error);
+      note("Could not place " + rel, LogLevel::Error);
       return 0;
+    }
+    if (dropped && dropped->animation_only()) {
+      const std::uint64_t onto = target ? target : primary();
+      if (!onto) {
+        note(fs::path(rel).stem().string() +
+                 " is an animation (no mesh). Select a skinned character and drop it on them, "
+                 "or onto Animation in the Inspector.",
+             LogLevel::Warn);
+        return 0;
+      }
+      std::string err;
+      apply_animation_asset(onto, rel, &err);
+      return onto;
     }
     Entity3D e;
     e.name = fs::path(rel).stem().string();
     e.transform.position = pos;
+    // Bind-pose feet on the surface under the cursor. A rig whose origin
+    // sits above the soles used to hover by that gap, collider and all.
+    if (dropped && std::isfinite(dropped->bounds.min.y) && std::isfinite(dropped->bounds.max.y) &&
+        dropped->bounds.max.y > dropped->bounds.min.y) {
+      e.transform.position.y = pos.y - dropped->bounds.min.y;
+    }
     e.mesh = scene3d::MeshRef{rel, true};
     // Import settings from the .meta (Asset Browser).
     float scale = 1.0f;
@@ -763,6 +788,13 @@ render3d::Camera3D Editor3DScreen::editor_camera() const {
   return cam;
 }
 
+void Editor3DScreen::look_at(const render3d::Vec3& target, float yaw, float pitch, float distance) {
+  scene_.editor_camera.target = target;
+  scene_.editor_camera.yaw = yaw;
+  scene_.editor_camera.pitch = std::clamp(pitch, -89.0f, 89.0f);
+  scene_.editor_camera.distance = std::clamp(distance, 0.5f, 800.0f);
+}
+
 void Editor3DScreen::orbit(float dyaw, float dpitch) {
   look_through_ = 0;  // moving the view leaves the camera
   scene_.editor_camera.yaw = std::fmod(scene_.editor_camera.yaw + dyaw, 360.0f);
@@ -853,6 +885,9 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
     cam = free_camera_in_play_ ? editor_camera() : world_.camera();
     opt.colliders = world_.authored().physics.debug_draw;  // Physics Settings
     opt.hitboxes = show_hitboxes_;
+    opt.bones = show_bones_;
+    opt.bone_entity = primary();
+    opt.bone_joint = bone_joint_;
     if (world_.vr()) {
       // VR preview: the head's view plus the hands, lasers and menu.
       std::vector<scene3d::Entity3D> ents = world_.entities();
@@ -876,19 +911,51 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
     opt.grid = scene_.show_grid;
     opt.colliders = show_colliders_;
     opt.hitboxes = show_hitboxes_;
+    opt.bones = show_bones_;
+    opt.bone_entity = primary();
+    opt.bone_joint = bone_joint_;
     opt.light_gizmos = true;
     opt.highlight = scene_.selection;
     const bool any_hidden = std::any_of(scene_.entities.begin(), scene_.entities.end(),
                                         [](const Entity3D& e) { return e.editor_hidden; });
-    const bool posing = anim_preview_.open && find(primary()) != nullptr;
+    const bool posing = (anim_preview_.open || timeline_.open) && find(primary()) != nullptr;
+    const std::uint64_t pose_root = posing ? resolve_skinned_entity(primary()) : 0;
+    auto pose_group = [&](std::uint64_t i) -> std::string {
+      const scene3d::Entity3D* e = find(i);
+      if (!e) return {};
+      std::string rel;
+      if (e->mesh && !e->mesh->is_primitive()) rel = e->mesh->source;
+      else if (e->animator && !e->animator->model.empty()) rel = e->animator->model;
+      auto grouped = [&](const std::string& r) -> std::string {
+        if (r.empty()) return {};
+        if (const auto* a = asset_browser_.db().by_path(r)) {
+          const std::string from = a->meta.settings.str("split_from");
+          if (!from.empty()) return from;
+        }
+        if (view_) {
+          const render3d::Model* m = view_->model(r);
+          if (m && m->skinned()) return r;
+        }
+        return {};
+      };
+      if (const std::string g = grouped(rel); !g.empty()) return g;
+      const std::uint64_t s = resolve_skinned_entity(i);
+      if (!s || s == i) return {};
+      const scene3d::Entity3D* o = find(s);
+      if (!o) return {};
+      std::string orel;
+      if (o->mesh && !o->mesh->is_primitive()) orel = o->mesh->source;
+      return grouped(orel);
+    };
+    const std::string pose_key = pose_root ? pose_group(pose_root) : std::string{};
     if (any_hidden || posing) {
       // Eye toggled off in the hierarchy: not drawn in the editor only.
-      // The animation preview poses the selection in this copy only.
+      // The animation preview poses the character and every skinned part.
       std::vector<Entity3D> shown;
       for (const Entity3D& e : scene_.entities) {
         if (effectively_hidden(e)) continue;
         shown.push_back(e);
-        if (posing && e.id == primary()) anim_preview_pose(&shown.back());
+        if (posing && !pose_key.empty() && pose_group(e.id) == pose_key) anim_preview_pose(&shown.back());
       }
       view_->begin(scene_.environment, shown, cam, width, height, opt);
     } else {
@@ -911,6 +978,7 @@ bool Editor3DScreen::play_start() {
   world_.set_vr(false);
   gizmo_cancel();
   world_.set_log_sink([this](const runtime::LogEntry& e) {
+    if (shot::hide_log_line(e.text)) return;
     log_.push_back(e);
     while (log_.size() > 400) log_.pop_front();
   });
@@ -932,6 +1000,9 @@ bool Editor3DScreen::play_start() {
     profiler::attach_profiler(world_);
     profiler::Profiler::get().set_capture_dir(plugins::capture_dir_for(project_.path));
   }
+  // A reimport can move the soles to y = 0. Refit before the ride so the
+  // capsule bottom is those soles, then the world drops a hover onto the floor.
+  refit_model_colliders(false);
   if (!world_.start(scene_, project_.path, &err)) {
     note("Play failed: " + err, LogLevel::Error);
     return false;

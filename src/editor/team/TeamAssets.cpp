@@ -1,10 +1,14 @@
 #include "editor/team/TeamAssets.h"
 
+#include "scene/JsonTree.h"
 #include "vault/Sha256.h"
 
 #include <filesystem>
+#include <fstream>
 #include <algorithm>
+#include <exception>
 #include <set>
+#include <thread>
 
 namespace ts {
 namespace tombstone {
@@ -20,6 +24,23 @@ long long mtime_of(const fs::path& p) {
 }
 
 constexpr const char* kMetaPrefix = ".tombstone/meta/";
+
+thread_local const TeamAssetSync* g_hash_sync = nullptr;
+
+bool hash_cancelled() { return g_hash_sync && g_hash_sync->stopping(); }
+
+bool import_failed_meta(const fs::path& root, const std::string& rel) {
+  std::string asset = rel;
+  if (team_meta_rel(rel)) asset = team_meta_asset(rel);
+  if (asset.empty()) return false;
+  const fs::path meta = root / ".tombstone" / "meta" / fs::u8path(asset + ".meta");
+  std::ifstream in(meta, std::ios::binary);
+  if (!in) return false;
+  std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  json::Value v;
+  if (!json::parse(text, &v, nullptr) || !v.is_object()) return false;
+  return v["info"].flag("import_failed", false);
+}
 
 }  // namespace
 
@@ -41,44 +62,98 @@ std::string team_meta_asset(const std::string& rel) {
 
 bool TeamAssetSync::start(TeamAssetPass pass, std::shared_ptr<vault::Backend> backend) {
   if (running() || !backend) return false;
-  if (job_.valid()) return false;  // finished but not taken yet
   cancel_ = false;
-  TeamAssetProgress p;
-  p.running = true;
-  p.stage = "Scanning";
-  set_progress(p);
-  job_ = std::async(std::launch::async, [this, pass = std::move(pass), backend]() mutable {
-    run(pass, *backend, this);
-    TeamAssetProgress done = progress();
-    done.running = false;
-    done.current.clear();
-    set_progress(done);
-    return std::move(pass);
-  });
+  done_.store(false);
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    has_result_ = false;
+    progress_ = TeamAssetProgress{};
+    progress_.running = true;
+    progress_.stage = "Scanning";
+  }
+  running_.store(true);
+  // A plain thread, not std::async: wait_for on that future can come back
+  // deferred, so the pass never starts and the editor reports no error.
+  try {
+    thread_ = std::thread([this, pass = std::move(pass), backend]() mutable {
+      try {
+        run(pass, *backend, this);
+      } catch (const std::exception& ex) {
+        pass.error = ex.what();
+      } catch (...) {
+        pass.error = "file sync failed";
+      }
+      {
+        std::lock_guard<std::mutex> lock(mu_);
+        result_ = std::move(pass);
+        has_result_ = true;
+        // Leave running set so the frame that is about to take this pass
+        // still shows the file and byte counters.
+        progress_.running = true;
+      }
+      running_.store(false);
+      done_.store(true);
+    });
+  } catch (const std::exception&) {
+    running_.store(false);
+    std::lock_guard<std::mutex> lock(mu_);
+    progress_.running = false;
+    return false;
+  }
   return true;
 }
 
 bool TeamAssetSync::running() const {
-  return job_.valid() && job_.wait_for(std::chrono::seconds(0)) != std::future_status::ready;
+  return running_.load() || done_.load();
 }
 
 bool TeamAssetSync::take(TeamAssetPass* out) {
-  if (!job_.valid() || running()) return false;
-  TeamAssetPass p = job_.get();
+  if (!done_.load()) return false;
+  if (thread_.joinable()) thread_.join();
+  TeamAssetPass p;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (!has_result_) return false;
+    p = std::move(result_);
+    has_result_ = false;
+    progress_.running = false;
+    progress_.current.clear();
+  }
+  done_.store(false);
+  running_.store(false);
   if (out) *out = std::move(p);
   return true;
 }
 
 void TeamAssetSync::wait() {
-  if (job_.valid()) job_.wait();
+  if (thread_.joinable()) thread_.join();
+}
+
+void TeamAssetSync::hold(const std::string& rel) {
+  std::lock_guard<std::mutex> lock(mu_);
+  held_.insert(rel);
+  if (progress_.current == rel) cancel_ = true;
+}
+
+void TeamAssetSync::release(const std::string& rel) {
+  std::lock_guard<std::mutex> lock(mu_);
+  held_.erase(rel);
+}
+
+bool TeamAssetSync::held(const std::string& rel) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return held_.count(rel) != 0;
 }
 
 void TeamAssetSync::cancel_and_wait() {
   cancel_ = true;
-  if (job_.valid()) job_.get();
+  if (thread_.joinable()) thread_.join();
   cancel_ = false;
-  TeamAssetProgress idle;
-  set_progress(idle);
+  done_.store(false);
+  running_.store(false);
+  std::lock_guard<std::mutex> lock(mu_);
+  has_result_ = false;
+  progress_ = TeamAssetProgress{};
 }
 
 TeamAssetProgress TeamAssetSync::progress() const {
@@ -92,6 +167,10 @@ void TeamAssetSync::set_progress(const TeamAssetProgress& p) {
 }
 
 void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync* self) {
+  struct HashGuard {
+    explicit HashGuard(const TeamAssetSync* s) { g_hash_sync = s; }
+    ~HashGuard() { g_hash_sync = nullptr; }
+  } hash_guard(self);
   const fs::path root = fs::u8path(p.root);
   std::error_code ec;
   TeamAssetProgress prog;
@@ -103,7 +182,15 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
   auto cancelled = [&] { return self && self->cancel_.load(); };
 
   // 1. Scan assets/ (mtime + size decide whether to re-hash).
-  std::map<std::string, TeamLocalFile> now;
+  // Sizes are published before the hash so a multi-megabyte send already
+  // has files / bytes on the progress readout while the Vault call is in flight.
+  struct Found {
+    std::string rel;
+    std::uint64_t size = 0;
+    long long mtime = 0;
+    std::string path;
+  };
+  std::vector<Found> found;
   for (const fs::path dir : {root / "assets", root / ".tombstone" / "meta" / "assets"}) {
     if (!fs::is_directory(dir, ec)) continue;
     for (fs::recursive_directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
@@ -111,19 +198,44 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
       if (!it->is_regular_file(ec)) continue;
       const std::string rel = fs::relative(it->path(), root, ec).generic_string();
       if (rel.empty() || !team_file_rel(rel)) continue;
-      TeamLocalFile f;
+      Found f;
+      f.rel = rel;
       f.size = static_cast<std::uint64_t>(it->file_size(ec));
       f.mtime = mtime_of(it->path());
-      auto old = p.files.find(rel);
-      if (old != p.files.end() && old->second.mtime == f.mtime && old->second.size == f.size) {
-        f.sha = old->second.sha;
-      } else {
-        prog.current = rel;
-        report();
-        f.sha = vault::sha256_file(it->path().string());
-      }
-      if (!f.sha.empty()) now[rel] = std::move(f);
+      f.path = it->path().string();
+      prog.bytes_total += f.size;
+      ++prog.files_total;
+      found.push_back(std::move(f));
     }
+  }
+  prog.stage = "Scanning";
+  prog.bytes_done = 0;
+  prog.files_done = 0;
+  report();
+  std::map<std::string, TeamLocalFile> now;
+  for (const Found& src : found) {
+    if (cancelled()) return;
+    TeamLocalFile f;
+    f.size = src.size;
+    f.mtime = src.mtime;
+    auto old = p.files.find(src.rel);
+    if (old != p.files.end() && old->second.mtime == f.mtime && old->second.size == f.size &&
+        !old->second.sha.empty()) {
+      f.sha = old->second.sha;
+    } else {
+      prog.current = src.rel;
+      report();
+      f.sha = vault::sha256_file(src.path, nullptr, hash_cancelled);
+    }
+    prog.bytes_done += src.size;
+    ++prog.files_done;
+    report();
+    if (f.sha.empty()) {
+      p.error = "could not read " + src.rel;
+      p.notes.push_back("Could not read " + src.rel + " (not sent).");
+      continue;
+    }
+    now[src.rel] = std::move(f);
   }
   p.files = now;
   // An asset changed here since it came from the session is ours now.
@@ -148,7 +260,7 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
   std::vector<Job> jobs;
   std::set<std::string> handled;
 
-  // 2. Deletes. A file the session and this claim agreed on ...
+  // 2. Deletes. A file the session and this realm agreed on ...
   for (auto it = p.synced.begin(); it != p.synced.end();) {
     const std::string rel = it->first;
     const std::string sha = it->second;
@@ -158,7 +270,7 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
     if (f == p.files.end() && s != p.session.end() && s->second.sha256 == sha && !p.first) {
       if (p.can_write) {
         p.ops.push_back(team::Op::asset(rel, "", 0));
-        if (!team_meta_rel(rel)) p.notes.push_back("Removed " + rel + " for the posse.");
+        if (!team_meta_rel(rel)) p.notes.push_back("Removed " + rel + " for the clan.");
         handled.insert(rel);
         it = p.synced.erase(it);
         continue;
@@ -179,7 +291,7 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
         p.arrived.push_back(rel);
         ++p.removed;
         if (!team_meta_rel(rel)) {
-          p.notes.push_back("Removed " + rel + " (deleted by the posse; a copy is in .tombstone/team/trash).");
+          p.notes.push_back("Removed " + rel + " (deleted by the clan; a copy is in .tombstone/team/trash).");
         }
       }
       handled.insert(rel);
@@ -215,6 +327,12 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
     }
     auto sent = p.sent.find(rel);
     if (sent != p.sent.end() && sent->second == f.sha) continue;  // waiting for the commit
+    // Both sides edited since the last agreed copy: the writer who syncs
+    // last keeps the file, and the clan is told.
+    if (!meta && s != p.session.end() && known != p.synced.end() && known->second != f.sha &&
+        s->second.sha256 != known->second && s->second.sha256 != f.sha) {
+      p.notes.push_back("Both sides changed " + rel + ". This copy is the one the clan keeps.");
+    }
     jobs.push_back({true, rel, team::AssetRef{f.sha, f.size}});
   }
   for (const auto& [rel, a] : p.session) {
@@ -224,10 +342,13 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
   // 4. Transfers. Fetched .meta files land before their assets, so the
   // asset scan finds the posse's GUID instead of minting one.
   std::stable_partition(jobs.begin(), jobs.end(), [](const Job& j) { return team_meta_rel(j.rel); });
-  prog.files_total = static_cast<int>(jobs.size());
+  std::uint64_t job_bytes = 0;
+  for (const Job& j : jobs) job_bytes += j.ref.size;
+  // Keep the scan totals. Replacing them with only the jobs would drop the
+  // counter to 0 for a frame and the smoke would miss the 3 MB send.
+  if (job_bytes > prog.bytes_total) prog.bytes_total = job_bytes;
+  if (static_cast<int>(jobs.size()) > prog.files_total) prog.files_total = static_cast<int>(jobs.size());
   prog.files_done = 0;
-  prog.bytes_total = 0;
-  for (const Job& j : jobs) prog.bytes_total += j.ref.size;
   prog.bytes_done = 0;
   report();
   std::vector<team::Op> ups;
@@ -238,6 +359,11 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
     report();
     std::string err;
     if (j.up) {
+      if ((self && self->held(j.rel)) || import_failed_meta(root, j.rel)) {
+        p.notes.push_back("Not sending " + j.rel + " (import failed or was cancelled).");
+        p.sent.erase(j.rel);
+        continue;
+      }
       std::vector<std::string> missing;
       const std::string path = (root / fs::u8path(j.rel)).string();
       if (!backend.missing({j.ref.sha256}, &missing, &err)) {
@@ -277,7 +403,7 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
         if (!team_meta_rel(j.rel)) p.fetched.insert(j.rel);
         p.arrived.push_back(j.rel);
         ++p.down;
-        if (!team_meta_rel(j.rel)) p.notes.push_back("Fetched " + j.rel + " from the posse.");
+        if (!team_meta_rel(j.rel)) p.notes.push_back("Fetched " + j.rel + " from the clan.");
       }
     }
     ++prog.files_done;

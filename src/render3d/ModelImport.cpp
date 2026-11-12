@@ -1,14 +1,19 @@
+#include "render3d/ClipFile.h"
 #include "render3d/HullFit.h"
 #include "render3d/ModelImport.h"
+
+#include "render3d/ImportLimits.h"
 
 #include "core/AssetMeta.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <new>
 #include <set>
 #include <sstream>
 
@@ -139,6 +144,8 @@ json::Value default_model_settings(const std::string& path) {
   s.set("scale", Value::number(1));  // placement scale (entity transform)
   s.set("unit_scale", Value::number(source ? 0.0254 : 1.0));
   s.set("up_axis", Value::string(source ? "z" : "auto"));
+  // glTF looks along +Z. Auto turns that onto the engine's -Z forward.
+  s.set("forward_axis", Value::string("auto"));
   s.set("material_path", Value::string(""));
   s.set("lod", Value::number(0));
   s.set("generate_collider", Value::boolean(true));
@@ -148,6 +155,15 @@ json::Value default_model_settings(const std::string& path) {
   s.set("hull_vertices", Value::number(64));
   s.set("decompose_max", Value::number(8));
   s.set("import_animations", Value::boolean(true));
+  s.set("animation_only", Value::boolean(false));
+  s.set("clip_start", Value::number(0));
+  s.set("clip_end", Value::number(0));
+  s.set("loop", Value::boolean(true));
+  s.set("root_motion", Value::boolean(false));
+  s.set("in_place", Value::boolean(false));
+  s.set("play_on_start", Value::boolean(true));
+  s.set("retarget_rig", Value::string("auto"));
+  s.set("max_texture", Value::number(kDefaultMaxTextureEdge));
   if (source) s.set("skin", Value::number(0));
   if (ext_of(path) == ".blend") s.set("blender_path", Value::string(""));
   return s;
@@ -161,9 +177,22 @@ ModelImportOptions model_options_from_settings(const json::Value& s, const std::
   if (!(o.unit_scale > 0.0f) || !std::isfinite(o.unit_scale)) o.unit_scale = 1.0f;
   const std::string up = lower(s.has("up_axis") ? s.str("up_axis") : d.str("up_axis"));
   o.up = up == "z" ? UpAxis::Z : up == "y" ? UpAxis::Y : UpAxis::Auto;
+  const std::string fw = lower(s.has("forward_axis") ? s.str("forward_axis") : d.str("forward_axis"));
+  if (fw == "+x" || fw == "x" || fw == "posx") o.forward = ForwardAxis::PosX;
+  else if (fw == "-x" || fw == "negx") o.forward = ForwardAxis::NegX;
+  else if (fw == "+y" || fw == "y" || fw == "posy") o.forward = ForwardAxis::PosY;
+  else if (fw == "-y" || fw == "negy") o.forward = ForwardAxis::NegY;
+  else if (fw == "+z" || fw == "z" || fw == "posz") o.forward = ForwardAxis::PosZ;
+  else if (fw == "-z" || fw == "negz" || fw == "none") o.forward = ForwardAxis::NegZ;
+  else o.forward = ForwardAxis::Auto;
   o.material_paths = split_paths(s.str("material_path"));
   o.lod = std::max(0, static_cast<int>(num("lod")));
   o.animations = s.flag("import_animations", true);
+  o.clips_only = s.flag("animation_only", false);
+  o.clip_start = static_cast<float>(s.num("clip_start", 0));
+  o.clip_end = static_cast<float>(s.num("clip_end", 0));
+  if (!std::isfinite(o.clip_start) || o.clip_start < 0.0f) o.clip_start = 0.0f;
+  if (!std::isfinite(o.clip_end) || o.clip_end < 0.0f) o.clip_end = 0.0f;
   o.collision = s.flag("generate_collider", true);
   o.skin = std::max(0, static_cast<int>(s.num("skin", 0)));
   const json::Value& bg = s["body_groups"];
@@ -171,6 +200,9 @@ ModelImportOptions model_options_from_settings(const json::Value& s, const std::
     for (const auto& [k, v] : bg.members()) o.body_groups[k] = static_cast<int>(v.as_number(0));
   }
   o.blender_path = s.str("blender_path");
+  o.max_texture = static_cast<int>(num("max_texture"));
+  if (o.max_texture < 0) o.max_texture = 0;
+  if (o.max_texture > kHardMaxTextureEdge) o.max_texture = kHardMaxTextureEdge;
   if (const json::Value& mo = s["material_overrides"]; mo.is_object()) {
     for (const auto& [k, v] : mo.members()) {
       if (v.is_string() && !v.as_string().empty()) o.material_overrides[lower(k)] = v.as_string();
@@ -281,6 +313,57 @@ void update_bounds(Model* m) {
   }
   m->bounds = any ? b : Aabb{};
 }
+
+void plant_skinned_feet(Model* m) {
+  if (!m || m->primitives.empty() || !m->skinned()) return;
+  update_bounds(m);
+  const float d = m->bounds.min.y;
+  if (!std::isfinite(d) || std::fabs(d) < 1.0e-4f) return;
+  // The rest pose is what the viewport draws. Lifting the root's base moves
+  // every skinned vertex by the same amount, so the soles land on y = 0
+  // without changing the clip's local keys.
+  const Mat4 shift = Mat4::translate({0.0f, -d, 0.0f});
+  for (Joint& j : m->skeleton.joints) {
+    if (j.parent < 0) j.base = shift * j.base;
+  }
+  update_bounds(m);
+}
+
+namespace {
+
+// FBX files are often in centimetres, and Assimp's root correction can
+// leave a metre file a hundred times too tall. Two 0.01 passes cover both
+// (170 cm, or 170 m after a 100x root scale) and leave a real metre rig alone.
+void normalize_fbx_metres(Model* m) {
+  for (int pass = 0; pass < 2; ++pass) {
+    update_bounds(m);
+    float h = m->bounds.max.y - m->bounds.min.y;
+    if (!m->primitives.empty()) {
+      if (!(h > 20.0f) || !std::isfinite(h)) return;
+    } else if (!m->skeleton.joints.empty()) {
+      const std::vector<Vec3> pos = joint_positions(m->skeleton, rest_pose(m->skeleton));
+      float lo = 0.0f, hi = 0.0f;
+      bool any = false;
+      for (const Vec3& p : pos) {
+        if (!std::isfinite(p.y)) continue;
+        if (!any) {
+          lo = hi = p.y;
+          any = true;
+        } else {
+          lo = std::min(lo, p.y);
+          hi = std::max(hi, p.y);
+        }
+      }
+      h = any ? hi - lo : 0.0f;
+      if (!(h > 20.0f)) return;
+    } else {
+      return;
+    }
+    bake_import_transform(m, 0.01f, false);
+  }
+}
+
+}  // namespace
 
 Aabb legacy_vertex_bounds(const Model& m) {
   Aabb b;
@@ -420,76 +503,175 @@ int split_special_meshes(Model* m, int lod, bool keep_hulls) {
   return removed;
 }
 
+namespace {
+
+struct MonitorSlot {
+  ImportMonitor mon{};
+  bool on = false;
+  int texture_edge = 0;
+  std::string notes;
+};
+
+MonitorSlot& monitor_slot() {
+  thread_local MonitorSlot slot;
+  return slot;
+}
+
+}  // namespace
+
+void set_import_monitor(const ImportMonitor* monitor) {
+  MonitorSlot& s = monitor_slot();
+  if (!monitor) {
+    s.on = false;
+    s.mon = {};
+    return;
+  }
+  s.mon = *monitor;
+  s.on = true;
+}
+
+namespace {
+std::atomic<bool> g_import_cancel{false};
+}
+
+void request_import_cancel() { g_import_cancel.store(true); }
+void clear_import_cancel() { g_import_cancel.store(false); }
+
+bool import_was_cancelled() {
+  if (g_import_cancel.load()) return true;
+  const MonitorSlot& s = monitor_slot();
+  return s.on && s.mon.cancelled && s.mon.cancelled(s.mon.user);
+}
+
+void import_report(int percent, const char* phase) {
+  const MonitorSlot& s = monitor_slot();
+  if (s.on && s.mon.progress) s.mon.progress(s.mon.user, percent, phase ? phase : "");
+}
+
+int active_import_texture_edge() { return monitor_slot().texture_edge; }
+
+void import_note(const std::string& text) {
+  if (text.empty()) return;
+  MonitorSlot& s = monitor_slot();
+  if (s.notes.find(text) != std::string::npos) return;
+  if (!s.notes.empty()) s.notes += " ";
+  s.notes += text;
+}
+
+std::string import_take_notes() {
+  std::string out;
+  out.swap(monitor_slot().notes);
+  return out;
+}
+
+namespace {
+
+struct TextureEdgeScope {
+  int prev;
+  explicit TextureEdgeScope(int edge) : prev(monitor_slot().texture_edge) {
+    monitor_slot().texture_edge = edge;
+  }
+  ~TextureEdgeScope() { monitor_slot().texture_edge = prev; }
+};
+
+}  // namespace
+
 void limit_skin_joints(Model* m) {
   if (!m->skinned()) return;
   const std::size_t limit = static_cast<std::size_t>(kMaxBones);
-  bool needed = m->skeleton.joints.size() > limit;
-  if (!needed) return;
+  if (m->skeleton.joints.size() <= limit) return;
+  const int nj = static_cast<int>(m->skeleton.joints.size());
   std::vector<ModelPrimitive> out;
+  out.reserve(m->primitives.size());
   for (ModelPrimitive& p : m->primitives) {
     if (!p.mesh.skinned() || !p.joint_map.empty()) {
       out.push_back(std::move(p));
       continue;
     }
-    auto used_of = [&](std::uint32_t v, std::vector<int>* js) {
+    // The old path copied a std::set per triangle. On a high-poly skin that
+    // is millions of allocations and the thing that froze a rig import.
+    // A byte per joint says whether the current chunk already has it.
+    std::vector<char> in_chunk(static_cast<std::size_t>(std::max(nj, 0)), 0);
+    struct Chunk {
+      std::vector<std::uint32_t> idx;
+      std::vector<int> joints;
+    };
+    std::vector<Chunk> chunks(1);
+    auto joints_of = [&](std::uint32_t v, int* js, int* njs) {
+      if (v >= p.mesh.skin.size()) return;
       const SkinVertex& s = p.mesh.skin[v];
       for (int k = 0; k < 4; ++k) {
-        if (s.weights[k] > 0.0f || k == 0) js->push_back(static_cast<int>(s.joints[k]));
+        if (s.weights[k] <= 0.0f && k != 0) continue;
+        const int j = static_cast<int>(s.joints[k] + 0.5f);
+        if (j < 0 || j >= nj) continue;
+        bool seen = false;
+        for (int i = 0; i < *njs; ++i) seen = seen || js[i] == j;
+        if (!seen && *njs < 12) js[(*njs)++] = j;
       }
     };
-    // Greedy: triangles in order, a new chunk when the joint set would
-    // pass the limit.
-    std::vector<std::vector<std::uint32_t>> chunks(1);
-    std::vector<std::set<int>> sets(1);
-    for (std::size_t t = 0; t + 2 < p.mesh.indices.size(); t += 3) {
-      std::vector<int> js;
-      for (int c = 0; c < 3; ++c) used_of(p.mesh.indices[t + c], &js);
-      std::set<int> merged = sets.back();
-      merged.insert(js.begin(), js.end());
-      if (merged.size() > limit && !chunks.back().empty()) {
+    auto grow = [&](const int* js, int njs) {
+      int add = 0;
+      for (int i = 0; i < njs; ++i)
+        if (!in_chunk[static_cast<std::size_t>(js[i])]) ++add;
+      if (!chunks.back().idx.empty() && chunks.back().joints.size() + static_cast<std::size_t>(add) > limit) {
+        for (int j : chunks.back().joints) in_chunk[static_cast<std::size_t>(j)] = 0;
         chunks.emplace_back();
-        sets.emplace_back();
-        merged = std::set<int>(js.begin(), js.end());
       }
-      sets.back() = std::move(merged);
-      for (int c = 0; c < 3; ++c) chunks.back().push_back(p.mesh.indices[t + c]);
+      for (int i = 0; i < njs; ++i) {
+        const int j = js[i];
+        if (in_chunk[static_cast<std::size_t>(j)]) continue;
+        in_chunk[static_cast<std::size_t>(j)] = 1;
+        chunks.back().joints.push_back(j);
+      }
+    };
+    for (std::size_t t = 0; t + 2 < p.mesh.indices.size(); t += 3) {
+      if ((t & 0xffffu) == 0 && import_was_cancelled()) return;
+      int js[12];
+      int njs = 0;
+      for (int c = 0; c < 3; ++c) joints_of(p.mesh.indices[t + static_cast<std::size_t>(c)], js, &njs);
+      grow(js, njs);
+      for (int c = 0; c < 3; ++c) chunks.back().idx.push_back(p.mesh.indices[t + static_cast<std::size_t>(c)]);
     }
-    for (std::size_t c = 0; c < chunks.size(); ++c) {
-      if (chunks[c].empty()) continue;
+    for (Chunk& ch : chunks) {
+      if (ch.idx.empty()) continue;
       ModelPrimitive q;
       q.material = p.material;
       q.node = p.node;
       q.mesh.name = p.mesh.name;
-      std::map<int, int> local;
-      for (int j : sets[c]) {
-        local[j] = static_cast<int>(q.joint_map.size());
+      q.joint_map.reserve(ch.joints.size());
+      std::vector<int> local(static_cast<std::size_t>(std::max(nj, 1)), -1);
+      for (int j : ch.joints) {
+        local[static_cast<std::size_t>(j)] = static_cast<int>(q.joint_map.size());
         q.joint_map.push_back(j);
       }
-      std::map<std::uint32_t, std::uint32_t> vmap;
-      for (std::uint32_t v : chunks[c]) {
-        auto it = vmap.find(v);
-        if (it == vmap.end()) {
-          const std::uint32_t nv = static_cast<std::uint32_t>(q.mesh.vertices.size());
+      std::vector<std::uint32_t> vmap(p.mesh.vertices.size(), 0xffffffffu);
+      q.mesh.vertices.reserve(std::min(p.mesh.vertices.size(), ch.idx.size()));
+      q.mesh.skin.reserve(q.mesh.vertices.capacity());
+      q.mesh.indices.reserve(ch.idx.size());
+      for (std::uint32_t v : ch.idx) {
+        if (v >= p.mesh.vertices.size()) continue;
+        std::uint32_t& slot = vmap[v];
+        if (slot == 0xffffffffu) {
+          slot = static_cast<std::uint32_t>(q.mesh.vertices.size());
           q.mesh.vertices.push_back(p.mesh.vertices[v]);
-          SkinVertex s = p.mesh.skin[v];
+          SkinVertex s = v < p.mesh.skin.size() ? p.mesh.skin[v] : SkinVertex{};
           for (int k = 0; k < 4; ++k) {
-            auto l = local.find(static_cast<int>(s.joints[k]));
-            if (l != local.end()) {
-              s.joints[k] = static_cast<float>(l->second);
+            const int j = static_cast<int>(s.joints[k] + 0.5f);
+            if (j >= 0 && j < nj && local[static_cast<std::size_t>(j)] >= 0) {
+              s.joints[k] = static_cast<float>(local[static_cast<std::size_t>(j)]);
             } else {
               s.joints[k] = 0.0f;
               s.weights[k] = 0.0f;
             }
           }
           q.mesh.skin.push_back(s);
-          it = vmap.emplace(v, nv).first;
         }
-        q.mesh.indices.push_back(it->second);
+        q.mesh.indices.push_back(slot);
       }
-      out.push_back(std::move(q));
+      if (q.mesh.valid()) out.push_back(std::move(q));
     }
   }
-  m->primitives = std::move(out);
+  if (!out.empty()) m->primitives = std::move(out);
 }
 
 void hitbox_matrices(const Model& m, const std::vector<Mat4>* palette, std::vector<Mat4>* out) {
@@ -535,6 +717,100 @@ void bake_import_transform(Model* m, float scale, bool z_up) {
   update_bounds(m);
 }
 
+namespace {
+
+ForwardAxis resolved_forward(const Model& m, ForwardAxis axis) {
+  if (axis != ForwardAxis::Auto) return axis;
+  return m.format == "gltf" ? ForwardAxis::PosZ : ForwardAxis::NegZ;
+}
+
+Quat forward_quat(ForwardAxis axis) {
+  switch (axis) {
+    case ForwardAxis::PosZ: return Quat::axis_angle({0, 1, 0}, kPi);
+    case ForwardAxis::PosX: return Quat::axis_angle({0, 1, 0}, kPi * 0.5f);
+    case ForwardAxis::NegX: return Quat::axis_angle({0, 1, 0}, -kPi * 0.5f);
+    case ForwardAxis::PosY: return Quat::axis_angle({1, 0, 0}, -kPi * 0.5f);
+    case ForwardAxis::NegY: return Quat::axis_angle({1, 0, 0}, kPi * 0.5f);
+    case ForwardAxis::NegZ:
+    case ForwardAxis::Auto: return {};
+  }
+  return {};
+}
+
+}  // namespace
+
+void bake_forward_axis(Model* m, ForwardAxis axis) {
+  if (!m) return;
+  const Quat q = forward_quat(resolved_forward(*m, axis));
+  if (std::fabs(q.x) + std::fabs(q.y) + std::fabs(q.z) < 1.0e-8f) return;
+  const Mat4 c = Mat4::rotate(q);
+  const Mat4 c_inv = c.inverse();
+  for (ModelPrimitive& p : m->primitives) {
+    for (Vertex3D& v : p.mesh.vertices) {
+      v.position = q.rotate(v.position);
+      v.normal = normalize(q.rotate(v.normal));
+      const Vec3 t = q.rotate(Vec3{v.tangent.x, v.tangent.y, v.tangent.z});
+      v.tangent = {t.x, t.y, t.z, v.tangent.w};
+    }
+  }
+  for (Joint& j : m->skeleton.joints) {
+    if (j.parent < 0) j.base = c * j.base;
+    j.inverse_bind = j.inverse_bind * c_inv;
+  }
+  for (auto& hull : m->collision_hulls) {
+    for (Vec3& p : hull) p = q.rotate(p);
+  }
+  for (ModelHitbox& h : m->hitboxes) h.bind = c * h.bind;
+  update_bounds(m);
+}
+
+namespace {
+
+int channel_stride(const Channel& ch) {
+  return ch.width() * (ch.interp == Interp::CubicSpline ? 3 : 1);
+}
+
+// Keep keys in [start, end] seconds and shift them to start at 0.
+void trim_clips(Model* out, float start, float end) {
+  if (!out || !(end > start)) return;
+  for (Clip& clip : out->clips) {
+    for (Channel& ch : clip.channels) {
+      const int stride = channel_stride(ch);
+      if (stride <= 0) continue;
+      std::vector<float> times;
+      std::vector<float> values;
+      for (std::size_t i = 0; i < ch.times.size(); ++i) {
+        const float t = ch.times[i];
+        if (t + 1e-4f < start || t - 1e-4f > end) continue;
+        const std::size_t base = i * static_cast<std::size_t>(stride);
+        if (base + static_cast<std::size_t>(stride) > ch.values.size()) break;
+        times.push_back(std::max(0.0f, t - start));
+        values.insert(values.end(), ch.values.begin() + static_cast<std::ptrdiff_t>(base),
+                      ch.values.begin() + static_cast<std::ptrdiff_t>(base + stride));
+      }
+      ch.times = std::move(times);
+      ch.values = std::move(values);
+    }
+    clip.channels.erase(std::remove_if(clip.channels.begin(), clip.channels.end(),
+                                       [](const Channel& ch) { return ch.times.empty(); }),
+                        clip.channels.end());
+    std::vector<ClipEvent> events;
+    for (ClipEvent ev : clip.events) {
+      if (ev.time + 1e-4f < start || ev.time - 1e-4f > end) continue;
+      ev.time = std::max(0.0f, ev.time - start);
+      events.push_back(std::move(ev));
+    }
+    clip.events = std::move(events);
+    float last = 0.0f;
+    for (const Channel& ch : clip.channels) {
+      if (!ch.times.empty()) last = std::max(last, ch.times.back());
+    }
+    clip.duration = last > 0.0f ? last : std::max(0.0f, end - start);
+  }
+}
+
+}  // namespace
+
 bool load_model(const std::string& path, Model* out, std::string* error) {
   ModelImportOptions opt;
   read_model_options(path, &opt);
@@ -543,62 +819,131 @@ bool load_model(const std::string& path, Model* out, std::string* error) {
 
 bool load_model(const std::string& path, const ModelImportOptions& opt, Model* out,
                 std::string* error) {
-  const std::string e = ext_of(path);
-  *out = Model{};
-  std::string err;
-  bool ok = false;
-  bool z_up = opt.up == UpAxis::Z;
-  if (is_gltf_ext(e)) {
-    ok = load_gltf(path, out, &err);
-    out->format = "gltf";
-  } else if (e == ".mdl") {
-    ok = load_source_mdl(path, opt, out, &err);
-    if (ok) {
-      out->format = "source-mdl";
-      if (opt.up == UpAxis::Auto) z_up = true;  // Source is Z up
-    } else if (err.rfind("not a Source", 0) == 0 && assimp_available()) {
-      // Quake / Half-Life 1 .mdl: Assimp reads those.
-      *out = Model{};
-      err.clear();
-      ok = load_assimp_model(path, opt, out, &err);
-      if (ok) out->format = "mdl";
-    }
-  } else if (e == ".blend") {
-    ok = load_blend_model(path, opt, out, &err);
-    out->format = "blend";
-  } else if (is_assimp_ext(e)) {
-    if (!assimp_available()) {
-      err = model_format_name(path) +
-            " needs the Assimp importers (this build has TS_WITH_ASSIMP off); export to glTF";
+  if (!out) return false;
+  (void)import_take_notes();
+  TextureEdgeScope edge(opt.max_texture);
+  auto fail = [&](const std::string& why) {
+    *out = Model{};
+    if (error) *error = why;
+    return false;
+  };
+  if (import_was_cancelled()) return fail(path + ": Import cancelled.");
+  try {
+    const std::string e = ext_of(path);
+    *out = Model{};
+    std::string err;
+    bool ok = false;
+    bool z_up = opt.up == UpAxis::Z;
+    import_report(8, "Opening file");
+    if (is_gltf_ext(e)) {
+      ok = load_gltf(path, out, &err);
+      out->format = "gltf";
+    } else if (e == ".mdl") {
+      ok = load_source_mdl(path, opt, out, &err);
+      if (ok) {
+        out->format = "source-mdl";
+        if (opt.up == UpAxis::Auto) z_up = true;  // Source is Z up
+      } else if (err.rfind("not a Source", 0) == 0 && assimp_available()) {
+        // Quake / Half-Life 1 .mdl: Assimp reads those.
+        *out = Model{};
+        err.clear();
+        ok = load_assimp_model(path, opt, out, &err);
+        if (ok) out->format = "mdl";
+      }
+    } else if (e == ".blend") {
+      ok = load_blend_model(path, opt, out, &err);
+      out->format = "blend";
+    } else if (is_assimp_ext(e)) {
+      if (assimp_available()) {
+        ok = load_assimp_model(path, opt, out, &err);
+        if (ok) out->format = e.substr(1);
+      } else if (e != ".fbx") {
+        err = model_format_name(path) +
+              " needs the Assimp importers (this build has TS_WITH_ASSIMP off); export to glTF";
+      }
+      // FBX 6.x / ASCII: Assimp stops at "FBX-DOM unsupported, old format version".
+      if (!ok && e == ".fbx") {
+        const std::string assimp_err = err;
+        *out = Model{};
+        std::string uerr;
+        if (load_ufbx_model(path, opt, out, &uerr)) {
+          ok = true;
+          err.clear();
+          out->format = "fbx";
+        } else if (!uerr.empty() &&
+                   (assimp_err.find("FBX-DOM") != std::string::npos ||
+                    assimp_err.find("old format") != std::string::npos || assimp_err.empty())) {
+          err = uerr;
+        } else if (err.empty()) {
+          err = uerr;
+        }
+      }
     } else {
-      // (Auto up axis: the loader applies the file's own axis metadata.)
-      ok = load_assimp_model(path, opt, out, &err);
-      out->format = e.substr(1);
+      err = "no model importer for '" + e + "'";
     }
-  } else {
-    err = "no model importer for '" + e + "'";
+    if (import_was_cancelled()) return fail(path + ": Import cancelled.");
+    if (!ok) return fail(err.empty() ? path + ": import failed" : err);
+    out->source = path;
+    if (!opt.animations) out->clips.clear();
+    import_report(72, "Preparing mesh");
+    if (out->format != "source-mdl") {
+      // Collision (UCX_...) and LOD > chosen meshes: not drawn, not bounds.
+      split_special_meshes(out, opt.lod, opt.collision);
+    }
+    if (!opt.collision) out->collision_hulls.clear();
+    bake_import_transform(out, opt.unit_scale, z_up);
+    bake_forward_axis(out, opt.forward);
+    if (out->format == "fbx") normalize_fbx_metres(out);
+    plant_skinned_feet(out);
+    limit_skin_joints(out);
+    if (import_was_cancelled()) return fail(path + ": Import cancelled.");
+    update_bounds(out);
+    // Authored clips sit beside the file (hero.gltf -> hero.anim3d.json).
+    if (opt.animations && out->skinned()) {
+      std::string clip_warn;
+      if (!merge_clip_sidecar(out, &clip_warn)) {
+        if (!err.empty()) err += "; ";
+        err += clip_warn.empty() ? "anim3d sidecar failed" : clip_warn;
+      } else if (!clip_warn.empty()) {
+        if (!err.empty()) err += "; ";
+        err += clip_warn;
+      }
+    }
+    if (opt.clip_end > opt.clip_start) trim_clips(out, opt.clip_start, opt.clip_end);
+    if (opt.clips_only) {
+      out->primitives.clear();
+      out->materials.clear();
+      out->collision_hulls.clear();
+    }
+    if (out->primitives.empty() && !out->animation_only()) {
+      std::string why;
+      if (opt.clips_only) {
+        why = path + ": Animation only is on, but this file has no skeleton and no clips to keep.";
+      } else {
+        why = path + ": no meshes";
+        if (out->clips.empty()) why += " and no animation clips";
+        else why += " (clips were found, but there is no skeleton to play them on)";
+        why += ". An animation-only FBX or glTF (Mixamo 'Without Skin') needs a skeleton and at least one clip.";
+      }
+      return fail(why);
+    }
+    apply_fitted_cache_file(path, out);
+    const std::string notes = import_take_notes();
+    if (!notes.empty()) {
+      if (!err.empty() && err.rfind("warning:", 0) != 0) err = "warning: " + err;
+      if (err.empty()) err = "warning: " + notes;
+      else err += " " + notes;
+    }
+    import_report(88, "Model ready");
+    if (error) *error = err;
+    return true;
+  } catch (const std::bad_alloc&) {
+    return fail(path +
+                ": out of memory while importing. The file is larger than this machine can hold. "
+                "Lower Texture size in the asset settings, or decimate the mesh in Blender and export glTF.");
+  } catch (const std::exception& ex) {
+    return fail(path + ": import failed (" + ex.what() + ")");
   }
-  if (!ok) {
-    if (error) *error = err.empty() ? path + ": import failed" : err;
-    return false;
-  }
-  out->source = path;
-  if (!opt.animations) out->clips.clear();
-  if (out->format != "source-mdl") {
-    // Collision (UCX_...) and LOD > chosen meshes: not drawn, not bounds.
-    split_special_meshes(out, opt.lod, opt.collision);
-  }
-  if (!opt.collision) out->collision_hulls.clear();
-  bake_import_transform(out, opt.unit_scale, z_up);
-  limit_skin_joints(out);
-  update_bounds(out);
-  if (out->primitives.empty()) {
-    if (error) *error = path + ": no meshes";
-    return false;
-  }
-  apply_fitted_cache_file(path, out);
-  if (error) *error = err;
-  return true;
 }
 
 }  // namespace render3d

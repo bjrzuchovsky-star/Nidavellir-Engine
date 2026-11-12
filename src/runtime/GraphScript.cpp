@@ -129,6 +129,12 @@ std::vector<GraphNodeDef> build_catalog() {
       "blend to a state over seconds");
   act("Animation", "anim.set_param", "Set Anim Param", {{"id", N(0)}, {"name", T("speed")}, {"value", N(0)}}, {},
       "animator parameter (bools: 0 / 1)");
+  act("Animation", "anim.set_float", "Set Anim Float", {{"id", N(0)}, {"name", T("speed")}, {"value", N(0)}}, {},
+      "float animator parameter, such as Speed");
+  act("Animation", "anim.set_bool", "Set Anim Bool", {{"id", N(0)}, {"name", T("grounded")}, {"value", B(true)}}, {},
+      "bool animator parameter");
+  act("Animation", "anim.trigger", "Anim Trigger", {{"id", N(0)}, {"name", T("jump")}}, {},
+      "fire a trigger parameter");
   // ts.ai (the ai table through the plugin bridge; 0 = self). 2D: x, y px
   // (z unused); 3D: metres, y up.
   act("AI", "ai.agent", "Make Agent", {{"id", N(0)}, {"speed", N(0)}}, {"value"},
@@ -696,12 +702,14 @@ struct GraphScriptHost::Impl {
         world->script_toast(slot <= 0 ? -1 : slot - 1, text(I("text")), num(I("seconds")), in.entity);
       } else if (t.rfind("anim.", 0) == 0) {
         const std::uint64_t e = id_of(I("id"));
-        const char* third = t == "anim.crossfade" ? "seconds" : t == "anim.set_param" ? "value" : "fade";
+        const std::string fn = t.substr(5);
+        std::vector<ScriptValue> args{N(static_cast<double>(e ? e : in.entity)), I("name")};
+        if (fn == "crossfade") args.push_back(I("seconds"));
+        else if (fn == "set_param" || fn == "set_float" || fn == "set_bool") args.push_back(I("value"));
+        else if (fn == "play") args.push_back(I("fade"));
         ScriptValue r;
         std::string err;
-        if (!world->script_plugin_call("anim", t.substr(5),
-                                       {N(static_cast<double>(e ? e : in.entity)), I("name"), I(third)}, &r,
-                                       &err)) {
+        if (!world->script_plugin_call("anim", fn, args, &r, &err)) {
           log(LogLevel::Error, err, &in, 0);
         }
       } else if (t.rfind("ai.", 0) == 0) {

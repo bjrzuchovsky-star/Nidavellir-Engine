@@ -1,8 +1,14 @@
 # Model import
 
-> **Rights:** you are responsible for having the rights to any model you import, and to anything you ship. The engine only reads the file formats. It ships no Valve, Garry's Mod or other third-party models or textures, and its tests build their own tiny files in a temp folder. TombStone is not affiliated with or endorsed by Valve Corporation or Facepunch Studios; their names are used only to say which file formats are read.
+> **Rights:** you are responsible for having the rights to any model you import, and to anything you ship. The engine only reads the file formats. It ships no Valve, Garry's Mod or other third-party models or textures, and its tests build their own tiny files in a temp folder. Nidavellir is not affiliated with or endorsed by Valve Corporation or Facepunch Studios; their names are used only to say which file formats are read.
 
 Every 3D model goes through one loader, `render3d::load_model` (`src/render3d/ModelImport.h`). The 3D editor, Play, the Jolt colliders, exported games and the Asset Browser all use it, so a format that imports in the editor also loads in a shipped game.
+
+## Forward and up
+
+The engine is **Y up, -Z forward**. `Transform.Forward`, script `Move` along that axis, and the rider (`ts.move.rider3d`) all use it: yaw 0 looks down -Z, and the body rotation puts the mesh's -Z along the direction of travel.
+
+glTF files are authored **+Z forward**. On import, **Forward axis: Auto** turns that +Z onto -Z once (a 180° yaw). Other formats are left as they are until you pick an axis. The Asset Browser setting is per model (`forward_axis` in the `.meta`: `auto`, `+x`, `-x`, `+y`, `-y`, `+z`, `-z`). **Up axis** is unchanged: Auto uses the file, and Z up is turned to Y up before the forward correction.
 
 ## Formats
 
@@ -159,6 +165,14 @@ Settings shows the Blender it found when the field is empty. The importer runs `
 - `.phy`: each `COLLIDE_POLY` convex ledge becomes a hull, placed by its bone. When the collider is a ConvexHull (the default when a model with hulls is dropped), each hull becomes its own Jolt convex shape.
 - LODs come from the `.vvd` fixups and the `.vtx` LOD tables; if the asked-for LOD doesn't exist, the last one is used.
 
+## Large files
+
+Import of a big model (a `.blend` of tens of megabytes up to about a gigabyte, or a mesh of millions of triangles) runs off the editor's UI thread. The Asset Browser shows progress and a **Cancel** button. Cancel stops Blender if it is still exporting. A failure — out of memory, a file over the limits below, a Blender timeout (300 s), a corrupt file — is a message in the editor. The editor stays open.
+
+Textures are scaled so the longest edge is **Texture size** (default 2048, hard stop 8192). The original file is not modified. A mesh past about 12 000 triangles gets one convex hull from a sample instead of a per-triangle decomposition; a triangle-mesh collider past about 48 000 triangles becomes that hull. Splitting a model simplifies a part past about 80 000 triangles. GPU upload of a model that does not fit in one frame is spread across frames (about 4 MB a frame).
+
+`.blend` files over 32 MB are exported without applying modifiers and without shape keys. The engine does not import shape keys, and applying every modifier on a heavy file is what made Blender run out of memory. Export glTF from Blender yourself when you need those baked.
+
 ## Limits
 
 - Source: flexes (face morphs), eyeballs, eye and mouth shaders, jigglebones, attachments, hitbox sets other than the first, and ragdoll constraints are not imported. Delta (additive) animations, animations in `.ani` blocks and `$includemodel` animations are skipped with a warning; blended sequences use their first animation. MDL versions outside 44 to 49 are refused (v53 is Titanfall / CS:GO-era).
@@ -177,6 +191,7 @@ The Source reader was written from public descriptions of the formats: the Valve
 
 - `TS_AUDIO=null ts_admin --smoke-mdl` builds a synthetic Source model (2 bones, body groups, 2 skins, 2 LODs, a sequence, a `.phy` hull, DXT1 and BGRA8888 VTFs) and checks the vertex, bone, material and hull counts for MDL v44, v48 and v49, the `.dx80` fallback, every setting, 9 more VTF formats, and the asset database (siblings, hot reload, moves).
 - `TS_AUDIO=null ts_admin --smoke-models` runs the above and then writes tiny OBJ + MTL + TGA, Collada (skinned and animated, Z-up), ASCII FBX, PLY, STL and DirectX `.x` files, imports each, checks hot reload from the `.mtl`, and checks the `.blend` message without Blender.
+- `TS_AUDIO=null ts_admin --smoke-bigmodel` builds a synthetic skinned glTF (about 2 million triangles, a 160-bone skeleton, four 4096² textures) and imports it on a worker. It checks that the caller is not blocked, memory growth stays bounded, textures are scaled down, the collider is a limited hull, a corrupt file is an error, and cancel stops the load.
 - `TS_AUDIO=null ts_admin --smoke-bounds` (also run by `--smoke-models`) checks bounds against the drawn vertex extents. Its cases: a skinned rig with a 0.01 armature, a helper bone 500 m away and a stray vertex at 10 km; the same rig as Collada through Assimp at two unit scales; glTF with a unit scale; OBJ with `UCX_` and `_LOD1` meshes; a 200-joint skeleton split into palettes of 128 or fewer that pose exactly like the full one; and the box / capsule / convex collider fits. `--smoke-mdl` also checks the Source hitbox set: a named head box, swapped min / max, and placement at rest and posed.
 - `TS_AUDIO=null ts_admin --smoke-mesh-parts` (also part of `--smoke`) splits the sample lantern into post / arm / glass, checks keep-position and recentred pivots and the `.meta` files, places the parts as a parent with children and undoes / redoes that (including the new files), then checks an oriented box, a vertex-limited hull, convex pieces of an L, the hull cache, a triangle-mesh floor in Jolt, and a sprite polygon in Box2D.
 - `--smoke-models` also checks the Steam `libraryfolders.vdf` parser on canned files (the current layout with `"path"` keys and escaped backslashes, and the old numbered layout), checks that the editor's Blender setting is used, and checks the "not found" message.

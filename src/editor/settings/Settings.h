@@ -20,9 +20,9 @@ struct Settings {
   std::string projects_root = "./TombStoneProjects";
   std::string username;                 // last-used login name
   bool auto_login_dev = false;          // DEV_LOGIN on Admin start when true
-  std::string theme = "dark";           // "dark" | "light" stub
+  std::string theme = "forge";          // "forge" | "dusk"/"dark" | "light"
   std::string last_project_path;        // last opened project folder
-  // The Vault (asset library shared by every claim; see docs/vault.md).
+  // The Vault (asset library shared by every realm; see docs/vault.md).
   std::string vault_backend = "local";  // "local" | "remote"
   std::string vault_local_dir;          // "" = Documents/TombStone/Vault
   std::string vault_url;                // ts_vault server, e.g. https://vault.example.com

@@ -50,13 +50,13 @@ struct UpdateService::Shared {
 namespace {
 
 vault::Headers api_headers(const ServiceOptions& o) {
-  return {{"User-Agent", std::string("TombStone-Engine/") + o.current_version + " (update-check)"},
+  return {{"User-Agent", std::string("Nidavellir-Engine/") + o.current_version + " (update-check)"},
           {"Accept", "application/vnd.github+json"},
           {"X-GitHub-Api-Version", "2022-11-28"}};
 }
 
 vault::Headers dl_headers(const ServiceOptions& o) {
-  return {{"User-Agent", std::string("TombStone-Engine/") + o.current_version + " (updater)"},
+  return {{"User-Agent", std::string("Nidavellir-Engine/") + o.current_version + " (updater)"},
           {"Accept", "application/octet-stream"}};
 }
 
@@ -202,7 +202,7 @@ void UpdateService::start_download() {
     }
     AssetKind kind = AssetKind::None;
     const ReleaseAsset* asset = select_update_asset(rel, &kind);
-    if (!asset) return fail("no TombStone-" + strip_v(rel.tag) + "-update.exe or -setup.exe on " + rel.tag);
+    if (!asset) return fail("no Nidavellir-" + strip_v(rel.tag) + "-update.exe or -setup.exe on " + rel.tag);
     for (char c : asset->name) {
       if (c == '/' || c == '\\' || c == ':') return fail("odd asset name " + asset->name);
     }

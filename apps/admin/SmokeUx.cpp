@@ -253,11 +253,14 @@ int check_registry(Ctx& ctx, ux::EditorUx& u, const char* tag,
 
   // Running a menu toggle through the registry flips the real state.
   const bool before = toggle_state();
-  if (!u.run_now(run_toggle)) return fail(t + ": run " + run_toggle);
+  // harvest() opens a window, so the registry run has to be inside a frame.
+  bool ran = false;
+  ctx.frames(1, [&] { ran = u.run_now(run_toggle); });
+  if (!ran) return fail(t + ": run " + run_toggle);
   ctx.frames(1, [&] { u.frame(); });
   if (toggle_state() == before) return fail(t + ": " + run_toggle + " did not toggle");
   if (u.actions().run_count(run_toggle) < 1) return fail(t + ": run count");
-  u.run_now(run_toggle);
+  ctx.frames(1, [&] { u.run_now(run_toggle); });
   if (toggle_state() != before) return fail(t + ": toggle back");
 
   // Disabled items refuse to run.
@@ -341,7 +344,9 @@ int check_empty(Ctx& ctx, ux::EditorUx& u, const char* tag, const std::function<
   for (const auto& [panel, ids] : want) {
     quiet();  // the Telegraph is only empty before anything has been logged
     ux::reset_empty_states_seen();
-    if (!u.run_now("Panel/" + panel)) return fail(std::string(tag) + ": no palette entry Panel/" + panel);
+    bool opened = false;
+    ctx.frames(1, [&] { opened = u.run_now("Panel/" + panel); });
+    if (!opened) return fail(std::string(tag) + ": no palette entry Panel/" + panel);
     bool ok = false;
     for (int f = 0; f < 120 && !ok; ++f) {  // the Vault opens its library on a worker
       ctx.frames(1, [&] { tick(); });
@@ -437,11 +442,18 @@ int check_errors(Ctx& ctx, const fs::path& root, int* cases) {
   if (ux::telegraph_label("trigger: Rider rode into Gate", false, K::Unknown) != "trigger: Rider rode into Gate")
     return fail("Telegraph tagged an info line");
   // Panel cards.
+  const ux::FriendlyError spaced = ux::explain(
+      "C:/Realms/Models/Unarmed Walk Forward.fbx: Assimp could not open this file (FBX-DOM unsupported, old format version)",
+      K::ImportFailed);
+  if (spaced.kind != K::ImportFailed || spaced.what.find("Unarmed Walk Forward.fbx") == std::string::npos ||
+      spaced.what.find("Models/Unarmed)") != std::string::npos) {
+    return fail("spaced path was truncated: " + spaced.what);
+  }
   if (editor::friendly_vault_error("could not connect to vault.example:7777", true).kind != K::VaultConnection ||
       editor::friendly_vault_error("x", true).fix_label != "Vault settings")
     return fail("Vault error card isn't the friendly one");
   if (editor::friendly_trading_post_error("Example Spurs: download failed: could not resolve example.invalid").title !=
-      "Couldn't reach the Trading Post")
+      "Couldn't reach the Market")
     return fail("Trading Post error card isn't the friendly one");
 
   // Scene version, for real: a scene.json from the future opens with the
@@ -564,12 +576,12 @@ int check_tour_and_layouts(Ctx& ctx, Screen& s, bool three_d, int* steps_out) {
     saw_add |= body.find("Add Component") != std::string::npos;
     saw_import |= body.find("mport") != std::string::npos;
     saw_play |= body.find("Play") != std::string::npos;
-    saw_post |= body.find("Trading Post") != std::string::npos;
+    saw_post |= body.find("Market") != std::string::npos;
     saw_vault |= body.find("Vault") != std::string::npos;
     if (i + 1 < w.step_count()) w.next();
   }
   if (!(saw_gizmo && saw_add && saw_import && saw_play && saw_post && saw_vault))
-    return fail(t + ": walkthrough misses a stop (viewport G/R/S, Add Component, import, Play, Trading Post, Vault)");
+    return fail(t + ": walkthrough misses a stop (viewport G/R/S, Add Component, import, Play, Market, Vault)");
   w.back();
   if (w.step() != w.step_count() - 2) return fail(t + ": walkthrough Back");
   // Skip without "Don't show again": comes back next launch.
@@ -578,10 +590,15 @@ int check_tour_and_layouts(Ctx& ctx, Screen& s, bool three_d, int* steps_out) {
   tick(2);
   if (w.active() || ImGui::FindWindowByName("###ts_walkthrough")->WasActive) return fail(t + ": Skip left the card up");
   if (done(ux::prefs()) || done(prefs_on_disk())) return fail(t + ": Skip without 'Don't show again' still marked the tour seen");
-  // Help > Walkthrough runs it again.
-  u.harvest();
-  const std::string help = find_action(u.actions().harvested("menu"), "/Walkthrough");
-  if (help.empty() || !u.run_now(help)) return fail(t + ": no Help > Walkthrough");
+  // Help > Walkthrough runs it again. harvest() opens a window, so it runs inside a frame.
+  std::string help;
+  bool restarted = false;
+  ctx.frames(1, [&] {
+    u.harvest();
+    help = find_action(u.actions().harvested("menu"), "/Walkthrough");
+    if (!help.empty()) restarted = u.run_now(help);
+  });
+  if (help.empty() || !restarted) return fail(t + ": no Help > Walkthrough");
   if (!w.active() || w.step() != 0) return fail(t + ": Help > Walkthrough didn't restart the tour");
   // Skip with "Don't show again" ticked (the default): saved to settings.json.
   if (!w.dont_show_again) return fail(t + ": 'Don't show again' should start ticked");
@@ -589,14 +606,14 @@ int check_tour_and_layouts(Ctx& ctx, Screen& s, bool three_d, int* steps_out) {
   if (!done(prefs_on_disk())) return fail(t + ": 'Don't show again' didn't reach settings.json");
   // Finishing also counts; run it from Help and Next all the way.
   (three_d ? ux::prefs().walkthrough_3d_done : ux::prefs().walkthrough_2d_done) = false;
-  u.run_now(help);
+  ctx.frames(1, [&] { u.run_now(help); });
   for (int i = 0; i < 20 && w.active(); ++i) w.next();
   if (w.active() || !done(prefs_on_disk())) return fail(t + ": Finish didn't mark the tour seen");
   *steps_out = w.step_count();
 
   // ---- layouts ----
   const char* panel = three_d ? "Inspector###Inspector3D" : "Inspector";
-  u.run_now("Panel/Inspector");
+  ctx.frames(1, [&] { u.run_now("Panel/Inspector"); });
   tick(4);
   ImGuiWindow* insp = ImGui::FindWindowByName(panel);
   if (!insp || insp->DockId == 0) return fail(t + ": Inspector isn't docked by default");
@@ -609,7 +626,7 @@ int check_tour_and_layouts(Ctx& ctx, Screen& s, bool three_d, int* steps_out) {
   tick(3);
   if (insp->DockId != 0) return fail(t + ": couldn't float the Inspector for the layout test");
   // Save through the menu + popup path (Window > Layouts > Save current...).
-  u.harvest();
+  ctx.frames(1, [&] { u.harvest(); });
   const std::vector<ux::Action> menu = u.actions().harvested("menu");
   const std::string save_id = find_action(menu, "Layouts/Save current...");
   const std::string reset_id = find_action(menu, "Layouts/Reset layout");
@@ -626,9 +643,14 @@ int check_tour_and_layouts(Ctx& ctx, Screen& s, bool three_d, int* steps_out) {
     if (ss.str().find("[Docking]") == std::string::npos) return fail(t + ": saved layout has no docking section");
   }
   // Load the docked one from the menu: applied at the start of the next frame.
-  u.harvest();
-  const std::string load_a = find_action(u.actions().harvested("menu"), "Layouts/" + a);
-  if (load_a.empty() || !u.run_now(load_a)) return fail(t + ": saved layout not in Window > Layouts");
+  std::string load_a;
+  bool loaded_menu = false;
+  ctx.frames(1, [&] {
+    u.harvest();
+    load_a = find_action(u.actions().harvested("menu"), "Layouts/" + a);
+    if (!load_a.empty()) loaded_menu = u.run_now(load_a);
+  });
+  if (load_a.empty() || !loaded_menu) return fail(t + ": saved layout not in Window > Layouts");
   if (!ux::layout_pending()) return fail(t + ": layout load not queued");
   tick(3);
   insp = ImGui::FindWindowByName(panel);
@@ -637,14 +659,18 @@ int check_tour_and_layouts(Ctx& ctx, Screen& s, bool three_d, int* steps_out) {
   tick(3);
   insp = ImGui::FindWindowByName(panel);
   if (!insp || insp->DockId != 0) return fail(t + ": loading the floating layout didn't float the Inspector");
-  if (!u.run_now(reset_id)) return fail(t + ": Reset layout");
+  bool reset_ok = false;
+  ctx.frames(1, [&] { reset_ok = u.run_now(reset_id); });
+  if (!reset_ok) return fail(t + ": Reset layout");
   tick(3);
   insp = ImGui::FindWindowByName(panel);
   if (!insp || insp->DockId == 0) return fail(t + ": Reset layout left the Inspector floating");
   (void)docked;
   // The name popup, with a path-ish name: cleaned, stays in layouts/.
   if (ux::clean_layout_name("../../evil\\name?") != "evilname") return fail("layout names aren't cleaned");
-  if (!u.run_now(save_id)) return fail(t + ": Save current...");
+  bool save_ok = false;
+  ctx.frames(1, [&] { save_ok = u.run_now(save_id); });
+  if (!save_ok) return fail(t + ": Save current...");
   tick(2);
   if (!ImGui::FindWindowByName("Save layout###ts_save_layout")) return fail(t + ": Save current... didn't ask for a name");
   ctx.frames(1, [&] {
@@ -784,7 +810,7 @@ int run_ux_smoke() {
     e.on_enter();
     ctx.frames(3, [&] { e.on_update(1.0f / 60.0f); });
     if (int r = check_registry(ctx, e.field_guide(), "3D",
-                               {"Claim/Save scene", "Edit/Duplicate", "Edit/Undo", "Create/Cube"},
+                               {"Realm/Save scene", "Edit/Duplicate", "Edit/Undo", "Create/Cube"},
                                "View/Grid", [&] { return e.scene().show_grid; }))
       return r;
     menu3d = static_cast<int>(e.field_guide().actions().harvested("menu").size());

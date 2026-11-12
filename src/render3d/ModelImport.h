@@ -14,7 +14,8 @@
 //   .blend              Blender, run headless to export glTF (when found)
 //
 // Import settings come from the Asset Browser's .meta (settings
-// object) and are shared by every format: unit_scale and up_axis are baked
+// object) and are shared by every format: unit_scale, up_axis and
+// forward_axis are baked
 // into the vertices / skeleton / hulls; material_path adds texture search
 // roots; lod picks a level of detail (Source); skin / body_groups pick
 // Source variants; import_animations / generate_collider turn those off.
@@ -34,16 +35,31 @@ namespace render3d {
 
 enum class UpAxis { Auto, Y, Z };
 
+// Which way the file's mesh noses. The engine's forward is -Z (Y up), the
+// same axis Transform.Forward and the rider use. Auto turns glTF's +Z
+// forward onto -Z and leaves other formats as they are.
+enum class ForwardAxis { Auto, PosX, NegX, PosY, NegY, PosZ, NegZ };
+
 struct ModelImportOptions {
   float unit_scale = 1.0f;  // file units -> metres (Source: 0.0254)
   UpAxis up = UpAxis::Auto;  // Auto = the format's own (Source: Z up)
+  ForwardAxis forward = ForwardAxis::Auto;
   std::vector<std::string> material_paths;  // extra roots ("a;b")
   int lod = 0;
   bool animations = true;
   bool collision = true;
+  // Drop the mesh and keep the skeleton + clips (Mixamo "Without Skin",
+  // or a full file the user wants as a clip only).
+  bool clips_only = false;
+  // Seconds. clip_end <= clip_start keeps the whole clip.
+  float clip_start = 0.0f;
+  float clip_end = 0.0f;
   int skin = 0;                              // Source skin family
   std::map<std::string, int> body_groups;    // Source: group -> option
   std::string blender_path;                  // override for .blend
+  // Longest edge kept for decoded textures (ImportLimits.h). 0 keeps the
+  // original, still refused past kHardMaxTextureEdge.
+  int max_texture = 2048;
   // Source materials relinked by hand: material name (as in the model,
   // lower case) -> .vmt / .vtf / image file (absolute, or relative to the
   // model's folder). Settings key "material_overrides".
@@ -93,10 +109,15 @@ std::vector<std::string> steam_library_folders_from_vdf(const std::string& vdf_t
 // Bake uniform scale and Z-up -> Y-up into a model (vertices, normals,
 // tangents, skeleton roots / inverse binds, hulls, bounds).
 void bake_import_transform(Model* m, float scale, bool z_up);
+// Turns the file's forward axis onto engine -Z. Auto: glTF +Z, else no yaw.
+void bake_forward_axis(Model* m, ForwardAxis axis);
 // Recompute Model::bounds from what is drawn: the vertices the triangles
 // reference, skinned primitives posed by the rest pose (the palette the
 // renderer uses), after the import transform.
 void update_bounds(Model* m);
+// Shift a skinned rest pose so the lowest drawn vertex sits on y = 0.
+// The collider and a placement at the ground then share the soles.
+void plant_skinned_feet(Model* m);
 // The pre-0.1.1 bounds (every vertex, skinned ones unposed). Only for
 // spotting colliders that were sized from them (scene migration).
 Aabb legacy_vertex_bounds(const Model& m);
@@ -123,6 +144,27 @@ void hitbox_matrices(const Model& m, const std::vector<Mat4>* palette, std::vect
 // 8x8 magenta / black checker shown where a texture is missing.
 std::shared_ptr<const Image> missing_texture_image();
 
+// Thread-wide progress / cancel for the import running on this thread
+// (the editor's background job, or a smoke). Null clears it. The pointer
+// is not owned and must outlive the import.
+struct ImportMonitor {
+  bool (*cancelled)(void* user) = nullptr;
+  void (*progress)(void* user, int percent, const char* phase) = nullptr;
+  void* user = nullptr;
+};
+void set_import_monitor(const ImportMonitor* monitor);
+// Sticky cancel for the UI thread (GPU upload, a load that is not on the
+// worker that owns the monitor). start of a job clears it; Cancel sets it.
+void request_import_cancel();
+void clear_import_cancel();
+bool import_was_cancelled();
+void import_report(int percent, const char* phase);
+// Longest texture edge for the import on this thread (0 = not clamping).
+int active_import_texture_edge();
+// One-line note merged into the import warning (deduped).
+void import_note(const std::string& text);
+std::string import_take_notes();
+
 // One-line rights note shown by the import UI.
 inline constexpr const char* kModelRightsNote =
     "You are responsible for having the rights to any model you import.";
@@ -132,6 +174,9 @@ bool load_source_mdl(const std::string& path, const ModelImportOptions& opt, Mod
                      std::string* error);
 bool load_assimp_model(const std::string& path, const ModelImportOptions& opt, Model* out,
                        std::string* error);
+// FBX 6.x / ASCII (and any FBX Assimp rejects) via ufbx.
+bool load_ufbx_model(const std::string& path, const ModelImportOptions& opt, Model* out,
+                     std::string* error);
 bool load_blend_model(const std::string& path, const ModelImportOptions& opt, Model* out,
                       std::string* error);
 

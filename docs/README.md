@@ -1,4 +1,4 @@
-# TombStone Engine documentation
+# Nidavellir Engine documentation
 
 These pages are written from the source in this repository (`src/`, `apps/`, `sdk/`, `templates/`, `cmake/`). Where a page cites a file, that file is the place to check the details.
 

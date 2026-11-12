@@ -30,7 +30,7 @@ Settings SettingsStore::make_defaults() {
   s.projects_root = default_projects_root();
   s.username.clear();
   s.auto_login_dev = false;
-  s.theme = "dark";
+  s.theme = "forge";
   s.last_project_path.clear();
   return s;
 }
@@ -67,8 +67,8 @@ Settings SettingsStore::load(std::string* error_out) {
   s.auto_login_dev =
       json_mini::get_bool(*parsed, "auto_login_dev", s.auto_login_dev);
   s.theme = json_mini::get_string(*parsed, "theme", s.theme);
-  if (s.theme != "dark" && s.theme != "light") {
-    s.theme = "dark";
+  if (s.theme != "forge" && s.theme != "dusk" && s.theme != "dark" && s.theme != "light") {
+    s.theme = "forge";
   }
   s.last_project_path =
       json_mini::get_string(*parsed, "last_project_path", s.last_project_path);
@@ -125,8 +125,9 @@ bool SettingsStore::save(const Settings& settings, std::string* error_out) {
   if (normalized.projects_root.empty()) {
     normalized.projects_root = default_projects_root();
   }
-  if (normalized.theme != "dark" && normalized.theme != "light") {
-    normalized.theme = "dark";
+  if (normalized.theme != "forge" && normalized.theme != "dusk" &&
+      normalized.theme != "dark" && normalized.theme != "light") {
+    normalized.theme = "forge";
   }
 
   const std::string body = json_mini::write_object(

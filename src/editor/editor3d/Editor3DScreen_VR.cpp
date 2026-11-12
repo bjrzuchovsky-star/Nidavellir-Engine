@@ -1,9 +1,10 @@
-// VR claims in the 3D editor: Play in the desktop simulator, "Preview in
+// VR realms in the 3D editor: Play in the desktop simulator, "Preview in
 // headset" through OpenXR, and the Headset Mirror window (both eyes, the
 // session state, comfort settings, simulator keys).
 
 #include "weather/Weather3D.h"
 #include "editor/editor3d/Editor3DScreen.h"
+#include "editor/ux/ShotOpts.h"
 
 #include "editor/ui/Theme.h"
 
@@ -37,6 +38,7 @@ bool Editor3DScreen::vr_preview_start(bool simulator) {
   gizmo_cancel();
   ensure_renderer();
   world_.set_log_sink([this](const runtime::LogEntry& e) {
+    if (shot::hide_log_line(e.text)) return;
     log_.push_back(e);
     while (log_.size() > 400) log_.pop_front();
   });
@@ -126,6 +128,8 @@ xr::SimDrive Editor3DScreen::poll_sim_drive() {
 
 void Editor3DScreen::draw_vr_mirror() {
   if (!vr_project()) return;
+  // Store shots keep the saloon picture, not the eye readouts and comfort keys.
+  if (shot::clean()) return;
   ImGui::SetNextWindowSize(ImVec2(620, 420), ImGuiCond_FirstUseEver);
   vr_mirror_hovered_ = false;
   if (!ImGui::Begin(kVrMirror)) {
