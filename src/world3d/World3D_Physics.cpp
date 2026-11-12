@@ -386,6 +386,13 @@ void World3D::phys_build() {
                         : 0.5f * std::max(p->collider->size.x, p->collider->size.z);
         cd.height = p->collider->size.y;
         cd.offset = p->collider->offset;
+        const float sy = std::max(1.0e-4f, std::fabs(p->transform.scale.y));
+        const float sh = std::max({1.0e-4f, std::fabs(p->transform.scale.x), std::fabs(p->transform.scale.z)});
+        cd.radius *= sh;
+        cd.height *= sy;
+        cd.offset.x *= p->transform.scale.x;
+        cd.offset.y *= p->transform.scale.y;
+        cd.offset.z *= p->transform.scale.z;
       }
       phys_->create_character(cd, p->transform.position);
       synced_[player_] = p->transform;

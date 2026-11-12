@@ -70,7 +70,8 @@ bool name_combo(const char* label, std::string* value, const std::vector<std::st
 }  // namespace
 
 void draw_animator_fields(scene3d::Animator3D& a, const render3d::Model* model,
-                          const std::function<void(const char*)>& after, const char** commit) {
+                          const std::function<void(const char*)>& after, const char** commit,
+                          const std::function<void()>& open_graph) {
   using scene3d::AnimParam3D;
   using scene3d::AnimTransition3D;
   auto discrete = [&](bool changed, const char* what) {
@@ -98,12 +99,7 @@ void draw_animator_fields(scene3d::Animator3D& a, const render3d::Model* model,
     }
     discrete(name_combo("Root bone", &a.root_bone, bones), "Root bone");
   }
-  if (ImGui::SmallButton("Reset to default locomotion")) {
-    const std::string keep = a.model;
-    a = scene3d::default_locomotion_animator();
-    a.model = keep;
-    *commit = "Default locomotion";
-  }
+  if (ImGui::Button("Open Animator Graph") && open_graph) open_graph();
 
   // Parameters.
   if (ImGui::TreeNodeEx("Parameters", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -137,203 +133,6 @@ void draw_animator_fields(scene3d::Animator3D& a, const render3d::Model* model,
       a.params.push_back({"param" + std::to_string(a.params.size()), AnimParam3D::Type::Float, 0.0f});
       *commit = "Add param";
     }
-    ImGui::TreePop();
-  }
-  std::vector<std::string> pnames;
-  for (const AnimParam3D& p : a.params) pnames.push_back(p.name);
-
-  // Layers.
-  for (std::size_t li = 0; li < a.layers.size(); ++li) {
-    scene3d::AnimLayer3D& l = a.layers[li];
-    ImGui::PushID(static_cast<int>(1000 + li));
-    const std::string head = "Layer: " + l.name + "###layer";
-    if (ImGui::TreeNodeEx(head.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
-      edit_str("Name", &l.name);
-      after("Layer name");
-      ImGui::SliderFloat("Weight", &l.weight, 0.0f, 1.0f);
-      after("Layer weight");
-      std::string mask;
-      for (const std::string& m : l.mask) mask += (mask.empty() ? "" : ", ") + m;
-      if (edit_str("Mask bones", &mask)) {
-        l.mask.clear();
-        std::size_t at = 0;
-        while (at <= mask.size()) {
-          std::size_t c = mask.find(',', at);
-          if (c == std::string::npos) c = mask.size();
-          std::string b = mask.substr(at, c - at);
-          b.erase(0, b.find_first_not_of(' '));
-          b.erase(b.find_last_not_of(' ') + 1);
-          if (!b.empty()) l.mask.push_back(b);
-          at = c + 1;
-        }
-      }
-      after("Layer mask");
-      if (ImGui::IsItemHovered()) ux::SetTooltip("Each bone takes its subtree; empty = whole body");
-      std::vector<std::string> snames;
-      for (const scene3d::AnimState3D& st : l.states) snames.push_back(st.name);
-      discrete(name_combo("Entry", &l.entry, snames), "Entry state");
-
-      theme::SectionHeader("States");
-      for (std::size_t si = 0; si < l.states.size(); ++si) {
-        scene3d::AnimState3D& st = l.states[si];
-        ImGui::PushID(static_cast<int>(si));
-        const bool open = ImGui::TreeNode("##st", "%s%s", st.name.c_str(), st.blend.empty() ? "" : "  (blend)");
-        ImGui::SameLine();
-        bool removed = false;
-        if (ImGui::SmallButton("x")) {
-          l.states.erase(l.states.begin() + static_cast<std::ptrdiff_t>(si));
-          *commit = "Remove state";
-          removed = true;
-        }
-        if (open) {
-          if (!removed) {
-            edit_str("Name", &st.name);
-            after("State name");
-            if (st.blend.empty()) {
-              discrete(clip_combo("Clip", &st.clip, model), "State clip");
-            } else {
-              discrete(name_combo("Blend by", &st.blend_param, pnames), "Blend param");
-              for (std::size_t bi = 0; bi < st.blend.size(); ++bi) {
-                ImGui::PushID(static_cast<int>(bi));
-                ImGui::SetNextItemWidth(120);
-                discrete(clip_combo("##bc", &st.blend[bi].clip, model), "Blend clip");
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(70);
-                ImGui::DragFloat("at", &st.blend[bi].at, 0.05f);
-                after("Blend point");
-                ImGui::SameLine();
-                if (ImGui::SmallButton("x")) {
-                  st.blend.erase(st.blend.begin() + static_cast<std::ptrdiff_t>(bi));
-                  *commit = "Remove blend point";
-                  ImGui::PopID();
-                  break;
-                }
-                ImGui::PopID();
-              }
-            }
-            if (ImGui::SmallButton(st.blend.empty() ? "Make blend space" : "+ Blend point")) {
-              st.blend.push_back({st.clip, st.blend.empty() ? 0.0f : st.blend.back().at + 1.0f});
-              *commit = "Add blend point";
-            }
-            ImGui::DragFloat("Speed", &st.speed, 0.01f, 0.0f, 5.0f, "%.2fx");
-            after("State speed");
-            discrete(ImGui::Checkbox("Loop", &st.loop), "State loop");
-          }
-          ImGui::TreePop();
-        }
-        ImGui::PopID();
-        if (removed) break;
-      }
-      if (ImGui::SmallButton("+ State")) {
-        scene3d::AnimState3D st;
-        st.name = "state" + std::to_string(l.states.size());
-        if (model && !model->clips.empty()) st.clip = model->clips.front().name;
-        l.states.push_back(st);
-        *commit = "Add state";
-      }
-
-      theme::SectionHeader("Transitions");
-      static const char* kOps = "> value\0< value\0is true\0is false\0trigger\0always\0";
-      for (std::size_t ti = 0; ti < l.transitions.size(); ++ti) {
-        AnimTransition3D& tr = l.transitions[ti];
-        ImGui::PushID(static_cast<int>(5000 + ti));
-        ImGui::SetNextItemWidth(95);
-        discrete(name_combo("##from", &tr.from, snames, "*"), "Transition from");
-        ImGui::SameLine();
-        ImGui::TextUnformatted("->");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(95);
-        discrete(name_combo("##to", &tr.to, snames), "Transition to");
-        ImGui::SameLine();
-        if (ImGui::SmallButton("x")) {
-          l.transitions.erase(l.transitions.begin() + static_cast<std::ptrdiff_t>(ti));
-          *commit = "Remove transition";
-          ImGui::PopID();
-          break;
-        }
-        ImGui::Indent();
-        int op = static_cast<int>(tr.op);
-        if (tr.op != AnimTransition3D::Op::Always) {
-          ImGui::SetNextItemWidth(95);
-          discrete(name_combo("##p", &tr.param, pnames), "Transition param");
-          ImGui::SameLine();
-        }
-        ImGui::SetNextItemWidth(80);
-        if (ImGui::Combo("##op", &op, kOps)) {
-          tr.op = static_cast<AnimTransition3D::Op>(op);
-          *commit = "Transition condition";
-        }
-        if (tr.op == AnimTransition3D::Op::Greater || tr.op == AnimTransition3D::Op::Less) {
-          ImGui::SameLine();
-          ImGui::SetNextItemWidth(60);
-          ImGui::DragFloat("##v", &tr.value, 0.05f);
-          after("Transition value");
-        }
-        ImGui::SetNextItemWidth(90);
-        ImGui::DragFloat("Fade", &tr.duration, 0.01f, 0.0f, 5.0f, "%.2f s");
-        after("Transition fade");
-        ImGui::SameLine();
-        discrete(ImGui::Checkbox("At end", &tr.at_end), "Transition at end");
-        ImGui::Unindent();
-        ImGui::PopID();
-      }
-      if (ImGui::SmallButton("+ Transition")) {
-        AnimTransition3D tr;
-        if (!snames.empty()) tr.to = snames.front();
-        if (!pnames.empty()) tr.param = pnames.front();
-        l.transitions.push_back(tr);
-        *commit = "Add transition";
-      }
-      ImGui::TreePop();
-    }
-    ImGui::PopID();
-  }
-  if (ImGui::SmallButton("+ Layer")) {
-    scene3d::AnimLayer3D l;
-    l.name = "Layer " + std::to_string(a.layers.size());
-    a.layers.push_back(l);
-    *commit = "Add layer";
-  }
-  if (a.layers.size() > 1) {
-    ImGui::SameLine();
-    if (ImGui::SmallButton("- Top layer")) {
-      a.layers.pop_back();
-      *commit = "Remove layer";
-    }
-  }
-
-  // Events.
-  if (ImGui::TreeNode("Events", "Events (%zu)", a.events.size())) {
-    for (std::size_t i = 0; i < a.events.size(); ++i) {
-      scene3d::AnimEvent3D& ev = a.events[i];
-      ImGui::PushID(static_cast<int>(9000 + i));
-      ImGui::SetNextItemWidth(95);
-      discrete(clip_combo("##c", &ev.clip, model), "Event clip");
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(60);
-      ImGui::DragFloat("##t", &ev.time, 0.01f, 0.0f, 600.0f, "%.2fs");
-      after("Event time");
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(90);
-      edit_str("##n", &ev.name);
-      after("Event name");
-      ImGui::SameLine();
-      if (ImGui::SmallButton("x")) {
-        a.events.erase(a.events.begin() + static_cast<std::ptrdiff_t>(i));
-        *commit = "Remove event";
-        ImGui::PopID();
-        break;
-      }
-      ImGui::PopID();
-    }
-    if (ImGui::SmallButton("+ Event")) {
-      scene3d::AnimEvent3D ev;
-      ev.name = "event";
-      if (model && !model->clips.empty()) ev.clip = model->clips.front().name;
-      a.events.push_back(ev);
-      *commit = "Add event";
-    }
-    ImGui::TextDisabled("Scripts get on_anim_event(name, time).");
     ImGui::TreePop();
   }
 }

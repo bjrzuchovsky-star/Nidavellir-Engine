@@ -170,6 +170,7 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
   }
   rebuild_statics();
   phys_build();
+  settle_rider();
   // Camera starts behind the rider, looking the way the editor camera did.
   cam_yaw_ = want_yaw_ = scene.editor_camera.yaw;
   cam_pitch_ = want_pitch_ = 0.0f;
@@ -352,6 +353,82 @@ void World3D::rebuild_statics() {
   }
 }
 
+namespace {
+
+bool tri_floor_y(const Vec3& a, const Vec3& b, const Vec3& c, float x, float z, float* y) {
+  const Vec3 ab = b - a, ac = c - a;
+  const Vec3 n = render3d::cross(ab, ac);
+  if (n.y <= 1e-4f) return false;
+  const float yy = a.y - (n.x * (x - a.x) + n.z * (z - a.z)) / n.y;
+  const Vec3 p{x - a.x, yy - a.y, z - a.z};
+  const float d00 = render3d::dot(ab, ab), d01 = render3d::dot(ab, ac), d11 = render3d::dot(ac, ac);
+  const float d20 = render3d::dot(p, ab), d21 = render3d::dot(p, ac);
+  const float den = d00 * d11 - d01 * d01;
+  if (std::fabs(den) < 1e-12f) return false;
+  const float v = (d11 * d20 - d01 * d21) / den;
+  const float w = (d00 * d21 - d01 * d20) / den;
+  const float u = 1.0f - v - w;
+  if (u < -1e-3f || v < -1e-3f || w < -1e-3f) return false;
+  *y = yy;
+  return true;
+}
+
+}  // namespace
+
+void World3D::settle_rider() {
+  Entity3D* p = live(player_);
+  if (!p || !p->collider) return;
+  float radius = 0.4f, bottom = 0.0f;
+  {
+    float r = p->collider->shape == scene3d::Collider3D::Shape::Capsule
+                  ? p->collider->size.x
+                  : 0.5f * std::max(p->collider->size.x, p->collider->size.z);
+    float h = p->collider->shape == scene3d::Collider3D::Shape::Capsule
+                  ? std::max(p->collider->size.y, 2.0f * r)
+                  : p->collider->size.y;
+    const float sy = std::max(1.0e-4f, std::fabs(p->transform.scale.y));
+    const float sh = std::max({1.0e-4f, std::fabs(p->transform.scale.x), std::fabs(p->transform.scale.z)});
+    r *= sh;
+    h *= sy;
+    const float off_y = p->collider->offset.y * p->transform.scale.y;
+    bottom = off_y - h * 0.5f;
+    radius = r;
+  }
+  const float feet = p->transform.position.y + bottom;
+  float ground = -1.0e30f;
+  bool any = false;
+  auto take = [&](float y) {
+    if (y <= feet + 0.05f && feet - y <= 4.0f && y > ground) {
+      ground = y;
+      any = true;
+    }
+  };
+  auto sample = [&](float x, float z) {
+    float h = 0.0f;
+    if (terrain_solid_height(x, z, &h, nullptr)) take(h);
+    for (const Static& s : statics_) {
+      if (s.volume) {
+        if (x >= s.box.min.x && x <= s.box.max.x && z >= s.box.min.z && z <= s.box.max.z) take(s.box.max.y);
+        continue;
+      }
+      for (const SurfTri& t : s.tris) {
+        float ty = 0.0f;
+        if (tri_floor_y(t.a, t.b, t.c, x, z, &ty)) take(ty);
+      }
+    }
+  };
+  sample(p->transform.position.x, p->transform.position.z);
+  for (int k = 0; k < 4; ++k) {
+    const float a = static_cast<float>(k) * 1.5707963f;
+    sample(p->transform.position.x + std::cos(a) * radius * 0.6f,
+           p->transform.position.z + std::sin(a) * radius * 0.6f);
+  }
+  if (!any || !(feet > ground + 0.02f)) return;
+  p->transform.position.y -= feet - ground;
+  if (phys_ && phys_->has_character()) phys_->set_character_position(p->transform.position);
+  vel_ = {};
+}
+
 void World3D::follow_camera(bool snap) {
   const Entity3D* p = find(player_);
   if (!p) return;
@@ -465,6 +542,13 @@ void World3D::move_player(const Input3D& in) {
                                                                   : 0.5f * std::max(p->collider->size.x, p->collider->size.z);
     h = p->collider->size.y;
     off = p->collider->offset;
+    const float sy = std::max(1.0e-4f, std::fabs(p->transform.scale.y));
+    const float sh = std::max({1.0e-4f, std::fabs(p->transform.scale.x), std::fabs(p->transform.scale.z)});
+    r *= sh;
+    h *= sy;
+    off.x *= p->transform.scale.x;
+    off.y *= p->transform.scale.y;
+    off.z *= p->transform.scale.z;
   }
   const float half = std::max(0.0f, h * 0.5f - r);
   grounded_ = false;

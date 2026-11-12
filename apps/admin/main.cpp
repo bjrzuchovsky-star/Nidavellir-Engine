@@ -138,6 +138,13 @@ using editor::SettingsStore;
 
 void apply_theme(const Settings& settings) {
   editor::theme::Apply(settings.theme);
+  // A panel dragged out of the main window is its own OS window. Those
+  // windows cannot be translucent, and rounded corners leave a halo.
+  if (ImGui::GetCurrentContext() && (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable)) {
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowRounding = 0.0f;
+    style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+  }
 }
 
 // Tiny uncompressed 32-bit TGA writer so --smoke can make test images
@@ -2994,6 +3001,9 @@ int run_imgui_app() {
       glfwSetWindowShouldClose(window, GLFW_FALSE);
     }
     profiler::Profiler::get().begin_frame();
+    // Secondary viewports share this context. A previous frame leaves GL
+    // current on the last platform window; the scene FBO belongs on the main one.
+    glfwMakeContextCurrent(window);
     glfwPollEvents();
     ts::tombstone::steam::SteamService::instance().run_callbacks();
 

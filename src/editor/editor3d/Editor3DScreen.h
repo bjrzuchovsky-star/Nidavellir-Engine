@@ -774,12 +774,11 @@ class Editor3DScreen final : public IScreen {
   std::unique_ptr<TeamSession> team_;
 };
 
-// Animator inspector body (Editor3DScreen_Anim.cpp): params, layers with
-// masks, states (clip / blend space), transitions, events, root motion.
-// `after(label)` follows each drag/text widget; discrete edits set
-// *commit. `model` (may be null) lists clip and bone names.
+// Compact Animator inspector. States and transitions are edited in the graph.
+// `after(label)` follows each drag/text widget; discrete edits set *commit.
 void draw_animator_fields(scene3d::Animator3D& a, const render3d::Model* model,
-                          const std::function<void(const char*)>& after, const char** commit);
+                          const std::function<void(const char*)>& after, const char** commit,
+                          const std::function<void()>& open_graph);
 
 }  // namespace editor
 }  // namespace tombstone

@@ -39,31 +39,61 @@ bool model_words(const std::string& l) {
   return has(l, {"model", "mesh", ".glb", ".gltf", ".obj", ".fbx", ".mdl", ".blend", ".dae", ".ply", ".stl"});
 }
 
-// The first thing that looks like a file path ("scripts/gate.lua",
-// "C:\x\y.png") or a quoted name ('ts.example').
+// A path may contain spaces ("Unarmed Walk Forward.fbx"). The title shows
+// the file name, not the folder the old scanner stopped on at the first space.
 std::string pull_subject(const std::string& raw) {
+  const std::string low = lower(raw);
+  static const char* kExt[] = {".fbx",  ".gltf", ".glb",  ".obj", ".blend", ".dae", ".mdl", ".png",
+                               ".jpg",  ".jpeg", ".tga",  ".bmp", ".vtf",   ".dds", ".lua", ".json",
+                               ".anim", ".wav",  ".ogg"};
+  std::size_t at = std::string::npos;
+  std::size_t ext_n = 0;
+  bool modelish = false;
+  for (const char* ext : kExt) {
+    const std::size_t p = low.find(ext);
+    if (p == std::string::npos) continue;
+    if (at != std::string::npos && p >= at) continue;
+    at = p;
+    ext_n = std::char_traits<char>::length(ext);
+    modelish = ext[1] != 'l' || std::string(ext) != ".lua";
+    if (std::string(ext) == ".json" || std::string(ext) == ".anim") modelish = false;
+  }
+  if (at != std::string::npos) {
+    std::size_t start = at;
+    auto sep = [](char c) {
+      return c == '\n' || c == '\r' || c == '"' || c == '\'' || c == '(' || c == ')' || c == ',' || c == ';';
+    };
+    while (start > 0) {
+      const char prev = raw[start - 1];
+      if (sep(prev)) break;
+      if (prev == ':') {
+        // "C:\..." stays; "path: reason" stops before the colon.
+        if (start >= 2 && std::isalpha(static_cast<unsigned char>(raw[start - 2])) &&
+            (start == 2 || sep(raw[start - 3]) || raw[start - 3] == ' ')) {
+          start -= 2;
+        }
+        break;
+      }
+      --start;
+    }
+    while (start < raw.size() && raw[start] == ' ') ++start;
+    std::size_t end = at + ext_n;
+    if (end < raw.size() && raw[end] == ':' && end + 1 < raw.size() &&
+        std::isdigit(static_cast<unsigned char>(raw[end + 1]))) {
+      ++end;
+      while (end < raw.size() && std::isdigit(static_cast<unsigned char>(raw[end]))) ++end;
+    }
+    std::string path = raw.substr(start, end - start);
+    if (modelish) {
+      const std::size_t slash = path.find_last_of("/\\");
+      if (slash != std::string::npos && slash + 1 < path.size()) path = path.substr(slash + 1);
+    }
+    if (path.size() > 2) return path;
+  }
   const auto q = raw.find('\'');
   if (q != std::string::npos) {
     const auto e = raw.find('\'', q + 1);
-    if (e != std::string::npos && e > q + 1 && e - q < 120) return raw.substr(q + 1, e - q - 1);
-  }
-  std::size_t i = 0;
-  while (i < raw.size()) {
-    while (i < raw.size() && (raw[i] == ' ' || raw[i] == '(' || raw[i] == '"' || raw[i] == ',')) ++i;
-    std::size_t j = i;
-    while (j < raw.size() && raw[j] != ' ' && raw[j] != '"' && raw[j] != ',' && raw[j] != ')' && raw[j] != '\n') ++j;
-    std::string tok = raw.substr(i, j - i);
-    while (!tok.empty() && (tok.back() == ':' || tok.back() == '.' || tok.back() == ';')) tok.pop_back();
-    const bool sep = tok.find('/') != std::string::npos || tok.find('\\') != std::string::npos;
-    const auto dot = tok.rfind('.');
-    const bool ext = dot != std::string::npos && dot > 0 && dot + 1 < tok.size() && tok.size() - dot <= 6 &&
-                     std::isalpha(static_cast<unsigned char>(tok[dot + 1]));
-    if ((sep || ext) && tok.find("://") == std::string::npos && tok.size() > 2) {
-      // "scripts/gate.lua:12" -> keep the line number, it helps.
-      return tok;
-    }
-    if (tok.find("://") != std::string::npos) return tok;  // a URL is a fine subject too
-    i = j + 1;
+    if (e != std::string::npos && e > q + 1 && e - q < 180) return raw.substr(q + 1, e - q - 1);
   }
   return {};
 }

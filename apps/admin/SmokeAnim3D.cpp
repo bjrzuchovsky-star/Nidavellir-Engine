@@ -1434,7 +1434,107 @@ int feet_on_ground() {
   if (std::fabs(rt.pose()[0].t.y - hip.t.y) > 0.02f) {
     return fail("in-place clip lifted the hips to " + std::to_string(rt.pose()[0].t.y));
   }
+
+  // A skinned rest pose whose soles sit above the origin is shifted onto y = 0.
+  r3::Model raised;
+  r3::Joint root;
+  root.name = "hips";
+  raised.skeleton.joints.push_back(root);
+  r3::ModelPrimitive prim;
+  r3::Vertex3D a, b, c;
+  a.position = {0.0f, 1.60f, 0.0f};
+  b.position = {0.20f, 1.60f, 0.0f};
+  c.position = {0.0f, 1.80f, 0.10f};
+  prim.mesh.vertices = {a, b, c};
+  prim.mesh.indices = {0, 1, 2};
+  r3::SkinVertex sw;
+  sw.weights[0] = 1.0f;
+  prim.mesh.skin = {sw, sw, sw};
+  raised.primitives.push_back(std::move(prim));
+  r3::plant_skinned_feet(&raised);
+  if (std::fabs(raised.bounds.min.y) > 0.02f) {
+    return fail("planted skinned feet at " + std::to_string(raised.bounds.min.y));
+  }
+
+  // Play: the rider starts 1.6 m up and must be on the floor, then stay there.
+  s3::Scene3D scene;
+  s3::Entity3D floor;
+  floor.id = 1;
+  floor.name = "Floor";
+  s3::Collider3D box;
+  box.shape = s3::Collider3D::Shape::Box;
+  box.size = {8.0f, 0.2f, 8.0f};
+  box.offset = {0.0f, -0.1f, 0.0f};
+  floor.collider = box;
+  s3::Entity3D rider;
+  rider.id = 2;
+  rider.name = "Rider";
+  rider.player = s3::Player3D{};
+  rider.transform.position = {0.0f, 1.6f, 0.0f};
+  s3::Collider3D cap;
+  cap.shape = s3::Collider3D::Shape::Capsule;
+  cap.size = {0.3f, 1.7f, 0.3f};
+  cap.offset = {0.0f, 0.85f, 0.0f};
+  rider.collider = cap;
+  scene.entities = {floor, rider};
+  w3::World3D play;
+  std::string err;
+  if (!play.start(scene, ".", &err)) return fail("play feet: " + err);
+  auto feet_of = [](const s3::Entity3D& e) {
+    return e.transform.position.y + (e.collider->offset.y - e.collider->size.y * 0.5f);
+  };
+  const s3::Entity3D* stood = play.find(2);
+  if (!stood || std::fabs(feet_of(*stood)) > 0.08f) {
+    return fail("play start left the rider at " + (stood ? std::to_string(feet_of(*stood)) : std::string("missing")));
+  }
+  w3::Input3D idle;
+  play.run_ticks(45, idle);
+  stood = play.find(2);
+  if (!stood || std::fabs(feet_of(*stood)) > 0.08f) {
+    return fail("play left the rider hovering at " + (stood ? std::to_string(feet_of(*stood)) : std::string("missing")));
+  }
   std::cout << "[smoke] anim3d feet on ground OK\n";
+  return 0;
+}
+
+fs::path fbx6100_fixture() {
+  const fs::path name = fs::path("apps") / "admin" / "testdata" / "fbx6100_anim.fbx";
+#ifdef TS_REPO_DIR
+  if (fs::exists(fs::path(TS_REPO_DIR) / name)) return fs::path(TS_REPO_DIR) / name;
+#endif
+  fs::path dir = fs::current_path();
+  for (int i = 0; i < 6; ++i) {
+    if (fs::exists(dir / name)) return dir / name;
+    if (!dir.has_parent_path() || dir.parent_path() == dir) break;
+    dir = dir.parent_path();
+  }
+  return {};
+}
+
+int fbx6100_import() {
+  const fs::path f = fbx6100_fixture();
+  if (f.empty()) return fail("fbx 6100 fixture not found");
+  r3::Model m;
+  std::string err;
+  if (!r3::load_model(f.string(), &m, &err)) return fail("fbx 6100: " + err);
+  if (m.clips.empty() || m.skeleton.joints.empty()) {
+    return fail("fbx 6100 has no clip or skeleton (" + std::to_string(m.clips.size()) + " clips)");
+  }
+  std::cout << "[smoke] fbx 6100 OK (" << m.clips.size() << " clips, " << m.skeleton.joints.size()
+            << " joints, " << m.primitives.size() << " meshes)\n";
+  if (const char* extra = std::getenv("TS_OLD_FBX"); extra && extra[0] && fs::exists(extra)) {
+    r3::Model old;
+    std::string oerr;
+    if (!r3::load_model(extra, &old, &oerr)) return fail(std::string("old fbx: ") + oerr);
+    if (old.clips.empty() || old.skeleton.joints.empty()) return fail("old fbx has no clip or skeleton");
+    if (!old.primitives.empty() && !old.animation_only() && old.bounds.max.y - old.bounds.min.y > 8.0f) {
+      return fail("old fbx still looks like centimetres (" + std::to_string(old.bounds.max.y - old.bounds.min.y) + " m)");
+    }
+    std::cout << "[smoke] old fbx " << extra << ": " << old.clips.size() << " clips, " << old.skeleton.joints.size()
+              << " joints, meshes " << old.primitives.size()
+              << (old.animation_only() ? " (animation only)" : "")
+              << " feet " << old.bounds.min.y << " height " << (old.bounds.max.y - old.bounds.min.y) << "\n";
+  }
   return 0;
 }
 
@@ -1457,6 +1557,7 @@ int run_anim3d_smoke() {
   if (world(dir / "town") != 0) return 1;
   if (graph_compat() != 0) return 1;
   if (feet_on_ground() != 0) return 1;
+  if (fbx6100_import() != 0) return 1;
   if (editor_preview(dir / "editor") != 0) return 1;
   if (multipart_drop(dir / "parts") != 0) return 1;
   std::cout << "[smoke] anim3d OK (skin math vs reference, linear/step/cubic + slerp, 1D blend weights, "

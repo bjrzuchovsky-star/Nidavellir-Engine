@@ -1,0 +1,1 @@
+ufbx (https://github.com/ufbx/ufbx) v0.20.0, MIT License. Copyright (c) 2020 Samuli Raivio.

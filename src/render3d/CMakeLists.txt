@@ -17,7 +17,9 @@ add_library(ts_render3d
   import/Gma.cpp
   import/Lzma.cpp
   import/AssimpImport.cpp
+  import/UfbxImport.cpp
   import/BlenderImport.cpp
+  ${CMAKE_SOURCE_DIR}/third_party/ufbx/ufbx.c
   Skeleton.cpp
   ClipFile.cpp
   Retarget.cpp
@@ -39,6 +41,12 @@ add_library(ts_render3d
   HiddenGl.cpp
 )
 target_include_directories(ts_render3d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_include_directories(ts_render3d PRIVATE ${CMAKE_SOURCE_DIR}/third_party/ufbx)
+if(MSVC)
+  set_source_files_properties(${CMAKE_SOURCE_DIR}/third_party/ufbx/ufbx.c PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "/w")
+else()
+  set_source_files_properties(${CMAKE_SOURCE_DIR}/third_party/ufbx/ufbx.c PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-w")
+endif()
 target_link_libraries(ts_render3d
   PUBLIC
     ts_core
