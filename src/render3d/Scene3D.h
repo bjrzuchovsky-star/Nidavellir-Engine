@@ -100,11 +100,15 @@ struct Material3D {
 };
 
 struct Light3D {
-  enum class Type : std::uint8_t { Point, Directional };
+  enum class Type : std::uint8_t { Point, Directional, Spot, Area, Emissive, Sky };
   Type type = Type::Point;
   float color[3] = {1.0f, 0.78f, 0.5f};
   float intensity = 6.0f;
-  float range = 8.0f;  // point only
+  float range = 8.0f;  // point / spot
+  float angle = 40.0f;  // spot outer cone, degrees
+  float inner = 0.75f;  // spot inner cone as a fraction of the outer
+  float size_x = 1.0f;  // area light
+  float size_y = 1.0f;
   bool operator==(const Light3D& o) const = default;
 };
 

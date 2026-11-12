@@ -28,6 +28,8 @@
 #include "editor/workspace/Workspace2D.h"
 #include "core/PngWrite.h"
 #include "gfx/GlTextureUploader.h"
+#include "GfxHost.h"
+#include "rhi/Rhi.h"
 
 #include "Smoke3D.h"
 #include "SmokeAssets.h"
@@ -2955,39 +2957,13 @@ int run_imgui_app() {
   } steam_guard;
   if (!steam_guard.ok) return 0;
 
-  if (!glfwInit()) {
-    std::cerr << "glfwInit failed\n";
+  admin_gfx::Host host;
+  if (!host.open(1280, 720, editor::brand::kWindowTitle)) {
+    std::cerr << "graphics startup failed\n";
     return 1;
   }
-
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-#if defined(__APPLE__)
-  glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-#endif
-
-  GLFWwindow* window =
-      glfwCreateWindow(1280, 720, editor::brand::kWindowTitle, nullptr, nullptr);
-  if (!window) {
-    std::cerr << "glfwCreateWindow failed\n";
-    glfwTerminate();
-    return 1;
-  }
-  glfwMakeContextCurrent(window);
-  glfwSwapInterval(1);
-
-  IMGUI_CHECKVERSION();
-  ImGui::CreateContext();
+  GLFWwindow* window = host.window;
   ImGuiIO& io = ImGui::GetIO();
-  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-  io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-  // Multi-viewport is optional; enable when the backend supports it.
-  io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
-  io.ConfigWindowsMoveFromTitleBarOnly = true;
-
-  ImGui_ImplGlfw_InitForOpenGL(window, true);
-  ImGui_ImplOpenGL3_Init("#version 330");
   // Files dropped from Explorer / Finder: the Asset Browser imports them
   // (sorted into type folders, or into the folder under the mouse).
   glfwSetDropCallback(window, [](GLFWwindow*, int count, const char** paths) {
@@ -2995,18 +2971,10 @@ int run_imgui_app() {
     for (int i = 0; i < count; ++i) v.emplace_back(paths[i]);
     editor::importsort::push_os_drop(v);
   });
-  // Sprites / tilesets upload through this while the GL context lives.
-  static gfx::GlTextureUploader gl_uploader;
-  gfx::set_texture_uploader(&gl_uploader);
-
   Engine engine;
   if (!engine.init()) {
     std::cerr << "Engine init failed\n";
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    host.shutdown();
     return 1;
   }
 
@@ -3030,8 +2998,7 @@ int run_imgui_app() {
     ts::tombstone::steam::SteamService::instance().run_callbacks();
 
     editor::StringsPanel::apply_pending_fonts();  // non-Latin glyphs for the Strings panel
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
+    host.new_frame();
     ImGui::NewFrame();
 
     const float dt = io.DeltaTime > 0.0f ? io.DeltaTime : (1.0f / 60.0f);
@@ -3063,24 +3030,9 @@ int run_imgui_app() {
     }
 
     profiler::Profiler::get().begin("editor.imgui_render");
-    ImGui::Render();
-    int display_w = 0;
-    int display_h = 0;
-    glfwGetFramebufferSize(window, &display_w, &display_h);
-    glViewport(0, 0, display_w, display_h);
     const ImVec4 clear = editor::theme::Charcoal();
-    glClearColor(clear.x, clear.y, clear.z, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-      GLFWwindow* backup_current_context = glfwGetCurrentContext();
-      ImGui::UpdatePlatformWindows();
-      ImGui::RenderPlatformWindowsDefault();
-      glfwMakeContextCurrent(backup_current_context);
-    }
+    host.present(clear.x, clear.y, clear.z);
     profiler::Profiler::get().end();
-    glfwSwapBuffers(window);
     if (profiler::Profiler::get().enabled() && admin_frames % 15 == 0) {
       profiler::Profiler::get().counter("mem.process_mb", profiler::process_memory_mb());
     }
@@ -3090,13 +3042,7 @@ int run_imgui_app() {
 
   editor::EditorAudio::get().shutdown();
   engine.shutdown();
-  // Live caches drop (not delete) their handles once the context is gone.
-  gfx::set_texture_uploader(nullptr);
-  ImGui_ImplOpenGL3_Shutdown();
-  ImGui_ImplGlfw_Shutdown();
-  ImGui::DestroyContext();
-  glfwDestroyWindow(window);
-  glfwTerminate();
+  host.shutdown();
   return 0;
 }
 
@@ -3110,6 +3056,8 @@ ts::tombstone::plugins::ProviderHold& smoke_provider_hold() {
   static ts::tombstone::plugins::ProviderHold hold;
   return hold;
 }
+
+namespace ts { namespace tombstone { int run_gfx_smoke(); } }
 
 int main(int argc, char** argv) {
   // Global capture flags, stripped so they can sit anywhere on the command
@@ -3136,6 +3084,15 @@ int main(int argc, char** argv) {
   }
 
   for (int i = 1; i < argc; ++i) {
+    if (std::strncmp(argv[i], "--gfx=", 6) == 0) {
+      bool ok = false;
+      const auto api = ts::tombstone::rhi::parse_api(argv[i] + 6, &ok);
+      if (!ok) {
+        std::cerr << "--gfx= wants gl, vk or dx12\n";
+        return 1;
+      }
+      ts::tombstone::rhi::set_cli_api(api);
+    }
     if (std::strcmp(argv[i], "+connect_lobby") == 0 && i + 1 < argc) {
       ts::tombstone::steam::note_connect_lobby(argv[++i]);
     }
@@ -3303,6 +3260,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-anim3d") == 0) {
       return run_anim3d_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-gfx") == 0) {
+      return ts::tombstone::run_gfx_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-3d") == 0) {
       // Just the 3D checks (quick loop while working on the 3D side).

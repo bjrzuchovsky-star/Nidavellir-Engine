@@ -29,8 +29,9 @@ add_library(ts_render3d
   SceneView.cpp
   UploadStage.cpp
   Renderer3D.cpp
-  GlApi.cpp
   GlRenderer3D.cpp
+  RhiRenderer3D.cpp
+  lighting/Lighting.cpp
   GlTerrainFoliage.cpp
   ../terrain/Terrain.cpp
   ../terrain/Foliage.cpp
@@ -43,6 +44,7 @@ target_link_libraries(ts_render3d
     ts_core
     ts_scene
     ts_profiler
+    ts_rhi
     glfw
     OpenGL::GL
   PRIVATE

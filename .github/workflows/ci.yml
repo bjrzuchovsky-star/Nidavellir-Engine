@@ -65,6 +65,9 @@ jobs:
       - name: Smoke (full ts_admin --smoke)
         working-directory: build/apps/admin/Release
         run: ./ts_admin.exe --smoke
+      - name: Smoke (graphics backends)
+        working-directory: build/apps/admin/Release
+        run: ./ts_admin.exe --smoke-gfx
 
   linux:
     name: ubuntu-latest / GCC
@@ -77,7 +80,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ninja-build \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libgl1-mesa-dev libwayland-dev libxkbcommon-dev wayland-protocols xvfb
+            libgl1-mesa-dev libwayland-dev libxkbcommon-dev wayland-protocols xvfb \
+            mesa-vulkan-drivers python3
       - name: .NET 8 SDK
         run: |
           curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
@@ -107,3 +111,6 @@ jobs:
       - name: Smoke (full ts_admin --smoke, under Xvfb)
         working-directory: build/apps/admin
         run: xvfb-run -a -s "-screen 0 1280x800x24" ./ts_admin --smoke
+      - name: Smoke (graphics backends, under Xvfb)
+        working-directory: build/apps/admin
+        run: xvfb-run -a -s "-screen 0 1280x800x24" ./ts_admin --smoke-gfx

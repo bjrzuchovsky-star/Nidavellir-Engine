@@ -40,7 +40,7 @@ bool load_gl33(std::string* error) {
   TS_GL(GenRenderbuffers); TS_GL(BindRenderbuffer); TS_GL(RenderbufferStorage);
   TS_GL(FramebufferRenderbuffer); TS_GL(DeleteRenderbuffers); TS_GL(ActiveTexture);
   TS_GL(GenerateMipmap); TS_GL(BlitFramebuffer); TS_GL(GetUniformBlockIndex);
-  TS_GL(UniformBlockBinding); TS_GL(BindBufferBase);
+  TS_GL(UniformBlockBinding); TS_GL(BindBufferBase); TS_GL(BindBufferRange);
 #undef TS_GL
   {
     // Optional: timer queries.

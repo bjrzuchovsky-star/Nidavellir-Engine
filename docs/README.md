@@ -40,4 +40,4 @@ These pages are written from the source in this repository (`src/`, `apps/`, `sd
 
 ## Note on the top-level README
 
-The "Build Requirements" section of the root `README.md` mentions "Vulkan/DirectX/OpenGL". The source only has OpenGL renderers: a fixed-function GL path for 2D `ts_game` and an OpenGL 3.3 core renderer in `src/render3d`. It has no Vulkan or DirectX backend.
+The "Build Requirements" section of the root `README.md` mentions "Vulkan/DirectX/OpenGL". 3D rendering is OpenGL 3.3, Vulkan, and Direct3D 12 (Windows) behind one hardware interface. See [graphics.md](graphics.md). 2D `ts_game` is still the fixed-function OpenGL path.

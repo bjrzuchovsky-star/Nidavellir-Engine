@@ -568,6 +568,36 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
             [](const auto& a, const auto& b) { return a.first < b.first; });
   for (const auto& [d, l] : points) r_->add_point_light(l);
   for (const scene3d::Entity3D& e : entities) {
+    if (!e.visible || !e.light) continue;
+    if (e.light->type == scene3d::Light3D::Type::Spot) {
+      SpotLight s;
+      s.position = e.transform.position;
+      s.direction = e.transform.rotation.rotate({0, 0, -1});
+      for (int i = 0; i < 3; ++i) s.color[i] = e.light->color[i];
+      s.intensity = e.light->intensity;
+      s.range = e.light->range;
+      const float outer = radians(std::max(1.0f, e.light->angle));
+      s.outer_cos = std::cos(outer * 0.5f);
+      s.inner_cos = std::cos(outer * 0.5f * std::clamp(e.light->inner, 0.05f, 0.99f));
+      r_->add_spot_light(s);
+    } else if (e.light->type == scene3d::Light3D::Type::Area) {
+      AreaLight a;
+      a.position = e.transform.position;
+      a.axis_u = e.transform.rotation.rotate({e.light->size_x * 0.5f, 0, 0});
+      a.axis_v = e.transform.rotation.rotate({0, 0, e.light->size_y * 0.5f});
+      for (int i = 0; i < 3; ++i) a.color[i] = e.light->color[i];
+      a.intensity = e.light->intensity;
+      r_->add_area_light(a);
+    } else if (e.light->type == scene3d::Light3D::Type::Emissive) {
+      PointLight l;
+      l.position = e.transform.position;
+      for (int i = 0; i < 3; ++i) l.color[i] = e.light->color[i];
+      l.intensity = e.light->intensity;
+      l.range = e.light->range;
+      r_->add_point_light(l);
+    }
+  }
+  for (const scene3d::Entity3D& e : entities) {
     if (!e.visible) continue;
     if (e.light && e.light->type == scene3d::Light3D::Type::Directional) {
       // A directional light entity steers the sun from its rotation.

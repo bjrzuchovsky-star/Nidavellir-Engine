@@ -67,6 +67,8 @@ Settings SettingsStore::load(std::string* error_out) {
   s.auto_login_dev =
       json_mini::get_bool(*parsed, "auto_login_dev", s.auto_login_dev);
   s.theme = json_mini::get_string(*parsed, "theme", s.theme);
+  s.graphics_api = json_mini::get_string(*parsed, "graphics_api", s.graphics_api);
+  if (s.graphics_api != "gl" && s.graphics_api != "vk" && s.graphics_api != "dx12") s.graphics_api = "gl";
   if (s.theme != "forge" && s.theme != "dusk" && s.theme != "dark" && s.theme != "light") {
     s.theme = "forge";
   }
@@ -135,6 +137,7 @@ bool SettingsStore::save(const Settings& settings, std::string* error_out) {
           {"projects_root", normalized.projects_root},
           {"username", normalized.username},
           {"theme", normalized.theme},
+          {"graphics_api", normalized.graphics_api.empty() ? "gl" : normalized.graphics_api},
           {"last_project_path", normalized.last_project_path},
           {"vault_backend", normalized.vault_backend == "remote" ? "remote" : "local"},
           {"vault_local_dir", normalized.vault_local_dir},

@@ -21,6 +21,7 @@ struct Settings {
   std::string username;                 // last-used login name
   bool auto_login_dev = false;          // DEV_LOGIN on Admin start when true
   std::string theme = "forge";          // "forge" | "dusk"/"dark" | "light"
+  std::string graphics_api = "gl";      // "gl" | "vk" | "dx12" (next launch)
   std::string last_project_path;        // last opened project folder
   // The Vault (asset library shared by every realm; see docs/vault.md).
   std::string vault_backend = "local";  // "local" | "remote"

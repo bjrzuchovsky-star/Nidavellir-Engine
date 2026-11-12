@@ -162,6 +162,7 @@ const std::vector<SettingsSection>& settings_sections() {
       {"Territory", "Where realms are kept on disk"},
       {"Wanderer", "Your name and dev login"},
       {"Lamplight", "Theme"},
+      {"Graphics", "OpenGL, Vulkan or Direct3D 12"},
       {"Supply Run", "Update checks"},
       {"Tools", "Blender, script editor, Source content folders"},
       {"Field Guide", "Tooltips, walkthroughs"},

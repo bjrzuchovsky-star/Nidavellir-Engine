@@ -18,6 +18,8 @@
 #include "world3d/VrOverlay.h"
 
 #include "render3d/GlRenderer3D.h"
+#include "render3d/RhiRenderer3D.h"
+#include "rhi/Rhi.h"
 #include "editor/assets/ModelSplit.h"
 #include "render3d/ColliderFit.h"
 #include "render3d/HullFit.h"
@@ -29,6 +31,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -133,8 +136,14 @@ void Editor3DScreen::on_exit() {
 }
 
 void Editor3DScreen::ensure_renderer() {
-  const bool want_gl = ImGui::GetCurrentContext() != nullptr && glfwGetCurrentContext() != nullptr;
-  if (renderer_ && gl_ == want_gl) return;
+  rhi::Device* dev = rhi::active();
+  const bool classic = scene_.environment.lighting.preset == 0;
+  const bool want_forward = dev && !(dev->api() == rhi::Api::OpenGL && classic);
+  const char* want = want_forward ? (dev->api() == rhi::Api::Vulkan   ? "vulkan"
+                                     : dev->api() == rhi::Api::D3D12 ? "d3d12"
+                                                                      : "opengl")
+                                  : (glfwGetCurrentContext() ? "gl" : "null");
+  if (renderer_ && std::strcmp(renderer_->backend_name(), want) == 0) return;
   preview_view_.reset();
   if (preview_renderer_) preview_renderer_->shutdown();
   preview_renderer_.reset();
@@ -142,9 +151,17 @@ void Editor3DScreen::ensure_renderer() {
   if (renderer_) renderer_->shutdown();
   renderer_.reset();
   gl_ = false;
-  if (want_gl) {
+  std::string err;
+  if (want_forward) {
+    auto fwd = render3d::make_rhi_renderer(dev);
+    if (fwd->init(&err)) {
+      renderer_ = std::move(fwd);
+      gl_ = dev->api() == rhi::Api::OpenGL;
+    } else {
+      note(std::string(rhi::api_name(dev->api())) + " renderer would not start (" + err + ")", LogLevel::Error);
+    }
+  } else if (glfwGetCurrentContext()) {
     auto gl = render3d::make_gl_renderer3d();
-    std::string err;
     if (gl->init(&err)) {
       renderer_ = std::move(gl);
       gl_ = true;

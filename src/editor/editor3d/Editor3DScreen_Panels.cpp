@@ -8,10 +8,14 @@
 #include "editor/editor3d/Editor3DScreen.h"
 
 #include "editor/audio/EditorAudio.h"
+#include "editor/projects/ProjectStore.h"
 #include "editor/ui/Theme.h"
+#include "render3d/lighting/Lighting.h"
+#include "rhi/Rhi.h"
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -236,9 +240,9 @@ void Editor3DScreen::draw_inspector() {
   if (component("Light", e.light.has_value(), [&] { e.light = scene3d::Light3D{}; },
                 [&] { e.light.reset(); })) {
     scene3d::Light3D& l = *e.light;
-    int type = l.type == scene3d::Light3D::Type::Point ? 0 : 1;
-    if (ImGui::Combo("Type", &type, "Point\0Directional (sun)\0")) {
-      l.type = type == 0 ? scene3d::Light3D::Type::Point : scene3d::Light3D::Type::Directional;
+    int type = static_cast<int>(l.type);
+    if (ImGui::Combo("Type", &type, "Point\0Directional (sun)\0Spot\0Area\0Emissive\0Sky\0")) {
+      l.type = static_cast<scene3d::Light3D::Type>(std::clamp(type, 0, 5));
       t.activated = true;
       t.commit = "Light type";
     }
@@ -246,9 +250,21 @@ void Editor3DScreen::draw_inspector() {
     t.after("Light color");
     ImGui::DragFloat("Intensity", &l.intensity, 0.05f, 0.0f, 100.0f);
     t.after("Intensity");
-    if (l.type == scene3d::Light3D::Type::Point) {
+    if (l.type == scene3d::Light3D::Type::Point || l.type == scene3d::Light3D::Type::Spot ||
+        l.type == scene3d::Light3D::Type::Emissive) {
       ImGui::DragFloat("Range", &l.range, 0.1f, 0.1f, 200.0f);
       t.after("Range");
+    }
+    if (l.type == scene3d::Light3D::Type::Spot) {
+      ImGui::DragFloat("Cone angle", &l.angle, 0.5f, 2.0f, 160.0f);
+      t.after("Cone");
+      ImGui::SliderFloat("Inner cone", &l.inner, 0.05f, 0.99f);
+      t.after("Cone");
+    }
+    if (l.type == scene3d::Light3D::Type::Area) {
+      ImGui::DragFloat("Width", &l.size_x, 0.05f, 0.05f, 50.0f);
+      ImGui::DragFloat("Height", &l.size_y, 0.05f, 0.05f, 50.0f);
+      t.after("Area size");
     }
   }
   if (component("Collider", e.collider.has_value(), [&] { e.collider = scene3d::Collider3D{}; },
@@ -843,6 +859,82 @@ void Editor3DScreen::draw_environment() {
   t.after("Shadows");
   ImGui::DragFloat("Shadow distance", &env.shadow_distance, 0.5f, 5.0f, 500.0f);
   t.after("Shadow distance");
+
+  theme::SectionHeader("Lighting");
+  {
+    render3d::Lighting& L = env.lighting;
+    const char* presets[] = {"Classic", "Fast", "Balanced", "Cinematic", "Custom"};
+    int preset = std::clamp(L.preset, 0, 4);
+    if (ImGui::Combo("Preset", &preset, presets, 5)) {
+      render3d::apply_lighting_preset(&L, preset);
+      t.after("Lighting preset");
+    }
+    const bool rt = rhi::active() && rhi::active()->raytracing();
+    int cascades = L.cascades;
+    if (ImGui::SliderInt("Shadow cascades", &cascades, 1, 4)) {
+      L.cascades = cascades;
+      L.preset = 4;
+      t.after("Shadow cascades");
+    }
+    int filter = L.filter;
+    if (ImGui::Combo("Shadow filter", &filter, "PCF\0PCSS\0")) {
+      L.filter = filter;
+      L.preset = 4;
+      t.after("Shadow filter");
+    }
+    int gi = L.gi;
+    if (ImGui::Combo("Global illumination", &gi, "None\0Baked probes\0Screen-space\0Ray traced\0")) {
+      if (gi == 3 && !rt) gi = L.gi;
+      L.gi = gi;
+      L.preset = 4;
+      t.after("Global illumination");
+    }
+    int ao = L.ao;
+    if (ImGui::Combo("Ambient occlusion", &ao, "Off\0SSAO\0Ray traced\0")) {
+      if (ao == 2 && !rt) ao = L.ao;
+      L.ao = ao;
+      L.preset = 4;
+      t.after("Ambient occlusion");
+    }
+    int refl = L.reflections;
+    if (ImGui::Combo("Reflections", &refl, "Off\0Probes\0Screen-space\0Ray traced\0")) {
+      if (refl == 3 && !rt) refl = L.reflections;
+      L.reflections = refl;
+      L.preset = 4;
+      t.after("Reflections");
+    }
+    int tone = L.tonemap;
+    if (ImGui::Combo("Tonemap", &tone, "Reinhard\0Reinhard (post)\0ACES\0")) {
+      L.tonemap = tone;
+      L.preset = 4;
+      t.after("Tonemap");
+    }
+    if (ImGui::SliderFloat("Exposure", &L.exposure, 0.1f, 4.0f)) { L.preset = 4; t.after("Exposure"); }
+    if (ImGui::SliderFloat("Bloom", &L.bloom, 0.0f, 1.0f)) { L.preset = 4; t.after("Bloom"); }
+    if (ImGui::SliderFloat("Contrast", &L.contrast, 0.5f, 1.5f)) { L.preset = 4; t.after("Colour grade"); }
+    if (ImGui::SliderFloat("Saturation", &L.saturation, 0.0f, 2.0f)) { L.preset = 4; t.after("Colour grade"); }
+    if (ImGui::SliderFloat("Parallax", &L.pom, 0.0f, 0.1f)) { L.preset = 4; t.after("Parallax"); }
+    if (rt) {
+      if (ImGui::Checkbox("Hardware ray tracing", &L.raytracing)) { L.preset = 4; t.after("Ray tracing"); }
+    } else {
+      ImGui::BeginDisabled();
+      bool off = false;
+      ImGui::Checkbox("Hardware ray tracing", &off);
+      ImGui::EndDisabled();
+      ImGui::TextDisabled("Shown when the GPU supports DXR or Vulkan ray queries.");
+    }
+    const char* gapis[] = {"Editor default", "OpenGL", "Vulkan", "Direct3D 12"};
+    int g = 0;
+    if (project_.graphics_api == "gl") g = 1;
+    else if (project_.graphics_api == "vk") g = 2;
+    else if (project_.graphics_api == "dx12") g = 3;
+    if (ImGui::Combo("Realm graphics API", &g, gapis, 4)) {
+      project_.graphics_api = g == 1 ? "gl" : g == 2 ? "vk" : g == 3 ? "dx12" : "";
+      std::string err;
+      ProjectStore::write_project_json(project_, &err);
+    }
+    ImGui::TextDisabled("The realm API is used the next time the editor or the game starts.");
+  }
 
   if (t.activated && !inspector_before_) inspector_before_ = scene_;
   scene_.environment = env;

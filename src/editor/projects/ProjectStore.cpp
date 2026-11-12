@@ -183,6 +183,7 @@ bool ProjectStore::load_project_json(const std::string& project_dir,
   normalize_vr(info);
   info.created = json_mini::get_string(*parsed, "created");
   info.last_opened = json_mini::get_string(*parsed, "last_opened");
+  info.graphics_api = json_mini::get_string(*parsed, "graphics_api", "");
   // "plugins" arrived with the plugin system; absent = defaults.
   if (parsed->count("plugins") != 0) {
     info.plugins_set = true;
@@ -268,6 +269,9 @@ bool ProjectStore::write_project_json(const ProjectInfo& project,
   }
   if (project.plugins_set) {
     fields.emplace_back("plugins", join_plugin_ids(project.plugins));
+  }
+  if (!project.graphics_api.empty() && project.graphics_api != "gl") {
+    fields.emplace_back("graphics_api", project.graphics_api);
   }
 
   std::vector<std::pair<std::string, bool>> flags;

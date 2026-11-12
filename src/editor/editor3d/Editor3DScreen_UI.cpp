@@ -637,7 +637,9 @@ void Editor3DScreen::draw_viewport() {
       ImGui::GetWindowDrawList()->AddRectFilled(origin, ImVec2(origin.x + vw, origin.y + vh), IM_COL32(8, 6, 5, 255));
       ImGui::SetCursorScreenPos(ImVec2(origin.x + rx, origin.y + ry));
     }
-    ImGui::Image(static_cast<ImTextureID>(tex), ImVec2(rw, rh), ImVec2(0, 1), ImVec2(1, 0));
+    const bool bottom = renderer_ && renderer_->color_bottom_up();
+    ImGui::Image(static_cast<ImTextureID>(tex), ImVec2(rw, rh),
+                 bottom ? ImVec2(0, 1) : ImVec2(0, 0), bottom ? ImVec2(1, 0) : ImVec2(1, 1));
   } else {
     ImGui::InvisibleButton("##vp_null", ImVec2(vw, vh));
   }

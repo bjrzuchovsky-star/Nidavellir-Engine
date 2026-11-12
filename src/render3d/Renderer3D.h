@@ -35,6 +35,31 @@ struct FrameStats {
   std::size_t gpu_bytes = 0;
 };
 
+// Modular lighting. Defaults reproduce the classic forward frame (one
+// shadowed sun, Reinhard in the mesh shader, no extra passes).
+struct Lighting {
+  int preset = 0;          // 0 classic, 1 fast, 2 balanced, 3 cinematic, 4 custom
+  int cascades = 1;        // 1..4
+  int filter = 0;          // 0 PCF, 1 PCSS
+  int gi = 0;              // 0 none, 1 baked probes, 2 screen-space, 3 ray traced
+  int ao = 0;              // 0 off, 1 SSAO, 2 RTAO
+  int reflections = 0;     // 0 off, 1 probes, 2 SSR, 3 ray traced
+  int tonemap = 0;         // 0 Reinhard in-shader, 1 Reinhard post, 2 ACES
+  float exposure = 1.0f;
+  float bloom = 0.0f;
+  float contrast = 1.0f;
+  float saturation = 1.0f;
+  float gain = 1.0f;
+  float pom = 0.0f;        // parallax scale, 0 off
+  float pcss = 0.08f;
+  bool point_shadows = false;
+  bool spot_shadows = false;
+  bool raytracing = false; // off unless a scene asks, and only if the GPU can
+  std::string hdri;
+  std::string modules;     // plugin passes: "id=1,other=0"
+  bool operator==(const Lighting& o) const = default;
+};
+
 // Sky, ambient and sun for a frame.
 struct Environment {
   float sky_top[3] = {0.16f, 0.22f, 0.36f};
@@ -56,6 +81,7 @@ struct Environment {
   float wind_dir[2] = {1.0f, 0.0f};
   float wind_strength = 0.0f;
   float wind_gust = 0.0f;
+  Lighting lighting{};
   bool operator==(const Environment& o) const = default;
 };
 
@@ -64,6 +90,27 @@ struct PointLight {
   float color[3] = {1.0f, 0.75f, 0.45f};
   float intensity = 6.0f;
   float range = 8.0f;
+};
+
+// Cone along `direction` (the direction light travels). outer_cos / inner_cos
+// are cosines of the half-angles.
+struct SpotLight {
+  Vec3 position;
+  Vec3 direction{0, -1, 0};
+  float color[3] = {1.0f, 0.9f, 0.7f};
+  float intensity = 8.0f;
+  float range = 12.0f;
+  float outer_cos = 0.8f;
+  float inner_cos = 0.9f;
+};
+
+// A flat rectangle centred at position, spanned by axis_u and axis_v.
+struct AreaLight {
+  Vec3 position;
+  Vec3 axis_u{0.5f, 0, 0};
+  Vec3 axis_v{0, 0, 0.5f};
+  float color[3] = {1.0f, 0.95f, 0.85f};
+  float intensity = 4.0f;
 };
 
 // One instanced foliage batch (terrain/Foliage.h): a mesh repeated at
@@ -106,6 +153,8 @@ class Renderer3D {
 
   virtual void begin_frame(const Camera3D& camera, int width, int height) = 0;
   virtual void add_point_light(const PointLight& /*light*/) {}
+  virtual void add_spot_light(const SpotLight& /*light*/) {}
+  virtual void add_area_light(const AreaLight& /*light*/) {}
   virtual void draw(MeshHandle mesh, MaterialHandle material,
                     const Transform& transform) = 0;
   virtual void draw_matrix(MeshHandle mesh, MaterialHandle material,
@@ -152,6 +201,8 @@ class Renderer3D {
   // Offscreen color texture (GL name; 0 when none) and its pixels, RGBA8
   // bottom row first. False when there is nothing to read.
   virtual std::uint64_t color_texture() const { return 0; }
+  // True when row 0 of color_texture() is the bottom of the image (OpenGL).
+  virtual bool color_bottom_up() const { return true; }
   virtual bool read_pixels(std::vector<unsigned char>* /*rgba*/, int* /*w*/,
                            int* /*h*/) const {
     return false;

@@ -174,10 +174,27 @@ Value entity_json(const Entity3D& e) {
   }
   if (e.light) {
     Value l = Value::object();
-    l.set("type", Value::string(e.light->type == Light3D::Type::Directional ? "directional" : "point"));
+    const char* kind = "point";
+    switch (e.light->type) {
+      case Light3D::Type::Directional: kind = "directional"; break;
+      case Light3D::Type::Spot: kind = "spot"; break;
+      case Light3D::Type::Area: kind = "area"; break;
+      case Light3D::Type::Emissive: kind = "emissive"; break;
+      case Light3D::Type::Sky: kind = "sky"; break;
+      case Light3D::Type::Point: kind = "point"; break;
+    }
+    l.set("type", Value::string(kind));
     l.set("color", json::floats(e.light->color, 3));
     l.set("intensity", Value::number(e.light->intensity));
     l.set("range", Value::number(e.light->range));
+    if (e.light->type == Light3D::Type::Spot) {
+      l.set("angle", Value::number(e.light->angle));
+      l.set("inner", Value::number(e.light->inner));
+    }
+    if (e.light->type == Light3D::Type::Area) {
+      l.set("size_x", Value::number(e.light->size_x));
+      l.set("size_y", Value::number(e.light->size_y));
+    }
     o.set("light", std::move(l));
   }
   if (e.collider) o.set("collider", physics_json::collider(*e.collider));
@@ -396,7 +413,17 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
   if (o["light"].is_object()) {
     const Value& v = o["light"];
     Light3D l;
-    l.type = v.str("type") == "directional" ? Light3D::Type::Directional : Light3D::Type::Point;
+    const std::string ty = v.str("type");
+    if (ty == "directional") l.type = Light3D::Type::Directional;
+    else if (ty == "spot") l.type = Light3D::Type::Spot;
+    else if (ty == "area") l.type = Light3D::Type::Area;
+    else if (ty == "emissive") l.type = Light3D::Type::Emissive;
+    else if (ty == "sky") l.type = Light3D::Type::Sky;
+    else l.type = Light3D::Type::Point;
+    l.angle = v.flt("angle", l.angle);
+    l.inner = v.flt("inner", l.inner);
+    l.size_x = v.flt("size_x", l.size_x);
+    l.size_y = v.flt("size_y", l.size_y);
     v.floats("color", l.color, 3);
     l.intensity = std::max(0.0f, v.flt("intensity", l.intensity));
     l.range = std::max(0.1f, v.flt("range", l.range));
@@ -772,6 +799,30 @@ std::string write(const Scene3D& s) {
   e.set("wind_dir", json::floats(env.wind_dir, 2));
   e.set("wind_strength", Value::number(env.wind_strength));
   e.set("wind_gust", Value::number(env.wind_gust));
+  if (!(env.lighting == render3d::Lighting{})) {
+    Value lit = Value::object();
+    const char* presets[] = {"classic", "fast", "balanced", "cinematic", "custom"};
+    const int preset = std::clamp(env.lighting.preset, 0, 4);
+    lit.set("preset", Value::string(presets[preset]));
+    lit.set("cascades", Value::number(env.lighting.cascades));
+    lit.set("filter", Value::string(env.lighting.filter == 1 ? "pcss" : "pcf"));
+    const char* gis[] = {"none", "baked", "screen", "ray"};
+    lit.set("gi", Value::string(gis[std::clamp(env.lighting.gi, 0, 3)]));
+    const char* aos[] = {"off", "ssao", "rtao"};
+    lit.set("ao", Value::string(aos[std::clamp(env.lighting.ao, 0, 2)]));
+    const char* rfs[] = {"off", "probes", "ssr", "ray"};
+    lit.set("reflections", Value::string(rfs[std::clamp(env.lighting.reflections, 0, 3)]));
+    lit.set("tonemap", Value::string(env.lighting.tonemap == 2 ? "aces" : env.lighting.tonemap == 1 ? "post" : "reinhard"));
+    lit.set("exposure", Value::number(env.lighting.exposure));
+    lit.set("bloom", Value::number(env.lighting.bloom));
+    lit.set("contrast", Value::number(env.lighting.contrast));
+    lit.set("saturation", Value::number(env.lighting.saturation));
+    lit.set("gain", Value::number(env.lighting.gain));
+    lit.set("pom", Value::number(env.lighting.pom));
+    lit.set("raytracing", Value::boolean(env.lighting.raytracing));
+    if (!env.lighting.hdri.empty()) lit.set("hdri", Value::string(env.lighting.hdri));
+    e.set("lighting", std::move(lit));
+  }
   root.set("environment", std::move(e));
   Value ents = Value::array();
   for (const Entity3D& en : s.entities) ents.push(entity_json(en));
@@ -844,6 +895,33 @@ bool parse(const std::string& text, Scene3D* out, std::string* error) {
     env.floats("wind_dir", e.wind_dir, 2);
     e.wind_strength = std::clamp(env.flt("wind_strength", e.wind_strength), 0.0f, 4.0f);
     e.wind_gust = std::clamp(env.flt("wind_gust", e.wind_gust), 0.0f, 4.0f);
+    const Value& lit = env["lighting"];
+    if (lit.is_object()) {
+      const std::string preset = lit.str("preset", "classic");
+      if (preset == "fast") e.lighting.preset = 1;
+      else if (preset == "balanced") e.lighting.preset = 2;
+      else if (preset == "cinematic") e.lighting.preset = 3;
+      else if (preset == "custom") e.lighting.preset = 4;
+      else e.lighting.preset = 0;
+      e.lighting.cascades = std::clamp(static_cast<int>(lit.num("cascades", e.lighting.cascades)), 1, 4);
+      e.lighting.filter = lit.str("filter", "pcf") == "pcss" ? 1 : 0;
+      const std::string gi = lit.str("gi", "none");
+      e.lighting.gi = gi == "baked" ? 1 : gi == "screen" ? 2 : gi == "ray" ? 3 : 0;
+      const std::string ao = lit.str("ao", "off");
+      e.lighting.ao = ao == "ssao" ? 1 : ao == "rtao" ? 2 : 0;
+      const std::string rf = lit.str("reflections", "off");
+      e.lighting.reflections = rf == "probes" ? 1 : rf == "ssr" ? 2 : rf == "ray" ? 3 : 0;
+      const std::string tm = lit.str("tonemap", "reinhard");
+      e.lighting.tonemap = tm == "aces" ? 2 : tm == "post" ? 1 : 0;
+      e.lighting.exposure = lit.flt("exposure", e.lighting.exposure);
+      e.lighting.bloom = lit.flt("bloom", e.lighting.bloom);
+      e.lighting.contrast = lit.flt("contrast", e.lighting.contrast);
+      e.lighting.saturation = lit.flt("saturation", e.lighting.saturation);
+      e.lighting.gain = lit.flt("gain", e.lighting.gain);
+      e.lighting.pom = lit.flt("pom", e.lighting.pom);
+      e.lighting.raytracing = lit.flag("raytracing", false);
+      e.lighting.hdri = lit.str("hdri", "");
+    }
   }
   for (const Value& v : root["entities"].items()) {
     Entity3D en;
