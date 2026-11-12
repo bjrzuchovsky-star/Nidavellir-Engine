@@ -200,13 +200,22 @@ void AssetBrowser::kick_pending() {
 void AssetBrowser::pump_import() {
   ImportJob::State done;
   if (!import_job_.take(&done)) return;
-  rescan();
   if (done.cancelled) {
-    if (host_.note) host_.note("Import cancelled.");
+    const std::string why = done.error.empty() ? "Import cancelled." : done.error;
+    for (const std::string& rel : done.rels) db_.fail_import(rel, why);
+    if (host_.on_import_stopped) host_.on_import_stopped(done.rels);
+    render3d::clear_import_cancel();
+    rescan();
+    if (host_.note) host_.note(why);
     return;
   }
   if (!done.ok) {
     const std::string why = done.error.empty() ? "Import failed." : done.error;
+    for (const std::string& rel : done.rels) {
+      if (const assetdb::AssetDb::Entry* e = db_.by_path(rel); !e || e->import_pending) db_.fail_import(rel, why);
+    }
+    if (host_.on_import_stopped) host_.on_import_stopped(done.rels);
+    rescan();
     if (host_.note) host_.note(why);
     ux::show_error(ux::explain(why, ux::ErrorKind::ImportFailed, "Importing a model"));
     return;
@@ -370,6 +379,7 @@ void AssetBrowser::accept_vault_drop() {
 }
 
 void AssetBrowser::reimport(const std::string& rel) {
+  if (host_.on_import_retry) host_.on_import_retry(rel);
   const AssetDb::Entry* e = db_.by_path(rel);
   if (e && e->meta.kind == assetdb::Kind::Model && e->size >= render3d::kDeferImportBytes) {
     if (import_job_.state().running) {
@@ -1181,7 +1191,11 @@ void AssetBrowser::draw_details() {
     if (entry.import_ok) {
       ImGui::Text("%s", assetdb::info_summary(entry.meta.info, entry.meta.kind).c_str());
     } else {
-      theme::StatusError(entry.import_error.c_str());
+      theme::StatusError(entry.import_error.empty() ? "Import failed." : entry.import_error.c_str());
+      if (ImGui::Button("Retry import")) reimport(entry.rel);
+      if (ImGui::IsItemHovered()) {
+        ux::SetTooltip("Try this file again. A failed import stays failed until you press this.");
+      }
     }
     ImGui::SetNextItemWidth(-90);
     ImGui::InputText("##rename", rename_, sizeof(rename_));

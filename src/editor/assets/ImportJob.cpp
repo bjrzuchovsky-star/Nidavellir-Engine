@@ -5,6 +5,7 @@
 #include "editor/assets/ModelSplit.h"
 #include "render3d/ModelImport.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <new>
 
@@ -22,6 +23,7 @@ void ImportJob::join() {
 
 void ImportJob::start(Request req) {
   join();
+  render3d::clear_import_cancel();
   cancel_.store(false);
   {
     std::lock_guard<std::mutex> lock(mu_);
@@ -36,7 +38,10 @@ void ImportJob::start(Request req) {
   thread_ = std::thread([this, req = std::move(req)] { run(req); });
 }
 
-void ImportJob::cancel() { cancel_.store(true); }
+void ImportJob::cancel() {
+  cancel_.store(true);
+  render3d::request_import_cancel();
+}
 
 ImportJob::State ImportJob::state() const {
   std::lock_guard<std::mutex> lock(mu_);
@@ -58,6 +63,7 @@ void ImportJob::run(Request req) {
     if (pct >= 0) state_.percent = pct;
     if (!phase.empty()) state_.phase = phase;
   };
+  std::vector<std::string> rels = req.reimport_rels;
   auto finish = [&](bool ok, bool cancelled, const std::string& error, importsort::Result copied) {
     std::lock_guard<std::mutex> lock(mu_);
     state_.running = false;
@@ -65,6 +71,10 @@ void ImportJob::run(Request req) {
     state_.ok = ok;
     state_.cancelled = cancelled;
     state_.error = error;
+    state_.rels = rels;
+    for (const std::string& m : copied.mains) {
+      if (std::find(state_.rels.begin(), state_.rels.end(), m) == state_.rels.end()) state_.rels.push_back(m);
+    }
     state_.copied = std::move(copied);
     state_.percent = cancelled ? state_.percent : 100;
     if (cancelled) state_.phase = "Cancelled";

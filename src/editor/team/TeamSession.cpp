@@ -931,6 +931,9 @@ std::vector<std::uint64_t> TeamSession::selection_held_by_others() const {
   return out;
 }
 
+void TeamSession::hold_asset_upload(const std::string& rel) { asset_sync_.hold(rel); }
+void TeamSession::release_asset_upload(const std::string& rel) { asset_sync_.release(rel); }
+
 bool TeamSession::sync_assets() {
   if (!assets_ || !client_.joined() || !loaded_) return false;
   finish_asset_pass();

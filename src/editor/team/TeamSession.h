@@ -153,6 +153,10 @@ class TeamSession {
   void set_asset_backend(std::shared_ptr<vault::Backend> backend) { assets_ = std::move(backend); }
   bool has_asset_backend() const { return assets_ != nullptr; }
   bool sync_assets();
+  // A failed or cancelled model import: do not upload this file, and stop
+  // a pass that is sending it now.
+  void hold_asset_upload(const std::string& rel);
+  void release_asset_upload(const std::string& rel);
   // "sending", "synced" or "failed". Shown beside each clan member.
   const std::string& asset_sync_state() const { return asset_sync_state_; }
   const std::string& asset_sync_detail() const { return asset_sync_detail_; }

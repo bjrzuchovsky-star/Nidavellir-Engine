@@ -126,6 +126,10 @@ bool import_asset(const std::string& abs_path, Kind kind, const Value& settings,
       }
       bool alpha = false;
       for (std::size_t i = 3; i < rgba.size(); i += 4) {
+        if ((i & 0xfffffu) == 3 && render3d::import_was_cancelled()) {
+          if (error) *error = abs_path + ": Import cancelled.";
+          return false;
+        }
         if (rgba[i] != 255) {
           alpha = true;
           break;

@@ -123,6 +123,7 @@ class SceneView {
     std::vector<MaterialHandle> materials;  // per model material (+1 default)
     std::vector<Mat4> rest_palette;         // skinned models: the rest pose
     bool uploaded = false;
+    bool upload_stopped = false;  // Cancel: do not keep uploading this model
     std::size_t prim_cursor = 0;
     std::size_t index_cursor = 0;
     std::size_t mat_cursor = 0;

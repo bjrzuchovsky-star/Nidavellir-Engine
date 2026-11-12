@@ -30,7 +30,9 @@ class Sha256 {
 
 std::string sha256_hex(std::string_view bytes);
 // "" when the file cannot be read; size_out receives the byte count.
-std::string sha256_file(const std::string& path, std::uint64_t* size_out = nullptr);
+// `cancelled` is polled between chunks. A true return stops and yields "".
+std::string sha256_file(const std::string& path, std::uint64_t* size_out = nullptr,
+                        bool (*cancelled)() = nullptr);
 bool is_sha256_hex(std::string_view s);
 
 }  // namespace vault

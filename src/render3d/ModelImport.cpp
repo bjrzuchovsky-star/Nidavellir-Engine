@@ -7,6 +7,7 @@
 #include "core/AssetMeta.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <filesystem>
@@ -478,7 +479,15 @@ void set_import_monitor(const ImportMonitor* monitor) {
   s.on = true;
 }
 
+namespace {
+std::atomic<bool> g_import_cancel{false};
+}
+
+void request_import_cancel() { g_import_cancel.store(true); }
+void clear_import_cancel() { g_import_cancel.store(false); }
+
 bool import_was_cancelled() {
+  if (g_import_cancel.load()) return true;
   const MonitorSlot& s = monitor_slot();
   return s.on && s.mon.cancelled && s.mon.cancelled(s.mon.user);
 }

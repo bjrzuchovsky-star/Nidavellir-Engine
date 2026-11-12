@@ -140,6 +140,9 @@ class AssetDb {
   void set_defer_import_bytes(std::uintmax_t bytes) { defer_bytes_ = bytes; }
   // Flag a model so the next scan leaves it for the background import.
   bool mark_import_pending(const std::string& rel);
+  // Record a failed or cancelled import and clear import_pending so a scan
+  // does not start the job again. The error is kept for the asset panel.
+  bool fail_import(const std::string& rel, const std::string& why);
   // Opens the realm and runs migrate() (legacy sidecars -> metadata folder).
   void open(const std::string& project_dir);
   // Moves sidecar .meta files next to assets into .tombstone/meta (GUIDs

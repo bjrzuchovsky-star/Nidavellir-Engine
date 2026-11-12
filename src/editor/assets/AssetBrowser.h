@@ -60,6 +60,10 @@ struct AssetBrowserHost {
   std::function<void(const std::string& rel)> preview_model;
   // An animation tile dropped onto a model tile (clip rel, model rel).
   std::function<void(const std::string& clip_rel, const std::string& model_rel)> apply_clip_to;
+  // A model import failed or was cancelled: stop uploading those files.
+  std::function<void(const std::vector<std::string>& rels)> on_import_stopped;
+  // Retry import: that file may be sent to the team session again.
+  std::function<void(const std::string& rel)> on_import_retry;
 };
 
 class AssetBrowser {

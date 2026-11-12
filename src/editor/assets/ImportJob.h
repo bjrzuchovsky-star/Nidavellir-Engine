@@ -38,6 +38,7 @@ class ImportJob {
     int percent = 0;
     std::string phase;
     std::string error;
+    std::vector<std::string> rels;  // files this job was importing
     importsort::Result copied;
     bool split = false;
     bool split_recenter = false;

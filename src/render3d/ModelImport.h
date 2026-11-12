@@ -150,6 +150,10 @@ struct ImportMonitor {
   void* user = nullptr;
 };
 void set_import_monitor(const ImportMonitor* monitor);
+// Sticky cancel for the UI thread (GPU upload, a load that is not on the
+// worker that owns the monitor). start of a job clears it; Cancel sets it.
+void request_import_cancel();
+void clear_import_cancel();
 bool import_was_cancelled();
 void import_report(int percent, const char* phase);
 // Longest texture edge for the import on this thread (0 = not clamping).

@@ -134,7 +134,9 @@ SceneView::ModelEntry& SceneView::entry(const std::string& source) {
       }
       ImportMonitor mon;
       mon.user = state.get();
-      mon.cancelled = [](void* p) { return static_cast<PendingModel*>(p)->cancel.load(); };
+      mon.cancelled = [](void* p) {
+        return static_cast<PendingModel*>(p)->cancel.load() || import_was_cancelled();
+      };
       set_import_monitor(&mon);
       auto model = std::make_unique<Model>();
       std::string err;
@@ -197,7 +199,12 @@ Aabb SceneView::local_bounds(const scene3d::Entity3D& e) {
 }
 
 void SceneView::upload(ModelEntry& m) {
-  if (m.uploaded || !m.model || !r_) return;
+  if (m.uploaded || m.upload_stopped || !m.model || !r_) return;
+  if (import_was_cancelled()) {
+    m.upload_stopped = true;
+    problem("upload-cancel", "Model upload cancelled.");
+    return;
+  }
   const std::size_t budget = upload_budget_;
   // True when this many bytes still fit in the frame. A single resource
   // larger than the budget does not fit (the caller slices it), unless

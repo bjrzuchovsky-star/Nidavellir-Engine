@@ -49,6 +49,13 @@ void Editor2DScreen::open_asset_browser() {
   host.payload_type = [](const assetdb::AssetDb::Entry& e) -> std::string {
     return e.meta.kind == assetdb::Kind::Texture ? assets::kDragPayload : kAssetAnyPayload;
   };
+  host.on_import_stopped = [this](const std::vector<std::string>& rels) {
+    if (!team_) return;
+    for (const std::string& rel : rels) team_->hold_asset_upload(rel);
+  };
+  host.on_import_retry = [this](const std::string& rel) {
+    if (team_) team_->release_asset_upload(rel);
+  };
   host.note = [this](const std::string& m) { note(m); };
   host.send_to_vault = [this](const std::string& rel) {
     show_vault_ = true;

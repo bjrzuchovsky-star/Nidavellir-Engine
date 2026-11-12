@@ -79,6 +79,12 @@ class TeamAssetSync {
   // Ask the running pass to stop after the current file and wait for it.
   void cancel_and_wait();
   void wait();
+  // Do not upload this project path (a failed or cancelled import). The
+  // running pass skips it; later passes skip it until release().
+  void hold(const std::string& rel);
+  void release(const std::string& rel);
+  bool held(const std::string& rel) const;
+  bool stopping() const { return cancel_.load(); }
   TeamAssetProgress progress() const;
 
   // The pass itself (runs on the worker; public for tests).
@@ -97,6 +103,7 @@ class TeamAssetSync {
   std::atomic<bool> running_{false};
   std::atomic<bool> done_{false};
   std::atomic<bool> cancel_{false};
+  std::set<std::string> held_;
 };
 
 }  // namespace editor

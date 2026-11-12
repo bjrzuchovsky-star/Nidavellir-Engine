@@ -1,8 +1,10 @@
 #include "editor/team/TeamAssets.h"
 
+#include "scene/JsonTree.h"
 #include "vault/Sha256.h"
 
 #include <filesystem>
+#include <fstream>
 #include <algorithm>
 #include <exception>
 #include <set>
@@ -22,6 +24,23 @@ long long mtime_of(const fs::path& p) {
 }
 
 constexpr const char* kMetaPrefix = ".tombstone/meta/";
+
+thread_local const TeamAssetSync* g_hash_sync = nullptr;
+
+bool hash_cancelled() { return g_hash_sync && g_hash_sync->stopping(); }
+
+bool import_failed_meta(const fs::path& root, const std::string& rel) {
+  std::string asset = rel;
+  if (team_meta_rel(rel)) asset = team_meta_asset(rel);
+  if (asset.empty()) return false;
+  const fs::path meta = root / ".tombstone" / "meta" / fs::u8path(asset + ".meta");
+  std::ifstream in(meta, std::ios::binary);
+  if (!in) return false;
+  std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  json::Value v;
+  if (!json::parse(text, &v, nullptr) || !v.is_object()) return false;
+  return v["info"].flag("import_failed", false);
+}
 
 }  // namespace
 
@@ -110,6 +129,22 @@ void TeamAssetSync::wait() {
   if (thread_.joinable()) thread_.join();
 }
 
+void TeamAssetSync::hold(const std::string& rel) {
+  std::lock_guard<std::mutex> lock(mu_);
+  held_.insert(rel);
+  if (progress_.current == rel) cancel_ = true;
+}
+
+void TeamAssetSync::release(const std::string& rel) {
+  std::lock_guard<std::mutex> lock(mu_);
+  held_.erase(rel);
+}
+
+bool TeamAssetSync::held(const std::string& rel) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return held_.count(rel) != 0;
+}
+
 void TeamAssetSync::cancel_and_wait() {
   cancel_ = true;
   if (thread_.joinable()) thread_.join();
@@ -132,6 +167,10 @@ void TeamAssetSync::set_progress(const TeamAssetProgress& p) {
 }
 
 void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync* self) {
+  struct HashGuard {
+    explicit HashGuard(const TeamAssetSync* s) { g_hash_sync = s; }
+    ~HashGuard() { g_hash_sync = nullptr; }
+  } hash_guard(self);
   const fs::path root = fs::u8path(p.root);
   std::error_code ec;
   TeamAssetProgress prog;
@@ -186,7 +225,7 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
     } else {
       prog.current = src.rel;
       report();
-      f.sha = vault::sha256_file(src.path);
+      f.sha = vault::sha256_file(src.path, nullptr, hash_cancelled);
     }
     prog.bytes_done += src.size;
     ++prog.files_done;
@@ -320,6 +359,11 @@ void TeamAssetSync::run(TeamAssetPass& p, vault::Backend& backend, TeamAssetSync
     report();
     std::string err;
     if (j.up) {
+      if ((self && self->held(j.rel)) || import_failed_meta(root, j.rel)) {
+        p.notes.push_back("Not sending " + j.rel + " (import failed or was cancelled).");
+        p.sent.erase(j.rel);
+        continue;
+      }
       std::vector<std::string> missing;
       const std::string path = (root / fs::u8path(j.rel)).string();
       if (!backend.missing({j.ref.sha256}, &missing, &err)) {

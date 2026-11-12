@@ -67,6 +67,13 @@ void Editor3DScreen::open_asset_browser() {
     std::string err;
     apply_animation_asset(id, rel, &err);
   };
+  host.on_import_stopped = [this](const std::vector<std::string>& rels) {
+    if (!team_) return;
+    for (const std::string& rel : rels) team_->hold_asset_upload(rel);
+  };
+  host.on_import_retry = [this](const std::string& rel) {
+    if (team_) team_->release_asset_upload(rel);
+  };
   host.apply_clip_to = [this](const std::string& clip, const std::string& model) {
     std::string err;
     apply_clip_to_model(clip, model, &err);

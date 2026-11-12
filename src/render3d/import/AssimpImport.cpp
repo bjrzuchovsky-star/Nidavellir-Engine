@@ -252,6 +252,11 @@ bool load_assimp_model(const std::string& path, const ModelImportOptions& opt, M
                          aiProcess_SortByPType | aiProcess_FlipUVs | aiProcess_CalcTangentSpace |
                          aiProcess_ValidateDataStructure;
   const aiScene* sc = imp.ReadFile(fs::u8path(path).string(), flags);
+  if (import_was_cancelled()) {
+    if (sc) imp.FreeScene();
+    if (error) *error = path + ": Import cancelled.";
+    return false;
+  }
   if (!sc || !sc->mRootNode) {
     const char* why = imp.GetErrorString();
     const std::string detail = (why && why[0]) ? why : "Assimp returned no scene";

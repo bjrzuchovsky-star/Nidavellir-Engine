@@ -276,9 +276,69 @@ bool write_giant(const fs::path& dir, std::string* gltf_out) {
   return true;
 }
 
+// A corrupt model fails once, stays failed, and a cancel is not started again.
+int import_fail_once() {
+  const fs::path root = fs::temp_directory_path() / "tombstone_import_fail_smoke";
+  std::error_code ec;
+  fs::remove_all(root, ec);
+  fs::create_directories(root / "assets", ec);
+  {
+    std::ofstream out(root / "assets" / "broken.gltf", std::ios::binary | std::ios::trunc);
+    out << "{ this is not a gltf";
+    if (!out) return fail("could not write broken.gltf");
+  }
+  std::atomic<int> calls{0};
+  ed::assetdb::AssetDb db;
+  db.set_importer([&](const std::string& path, ed::assetdb::Kind kind, const ts::tombstone::json::Value& settings,
+                      ts::tombstone::json::Value* info, std::string* err) {
+    ++calls;
+    return ed::assetdb::import_asset(path, kind, settings, info, err);
+  });
+  db.open(root.string());
+  db.scan();
+  const ed::assetdb::AssetDb::Entry* e = db.by_path("assets/broken.gltf");
+  if (!e || e->import_ok || e->import_pending) return fail("corrupt model did not fail once");
+  if (e->import_error.find("broken.gltf") == std::string::npos) return fail("error did not name the file: " + e->import_error);
+  if (!e->meta.info.flag("import_failed", false)) return fail("failure was not recorded");
+  const int once = calls.load();
+  if (once < 1) return fail("importer was not called");
+  db.scan();
+  if (calls.load() != once) return fail("failed import was retried (" + std::to_string(calls.load()) + " calls)");
+
+  db.mark_import_pending("assets/broken.gltf");
+  const std::vector<std::string> rels = {"assets/broken.gltf"};
+  ed::ImportJob job;
+  ed::ImportJob::Request req;
+  req.project_dir = root.string();
+  req.reimport_rels = rels;
+  job.start(std::move(req));
+  job.cancel();
+  ed::ImportJob::State st;
+  const auto t0 = Clock::now();
+  while (!job.take(&st)) {
+    if (ms_since(t0) > 20000.0) return fail("cancel did not finish the import job");
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  if (!st.cancelled && st.ok) return fail("cancel did not stop the import job");
+  const std::vector<std::string>& stopped = st.rels.empty() ? rels : st.rels;
+  const std::string why = st.cancelled ? std::string("Import cancelled.") : (st.error.empty() ? "Import failed." : st.error);
+  for (const std::string& rel : stopped) db.fail_import(rel, why);
+  r3::clear_import_cancel();
+  const int mid = calls.load();
+  db.scan();
+  const ed::assetdb::AssetDb::Entry* after = db.by_path("assets/broken.gltf");
+  if (!after || after->import_pending) return fail("cancelled import stayed pending");
+  if (after->import_ok) return fail("cancelled import was marked ok");
+  if (calls.load() != mid) return fail("cancelled import was retried");
+  fs::remove_all(root, ec);
+  std::cout << "[smoke] import-fail: OK (failed once, cancel did not retry)\n";
+  return 0;
+}
+
 }  // namespace
 
 int run_big_model_smoke() {
+  if (import_fail_once() != 0) return 1;
   const fs::path root = fs::temp_directory_path() / "tombstone_bigmodel_smoke";
   std::error_code ec;
   fs::remove_all(root, ec);
