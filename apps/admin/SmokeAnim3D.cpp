@@ -2,6 +2,7 @@
 
 #include "editor/editor3d/Editor3DScreen.h"
 #include "render3d/Animator.h"
+#include "runtime/GraphScript.h"
 #include "render3d/ClipFile.h"
 #include "render3d/ColliderFit.h"
 #include "render3d/GlRenderer3D.h"
@@ -442,6 +443,29 @@ end
                             &res, &err) ||
       w.animator(hank)->param("speed") != 4.5f) {
     return fail("graph bridge anim.set_param: " + err);
+  }
+  if (!w.script_plugin_call("anim", "set_float",
+                            {ts::tombstone::ScriptValue::of_number(static_cast<double>(hank)),
+                             ts::tombstone::ScriptValue::of_text("speed"),
+                             ts::tombstone::ScriptValue::of_number(2.25)},
+                            &res, &err) ||
+      !near(w.animator(hank)->param("speed"), 2.25f)) {
+    return fail("graph bridge anim.set_float: " + err);
+  }
+  if (!w.script_plugin_call("anim", "set_bool",
+                            {ts::tombstone::ScriptValue::of_number(static_cast<double>(hank)),
+                             ts::tombstone::ScriptValue::of_text("grounded"),
+                             ts::tombstone::ScriptValue::of_bool(false)},
+                            &res, &err) ||
+      w.animator(hank)->param("grounded") > 0.5f) {
+    return fail("graph bridge anim.set_bool: " + err);
+  }
+  if (!w.script_plugin_call("anim", "trigger",
+                            {ts::tombstone::ScriptValue::of_number(static_cast<double>(hank)),
+                             ts::tombstone::ScriptValue::of_text("jump")},
+                            &res, &err) ||
+      w.animator(hank)->param("jump") < 0.5f) {
+    return fail("graph bridge anim.trigger: " + err);
   }
   // Ride north: the controller feeds speed; the blend space runs.
   w3::Input3D north;
@@ -1325,6 +1349,43 @@ int multipart_drop(const fs::path& dir) {
 }
 
 // Capsule soles match the bind-pose feet, and an in-place clip cannot lift them.
+int graph_compat() {
+  ts::tombstone::runtime::Graph g;
+  std::string err;
+  const char* old =
+      R"({"graph":1,"note":"kept","nodes":[{"id":1,"type":"anim.set_param","x":10,"y":20,"inputs":{"name":"speed","value":0.1}}],"links":[]})";
+  if (!ts::tombstone::runtime::find_graph_node("anim.set_float") ||
+      !ts::tombstone::runtime::find_graph_node("anim.set_bool") ||
+      !ts::tombstone::runtime::find_graph_node("anim.trigger") ||
+      !ts::tombstone::runtime::find_graph_node("anim.set_param")) {
+    return fail("anim parameter nodes missing from the script catalog");
+  }
+  if (!ts::tombstone::runtime::parse_graph(old, &g, &err) || g.nodes.size() != 1 || g.nodes[0].type != "anim.set_param" ||
+      g.nodes[0].x != 10.0f) {
+    return fail("old graph json: " + err);
+  }
+  std::vector<std::string> problems;
+  if (!ts::tombstone::runtime::check_graph(g, &problems))
+    return fail("old anim.set_param graph: " + (problems.empty() ? err : problems.front()));
+  ts::tombstone::json::Value j;
+  const char* anim =
+      R"({"layout":{"entry":[1,2]},"params":[{"name":"speed","type":"float","value":0}],"layers":[{"name":"Base","entry":"idle","states":[{"name":"idle","clip":"idle","blend":[{"clip":"idle","at":0},{"clip":"run","at":4.5}],"blend_param":"speed"}],"transitions":[{"from":"*","to":"idle","param":"speed","op":">","value":0.1,"duration":0.2}]}]})";
+  if (!ts::tombstone::json::parse(anim, &j, &err)) return fail("animator json: " + err);
+  const s3::Animator3D a = r3::animator_from_json(j);
+  if (a.layers.size() != 1 || a.layers[0].entry != "idle" || a.layers[0].states.size() != 1 ||
+      a.layers[0].states[0].blend.size() != 2 || a.layers[0].transitions.size() != 1 ||
+      a.layers[0].transitions[0].param != "speed" || !near(a.layers[0].transitions[0].value, 0.1f, 1e-3f)) {
+    return fail("animator json with an extra layout field");
+  }
+  const s3::Animator3D back = r3::animator_from_json(r3::animator_to_json(a));
+  if (back.layers[0].entry != "idle" || back.layers[0].states[0].blend_param != "speed" ||
+      !near(back.layers[0].transitions[0].value, 0.1f, 1e-3f)) {
+    return fail("animator round trip dropped the blend or the Speed condition");
+  }
+  std::cout << "[smoke] anim graph json OK\n";
+  return 0;
+}
+
 int feet_on_ground() {
   r3::Model m;
   m.bounds = {{-0.25f, 0.35f, -0.12f}, {0.25f, 1.85f, 0.12f}};
@@ -1394,6 +1455,7 @@ int run_anim3d_smoke() {
   if (scene_roundtrip() != 0) return 1;
   if (gpu_render(dir) != 0) return 1;
   if (world(dir / "town") != 0) return 1;
+  if (graph_compat() != 0) return 1;
   if (feet_on_ground() != 0) return 1;
   if (editor_preview(dir / "editor") != 0) return 1;
   if (multipart_drop(dir / "parts") != 0) return 1;

@@ -2,6 +2,7 @@
 #include "editor/editor3d/Editor3DScreen.h"
 #include "editor/ux/Tooltip.h"
 
+#include "editor/scripting/GraphCanvas.h"
 #include "editor/ui/Theme.h"
 #include "render3d/Animator.h"
 #include "render3d/Retarget.h"
@@ -602,7 +603,7 @@ void Editor3DScreen::draw_anim_graph() {
   }
   if (ImGui::IsItemHovered()) {
     ux::SetTooltip(linking ? "Click the state this should switch to."
-                           : "Then click another state. The arrow uses the first parameter.");
+                           : "Or drag from a node's out pin to another state's in pin. Speed > 0.1 when that parameter exists.");
   }
 
   scene3d::AnimLayer3D& layer = anim.layers[static_cast<std::size_t>(anim_graph_.layer)];
@@ -611,8 +612,15 @@ void Editor3DScreen::draw_anim_graph() {
     const std::string key = layer_key + name;
     auto it = anim_graph_.pos.find(key);
     if (it == anim_graph_.pos.end()) {
-      const float x = 28.0f + static_cast<float>(index % 4) * 172.0f;
-      const float y = 28.0f + static_cast<float>(index / 4) * 108.0f;
+      float x = 280.0f + static_cast<float>(std::max(index, 0) % 3) * 230.0f;
+      float y = 48.0f + static_cast<float>(std::max(index, 0) / 3) * 150.0f;
+      if (name == "##entry") {
+        x = 24.0f;
+        y = 48.0f;
+      } else if (name == "##any") {
+        x = 24.0f;
+        y = 230.0f;
+      }
       it = anim_graph_.pos.emplace(key, std::make_pair(x, y)).first;
     }
     return it->second;
@@ -665,32 +673,26 @@ void Editor3DScreen::draw_anim_graph() {
   const ImVec2 avail = ImGui::GetContentRegionAvail();
   const ImVec2 size(std::max(avail.x, 40.0f), std::max(avail.y, 40.0f));
   ImDrawList* dl = ImGui::GetWindowDrawList();
-  dl->AddRectFilled(origin, ImVec2(origin.x + size.x, origin.y + size.y), IM_COL32(22, 18, 16, 255));
-  for (float g = 0; g < size.x; g += 24.0f)
-    dl->AddLine(ImVec2(origin.x + g, origin.y), ImVec2(origin.x + g, origin.y + size.y), IM_COL32(40, 34, 30, 255));
-  for (float g = 0; g < size.y; g += 24.0f)
-    dl->AddLine(ImVec2(origin.x, origin.y + g), ImVec2(origin.x + size.x, origin.y + g), IM_COL32(40, 34, 30, 255));
-  constexpr float kW = 148.0f, kH = 62.0f;
-  auto box_at = [&](int index) {
-    const auto& p = pos_of(layer.states[static_cast<std::size_t>(index)].name, index);
-    return ImVec2(origin.x + p.first, origin.y + p.second);
+  const float z = anim_graph_.zoom;
+  const float nw = graphcanvas::kNodeW * z;
+  const float nh = (graphcanvas::kHeaderH + graphcanvas::kRowH + 8.0f) * z;
+  graphcanvas::draw_grid(dl, origin, size, anim_graph_.pan_x, anim_graph_.pan_y, z);
+  auto to_screen = [&](float x, float y) {
+    return ImVec2(origin.x + anim_graph_.pan_x + x * z, origin.y + anim_graph_.pan_y + y * z);
   };
-  auto center_of = [&](int index) {
-    const ImVec2 b = box_at(index);
-    return ImVec2(b.x + kW * 0.5f, b.y + kH * 0.5f);
+  auto card_at = [&](const std::string& name, int index) {
+    const auto& p = pos_of(name, index);
+    return to_screen(p.first, p.second);
   };
+  auto pin_y = [&](ImVec2 a) { return a.y + (graphcanvas::kHeaderH + graphcanvas::kRowH * 0.5f + 4.0f) * z; };
+  auto out_pin = [&](ImVec2 a) { return ImVec2(a.x + nw, pin_y(a)); };
+  auto in_pin = [&](ImVec2 a) { return ImVec2(a.x, pin_y(a)); };
   auto index_of = [&](const std::string& name) {
     for (int i = 0; i < static_cast<int>(layer.states.size()); ++i)
       if (layer.states[static_cast<std::size_t>(i)].name == name) return i;
     return -1;
   };
-  for (const scene3d::AnimTransition3D& tr : layer.transitions) {
-    const int to = index_of(tr.to);
-    if (to < 0) continue;
-    const int from = tr.from == "*" ? -1 : index_of(tr.from);
-    const ImVec2 b = center_of(to);
-    const ImVec2 a = from >= 0 ? center_of(from) : ImVec2(b.x - kW * 0.5f - 18.0f, b.y);
-    dl->AddLine(a, b, ImGui::GetColorU32(theme::Accent()), 2.0f);
+  auto cond_text = [](const scene3d::AnimTransition3D& tr) {
     const char* op = "?";
     switch (tr.op) {
       case scene3d::AnimTransition3D::Op::Greater: op = ">"; break;
@@ -703,81 +705,286 @@ void Editor3DScreen::draw_anim_graph() {
     char label[96];
     if (tr.op == scene3d::AnimTransition3D::Op::Greater || tr.op == scene3d::AnimTransition3D::Op::Less)
       std::snprintf(label, sizeof(label), "%s %s %.2f", tr.param.c_str(), op, tr.value);
+    else if (tr.param.empty())
+      std::snprintf(label, sizeof(label), "%s", op);
     else
       std::snprintf(label, sizeof(label), "%s %s", tr.param.c_str(), op);
-    dl->AddText(ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f - 8.0f),
-                ImGui::GetColorU32(theme::Text()), label);
+    return std::string(label);
+  };
+  auto source_of = [&](const std::string& from) -> ImVec2 {
+    if (from == "##entry") return out_pin(card_at("##entry", -1));
+    if (from == "##any" || from == "*") return out_pin(card_at("##any", -1));
+    const int i = index_of(from);
+    if (i < 0) return out_pin(card_at("##any", -1));
+    return out_pin(card_at(layer.states[static_cast<std::size_t>(i)].name, i));
+  };
+  const int entry_i = index_of(layer.entry);
+  if (entry_i >= 0) {
+    const ImVec2 a = source_of("##entry");
+    const ImVec2 b = in_pin(card_at(layer.entry, entry_i));
+    graphcanvas::draw_wire(dl, a, b, theme::U32(theme::Copper(), 0.9f), 2.4f * z);
+    theme::DrawSizedText(dl, ImVec2((a.x + b.x) * 0.5f - 16.0f, (a.y + b.y) * 0.5f - 16.0f), 12.0f * z,
+                         theme::U32(theme::Text()), "entry");
   }
+  for (std::size_t ti = 0; ti < layer.transitions.size(); ++ti) {
+    const scene3d::AnimTransition3D& tr = layer.transitions[ti];
+    const int to = index_of(tr.to);
+    if (to < 0) continue;
+    const ImVec2 a = source_of(tr.from);
+    const ImVec2 b = in_pin(card_at(tr.to, to));
+    const bool hot = anim_graph_.selected_tr == static_cast<int>(ti);
+    graphcanvas::draw_wire(dl, a, b, hot ? theme::U32(theme::Accent()) : theme::U32(theme::Text(), 0.8f),
+                           (hot ? 3.2f : 2.2f) * z);
+    const std::string label = cond_text(tr);
+    const ImVec2 m = theme::MeasureText(12.0f * z, label.c_str());
+    const ImVec2 lp((a.x + b.x) * 0.5f - m.x * 0.5f, (a.y + b.y) * 0.5f - m.y - 2.0f);
+    theme::DrawSizedText(dl, lp, 12.0f * z, theme::U32(hot ? theme::Accent() : theme::Text()), label.c_str());
+  }
+  if (!anim_graph_.link_from.empty()) {
+    ImVec2 a = source_of(anim_graph_.link_from);
+    graphcanvas::draw_wire(dl, a, ImGui::GetIO().MousePos, theme::U32(theme::Accent()), 2.4f * z);
+  }
+  auto draw_special = [&](const char* key, const char* title, const char* cat, ImVec4 header) {
+    const ImVec2 a = card_at(key, -1);
+    const ImVec2 b(a.x + nw, a.y + nh);
+    graphcanvas::draw_node_card(dl, a, b, z, title, cat, header, anim_graph_.link_from == key);
+  };
+  draw_special("##entry", "Entry", "Flow", theme::Copper());
+  draw_special("##any", "Any State", "Flow", theme::Sand());
   for (int i = 0; i < static_cast<int>(layer.states.size()); ++i) {
     const scene3d::AnimState3D& st = layer.states[static_cast<std::size_t>(i)];
-    const ImVec2 b = box_at(i);
+    const ImVec2 a = card_at(st.name, i);
+    const ImVec2 b(a.x + nw, a.y + nh);
+    const bool blend = !st.blend.empty();
     const bool sel = st.name == anim_graph_.selected;
-    const bool entry = st.name == layer.entry;
-    dl->AddRectFilled(b, ImVec2(b.x + kW, b.y + kH), IM_COL32(42, 34, 28, 255), 6.0f);
-    dl->AddRect(b, ImVec2(b.x + kW, b.y + kH),
-                ImGui::GetColorU32(sel || entry ? theme::Accent() : theme::Text()), 6.0f, 0, sel ? 2.5f : 1.0f);
-    dl->AddText(ImVec2(b.x + 8, b.y + 6), ImGui::GetColorU32(theme::Text()), st.name.c_str());
-    const std::string sub = st.blend.empty() ? st.clip : ("blend " + st.blend_param);
-    ImVec4 dim = theme::Text();
-    dim.w *= 0.65f;
-    dl->AddText(ImVec2(b.x + 8, b.y + 26), ImGui::GetColorU32(dim), sub.c_str());
-    if (entry) dl->AddText(ImVec2(b.x + 8, b.y + 44), ImGui::GetColorU32(theme::Accent()), "entry");
+    graphcanvas::draw_node_card(dl, a, b, z, st.name.c_str(), blend ? "Blend" : "State",
+                               blend ? theme::Sand() : theme::Accent(), sel);
+    std::string sub = blend ? (st.blend_param.empty() ? "blend" : st.blend_param + " blend") : st.clip;
+    if (sub.size() > 22) sub = sub.substr(0, 20) + "..";
+    theme::DrawSizedText(dl, ImVec2(a.x + 12.0f * z, a.y + (graphcanvas::kHeaderH + 4.0f) * z), 12.0f * z,
+                         theme::U32(theme::Text(), 0.75f), sub.c_str());
+    const ImVec2 ip = in_pin(a);
+    const ImVec2 op = out_pin(a);
+    dl->AddCircleFilled(ip, graphcanvas::kPinR * z, theme::U32(theme::Text()));
+    dl->AddCircleFilled(op, graphcanvas::kPinR * z, theme::U32(theme::Accent()));
   }
+  {
+    const ImVec2 e = out_pin(card_at("##entry", -1));
+    const ImVec2 any = out_pin(card_at("##any", -1));
+    dl->AddCircleFilled(e, graphcanvas::kPinR * z, theme::U32(theme::Copper()));
+    dl->AddCircleFilled(any, graphcanvas::kPinR * z, theme::U32(theme::Sand()));
+  }
+  char info[96];
+  std::snprintf(info, sizeof(info), "%zu states  %zu wires  |  zoom %d%%   drag a pin, right-click to add",
+                layer.states.size(), layer.transitions.size(), static_cast<int>(std::round(z * 100)));
+  theme::DrawSizedText(dl, ImVec2(origin.x + 12, origin.y + size.y - 22), 13, theme::U32(theme::TextMuted()), info);
+  dl->PopClipRect();
+
   ImGui::InvisibleButton("##canvas", size);
   const bool over = ImGui::IsItemHovered() || ImGui::IsItemActive();
-  int hit = -1;
   if (over) {
     const ImVec2 mouse = ImGui::GetIO().MousePos;
-    for (int i = static_cast<int>(layer.states.size()) - 1; i >= 0; --i) {
-      const ImVec2 b = box_at(i);
-      if (mouse.x >= b.x && mouse.x <= b.x + kW && mouse.y >= b.y && mouse.y <= b.y + kH) {
-        hit = i;
-        break;
+    const float pin_r = (graphcanvas::kPinR + 4.0f) * z;
+    int pin_node = -999;
+    bool pin_out = false;
+    auto consider_pin = [&](int node, ImVec2 p, bool output) {
+      if (std::hypot(mouse.x - p.x, mouse.y - p.y) <= pin_r) {
+        pin_node = node;
+        pin_out = output;
       }
+    };
+    consider_pin(-2, out_pin(card_at("##entry", -1)), true);
+    consider_pin(-3, out_pin(card_at("##any", -1)), true);
+    int hit = -1;
+    for (int i = static_cast<int>(layer.states.size()) - 1; i >= 0; --i) {
+      const ImVec2 a = card_at(layer.states[static_cast<std::size_t>(i)].name, i);
+      consider_pin(i, in_pin(a), false);
+      consider_pin(i, out_pin(a), true);
+      if (mouse.x >= a.x && mouse.x <= a.x + nw && mouse.y >= a.y && mouse.y <= a.y + nh) hit = i;
     }
+    auto name_of_node = [&](int node) -> std::string {
+      if (node == -2) return "##entry";
+      if (node == -3) return "##any";
+      if (node >= 0 && node < static_cast<int>(layer.states.size()))
+        return layer.states[static_cast<std::size_t>(node)].name;
+      return {};
+    };
+    auto finish_link = [&](const std::string& to_name) {
+      if (anim_graph_.link_from.empty() || anim_graph_.link_from == to_name) return;
+      if (anim_graph_.link_from == "##entry") {
+        layer.entry = to_name;
+        anim_graph_.selected = to_name;
+        anim_graph_.link_from.clear();
+        what = "Entry state";
+        touch(true);
+        return;
+      }
+      scene3d::AnimTransition3D tr;
+      tr.from = anim_graph_.link_from == "##any" ? "*" : anim_graph_.link_from;
+      tr.to = to_name;
+      tr.duration = 0.2f;
+      const scene3d::AnimParam3D* speed = nullptr;
+      for (const scene3d::AnimParam3D& p : anim.params)
+        if (p.name == "speed") speed = &p;
+      const scene3d::AnimParam3D* use = speed ? speed : (anim.params.empty() ? nullptr : &anim.params.front());
+      if (!use) {
+        tr.op = scene3d::AnimTransition3D::Op::Always;
+      } else {
+        tr.param = use->name;
+        if (use->type == scene3d::AnimParam3D::Type::Trigger) tr.op = scene3d::AnimTransition3D::Op::Trigger;
+        else if (use->type == scene3d::AnimParam3D::Type::Bool) tr.op = scene3d::AnimTransition3D::Op::True;
+        else {
+          tr.op = scene3d::AnimTransition3D::Op::Greater;
+          tr.value = speed ? 0.1f : 0.5f;
+        }
+      }
+      layer.transitions.push_back(std::move(tr));
+      anim_graph_.selected_tr = static_cast<int>(layer.transitions.size()) - 1;
+      anim_graph_.link_from.clear();
+      anim_graph_.selected = to_name;
+      what = "Add transition";
+      touch(true);
+    };
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-      if (hit >= 0) {
+      if (pin_node != -999 && pin_out) {
+        anim_graph_.link_from = name_of_node(pin_node);
+        anim_graph_.dragging = -1;
+      } else if (pin_node >= 0 && !pin_out && !anim_graph_.link_from.empty()) {
+        finish_link(name_of_node(pin_node));
+      } else if (hit >= 0) {
         const std::string name = layer.states[static_cast<std::size_t>(hit)].name;
         if (!anim_graph_.link_from.empty() && anim_graph_.link_from != name) {
-          scene3d::AnimTransition3D tr;
-          tr.from = anim_graph_.link_from;
-          tr.to = name;
-          tr.duration = 0.2f;
-          if (!anim.params.empty()) {
-            tr.param = anim.params.front().name;
-            tr.op = anim.params.front().type == scene3d::AnimParam3D::Type::Trigger
-                        ? scene3d::AnimTransition3D::Op::Trigger
-                        : anim.params.front().type == scene3d::AnimParam3D::Type::Bool
-                              ? scene3d::AnimTransition3D::Op::True
-                              : scene3d::AnimTransition3D::Op::Greater;
-            tr.value = 0.5f;
-          } else {
-            tr.op = scene3d::AnimTransition3D::Op::Always;
-          }
-          layer.transitions.push_back(std::move(tr));
-          anim_graph_.link_from.clear();
-          anim_graph_.selected = name;
-          what = "Add transition";
-          touch(true);
+          finish_link(name);
         } else {
           anim_graph_.selected = name;
+          anim_graph_.selected_tr = -1;
           anim_graph_.dragging = hit;
-          const ImVec2 b = box_at(hit);
-          anim_graph_.grab_x = mouse.x - b.x;
-          anim_graph_.grab_y = mouse.y - b.y;
+          const ImVec2 a = card_at(name, hit);
+          anim_graph_.grab_x = (mouse.x - a.x) / z;
+          anim_graph_.grab_y = (mouse.y - a.y) / z;
         }
-      } else if (anim_graph_.link_from.empty()) {
-        anim_graph_.selected.clear();
+      } else {
+        int special = 0;
+        auto on_special = [&](const char* key) {
+          const ImVec2 a = card_at(key, -1);
+          return mouse.x >= a.x && mouse.x <= a.x + nw && mouse.y >= a.y && mouse.y <= a.y + nh;
+        };
+        if (on_special("##entry")) special = -2;
+        else if (on_special("##any")) special = -3;
+        if (special != 0) {
+          anim_graph_.dragging = special;
+          const char* key = special == -2 ? "##entry" : "##any";
+          const ImVec2 a = card_at(key, -1);
+          anim_graph_.grab_x = (mouse.x - a.x) / z;
+          anim_graph_.grab_y = (mouse.y - a.y) / z;
+        } else {
+        int wire = -1;
+        float best = 18.0f;
+        for (std::size_t ti = 0; ti < layer.transitions.size(); ++ti) {
+          const scene3d::AnimTransition3D& tr = layer.transitions[ti];
+          const int to = index_of(tr.to);
+          if (to < 0) continue;
+          const ImVec2 a = source_of(tr.from);
+          const ImVec2 b = in_pin(card_at(tr.to, to));
+          const float d = std::hypot(mouse.x - (a.x + b.x) * 0.5f, mouse.y - (a.y + b.y) * 0.5f);
+          if (d < best) {
+            best = d;
+            wire = static_cast<int>(ti);
+          }
+        }
+        if (wire >= 0) {
+          anim_graph_.selected_tr = wire;
+          anim_graph_.selected = layer.transitions[static_cast<std::size_t>(wire)].to;
+          anim_graph_.link_from.clear();
+        } else if (anim_graph_.link_from.empty()) {
+          anim_graph_.selected.clear();
+          anim_graph_.selected_tr = -1;
+          anim_graph_.dragging = -4;
+        }
+        }
       }
     }
-    if (anim_graph_.dragging >= 0 && anim_graph_.dragging < static_cast<int>(layer.states.size()) &&
-        ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-      auto& p = pos_of(layer.states[static_cast<std::size_t>(anim_graph_.dragging)].name, anim_graph_.dragging);
-      p.first = std::max(8.0f, mouse.x - origin.x - anim_graph_.grab_x);
-      p.second = std::max(8.0f, mouse.y - origin.y - anim_graph_.grab_y);
+    if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+      if (anim_graph_.dragging >= 0 && anim_graph_.dragging < static_cast<int>(layer.states.size())) {
+        auto& p = pos_of(layer.states[static_cast<std::size_t>(anim_graph_.dragging)].name, anim_graph_.dragging);
+        p.first = (mouse.x - origin.x - anim_graph_.pan_x) / z - anim_graph_.grab_x;
+        p.second = (mouse.y - origin.y - anim_graph_.pan_y) / z - anim_graph_.grab_y;
+      } else if (anim_graph_.dragging == -2 || anim_graph_.dragging == -3) {
+        auto& p = pos_of(anim_graph_.dragging == -2 ? "##entry" : "##any", -1);
+        p.first = (mouse.x - origin.x - anim_graph_.pan_x) / z - anim_graph_.grab_x;
+        p.second = (mouse.y - origin.y - anim_graph_.pan_y) / z - anim_graph_.grab_y;
+      } else if (anim_graph_.dragging == -4) {
+        anim_graph_.pan_x += ImGui::GetIO().MouseDelta.x;
+        anim_graph_.pan_y += ImGui::GetIO().MouseDelta.y;
+      }
     }
+    if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0.0f)) {
+      anim_graph_.pan_x += ImGui::GetIO().MouseDelta.x;
+      anim_graph_.pan_y += ImGui::GetIO().MouseDelta.y;
+    }
+    if (ImGui::GetIO().MouseWheel != 0.0f) {
+      const float gx = (mouse.x - origin.x - anim_graph_.pan_x) / z;
+      const float gy = (mouse.y - origin.y - anim_graph_.pan_y) / z;
+      anim_graph_.zoom = std::clamp(anim_graph_.zoom * (ImGui::GetIO().MouseWheel > 0 ? 1.1f : 1.0f / 1.1f), 0.4f, 1.8f);
+      anim_graph_.pan_x = mouse.x - origin.x - gx * anim_graph_.zoom;
+      anim_graph_.pan_y = mouse.y - origin.y - gy * anim_graph_.zoom;
+    }
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("##anim_palette");
   }
-  if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) anim_graph_.dragging = -1;
+  if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) && anim_graph_.dragging != -1) anim_graph_.dragging = -1;
+  if (ImGui::BeginPopup("##anim_palette")) {
+    if (ImGui::MenuItem("Add state")) {
+      scene3d::AnimState3D st;
+      st.name = "state";
+      int n = 2;
+      auto taken = [&](const std::string& name) {
+        for (const scene3d::AnimState3D& s : layer.states)
+          if (s.name == name) return true;
+        return false;
+      };
+      while (taken(st.name)) st.name = "state" + std::to_string(n++);
+      if (model && !model->clips.empty()) st.clip = model->clips.front().name;
+      if (layer.entry.empty()) layer.entry = st.name;
+      anim_graph_.selected = st.name;
+      layer.states.push_back(std::move(st));
+      what = "Add state";
+      touch(true);
+    }
+    if (ImGui::MenuItem("Add Speed blend")) {
+      scene3d::AnimState3D st;
+      st.name = "locomotion";
+      int n = 2;
+      auto taken = [&](const std::string& name) {
+        for (const scene3d::AnimState3D& s : layer.states)
+          if (s.name == name) return true;
+        return false;
+      };
+      while (taken(st.name)) st.name = "locomotion" + std::to_string(n++);
+      const char* names[3] = {"idle", "walk", "run"};
+      const float at[3] = {0.0f, 1.8f, 4.5f};
+      if (model) {
+        for (int i = 0; i < 3; ++i)
+          if (model->find_clip(names[i]) >= 0) st.blend.push_back({names[i], at[i]});
+      }
+      if (st.blend.empty()) {
+        const std::string clip = model && !model->clips.empty() ? model->clips.front().name : std::string("clip");
+        st.blend.push_back({clip, 0.0f});
+        st.blend.push_back({clip, 1.8f});
+        st.blend.push_back({clip, 4.5f});
+      }
+      st.blend_param = "speed";
+      bool have = false;
+      for (const scene3d::AnimParam3D& p : anim.params)
+        if (p.name == "speed") have = true;
+      if (!have) anim.params.push_back({"speed", scene3d::AnimParam3D::Type::Float, 0.0f});
+      if (layer.entry.empty()) layer.entry = st.name;
+      anim_graph_.selected = st.name;
+      layer.states.push_back(std::move(st));
+      what = "Add blend";
+      touch(true);
+    }
+    ImGui::EndPopup();
+  }
   ImGui::EndChild();
   ImGui::SameLine();
 

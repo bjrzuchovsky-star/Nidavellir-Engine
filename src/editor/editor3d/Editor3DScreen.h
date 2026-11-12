@@ -673,6 +673,10 @@ class Editor3DScreen final : public IScreen {
     int dragging = -1;
     float grab_x = 0.0f;
     float grab_y = 0.0f;
+    float pan_x = 48.0f;
+    float pan_y = 36.0f;
+    float zoom = 1.0f;
+    int selected_tr = -1;  // transition under the selection, or -1
     std::map<std::string, std::pair<float, float>> pos;
     std::optional<scene3d::Scene3D> before;
   };

@@ -1,4 +1,6 @@
 #include "editor/scripting/BrandBook.h"
+
+#include "editor/scripting/GraphCanvas.h"
 #include "editor/ux/Tooltip.h"
 #include "editor/ux/Actions.h"
 
@@ -61,11 +63,6 @@ ImVec4 value_color(const ScriptValue& v) {
     case ScriptValue::Type::Number: break;
   }
   return theme::Sand();
-}
-
-std::string upper(std::string s) {
-  for (char& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-  return s;
 }
 
 constexpr float kNodeW = 196.0f;
@@ -613,7 +610,6 @@ void BrandBook::draw_canvas() {
     if (!a || !b) continue;
     const ImVec2 p0 = pin_pos(*a, l.from_pin, true), p1 = pin_pos(*b, l.to_pin, false);
     const bool exec = is_exec_out(graph_, l.from_node, l.from_pin);
-    const float dx = std::max(40.0f * z, std::fabs(p1.x - p0.x) * 0.5f);
     ImU32 col = exec ? theme::U32(theme::Text(), 0.85f) : theme::U32(theme::Sand(), 0.85f);
     if (!exec) {
       const GraphNodeDef* d = runtime::find_graph_node(b->type);
@@ -622,7 +618,7 @@ void BrandBook::draw_canvas() {
       }
     }
     if (selected_ && (l.from_node == selected_ || l.to_node == selected_)) col = theme::U32(theme::Accent());
-    dl->AddBezierCubic(p0, ImVec2(p0.x + dx, p0.y), ImVec2(p1.x - dx, p1.y), p1, col, (exec ? 3.2f : 2.0f) * z);
+    graphcanvas::draw_wire(dl, p0, p1, col, (exec ? 3.2f : 2.0f) * z);
   }
   if (linking_) {
     const GraphNode* a = graph_.node(link_from_.node);
@@ -640,22 +636,9 @@ void BrandBook::draw_canvas() {
     const std::string cat = l.def ? l.def->category : "Unknown";
     const ImVec4 fam = l.def ? family_color(cat) : theme::Danger();
     const ImVec2 a = to_screen(n.x, n.y), b = to_screen(n.x + kNodeW, n.y + l.h);
-    const float r = 6.0f * z;
-    dl->AddRectFilled(ImVec2(a.x + 4 * z, a.y + 5 * z), ImVec2(b.x + 4 * z, b.y + 5 * z),
-                      IM_COL32(0, 0, 0, 70), r);  // shadow
-    dl->AddRectFilled(a, b, theme::U32(theme::PanelBg()), r);
-    dl->AddRectFilled(a, ImVec2(b.x, a.y + kHeaderH * z), theme::U32(fam), r, ImDrawFlags_RoundCornersTop);
-    dl->AddRectFilled(ImVec2(a.x, a.y + kHeaderH * z - 3 * z), ImVec2(b.x, a.y + kHeaderH * z),
-                      theme::U32(theme::Charcoal(), 0.35f));  // header rule
     const bool sel = n.id == selected_;
-    dl->AddRect(a, b, sel ? theme::U32(theme::Accent()) : theme::U32(theme::Border()), r, 0, sel ? 2.5f : 1.0f);
     const std::string title = l.def ? l.def->title : n.type;
-    theme::DrawSizedText(dl, ImVec2(a.x + 9 * z, a.y + 7 * z), 15.0f * z, theme::U32(theme::TextOnAccent()),
-                         title.c_str());
-    const std::string fam_label = upper(cat);
-    const ImVec2 fl = theme::MeasureText(9.5f * z, fam_label.c_str());
-    theme::DrawSizedText(dl, ImVec2(b.x - fl.x - 8 * z, a.y + 10 * z), 9.5f * z,
-                         theme::U32(theme::TextOnAccent(), 0.65f), fam_label.c_str());
+    graphcanvas::draw_node_card(dl, a, b, z, title.c_str(), cat.c_str(), fam, sel);
     for (int side = 0; side < 2; ++side) {
       const auto& col = side ? l.right : l.left;
       for (const auto& [name, exec] : col) {
