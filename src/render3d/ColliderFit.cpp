@@ -121,9 +121,14 @@ bool fit_collider(const Model& m, ColliderFit f, scene3d::Collider3D* out, const
       }
       radius = std::min({radius, 0.5f * std::max(ext.x, ext.z), 0.5f * ext.y});
       radius = std::max(radius, 0.01f);
+      // The soles are the lowest bind-pose vertex. The capsule grows upward
+      // from there, so the controller stands on the feet instead of the
+      // box centre (a mesh whose origin is above the floor used to hover).
+      const float height = std::max(ext.y, 2.0f * radius);
+      const float bottom = b.min.y;
       out->shape = scene3d::ColliderShape3D::Capsule;
-      out->size = {radius, std::max(ext.y, 2.0f * radius), radius};
-      out->offset = ctr;
+      out->size = {radius, height, radius};
+      out->offset = {ctr.x, bottom + height * 0.5f, ctr.z};
       break;
     }
     case ColliderFit::Convex:

@@ -513,6 +513,12 @@ std::uint64_t Editor3DScreen::drop_asset(const std::string& rel, const Vec3& pos
     Entity3D e;
     e.name = fs::path(rel).stem().string();
     e.transform.position = pos;
+    // Bind-pose feet on the surface under the cursor. A rig whose origin
+    // sits above the soles used to hover by that gap, collider and all.
+    if (dropped && std::isfinite(dropped->bounds.min.y) && std::isfinite(dropped->bounds.max.y) &&
+        dropped->bounds.max.y > dropped->bounds.min.y) {
+      e.transform.position.y = pos.y - dropped->bounds.min.y;
+    }
     e.mesh = scene3d::MeshRef{rel, true};
     // Import settings from the .meta (Asset Browser).
     float scale = 1.0f;

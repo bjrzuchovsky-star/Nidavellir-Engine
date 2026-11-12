@@ -1,5 +1,7 @@
 #include "render3d/Animator.h"
 
+#include "render3d/Retarget.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -595,9 +597,29 @@ void AnimatorRuntime::update(float dt) {
       blend_poses(pose_, cur, k, &pose_, &L.mask);
     }
   }
-  if (cfg_.root_motion && static_cast<std::size_t>(root_) < pose_.size()) {
-    pose_[static_cast<std::size_t>(root_)].t.x = root_rest_.x;
-    pose_[static_cast<std::size_t>(root_)].t.z = root_rest_.z;
+  // The clip's root / hip translation is either turned into XZ root motion
+  // or thrown away. Leaving it in the pose lifts the mesh off the capsule
+  // (a Mixamo run whose hip keys are not deltas from this rig's rest).
+  auto pin = [&](int joint, bool y_only) {
+    if (joint < 0 || static_cast<std::size_t>(joint) >= pose_.size() ||
+        static_cast<std::size_t>(joint) >= sk.joints.size())
+      return;
+    const Vec3 rest = sk.joints[static_cast<std::size_t>(joint)].t;
+    Vec3& t = pose_[static_cast<std::size_t>(joint)].t;
+    if (y_only) t.y = rest.y;
+    else t = rest;
+  };
+  const int hip = map_humanoid(sk).get(HumanSlot::Hips);
+  if (cfg_.root_motion) {
+    pin(root_, true);
+    if (hip != root_) pin(hip, true);
+    if (static_cast<std::size_t>(root_) < pose_.size()) {
+      pose_[static_cast<std::size_t>(root_)].t.x = root_rest_.x;
+      pose_[static_cast<std::size_t>(root_)].t.z = root_rest_.z;
+    }
+  } else {
+    pin(root_, false);
+    if (hip != root_) pin(hip, false);
   }
 }
 

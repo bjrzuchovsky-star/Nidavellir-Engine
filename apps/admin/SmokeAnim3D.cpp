@@ -3,6 +3,7 @@
 #include "editor/editor3d/Editor3DScreen.h"
 #include "render3d/Animator.h"
 #include "render3d/ClipFile.h"
+#include "render3d/ColliderFit.h"
 #include "render3d/GlRenderer3D.h"
 #include "render3d/Gltf.h"
 #include "render3d/ModelImport.h"
@@ -1323,6 +1324,59 @@ int multipart_drop(const fs::path& dir) {
   return 0;
 }
 
+// Capsule soles match the bind-pose feet, and an in-place clip cannot lift them.
+int feet_on_ground() {
+  r3::Model m;
+  m.bounds = {{-0.25f, 0.35f, -0.12f}, {0.25f, 1.85f, 0.12f}};
+  s3::Collider3D col;
+  if (!r3::fit_collider(m, r3::ColliderFit::Capsule, &col)) return fail("fit capsule");
+  const float bottom = col.offset.y - col.size.y * 0.5f;
+  if (std::fabs(bottom - m.bounds.min.y) > 0.02f) {
+    return fail("capsule bottom " + std::to_string(bottom) + " is not the bind-pose feet");
+  }
+  const float ground = 0.0f;
+  const float planted = ground - m.bounds.min.y;
+  if (std::fabs(planted + m.bounds.min.y - ground) > 0.02f) return fail("planted feet left the ground");
+
+  r3::Skeleton sk;
+  r3::Joint hip;
+  hip.name = "hips";
+  hip.parent = -1;
+  hip.t = {0.0f, 0.95f, 0.0f};
+  sk.joints.push_back(hip);
+  r3::Clip lift;
+  lift.name = "run";
+  r3::Channel tr;
+  tr.joint = 0;
+  tr.path = r3::ChannelPath::Translation;
+  const float restk[3] = {0.0f, 0.95f, 0.0f};
+  const float up[3] = {0.0f, 1.95f, 0.0f};
+  r3::upsert_key(&tr, 0.0f, restk);
+  r3::upsert_key(&tr, 1.0f, up);
+  lift.channels = {tr};
+  r3::clip_duration(&lift);
+  m.skeleton = sk;
+  m.clips = {lift};
+  s3::Animator3D cfg;
+  s3::AnimState3D st;
+  st.name = "run";
+  st.clip = "run";
+  st.loop = false;
+  s3::AnimLayer3D layer;
+  layer.entry = "run";
+  layer.states = {st};
+  cfg.layers = {layer};
+  cfg.root_motion = false;
+  r3::AnimatorRuntime rt;
+  if (!rt.bind(cfg, &m)) return fail("bind in-place run");
+  rt.update(0.5f);
+  if (std::fabs(rt.pose()[0].t.y - hip.t.y) > 0.02f) {
+    return fail("in-place clip lifted the hips to " + std::to_string(rt.pose()[0].t.y));
+  }
+  std::cout << "[smoke] anim3d feet on ground OK\n";
+  return 0;
+}
+
 }  // namespace
 
 int run_anim3d_smoke() {
@@ -1340,6 +1394,7 @@ int run_anim3d_smoke() {
   if (scene_roundtrip() != 0) return 1;
   if (gpu_render(dir) != 0) return 1;
   if (world(dir / "town") != 0) return 1;
+  if (feet_on_ground() != 0) return 1;
   if (editor_preview(dir / "editor") != 0) return 1;
   if (multipart_drop(dir / "parts") != 0) return 1;
   std::cout << "[smoke] anim3d OK (skin math vs reference, linear/step/cubic + slerp, 1D blend weights, "
