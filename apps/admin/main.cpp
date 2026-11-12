@@ -136,6 +136,13 @@ using editor::SettingsStore;
 
 void apply_theme(const Settings& settings) {
   editor::theme::Apply(settings.theme);
+  // A panel dragged out of the main window is its own OS window. Those
+  // windows cannot be translucent, and rounded corners leave a halo.
+  if (ImGui::GetCurrentContext() && (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable)) {
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowRounding = 0.0f;
+    style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+  }
 }
 
 // Tiny uncompressed 32-bit TGA writer so --smoke can make test images
@@ -3026,6 +3033,9 @@ int run_imgui_app() {
       glfwSetWindowShouldClose(window, GLFW_FALSE);
     }
     profiler::Profiler::get().begin_frame();
+    // Secondary viewports share this context. A previous frame leaves GL
+    // current on the last platform window; the scene FBO belongs on the main one.
+    glfwMakeContextCurrent(window);
     glfwPollEvents();
     ts::tombstone::steam::SteamService::instance().run_callbacks();
 
@@ -3074,6 +3084,13 @@ int run_imgui_app() {
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+      // Same GL profile as the main window, or the shared context fails to create.
+      glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+      glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+      glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#if defined(__APPLE__)
+      glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+#endif
       GLFWwindow* backup_current_context = glfwGetCurrentContext();
       ImGui::UpdatePlatformWindows();
       ImGui::RenderPlatformWindowsDefault();
