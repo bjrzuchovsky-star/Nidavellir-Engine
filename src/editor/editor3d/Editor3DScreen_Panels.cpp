@@ -637,7 +637,8 @@ void Editor3DScreen::draw_inspector() {
                 [&] { e.animator = scene3d::default_locomotion_animator(); },
                 [&] { e.animator.reset(); })) {
     const char* step = nullptr;
-    draw_animator_fields(*e.animator, entity_model(e), [&](const char* l) { t.after(l); }, &step);
+    draw_animator_fields(*e.animator, entity_model(e), [&](const char* l) { t.after(l); }, &step,
+                         [&] { anim_graph_.open = true; });
     if (step) {
       t.activated = true;
       t.commit = step;
