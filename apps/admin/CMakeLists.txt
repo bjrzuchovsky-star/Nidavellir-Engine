@@ -108,6 +108,11 @@ target_link_libraries(ts_admin
 if(WIN32)
   target_link_libraries(ts_admin PRIVATE ts_imgui_dx12)
 endif()
+# dxcompiler.dll / dxil.dll from the same arch folder as the dxc that baked
+# the shaders, so a runtime HLSL compile loads the host compiler.
+if(COMMAND nidavellir_copy_dxc_runtime)
+  nidavellir_copy_dxc_runtime(ts_admin)
+endif()
 
 target_compile_features(ts_admin PRIVATE cxx_std_20)
 

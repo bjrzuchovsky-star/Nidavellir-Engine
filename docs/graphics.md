@@ -34,3 +34,5 @@ Passes are modules (`src/render3d/lighting`). A plugin registers one with `regis
 - Parallax occlusion, driven by the normal map alpha when the scale is above zero.
 
 Ray tracing is off unless the scene asks for it, and the controls that need it are hidden when the device cannot do it.
+
+The shader bake runs `dxc` for the CPU that is configuring the build (`bin/x64` on AMD64, `bin/arm64` on ARM64). `VULKAN_SDK/Bin/dxc.exe` is used when that file exists. `-DNID_DXC_EXECUTABLE` overrides both. Configure runs `dxc --version` and stops if the binary is the wrong architecture. On Windows, `dxcompiler.dll` and `dxil.dll` from that same folder are copied next to `ts_admin.exe`.

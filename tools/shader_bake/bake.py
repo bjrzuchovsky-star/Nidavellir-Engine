@@ -7,6 +7,7 @@ the RHI so the runtime does not need the tool chain.
 """
 
 import argparse
+import os
 import pathlib
 import re
 import subprocess
@@ -39,8 +40,8 @@ SHADERS = [
 ]
 
 
-def run(cmd):
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+def run(cmd, env=None):
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if proc.returncode != 0:
         sys.stderr.write("$ " + " ".join(cmd) + "\n")
         sys.stderr.write(proc.stdout)
@@ -112,6 +113,26 @@ def main():
     args = ap.parse_args()
     src = pathlib.Path(args.src)
     out = pathlib.Path(args.out)
+    dxc = pathlib.Path(args.dxc)
+    dxc_dir = str(dxc.resolve().parent)
+    if os.name == "nt":
+        missing = [name for name in ("dxcompiler.dll", "dxil.dll") if not (dxc.parent / name).is_file()]
+        if missing:
+            sys.stderr.write(
+                "DXC at %s is missing %s in the same folder.\n"
+                "Those DLLs have to match dxc.exe (bin/x64 on AMD64, bin/arm64 on ARM64).\n"
+                % (dxc, ", ".join(missing))
+            )
+            raise SystemExit(1)
+    dxc_env = os.environ.copy()
+    dxc_env["PATH"] = dxc_dir + os.pathsep + dxc_env.get("PATH", "")
+    # Linux packages keep libdxcompiler.so in ../lib (rpath). Prepend both
+    # so a copy of dxc without an rpath still loads the matching library.
+    if os.name != "nt":
+        lib_dir = str(dxc.resolve().parent.parent / "lib")
+        dxc_env["LD_LIBRARY_PATH"] = os.pathsep.join(
+            [dxc_dir, lib_dir, dxc_env.get("LD_LIBRARY_PATH", "")]
+        )
     work = out.parent / "shader_bake"
     work.mkdir(parents=True, exist_ok=True)
     blobs = []
@@ -131,7 +152,7 @@ def main():
         else:
             run([args.spirv_cross, str(spv), "--version", "330", "--no-es", "--output", str(glsl)])
         profile = "vs_6_0" if stage == "vert" else ("ps_6_5" if "TS_RAY" in defines else "ps_6_0")
-        run([args.dxc, "-T", profile, "-E", "main", "-Fo", str(dxil), str(hlsl)])
+        run([args.dxc, "-T", profile, "-E", "main", "-Fo", str(dxil), str(hlsl)], env=dxc_env)
         blobs.append((name, spv.read_bytes(), glsl330(glsl.read_text(encoding="utf-8")), dxil.read_bytes()))
 
     out.parent.mkdir(parents=True, exist_ok=True)

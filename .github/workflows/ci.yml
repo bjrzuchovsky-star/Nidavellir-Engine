@@ -46,6 +46,28 @@ jobs:
         run: cmake -S . -B build -A x64
       - name: Build (Release)
         run: cmake --build build --config Release --parallel
+      # The D3D12 translation unit and the host-arch DXC bake. A recursive
+      # search of the DXC package used to pick bin/arm64/dxc.exe on AMD64
+      # (WinError 216). This fails the job if that happens again.
+      - name: Direct3D 12 (host x64 DXC)
+        shell: pwsh
+        run: |
+          $line = Select-String -Path build/CMakeCache.txt -Pattern '^TS_DXC:FILEPATH=' | Select-Object -First 1
+          if (-not $line) { throw "TS_DXC was not recorded in CMakeCache.txt" }
+          $dxc = $line.Line.Substring("TS_DXC:FILEPATH=".Length).Trim()
+          Write-Host "DXC: $dxc"
+          if ($dxc -match '[\\/]arm64[\\/]') { throw "x64 Windows CI resolved an ARM64 dxc: $dxc" }
+          & $dxc --version
+          if ($LASTEXITCODE) { throw "dxc --version failed: $dxc" }
+          $obj = Get-ChildItem -Path build -Recurse -File -Filter 'Dx12Device*.obj' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -eq 'Dx12Device.obj' -or $_.Name -eq 'Dx12Device.cpp.obj' } |
+            Select-Object -First 1
+          if (-not $obj) { throw "D3D12 path was not built (Dx12Device.obj missing)" }
+          foreach ($dll in @('dxcompiler.dll', 'dxil.dll')) {
+            $copied = Join-Path 'build/apps/admin/Release' $dll
+            if (-not (Test-Path $copied)) { throw "$dll was not copied next to ts_admin.exe ($copied)" }
+          }
+          Write-Host "D3D12 built: $($obj.FullName)"
       - name: Smoke (server + client)
         shell: pwsh
         run: |
