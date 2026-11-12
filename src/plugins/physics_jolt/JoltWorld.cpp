@@ -832,7 +832,11 @@ bool JoltWorld::create_character(const CharacterDesc& d, const Vec3& position) {
   s->mMaxSlopeAngle = JPH::DegreesToRadians(d.max_slope_deg);
   s->mMass = d.mass;
   s->mMaxStrength = d.push_strength;
-  // Contacts below the lower cap's centre hold the rider up.
+  // Stay on the soles. The default 2 cm padding reads as a hover once the
+  // capsule bottom is the feet. The supporting plane is the lower hemisphere:
+  // a contact on the bottom cap holds the rider, a wall at the chest does not.
+  s->mCharacterPadding = 0.0f;
+  s->mPredictiveContactDistance = 0.02f;
   s->mSupportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -(d.offset.y - half));
   impl_->char_desc = d;
   impl_->character = new JPH::CharacterVirtual(s, JPH::RVec3(position.x, position.y, position.z),

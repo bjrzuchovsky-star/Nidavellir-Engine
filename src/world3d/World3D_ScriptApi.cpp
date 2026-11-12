@@ -144,6 +144,13 @@ void capsule_feet(const Entity3D& e, float* radius, float* bottom) {
     h = e.collider->size.y;
   }
   off = e.collider->offset;
+  // Colliders are in the entity's local space. A Mixamo import scaled to
+  // 0.01 on the transform used to leave a metre-tall capsule on a centimetre mesh.
+  const float sy = std::max(1.0e-4f, std::fabs(e.transform.scale.y));
+  const float sh = std::max(std::fabs(e.transform.scale.x), std::fabs(e.transform.scale.z));
+  r *= std::max(sh, 1.0e-4f);
+  h *= sy;
+  off.y *= e.transform.scale.y;
   const float half = std::max(0.0f, h * 0.5f - r);
   *radius = r;
   *bottom = off.y - half - r;

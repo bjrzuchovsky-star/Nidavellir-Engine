@@ -1000,6 +1000,9 @@ bool Editor3DScreen::play_start() {
     profiler::attach_profiler(world_);
     profiler::Profiler::get().set_capture_dir(plugins::capture_dir_for(project_.path));
   }
+  // A reimport can move the soles to y = 0. Refit before the ride so the
+  // capsule bottom is those soles, then the world drops a hover onto the floor.
+  refit_model_colliders(false);
   if (!world_.start(scene_, project_.path, &err)) {
     note("Play failed: " + err, LogLevel::Error);
     return false;
