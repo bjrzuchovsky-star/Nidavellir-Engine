@@ -50,6 +50,9 @@ struct TextureDesc {
   bool sampled = true;
   bool render = false;
   bool mips = false;
+  // Optimized clear for a color render target. Direct3D 12 warns (message
+  // 820) when ClearRenderTargetView uses a different color.
+  float clear_rgba[4] = {0, 0, 0, 1};
 };
 
 struct SamplerDesc {
@@ -88,6 +91,9 @@ struct TargetDesc {
   bool color = true;
   bool depth = true;
   bool sample_depth = true;
+  // Color the color buffer will be cleared to. Direct3D 12 stores this as
+  // the resource's optimized clear value.
+  float clear_rgba[4] = {0, 0, 0, 1};
 };
 
 struct PassDesc {

@@ -770,15 +770,27 @@ class RhiRenderer final : public Renderer3D {
   }
   void ensure_color() {
     if (!offscreen_) return;
-    if (color_ && cw_ == width_ && ch_ == height_) return;
+    const float rgba[4] = {env_.sky_horizon[0], env_.sky_horizon[1], env_.sky_horizon[2], 1};
+    if (color_ && cw_ == width_ && ch_ == height_ && clear_[0] == rgba[0] && clear_[1] == rgba[1] &&
+        clear_[2] == rgba[2] && clear_[3] == rgba[3]) {
+      return;
+    }
     device_->destroy_target(color_);
     rhi::TargetDesc td;
     td.width = width_;
     td.height = height_;
+    td.clear_rgba[0] = rgba[0];
+    td.clear_rgba[1] = rgba[1];
+    td.clear_rgba[2] = rgba[2];
+    td.clear_rgba[3] = rgba[3];
     std::string err;
     color_ = device_->create_target(td, &err);
     cw_ = width_;
     ch_ = height_;
+    clear_[0] = rgba[0];
+    clear_[1] = rgba[1];
+    clear_[2] = rgba[2];
+    clear_[3] = rgba[3];
   }
   void ensure_aux(rhi::RenderTarget*& t, int w, int h) {
     w = std::max(1, w);
@@ -804,6 +816,7 @@ class RhiRenderer final : public Renderer3D {
   int height_ = 1;
   int cw_ = 0;
   int ch_ = 0;
+  float clear_[4] = {-1, -1, -1, -1};
   FrameStats stats_{};
   std::uint32_t next_ = 0;
   std::size_t align_ = 256;

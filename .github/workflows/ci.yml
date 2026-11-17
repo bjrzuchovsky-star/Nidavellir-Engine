@@ -114,6 +114,9 @@ jobs:
       - name: Smoke realm (Direct3D 12 on WARP)
         working-directory: build/apps/admin/Release
         run: ./ts_admin.exe --smoke-realm --gfx=dx12 --gfx-warp --gfx-debug
+      - name: Smoke window (visible OpenGL)
+        working-directory: build/apps/admin/Release
+        run: ./ts_admin.exe --smoke-window --gfx=gl
       - name: Upload D3D12 smoke dumps
         if: always()
         uses: actions/upload-artifact@v4
@@ -176,3 +179,6 @@ jobs:
       - name: Smoke (graphics backends, under Xvfb)
         working-directory: build/apps/admin
         run: xvfb-run -a -s "-screen 0 1280x800x24" ./ts_admin --smoke-gfx
+      - name: Smoke window (visible OpenGL, under Xvfb)
+        working-directory: build/apps/admin
+        run: xvfb-run -a -s "-screen 0 1280x800x24" ./ts_admin --smoke-window --gfx=gl

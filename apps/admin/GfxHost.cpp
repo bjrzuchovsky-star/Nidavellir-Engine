@@ -112,10 +112,36 @@ bool Host::open(int width, int height, const char* title) {
 #if defined(__APPLE__)
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
+    // GLFW calls ShowWindow before glfwCreateWindow returns, while the new
+    // WGL context is still on that stack. The Steam overlay's hook deadlocks
+    // there on NVIDIA, so no window appears and nothing is printed after
+    // Steam's breakpad line. A hidden smoke window never calls ShowWindow.
+    // Create the context hidden and show it only after creation has returned.
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    std::cout << "Creating OpenGL window..." << std::endl;
     window = glfwCreateWindow(width, height, title, nullptr, nullptr);
     if (!window) return false;
     glfwMakeContextCurrent(window);
+    if (glfwGetCurrentContext() != window) {
+      std::cerr << "OpenGL context was not created\n";
+      glfwDestroyWindow(window);
+      window = nullptr;
+      return false;
+    }
+    glfwShowWindow(window);
+    glfwFocusWindow(window);
     glfwSwapInterval(1);
+    // Later ImGui viewports must not inherit the hidden hint.
+    glfwDefaultWindowHints();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
+    glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
+#if defined(__APPLE__)
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+#endif
+    std::cout << "OpenGL window ready" << std::endl;
     g_gl = true;
     rhi::DeviceDesc desc;
     desc.api = rhi::Api::OpenGL;

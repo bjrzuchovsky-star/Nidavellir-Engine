@@ -2959,19 +2959,30 @@ int run_assets_shot(const char* png) {
 std::string g_startup_project;
 
 int run_imgui_app() {
-  struct SteamGuard {
-    SteamGuard() { ok = ts::tombstone::steam::SteamService::instance().init(); }
-    ~SteamGuard() { ts::tombstone::steam::SteamService::instance().shutdown(); }
-    bool ok = true;
-  } steam_guard;
-  if (!steam_guard.ok) return 0;
-
+  // Open the window before Steam. SteamAPI_Init loads the overlay, and its
+  // OpenGL hook deadlocks inside the first visible WGL context on NVIDIA
+  // (the process sits in Steam's breakpad line and never prints a line).
   admin_gfx::Host host;
   if (!host.open(1280, 720, editor::brand::kWindowTitle)) {
     std::cerr << "graphics startup failed\n";
     return 1;
   }
   GLFWwindow* window = host.window;
+  // Drop the GL context while the overlay DLL loads. NVIDIA holds a driver
+  // lock for the current context, and the overlay's DllMain takes the
+  // loader lock and then calls back into WGL.
+  const bool release_gl = window && glfwGetWindowAttrib(window, GLFW_CLIENT_API) != GLFW_NO_API;
+  if (release_gl) glfwMakeContextCurrent(nullptr);
+  struct SteamGuard {
+    SteamGuard() { ok = ts::tombstone::steam::SteamService::instance().init(); }
+    ~SteamGuard() { ts::tombstone::steam::SteamService::instance().shutdown(); }
+    bool ok = true;
+  } steam_guard;
+  if (release_gl) glfwMakeContextCurrent(window);
+  if (!steam_guard.ok) {
+    host.shutdown();
+    return 0;
+  }
   ImGuiIO& io = ImGui::GetIO();
   // Files dropped from Explorer / Finder: the Asset Browser imports them
   // (sorted into type folders, or into the folder under the mouse).
@@ -3297,6 +3308,9 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[i], "--smoke-realm") == 0) {
       return run_realm_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-window") == 0) {
+      return run_window_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-vr") == 0) {
       // Just the VR checks.

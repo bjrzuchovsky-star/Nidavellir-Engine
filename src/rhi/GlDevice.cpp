@@ -227,13 +227,22 @@ class GlDevice final : public Device {
 #if defined(__APPLE__)
       glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 #endif
-      glfwWindowHint(GLFW_VISIBLE, desc.visible && !desc.offscreen ? GLFW_TRUE : GLFW_FALSE);
+      // ShowWindow before glfwCreateWindow returns deadlocks NVIDIA once the
+      // Steam overlay has hooked WGL. Build the context hidden, then show.
+      const bool show = desc.visible && !desc.offscreen;
+      glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
       window_ = glfwCreateWindow(desc.width, desc.height, desc.title ? desc.title : "Nidavellir", nullptr, nullptr);
       if (!window_) {
         if (error) *error = "OpenGL 3.3 window failed";
         return false;
       }
       owned_window_ = true;
+      glfwMakeContextCurrent(window_);
+      if (show) {
+        glfwShowWindow(window_);
+        glfwFocusWindow(window_);
+      }
+      glfwWindowHint(GLFW_VISIBLE, show ? GLFW_TRUE : GLFW_FALSE);
     } else {
       window_ = static_cast<GLFWwindow*>(desc.window);
     }

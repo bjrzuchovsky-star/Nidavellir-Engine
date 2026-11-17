@@ -20,3 +20,7 @@ int run_present_smoke();
 // --smoke-realm: create a 3D realm, render a few frames, close. Direct3D 12
 // with --gfx-debug fails if the debug layer stored an error. 0 = pass.
 int run_realm_smoke();
+
+// --smoke-window: the editor's real visible window (the path --open and the
+// project manager use). Hidden smokes do not cover it. 0 = pass.
+int run_window_smoke();

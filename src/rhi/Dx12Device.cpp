@@ -765,8 +765,17 @@ Texture* DxDevice::create_texture(const TextureDesc& desc, const void* rgba) {
   rd.Flags = t->depth ? D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL : D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
   D3D12_CLEAR_VALUE clear{};
   clear.Format = t->depth ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
-  clear.DepthStencil.Depth = 1;
-  clear.Color[3] = 1;
+  // Color and DepthStencil share a union. Writing both would clobber the
+  // depth clear of 1, and the depth pass would warn the other way.
+  if (t->depth) {
+    clear.DepthStencil.Depth = 1;
+    clear.DepthStencil.Stencil = 0;
+  } else {
+    clear.Color[0] = desc.clear_rgba[0];
+    clear.Color[1] = desc.clear_rgba[1];
+    clear.Color[2] = desc.clear_rgba[2];
+    clear.Color[3] = desc.clear_rgba[3];
+  }
   t->state = D3D12_RESOURCE_STATE_COMMON;
   const HRESULT hr = device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &rd, t->state,
                                                       t->depth || !rgba ? &clear : nullptr, IID_PPV_ARGS(&t->res));
@@ -978,6 +987,10 @@ RenderTarget* DxDevice::create_target(const TargetDesc& desc, std::string* error
   td.width = desc.width;
   td.height = desc.height;
   if (desc.color) {
+    td.clear_rgba[0] = desc.clear_rgba[0];
+    td.clear_rgba[1] = desc.clear_rgba[1];
+    td.clear_rgba[2] = desc.clear_rgba[2];
+    td.clear_rgba[3] = desc.clear_rgba[3];
     t->color = static_cast<DxTexture*>(create_texture(td, nullptr));
     if (!t->color || !t->color->res) {
       delete t;
