@@ -6,6 +6,7 @@
 // device's context when a scene asks for the classic lighting preset, so
 // existing scenes stay on the path they already have.
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -143,7 +144,12 @@ void set_texture_registrar(TextureRegistrar add, TextureUnregistrar remove, void
 
 class Device {
  public:
-  virtual ~Device() = default;
+  // Stays true until this object has finished destructing. Renderers keep a
+  // copy so a late free does not call through a destroyed vtable.
+  std::shared_ptr<std::atomic<bool>> lifetime() const { return alive_; }
+  virtual ~Device() {
+    if (alive_) alive_->store(false);
+  }
   virtual Api api() const = 0;
   virtual const char* adapter_name() const = 0;
   virtual bool raytracing() const = 0;
@@ -231,6 +237,11 @@ class Device {
   };
   virtual bool vk_info(VkInfo* out) const { (void)out; return false; }
   virtual bool dx_info(DxInfo* out) const { (void)out; return false; }
+  // Direct3D 12 debug-layer errors recorded since the device was opened.
+  virtual int debug_error_count() const { return 0; }
+
+ protected:
+  std::shared_ptr<std::atomic<bool>> alive_ = std::make_shared<std::atomic<bool>>(true);
 };
 
 std::unique_ptr<Device> create_device(const DeviceDesc& desc, std::string* error);

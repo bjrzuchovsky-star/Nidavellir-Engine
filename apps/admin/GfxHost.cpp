@@ -73,8 +73,14 @@ void check_vk(VkResult err) {
 
 bool Host::open(int width, int height, const char* title) {
   editor::Settings boot = editor::SettingsStore::load(nullptr);
-  if (boot.graphics_api.empty()) boot.graphics_api = rhi::default_api_flag();
-  rhi::Api want = rhi::resolve_api(boot.graphics_api);
+  rhi::Api cli = rhi::Api::OpenGL;
+  const bool pinned = rhi::cli_api(&cli);
+  // --gfx= is already decided. Probing Vulkan here (an offscreen device)
+  // runs before the window exists and can sit forever in the driver when
+  // the caller asked for OpenGL.
+  if (!pinned && boot.graphics_api.empty()) boot.graphics_api = rhi::default_api_flag();
+  rhi::Api want = pinned ? cli : rhi::resolve_api(boot.graphics_api);
+  std::cout << "Opening " << rhi::api_name(want) << "..." << std::endl;
   std::string err;
   if (want != rhi::Api::OpenGL) {
     rhi::DeviceDesc desc;
@@ -95,9 +101,14 @@ bool Host::open(int width, int height, const char* title) {
   }
   if (!window) {
     if (!glfwInit()) return false;
+    // A Vulkan or Direct3D 12 attempt leaves GLFW_CLIENT_API at NO_API.
+    // Creating the GL window with that hint yields a window with no
+    // context, and the next GL call never returns.
+    glfwDefaultWindowHints();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
 #if defined(__APPLE__)
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif

@@ -147,6 +147,7 @@ class DxDevice final : public Device {
   std::uint32_t rt_create_tlas(const RtInstance* instances, std::uint32_t count, std::string* error) override;
   void rt_reset() override;
   bool dx_info(DxInfo* out) const override;
+  int debug_error_count() const override;
   bool read_swapchain(std::vector<std::uint8_t>* rgba, int* w, int* h) override;
   void blit_swapchain(Texture* color) override;
   bool has_swapchain() const { return static_cast<bool>(swap_); }
@@ -155,7 +156,8 @@ class DxDevice final : public Device {
   void resize_swapchain(int w, int h);
   void deliver_swapchain_read();
 
-  ID3D12Device* device() const { return device_; }
+  ID3D12Device* device() const { return removed_ ? nullptr : device_; }
+  bool device_lost() const { return removed_; }
   ID3D12GraphicsCommandList* list() const { return list_; }
   ID3D12RootSignature* root(bool) const { return root_; }
   void barrier(ID3D12Resource* res, D3D12_RESOURCE_STATES from, D3D12_RESOURCE_STATES to);
@@ -173,6 +175,10 @@ class DxDevice final : public Device {
   void end_frame_wait();
   ID3D12Resource* upload(const void* data, std::size_t size, ID3D12Resource** keep);
   void explain(std::string* error, const std::string& head, HRESULT hr);
+  void note_removed(const char* where, HRESULT hr);
+  bool failed(HRESULT hr, const char* where);
+  D3D12_CPU_DESCRIPTOR_HANDLE alloc_visible();
+  D3D12_GPU_DESCRIPTOR_HANDLE gpu_visible(D3D12_CPU_DESCRIPTOR_HANDLE cpu) const;
   DeviceDesc desc_{};
   Com<IDXGIFactory6> factory_;
   Com<ID3D12CommandQueue> queue_;
@@ -183,11 +189,15 @@ class DxDevice final : public Device {
   Com<ID3D12RootSignature> root_rt_;
   Com<ID3D12DescriptorHeap> rtv_heap_;
   Com<ID3D12DescriptorHeap> dsv_heap_;
-  Com<ID3D12DescriptorHeap> srv_;
+  Com<ID3D12DescriptorHeap> srv_;       // shader-visible: ImGui + per-draw table
+  Com<ID3D12DescriptorHeap> srv_cpu_;   // not shader-visible: copy sources
   UINT srv_stride_ = 0;
   UINT rtv_stride_ = 0;
   UINT dsv_stride_ = 0;
-  UINT srv_used_ = 64;  // 0..63 reserved for Dear ImGui
+  UINT srv_used_ = 64;       // shader-visible, 0..63 reserved for Dear ImGui
+  UINT srv_cpu_used_ = 0;    // staging heap
+  bool removed_ = false;
+  mutable int debug_errors_ = 0;
   UINT rtv_used_ = 0;
   UINT dsv_used_ = 0;
   ID3D12Resource* back_[2] = {};
@@ -223,11 +233,21 @@ void DxDevice::barrier(ID3D12Resource* res, D3D12_RESOURCE_STATES from, D3D12_RE
   list_->ResourceBarrier(1, &b);
 }
 D3D12_CPU_DESCRIPTOR_HANDLE DxDevice::alloc_cpu() {
+  // CopyDescriptorsSimple refuses a shader-visible source (debug error 654).
+  D3D12_CPU_DESCRIPTOR_HANDLE h = srv_cpu_->GetCPUDescriptorHandleForHeapStart();
+  h.ptr += static_cast<SIZE_T>(srv_cpu_used_++) * srv_stride_;
+  return h;
+}
+D3D12_CPU_DESCRIPTOR_HANDLE DxDevice::alloc_visible() {
+  if (srv_used_ >= 500) srv_used_ = 64;
   D3D12_CPU_DESCRIPTOR_HANDLE h = srv_->GetCPUDescriptorHandleForHeapStart();
   h.ptr += static_cast<SIZE_T>(srv_used_++) * srv_stride_;
   return h;
 }
 D3D12_GPU_DESCRIPTOR_HANDLE DxDevice::gpu_of(D3D12_CPU_DESCRIPTOR_HANDLE cpu) const {
+  return gpu_visible(cpu);
+}
+D3D12_GPU_DESCRIPTOR_HANDLE DxDevice::gpu_visible(D3D12_CPU_DESCRIPTOR_HANDLE cpu) const {
   D3D12_GPU_DESCRIPTOR_HANDLE g = srv_->GetGPUDescriptorHandleForHeapStart();
   g.ptr += cpu.ptr - srv_->GetCPUDescriptorHandleForHeapStart().ptr;
   return g;
@@ -309,7 +329,7 @@ void DxCmd::set_texture(int slot, Texture* texture, Sampler*) {
 }
 void DxCmd::set_tlas(std::uint32_t) {}
 void DxCmd::draw(std::uint32_t count, std::uint32_t instances, std::uint32_t first) {
-  if (!pipe || !pass) return;
+  if (!pipe || !pass || !dev->device()) return;
   for (int i = 0; i < 3; ++i) {
     if (!ubo[i]) continue;
     list->SetGraphicsRootConstantBufferView(static_cast<UINT>(i), ubo[i]->gpu + ubo_off[i]);
@@ -391,6 +411,45 @@ void DxDevice::explain(std::string* error, const std::string& head, HRESULT hr) 
   queue->ClearStoredMessages();
 }
 
+void DxDevice::note_removed(const char* where, HRESULT hr) {
+  if (removed_) return;
+  removed_ = true;
+  const HRESULT reason = device_ ? device_->GetDeviceRemovedReason() : hr;
+  std::fprintf(stderr, "D3D12 device removed during %s (0x%08X, reason 0x%08X)\n", where ? where : "a call",
+               static_cast<unsigned>(hr), static_cast<unsigned>(reason));
+  Com<ID3D12DeviceRemovedExtendedData> dred;
+  if (!device_ || FAILED(device_->QueryInterface(IID_PPV_ARGS(dred.out())))) return;
+  D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT crumbs{};
+  if (FAILED(dred->GetAutoBreadcrumbsOutput(&crumbs)) || !crumbs.pHeadAutoBreadcrumbNode) return;
+  const D3D12_AUTO_BREADCRUMB_NODE* node = crumbs.pHeadAutoBreadcrumbNode;
+  const D3D12_AUTO_BREADCRUMB_NODE* last = node;
+  while (node) {
+    last = node;
+    node = node->pNext;
+  }
+  if (last && last->pCommandListDebugNameA) {
+    std::fprintf(stderr, "D3D12 DRED: last breadcrumb list \"%s\" (%u ops)\n", last->pCommandListDebugNameA,
+                 last->BreadcrumbCount);
+  } else if (last) {
+    std::fprintf(stderr, "D3D12 DRED: last breadcrumb list has %u ops\n", last->BreadcrumbCount);
+  }
+  D3D12_DRED_PAGE_FAULT_OUTPUT fault{};
+  if (SUCCEEDED(dred->GetPageFaultAllocationOutput(&fault)) && fault.PageFaultVA) {
+    std::fprintf(stderr, "D3D12 DRED: page fault at 0x%llX\n", static_cast<unsigned long long>(fault.PageFaultVA));
+  }
+}
+
+bool DxDevice::failed(HRESULT hr, const char* where) {
+  if (!FAILED(hr)) return false;
+  if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_HUNG || hr == DXGI_ERROR_DEVICE_RESET) {
+    note_removed(where, hr);
+  } else {
+    std::fprintf(stderr, "D3D12 %s failed (0x%08X)\n", where ? where : "call", static_cast<unsigned>(hr));
+    ++debug_errors_;
+  }
+  return true;
+}
+
 namespace {
 
 std::string adapter_text(const DXGI_ADAPTER_DESC1& ad) {
@@ -434,6 +493,13 @@ bool DxDevice::open(const DeviceDesc& desc, std::string* error) {
       dbg->EnableDebugLayer();
       factory_flags = DXGI_CREATE_FACTORY_DEBUG;
     }
+  }
+  // Breadcrumbs have to be turned on before the device exists, or a later
+  // removal has nothing to report.
+  Com<ID3D12DeviceRemovedExtendedDataSettings> dred_settings;
+  if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(dred_settings.out())))) {
+    dred_settings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+    dred_settings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
   }
   if (CreateDXGIFactory2(factory_flags, IID_PPV_ARGS(factory_.out())) != S_OK &&
       (factory_flags == 0 || CreateDXGIFactory2(0, IID_PPV_ARGS(factory_.out())) != S_OK)) {
@@ -560,8 +626,14 @@ bool DxDevice::open(const DeviceDesc& desc, std::string* error) {
   device_->CreateDescriptorHeap(&hd, IID_PPV_ARGS(dsv_heap_.out()));
   hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
   hd.NumDescriptors = 2048;
+  hd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+  device_->CreateDescriptorHeap(&hd, IID_PPV_ARGS(srv_cpu_.out()));
   hd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
   device_->CreateDescriptorHeap(&hd, IID_PPV_ARGS(srv_.out()));
+  if (!srv_cpu_ || !srv_) {
+    if (error) *error = "D3D12 descriptor heap failed";
+    return false;
+  }
   srv_stride_ = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
   rtv_stride_ = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
   dsv_stride_ = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
@@ -623,7 +695,7 @@ void DxDevice::shutdown() {
 }
 
 void DxDevice::end_frame_wait() {
-  if (!queue_ || !fence_) return;
+  if (removed_ || !queue_ || !fence_) return;
   const UINT64 v = ++fence_value_;
   queue_->Signal(fence_, v);
   if (fence_->GetCompletedValue() < v) {
@@ -633,6 +705,7 @@ void DxDevice::end_frame_wait() {
 }
 
 Buffer* DxDevice::create_buffer(const BufferDesc& desc, const void* data) {
+  if (removed_ || !device_) return nullptr;
   auto* b = new DxBuffer();
   b->kind = desc.kind;
   b->size = std::max<std::size_t>(desc.size, 256);
@@ -646,11 +719,15 @@ Buffer* DxDevice::create_buffer(const BufferDesc& desc, const void* data) {
   rd.MipLevels = 1;
   rd.SampleDesc.Count = 1;
   rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-  device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                   IID_PPV_ARGS(&b->res));
+  const HRESULT hr = device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_GENERIC_READ,
+                                                      nullptr, IID_PPV_ARGS(&b->res));
+  if (failed(hr, "CreateCommittedResource(buffer)") || !b->res) {
+    delete b;
+    return nullptr;
+  }
   b->gpu = b->res->GetGPUVirtualAddress();
   D3D12_RANGE range{0, 0};
-  b->res->Map(0, &range, &b->map);
+  if (FAILED(b->res->Map(0, &range, &b->map))) b->map = nullptr;
   if (data && b->map) std::memcpy(b->map, data, desc.size);
   return b;
 }
@@ -691,17 +768,23 @@ Texture* DxDevice::create_texture(const TextureDesc& desc, const void* rgba) {
   clear.DepthStencil.Depth = 1;
   clear.Color[3] = 1;
   t->state = D3D12_RESOURCE_STATE_COMMON;
-  device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &rd, t->state, t->depth || !rgba ? &clear : nullptr,
-                                   IID_PPV_ARGS(&t->res));
+  const HRESULT hr = device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &rd, t->state,
+                                                      t->depth || !rgba ? &clear : nullptr, IID_PPV_ARGS(&t->res));
+  if (failed(hr, "CreateCommittedResource(texture)") || !t->res) {
+    delete t;
+    return nullptr;
+  }
   if (!t->depth) {
     t->cpu = alloc_cpu();
-    t->gpu = gpu_of(t->cpu);
     D3D12_SHADER_RESOURCE_VIEW_DESC sv{};
     sv.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     sv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     sv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     sv.Texture2D.MipLevels = 1;
     device_->CreateShaderResourceView(t->res, &sv, t->cpu);
+    D3D12_CPU_DESCRIPTOR_HANDLE visible = alloc_visible();
+    device_->CopyDescriptorsSimple(1, visible, t->cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    t->gpu = gpu_visible(visible);
     t->has_srv = true;
     t->imgui = t->gpu.ptr;
     if (rgba) update_texture(t, rgba, desc.width, desc.height);
@@ -724,10 +807,17 @@ void DxDevice::update_texture(Texture* texture, const void* rgba, int w, int h) 
   rd.SampleDesc.Count = 1;
   rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
   ID3D12Resource* up = nullptr;
-  device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                   IID_PPV_ARGS(&up));
+  if (failed(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_GENERIC_READ,
+                                              nullptr, IID_PPV_ARGS(&up)),
+             "CreateCommittedResource(upload)") ||
+      !up) {
+    return;
+  }
   void* map = nullptr;
-  up->Map(0, nullptr, &map);
+  if (FAILED(up->Map(0, nullptr, &map)) || !map) {
+    up->Release();
+    return;
+  }
   for (int y = 0; y < h; ++y) {
     std::memcpy(static_cast<char*>(map) + static_cast<std::size_t>(y) * pitch, static_cast<const char*>(rgba) + static_cast<std::size_t>(y) * row, row);
   }
@@ -889,6 +979,10 @@ RenderTarget* DxDevice::create_target(const TargetDesc& desc, std::string* error
   td.height = desc.height;
   if (desc.color) {
     t->color = static_cast<DxTexture*>(create_texture(td, nullptr));
+    if (!t->color || !t->color->res) {
+      delete t;
+      return nullptr;
+    }
     t->rtv = rtv_heap_->GetCPUDescriptorHandleForHeapStart();
     t->rtv.ptr += static_cast<SIZE_T>(rtv_used_++) * rtv_stride_;
     device_->CreateRenderTargetView(t->color->res, nullptr, t->rtv);
@@ -896,6 +990,11 @@ RenderTarget* DxDevice::create_target(const TargetDesc& desc, std::string* error
   if (desc.depth) {
     td.format = TextureFormat::Depth;
     t->depth = static_cast<DxTexture*>(create_texture(td, nullptr));
+    if (!t->depth || !t->depth->res) {
+      destroy_texture(t->color);
+      delete t;
+      return nullptr;
+    }
     t->dsv = dsv_heap_->GetCPUDescriptorHandleForHeapStart();
     t->dsv.ptr += static_cast<SIZE_T>(dsv_used_++) * dsv_stride_;
     D3D12_DEPTH_STENCIL_VIEW_DESC dv{};
@@ -903,13 +1002,15 @@ RenderTarget* DxDevice::create_target(const TargetDesc& desc, std::string* error
     dv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     device_->CreateDepthStencilView(t->depth->res, &dv, t->dsv);
     t->depth->cpu = alloc_cpu();
-    t->depth->gpu = gpu_of(t->depth->cpu);
     D3D12_SHADER_RESOURCE_VIEW_DESC sv{};
     sv.Format = DXGI_FORMAT_R32_FLOAT;
     sv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     sv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     sv.Texture2D.MipLevels = 1;
     device_->CreateShaderResourceView(t->depth->res, &sv, t->depth->cpu);
+    D3D12_CPU_DESCRIPTOR_HANDLE visible = alloc_visible();
+    device_->CopyDescriptorsSimple(1, visible, t->depth->cpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    t->depth->gpu = gpu_visible(visible);
     t->depth->has_srv = true;
   }
   (void)error;
@@ -924,6 +1025,7 @@ void DxDevice::destroy_target(RenderTarget* target) {
 }
 void DxDevice::begin_frame() {
   if (depth_++ > 0) return;
+  if (removed_ || !device_) return;
   if (window_) {
     int w = 0, h = 0;
     glfwGetFramebufferSize(window_, &w, &h);
@@ -940,6 +1042,7 @@ void DxDevice::begin_frame() {
 void DxDevice::end_frame() {
   if (depth_ == 0) return;
   if (--depth_ > 0) return;
+  if (removed_ || !device_ || !list_) return;
   if (swap_ && frame_index_ < 2 && back_[frame_index_] && back_state_[frame_index_] != D3D12_RESOURCE_STATE_PRESENT) {
     barrier(back_[frame_index_], back_state_[frame_index_], D3D12_RESOURCE_STATE_PRESENT);
     back_state_[frame_index_] = D3D12_RESOURCE_STATE_PRESENT;
@@ -949,7 +1052,10 @@ void DxDevice::end_frame() {
   queue_->ExecuteCommandLists(1, lists);
   end_frame_wait();
   deliver_swapchain_read();
-  if (swap_ && swap_drawn_) swap_->Present(1, 0);
+  if (swap_ && swap_drawn_ && !removed_) {
+    const HRESULT phr = swap_->Present(1, 0);
+    if (FAILED(phr)) failed(phr, "Present");
+  }
   swap_drawn_ = false;
 }
 
@@ -1100,7 +1206,12 @@ bool DxDevice::read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba,
   rd.SampleDesc.Count = 1;
   rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
   ID3D12Resource* rb = nullptr;
-  device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&rb));
+  if (failed(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                              IID_PPV_ARGS(&rb)),
+             "CreateCommittedResource(readback)") ||
+      !rb) {
+    return false;
+  }
   alloc_->Reset();
   list_->Reset(alloc_, nullptr);
   barrier(t->color->res, t->color->state, D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -1201,6 +1312,26 @@ std::uint32_t DxDevice::rt_create_tlas(const RtInstance*, std::uint32_t, std::st
   return 0;
 }
 void DxDevice::rt_reset() {}
+
+int DxDevice::debug_error_count() const {
+  if (!device_) return debug_errors_;
+  Com<ID3D12InfoQueue> queue;
+  if (FAILED(device_->QueryInterface(IID_PPV_ARGS(queue.out())))) return debug_errors_;
+  const UINT64 n = queue->GetNumStoredMessages();
+  for (UINT64 i = 0; i < n; ++i) {
+    SIZE_T bytes = 0;
+    if (FAILED(queue->GetMessage(i, nullptr, &bytes)) || bytes == 0) continue;
+    std::vector<unsigned char> mem(bytes);
+    auto* msg = reinterpret_cast<D3D12_MESSAGE*>(mem.data());
+    if (FAILED(queue->GetMessage(i, msg, &bytes))) continue;
+    if (msg->Severity != D3D12_MESSAGE_SEVERITY_ERROR && msg->Severity != D3D12_MESSAGE_SEVERITY_CORRUPTION) continue;
+    ++debug_errors_;
+    if (msg->pDescription) std::fprintf(stderr, "D3D12: %s\n", msg->pDescription);
+  }
+  queue->ClearStoredMessages();
+  return debug_errors_;
+}
+
 bool DxDevice::dx_info(DxInfo* out) const {
   if (!out) return false;
   out->device = device_;

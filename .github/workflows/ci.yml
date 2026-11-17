@@ -111,6 +111,9 @@ jobs:
       - name: Smoke present (Direct3D 12 on WARP)
         working-directory: build/apps/admin/Release
         run: ./ts_admin.exe --smoke-present --gfx=dx12 --gfx-warp --gfx-debug
+      - name: Smoke realm (Direct3D 12 on WARP)
+        working-directory: build/apps/admin/Release
+        run: ./ts_admin.exe --smoke-realm --gfx=dx12 --gfx-warp --gfx-debug
       - name: Upload D3D12 smoke dumps
         if: always()
         uses: actions/upload-artifact@v4

@@ -82,8 +82,11 @@ rhi::VertexAttr mesh_attr(std::uint32_t loc, std::uint32_t buf, std::uint32_t of
 
 class RhiRenderer final : public Renderer3D {
  public:
-  explicit RhiRenderer(rhi::Device* device) : device_(device) {}
+  explicit RhiRenderer(rhi::Device* device)
+      : device_(device), live_(device ? device->lifetime() : nullptr) {}
   ~RhiRenderer() override { shutdown(); }
+
+  bool device_live() const { return device_ && live_ && live_->load(); }
 
   const char* backend_name() const override {
     if (!device_) return "rhi";
@@ -220,8 +223,14 @@ class RhiRenderer final : public Renderer3D {
   }
 
   void shutdown() override {
-    if (!device_ || shut_) return;
+    if (shut_) return;
     shut_ = true;
+    // The device may already have been destroyed (editor close). Calling
+    // through it is a use-after-free, sometimes with a null vtable.
+    if (!device_live()) {
+      device_ = nullptr;
+      return;
+    }
     for (auto& [id, m] : meshes_) free_mesh(m);
     meshes_.clear();
     for (auto& [id, m] : materials_) free_mat(m);
@@ -258,9 +267,17 @@ class RhiRenderer final : public Renderer3D {
     ib.kind = rhi::BufferKind::Index;
     ib.size = mesh.indices.size() * sizeof(std::uint32_t);
     m.ib = device_->create_buffer(ib, mesh.indices.data());
+    if (!m.vb || !m.ib) {
+      free_mesh(m);
+      return {};
+    }
     if (mesh.skinned()) {
       vb.size = mesh.skin.size() * sizeof(SkinVertex);
       m.skin = device_->create_buffer(vb, mesh.skin.data());
+      if (!m.skin) {
+        free_mesh(m);
+        return {};
+      }
     }
     m.count = static_cast<std::uint32_t>(mesh.indices.size());
     m.verts = static_cast<std::uint32_t>(mesh.vertices.size());
@@ -714,6 +731,10 @@ class RhiRenderer final : public Renderer3D {
     return device_->create_texture(td, rgba);
   }
   void free_mesh(GpuMesh& m) {
+    if (!device_live()) {
+      m.vb = m.ib = m.skin = nullptr;
+      return;
+    }
     device_->destroy_buffer(m.vb);
     device_->destroy_buffer(m.ib);
     device_->destroy_buffer(m.skin);
@@ -772,6 +793,7 @@ class RhiRenderer final : public Renderer3D {
   }
 
   rhi::Device* device_ = nullptr;
+  std::shared_ptr<std::atomic<bool>> live_;
   bool ready_ = false;
   bool shut_ = false;
   bool offscreen_ = true;

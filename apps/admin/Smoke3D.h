@@ -16,3 +16,7 @@ void set_smoke_dump(bool on);
 // --smoke-present: a few frames into the real swapchain, then read the
 // backbuffer back. Direct3D 12 and Vulkan. 0 = pass.
 int run_present_smoke();
+
+// --smoke-realm: create a 3D realm, render a few frames, close. Direct3D 12
+// with --gfx-debug fails if the debug layer stored an error. 0 = pass.
+int run_realm_smoke();

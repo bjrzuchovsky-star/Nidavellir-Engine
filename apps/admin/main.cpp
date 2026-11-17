@@ -3295,6 +3295,9 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-present") == 0) {
       return run_present_smoke();
     }
+    if (std::strcmp(argv[i], "--smoke-realm") == 0) {
+      return run_realm_smoke();
+    }
     if (std::strcmp(argv[i], "--smoke-vr") == 0) {
       // Just the VR checks.
       return run_vr_smoke();

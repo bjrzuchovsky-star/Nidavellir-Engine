@@ -238,6 +238,10 @@ class GlDevice final : public Device {
       window_ = static_cast<GLFWwindow*>(desc.window);
     }
     glfwMakeContextCurrent(window_);
+    if (glfwGetCurrentContext() != window_) {
+      if (error) *error = "OpenGL context was not created";
+      return false;
+    }
     if (!load_gl33(error)) return false;
     const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
     name_ = renderer ? renderer : "OpenGL";

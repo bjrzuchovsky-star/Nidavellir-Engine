@@ -62,7 +62,7 @@ void AppFlow::start() {
                       " project(s) from " + settings_.projects_root;
   }
 
-  if (settings_.graphics_api.empty()) settings_.graphics_api = rhi::default_api_flag();
+  if (settings_.graphics_api.empty() && !rhi::cli_api(nullptr)) settings_.graphics_api = rhi::default_api_flag();
   // Persist defaults on first run so the config file exists and is discoverable.
   persist_settings();
 
