@@ -122,7 +122,9 @@ class VkDeviceR final : public Device {
   bool raytracing() const override { return raytracing_; }
   bool bottom_up() const override { return false; }
   void clip_params(float o[4]) const override { o[0] = 1; o[1] = 0.5f; o[2] = 0.5f; o[3] = 0; }
-  bool shadow_flip_v() const override { return false; }
+  // Negative-height viewports put clip +Y at texture v = 0. The shadow
+  // sample uses GL's v = 1 at the top, so the lookup is flipped to match.
+  bool shadow_flip_v() const override { return true; }
   void* window() const override { return window_; }
   int width() const override { return width_; }
   int height() const override { return height_; }

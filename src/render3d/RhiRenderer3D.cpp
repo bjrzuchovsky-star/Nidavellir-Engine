@@ -408,43 +408,8 @@ class RhiRenderer final : public Renderer3D {
       (&frame.cascade_splits.x)[i] = scale;
     }
     const int tiles = cascades <= 1 ? 1 : 2;
-    if (shadows && shadow_) {
-      rhi::PassDesc sp;
-      sp.target = shadow_;
-      sp.color = false;
-      sp.clear_color = false;
-      sp.clear_depth = true;
-      cmd->begin_pass(sp);
-      cmd->set_pipeline(depth_);
-      for (int c = 0; c < cascades; ++c) {
-        const int side = kShadow / tiles;
-        cmd->set_viewport((c % tiles) * side, (c / tiles) * side, side, side);
-        for (const DrawItem& d : draws_) {
-          if (!d.shadow) continue;
-          DrawBlock db{};
-          db.model = d.model;
-          db.extra.x = static_cast<float>(c);
-          upload_draw(cmd, db, d);
-          const GpuMesh& m = meshes_[d.mesh];
-          cmd->set_pipeline(d.bone >= 0 ? depth_skin_ : depth_);
-          cmd->set_vertex_buffer(0, m.vb);
-          if (m.skin) cmd->set_vertex_buffer(1, m.skin);
-          cmd->set_index_buffer(m.ib);
-          cmd->draw_indexed(m.count, 1, 0);
-          ++stats_.shadow_casters;
-        }
-      }
-      cmd->end_pass();
-    }
-    ensure_color();
-    rhi::PassDesc mp;
-    mp.target = offscreen_ ? color_ : nullptr;
-    mp.rgba[0] = env_.sky_horizon[0];
-    mp.rgba[1] = env_.sky_horizon[1];
-    mp.rgba[2] = env_.sky_horizon[2];
-    mp.rgba[3] = 1;
-    cmd->begin_pass(mp);
-    cmd->set_viewport(0, 0, width_, height_);
+    // The depth pass reads frame.light_vp. Upload it before that pass, or
+    // the shadow map is drawn with an empty matrix and the sun casts nothing.
     const float aspect = static_cast<float>(width_) / static_cast<float>(height_);
     const Mat4 view = camera_.view();
     const Mat4 proj = camera_.projection(aspect);
@@ -495,6 +460,44 @@ class RhiRenderer final : public Renderer3D {
     }
     const std::size_t frame_off = bump(sizeof(FrameBlock));
     device_->update_buffer(ubo_, &frame, sizeof(frame), frame_off);
+    if (shadows && shadow_) {
+      rhi::PassDesc sp;
+      sp.target = shadow_;
+      sp.color = false;
+      sp.clear_color = false;
+      sp.clear_depth = true;
+      cmd->begin_pass(sp);
+      cmd->set_uniform(0, ubo_, frame_off, sizeof(FrameBlock));
+      cmd->set_pipeline(depth_);
+      for (int c = 0; c < cascades; ++c) {
+        const int side = kShadow / tiles;
+        cmd->set_viewport((c % tiles) * side, (c / tiles) * side, side, side);
+        for (const DrawItem& d : draws_) {
+          if (!d.shadow) continue;
+          DrawBlock db{};
+          db.model = d.model;
+          db.extra.x = static_cast<float>(c);
+          upload_draw(cmd, db, d);
+          const GpuMesh& m = meshes_[d.mesh];
+          cmd->set_pipeline(d.bone >= 0 ? depth_skin_ : depth_);
+          cmd->set_vertex_buffer(0, m.vb);
+          if (m.skin) cmd->set_vertex_buffer(1, m.skin);
+          cmd->set_index_buffer(m.ib);
+          cmd->draw_indexed(m.count, 1, 0);
+          ++stats_.shadow_casters;
+        }
+      }
+      cmd->end_pass();
+    }
+    ensure_color();
+    rhi::PassDesc mp;
+    mp.target = offscreen_ ? color_ : nullptr;
+    mp.rgba[0] = env_.sky_horizon[0];
+    mp.rgba[1] = env_.sky_horizon[1];
+    mp.rgba[2] = env_.sky_horizon[2];
+    mp.rgba[3] = 1;
+    cmd->begin_pass(mp);
+    cmd->set_viewport(0, 0, width_, height_);
     auto bind_frame = [&]() {
       cmd->set_uniform(0, ubo_, frame_off, sizeof(FrameBlock));
       cmd->set_texture(6, device_->target_depth(shadow_), clamp_);

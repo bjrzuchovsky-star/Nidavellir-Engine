@@ -185,7 +185,11 @@ bool Host::open(int width, int height, const char* title) {
     gfx::set_texture_uploader(g_uploader);
   }
 #endif
-  std::cout << "Graphics API: " << api_name() << "\n";
+  std::cout << "Graphics API: " << api_name();
+  if (g_device && g_device->adapter_name() && g_device->adapter_name()[0]) {
+    std::cout << "  " << g_device->adapter_name();
+  }
+  std::cout << "\n";
   return window != nullptr;
 }
 
@@ -246,6 +250,9 @@ void Host::present(float r, float g, float b) {
       cmd->end_pass();
     }
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+      // Extra viewports are their own GLFW windows. They must not pick up
+      // an OpenGL context hint left over from another tool window.
+      glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
       ImGui::UpdatePlatformWindows();
       ImGui::RenderPlatformWindowsDefault();
     }
@@ -263,6 +270,7 @@ void Host::present(float r, float g, float b) {
       ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), list);
     }
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+      glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
       ImGui::UpdatePlatformWindows();
       ImGui::RenderPlatformWindowsDefault();
     }

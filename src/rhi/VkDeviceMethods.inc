@@ -141,10 +141,31 @@ bool VkDeviceR::open(const DeviceDesc& desc, std::string* error) {
     }
     volk_ready = true;
   }
-  std::uint32_t ext_count = 0;
-  const char** glfw_ext = nullptr;
-  if (!desc.offscreen) glfw_ext = glfwGetRequiredInstanceExtensions(&ext_count);
-  std::vector<const char*> exts(glfw_ext, glfw_ext + ext_count);
+  // glfwGetRequiredInstanceExtensions returns null until glfwInit. Without
+  // VK_KHR_surface / the platform surface extension, the instance comes up
+  // and glfwCreateWindowSurface then fails.
+  if (!desc.offscreen && !desc.window) {
+    if (!glfwInit()) {
+      if (error) *error = "glfwInit failed";
+      return false;
+    }
+    owned_glfw_ = true;
+  }
+  std::vector<const char*> exts;
+  if (!desc.offscreen) {
+    std::uint32_t ext_count = 0;
+    const char** glfw_ext = glfwGetRequiredInstanceExtensions(&ext_count);
+    if (glfw_ext && ext_count) {
+      exts.assign(glfw_ext, glfw_ext + ext_count);
+    } else {
+      exts.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+#if defined(_WIN32)
+      exts.push_back("VK_KHR_win32_surface");
+#else
+      exts.push_back("VK_KHR_xlib_surface");
+#endif
+    }
+  }
   VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
   app.pApplicationName = "Nidavellir";
   app.apiVersion = VK_API_VERSION_1_2;
@@ -206,18 +227,18 @@ bool VkDeviceR::open(const DeviceDesc& desc, std::string* error) {
 
   if (!desc.offscreen) {
     if (!desc.window) {
-      if (!glfwInit()) {
-        if (error) *error = "glfwInit failed";
-        return false;
-      }
-      owned_glfw_ = true;
       glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
       glfwWindowHint(GLFW_VISIBLE, desc.visible ? GLFW_TRUE : GLFW_FALSE);
       window_ = glfwCreateWindow(desc.width, desc.height, desc.title ? desc.title : "Nidavellir", nullptr, nullptr);
       owned_window_ = true;
     } else window_ = static_cast<GLFWwindow*>(desc.window);
-    if (!window_ || glfwCreateWindowSurface(instance_, window_, nullptr, &surface_) != VK_SUCCESS) {
-      if (error) *error = "Vulkan surface failed";
+    if (!window_) {
+      if (error) *error = "Vulkan window failed (GLFW_CLIENT_API must be GLFW_NO_API)";
+      return false;
+    }
+    const VkResult sr = glfwCreateWindowSurface(instance_, window_, nullptr, &surface_);
+    if (sr != VK_SUCCESS) {
+      if (error) *error = "Vulkan surface failed (VkResult " + std::to_string(static_cast<int>(sr)) + ")";
       return false;
     }
   }
@@ -329,11 +350,29 @@ bool VkDeviceR::open(const DeviceDesc& desc, std::string* error) {
     sub.colorAttachmentCount = color ? 1 : 0;
     sub.pColorAttachments = color ? &cref : nullptr;
     sub.pDepthStencilAttachment = depth ? &dref : nullptr;
+    // The shadow pass writes depth and the lighting pass samples it. Without
+    // this, the sample can see the cleared depth and the sun casts no shadow.
+    VkSubpassDependency deps[2]{};
+    deps[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    deps[0].dstSubpass = 0;
+    deps[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    deps[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    deps[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[1].srcSubpass = 0;
+    deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    deps[1].srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    deps[1].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     VkRenderPassCreateInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
     rp.attachmentCount = static_cast<uint32_t>(n);
     rp.pAttachments = att;
     rp.subpassCount = 1;
     rp.pSubpasses = &sub;
+    rp.dependencyCount = 2;
+    rp.pDependencies = deps;
     (void)present;
     VkRenderPass pass = VK_NULL_HANDLE;
     vkCreateRenderPass(device_, &rp, nullptr, &pass);

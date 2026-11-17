@@ -105,6 +105,7 @@ class DxCmd final : public CommandList {
   void set_tlas(std::uint32_t) override;
   void draw(std::uint32_t vertices, std::uint32_t instances, std::uint32_t first) override;
   void draw_indexed(std::uint32_t indices, std::uint32_t instances, std::uint32_t first) override;
+  DxTarget* bound = nullptr;
 };
 
 class DxDevice final : public Device {
@@ -225,27 +226,44 @@ void DxCmd::begin_pass(const PassDesc& p) {
   if (t) {
     w = t->width;
     h = t->height;
-    if (t->color && p.clear_color) {
-      const float c[4] = {p.rgba[0], p.rgba[1], p.rgba[2], p.rgba[3]};
+    if (t->color) {
       dev->barrier(t->color->res, t->color->state, D3D12_RESOURCE_STATE_RENDER_TARGET);
       t->color->state = D3D12_RESOURCE_STATE_RENDER_TARGET;
-      list->ClearRenderTargetView(t->rtv, c, 0, nullptr);
+      if (p.clear_color) {
+        const float c[4] = {p.rgba[0], p.rgba[1], p.rgba[2], p.rgba[3]};
+        list->ClearRenderTargetView(t->rtv, c, 0, nullptr);
+      }
     }
-    if (t->depth && p.clear_depth) {
+    if (t->depth) {
       dev->barrier(t->depth->res, t->depth->state, D3D12_RESOURCE_STATE_DEPTH_WRITE);
       t->depth->state = D3D12_RESOURCE_STATE_DEPTH_WRITE;
-      list->ClearDepthStencilView(t->dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+      if (p.clear_depth) list->ClearDepthStencilView(t->dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
     }
     rtv = t->color_on ? t->rtv : D3D12_CPU_DESCRIPTOR_HANDLE{};
     dsv = t->depth ? t->dsv : D3D12_CPU_DESCRIPTOR_HANDLE{};
     list->OMSetRenderTargets(t->color_on ? 1 : 0, t->color_on ? &rtv : nullptr, FALSE, t->depth ? &dsv : nullptr);
   }
+  bound = t;
   pass = true;
   set_viewport(0, 0, w, h);
   ID3D12DescriptorHeap* heaps[] = {dev->srv_heap()};
   list->SetDescriptorHeaps(1, heaps);
 }
-void DxCmd::end_pass() { pass = false; }
+void DxCmd::end_pass() {
+  if (!pass) return;
+  // The shadow map (and any later sample of this target) is an SRV. Leave
+  // the resources in shader-read so the lighting pass can sample the depth.
+  if (bound && bound->depth && bound->depth->res && bound->depth->state == D3D12_RESOURCE_STATE_DEPTH_WRITE) {
+    dev->barrier(bound->depth->res, D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    bound->depth->state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+  }
+  if (bound && bound->color && bound->color->res && bound->color->state == D3D12_RESOURCE_STATE_RENDER_TARGET) {
+    dev->barrier(bound->color->res, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    bound->color->state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+  }
+  bound = nullptr;
+  pass = false;
+}
 void DxCmd::set_viewport(int x, int y, int w, int h) {
   D3D12_VIEWPORT vp{static_cast<float>(x), static_cast<float>(y), static_cast<float>(w), static_cast<float>(h), 0, 1};
   D3D12_RECT sc{x, y, x + w, y + h};
@@ -635,11 +653,14 @@ Texture* DxDevice::create_texture(const TextureDesc& desc, const void* rgba) {
   rd.Height = static_cast<UINT>(desc.height);
   rd.DepthOrArraySize = 1;
   rd.MipLevels = 1;
-  rd.Format = t->depth ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
+  // A depth resource that is also sampled has to be typeless. D32_FLOAT
+  // cannot back an R32_FLOAT shader resource view, so the shadow map
+  // would sample as white and every pixel would look unshadowed.
+  rd.Format = t->depth ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_R8G8B8A8_UNORM;
   rd.SampleDesc.Count = 1;
   rd.Flags = t->depth ? D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL : D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
   D3D12_CLEAR_VALUE clear{};
-  clear.Format = rd.Format;
+  clear.Format = t->depth ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
   clear.DepthStencil.Depth = 1;
   clear.Color[3] = 1;
   t->state = D3D12_RESOURCE_STATE_COMMON;
@@ -757,7 +778,6 @@ Pipeline* DxDevice::create_pipeline(const PipelineDesc& desc, std::string* error
   pso.RasterizerState.DepthBias = desc.polygon_offset ? 2 : 0;
   pso.RasterizerState.SlopeScaledDepthBias = desc.polygon_offset ? 1.5f : 0;
   pso.RasterizerState.DepthClipEnable = TRUE;
-  pso.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
   if (desc.blend != Blend::Off) {
     auto& b = pso.BlendState.RenderTarget[0];
     b.BlendEnable = TRUE;
@@ -784,10 +804,22 @@ Pipeline* DxDevice::create_pipeline(const PipelineDesc& desc, std::string* error
   pso.SampleMask = UINT_MAX;
   pso.PrimitiveTopologyType = desc.topology == Topology::Lines ? D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE
                                                                : D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+  // Every slot past NumRenderTargets must be UNKNOWN. A depth-only shadow
+  // pass has no color target, so all eight stay unknown. The color and
+  // shadow targets both bind a D32 depth buffer, including draws that do
+  // not test depth (sky, post), so the DSV format stays D32.
   pso.NumRenderTargets = depth_only ? 0 : 1;
-  pso.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+  for (int i = 0; i < 8; ++i) pso.RTVFormats[i] = DXGI_FORMAT_UNKNOWN;
+  if (depth_only) {
+    pso.BlendState.RenderTarget[0].BlendEnable = FALSE;
+    pso.BlendState.RenderTarget[0].RenderTargetWriteMask = 0;
+  } else {
+    pso.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    pso.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+  }
   pso.DSVFormat = DXGI_FORMAT_D32_FLOAT;
   pso.SampleDesc.Count = 1;
+  pso.SampleDesc.Quality = 0;
   ID3D12PipelineState* p = nullptr;
   const HRESULT phr = device_->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&p));
   if (FAILED(phr)) {
