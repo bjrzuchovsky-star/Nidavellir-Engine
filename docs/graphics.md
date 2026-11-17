@@ -35,4 +35,4 @@ Passes are modules (`src/render3d/lighting`). A plugin registers one with `regis
 
 Ray tracing is off unless the scene asks for it, and the controls that need it are hidden when the device cannot do it.
 
-The shader bake runs `dxc` for the CPU that is configuring the build (`bin/x64` on AMD64, `bin/arm64` on ARM64). `VULKAN_SDK/Bin/dxc.exe` is used when that file exists. `-DNID_DXC_EXECUTABLE` overrides both. Configure runs `dxc --version` and stops if the binary is the wrong architecture. On Windows, `dxcompiler.dll` and `dxil.dll` from that same folder are copied next to `ts_admin.exe`.
+The shader bake runs `dxc` for the CPU that is configuring the build. The default is the fetched package's `bin/x64` (AMD64) or `bin/arm64`, which ships `dxc.exe`, `dxcompiler.dll` and `dxil.dll` together. `VULKAN_SDK/Bin/dxc.exe` is only used when that package is not there: SDK 1.4 Bin has no `dxil.dll`, which is normal for DXC 1.8 and newer. `-DNID_DXC_EXECUTABLE` overrides both. Configure runs `dxc --version` and stops if the binary is the wrong architecture. `dxil.dll` is copied next to `ts_admin.exe` only when the chosen compiler has it.

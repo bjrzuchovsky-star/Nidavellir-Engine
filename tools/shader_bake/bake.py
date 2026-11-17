@@ -115,15 +115,15 @@ def main():
     out = pathlib.Path(args.out)
     dxc = pathlib.Path(args.dxc)
     dxc_dir = str(dxc.resolve().parent)
-    if os.name == "nt":
-        missing = [name for name in ("dxcompiler.dll", "dxil.dll") if not (dxc.parent / name).is_file()]
-        if missing:
-            sys.stderr.write(
-                "DXC at %s is missing %s in the same folder.\n"
-                "Those DLLs have to match dxc.exe (bin/x64 on AMD64, bin/arm64 on ARM64).\n"
-                % (dxc, ", ".join(missing))
-            )
-            raise SystemExit(1)
+    if os.name == "nt" and not (dxc.parent / "dxcompiler.dll").is_file():
+        sys.stderr.write(
+            "DXC at %s has no dxcompiler.dll beside it.\n"
+            "That DLL has to match dxc.exe (bin/x64 on AMD64, bin/arm64 on ARM64).\n" % dxc
+        )
+        raise SystemExit(1)
+    if os.name == "nt" and not (dxc.parent / "dxil.dll").is_file():
+        # DXC 1.8+ validates DXIL itself. The Vulkan SDK does not ship dxil.dll.
+        print("DXC %s has no dxil.dll; continuing (DXC 1.8+ internal validator)" % dxc, file=sys.stderr)
     dxc_env = os.environ.copy()
     dxc_env["PATH"] = dxc_dir + os.pathsep + dxc_env.get("PATH", "")
     # Linux packages keep libdxcompiler.so in ../lib (rpath). Prepend both

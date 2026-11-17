@@ -76,7 +76,7 @@ endif()
 # and bin/x86; a recursive glob picks arm64 first and then fails with
 # WinError 216 (the executable is for another CPU).
 set(NID_DXC_EXECUTABLE "" CACHE FILEPATH
-  "Host dxc (or dxc.exe). Empty uses VULKAN_SDK, then the fetched package for this CPU.")
+  "Host dxc (or dxc.exe). Empty uses the fetched package for this CPU, then VULKAN_SDK.")
 
 function(nid_host_dxc_arch out_var)
   string(TOLOWER "${CMAKE_HOST_SYSTEM_PROCESSOR}" _proc)
@@ -92,17 +92,16 @@ function(nid_host_dxc_arch out_var)
 endfunction()
 
 nid_host_dxc_arch(TS_DXC_HOST_ARCH)
+
+# Reproducible default is the fetched host-arch compiler (bin/x64 on AMD64,
+# which ships dxc.exe, dxcompiler.dll and dxil.dll together). VULKAN_SDK is
+# only a fallback: SDK 1.4.x Bin has dxc.exe and dxcompiler.dll but no
+# dxil.dll, because DXC 1.8+ signs DXIL itself.
 set(_dxc_candidates "")
+set(_dxc_required "")
 if(NID_DXC_EXECUTABLE)
   list(APPEND _dxc_candidates "${NID_DXC_EXECUTABLE}")
-endif()
-if(NOT "$ENV{VULKAN_SDK}" STREQUAL "")
-  # Vulkan SDK on Windows keeps dxc.exe in Bin\, next to dxcompiler.dll.
-  list(APPEND _dxc_candidates
-    "$ENV{VULKAN_SDK}/Bin/dxc.exe"
-    "$ENV{VULKAN_SDK}/bin/dxc.exe"
-    "$ENV{VULKAN_SDK}/Bin/dxc"
-    "$ENV{VULKAN_SDK}/bin/dxc")
+  set(_dxc_required "${NID_DXC_EXECUTABLE}")
 endif()
 if(TS_DXC_HOST_ARCH)
   list(APPEND _dxc_candidates
@@ -112,76 +111,137 @@ endif()
 list(APPEND _dxc_candidates
   "${dxc_bin_SOURCE_DIR}/bin/dxc${CMAKE_EXECUTABLE_SUFFIX}"
   "${dxc_bin_SOURCE_DIR}/dxc${CMAKE_EXECUTABLE_SUFFIX}")
+if(NOT "$ENV{VULKAN_SDK}" STREQUAL "")
+  list(APPEND _dxc_candidates
+    "$ENV{VULKAN_SDK}/Bin/dxc.exe"
+    "$ENV{VULKAN_SDK}/bin/dxc.exe"
+    "$ENV{VULKAN_SDK}/Bin/dxc"
+    "$ENV{VULKAN_SDK}/bin/dxc")
+endif()
+
+# Returns whether major.minor in `text` is at least 1.8.
+function(nid_dxc_at_least_1_8 out_ok out_mm text)
+  string(REGEX MATCH "([0-9]+)\\.([0-9]+)" _m "${text}")
+  if(NOT CMAKE_MATCH_1)
+    set(${out_ok} FALSE PARENT_SCOPE)
+    set(${out_mm} "" PARENT_SCOPE)
+    return()
+  endif()
+  set(_ok FALSE)
+  if(CMAKE_MATCH_1 GREATER 1 OR (CMAKE_MATCH_1 EQUAL 1 AND CMAKE_MATCH_2 GREATER_EQUAL 8))
+    set(_ok TRUE)
+  endif()
+  set(${out_ok} ${_ok} PARENT_SCOPE)
+  set(${out_mm} "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}" PARENT_SCOPE)
+endfunction()
 
 set(_dxc_found "")
+set(_dxc_ver "")
+set(_dxc_notes "")
 foreach(_cand IN LISTS _dxc_candidates)
-  if(EXISTS "${_cand}")
-    set(_dxc_found "${_cand}")
-    break()
+  if(NOT EXISTS "${_cand}")
+    string(APPEND _dxc_notes "  ${_cand}: not found\n")
+    if("${_cand}" STREQUAL "${_dxc_required}" AND NOT "${_dxc_required}" STREQUAL "")
+      message(FATAL_ERROR
+        "NID_DXC_EXECUTABLE='${_cand}' does not exist.\n"
+        "Point it at the host dxc.exe, or leave it empty to use the fetched bin/${TS_DXC_HOST_ARCH} compiler.")
+    endif()
+    continue()
   endif()
+  set(_wrong_arch FALSE)
+  if(TS_DXC_HOST_ARCH STREQUAL "x64" AND _cand MATCHES "[/\\\\](arm64|x86)[/\\\\]")
+    set(_wrong_arch TRUE)
+  elseif(TS_DXC_HOST_ARCH STREQUAL "arm64" AND _cand MATCHES "[/\\\\](x64|x86)[/\\\\]")
+    set(_wrong_arch TRUE)
+  elseif(TS_DXC_HOST_ARCH STREQUAL "x86" AND _cand MATCHES "[/\\\\](x64|arm64)[/\\\\]")
+    set(_wrong_arch TRUE)
+  endif()
+  if(_wrong_arch)
+    string(APPEND _dxc_notes "  ${_cand}: wrong CPU for host ${CMAKE_HOST_SYSTEM_PROCESSOR}\n")
+    if("${_cand}" STREQUAL "${_dxc_required}" AND NOT "${_dxc_required}" STREQUAL "")
+      message(FATAL_ERROR
+        "NID_DXC_EXECUTABLE='${_cand}' is for another CPU. This host is ${CMAKE_HOST_SYSTEM_PROCESSOR} "
+        "(want bin/${TS_DXC_HOST_ARCH}). WinError 216 is that mismatch.")
+    endif()
+    continue()
+  endif()
+
+  get_filename_component(_cand_dir "${_cand}" DIRECTORY)
+  set(_has_dxil TRUE)
+  if(WIN32)
+    if(NOT EXISTS "${_cand_dir}/dxcompiler.dll")
+      string(APPEND _dxc_notes "  ${_cand}: no dxcompiler.dll beside it\n")
+      if("${_cand}" STREQUAL "${_dxc_required}" AND NOT "${_dxc_required}" STREQUAL "")
+        message(FATAL_ERROR "NID_DXC_EXECUTABLE='${_cand}' has no dxcompiler.dll beside it.")
+      endif()
+      continue()
+    endif()
+    if(NOT EXISTS "${_cand_dir}/dxil.dll")
+      set(_has_dxil FALSE)
+    endif()
+  endif()
+
+  execute_process(
+    COMMAND "${_cand}" --version
+    RESULT_VARIABLE _dxc_rc
+    OUTPUT_VARIABLE _dxc_out
+    ERROR_VARIABLE _dxc_err
+  )
+  if(NOT _dxc_rc EQUAL 0)
+    string(APPEND _dxc_notes
+      "  ${_cand}: dxc --version failed (exit ${_dxc_rc}). WinError 216 means the binary is for another CPU.\n")
+    if("${_cand}" STREQUAL "${_dxc_required}" AND NOT "${_dxc_required}" STREQUAL "")
+      message(FATAL_ERROR
+        "NID_DXC_EXECUTABLE='${_cand}' did not run (exit ${_dxc_rc}) on ${CMAKE_HOST_SYSTEM_PROCESSOR}.\n"
+        "${_dxc_out}${_dxc_err}")
+    endif()
+    continue()
+  endif()
+  string(STRIP "${_dxc_out}${_dxc_err}" _this_ver)
+  if(WIN32 AND NOT _has_dxil)
+    nid_dxc_at_least_1_8(_new_enough _mm "${_this_ver}")
+    if(NOT _new_enough)
+      string(APPEND _dxc_notes
+        "  ${_cand}: no dxil.dll, and DXC '${_this_ver}' is older than 1.8 (the internal validator).\n")
+      if("${_cand}" STREQUAL "${_dxc_required}" AND NOT "${_dxc_required}" STREQUAL "")
+        message(FATAL_ERROR
+          "NID_DXC_EXECUTABLE='${_cand}' has no dxil.dll and is older than DXC 1.8.\n${_this_ver}")
+      endif()
+      continue()
+    endif()
+    message(STATUS "DXC ${_cand} has no dxil.dll; DXC ${_mm} signs DXIL itself")
+  endif()
+  set(_dxc_found "${_cand}")
+  set(_dxc_ver "${_this_ver}")
+  break()
 endforeach()
+
 if(NOT _dxc_found)
   message(FATAL_ERROR
     "DXC was not found for host ${CMAKE_HOST_SYSTEM_PROCESSOR} (want bin/${TS_DXC_HOST_ARCH}).\n"
-    "Set -DNID_DXC_EXECUTABLE to dxc.exe, or install the Vulkan SDK and set VULKAN_SDK "
-    "(its Bin/dxc.exe is used when that file exists).\n"
-    "Looked for:\n  ${_dxc_candidates}")
-endif()
-
-# A path that names the other CPU folder is never the right compiler, even
-# if someone passed it explicitly.
-if(TS_DXC_HOST_ARCH STREQUAL "x64" AND _dxc_found MATCHES "[/\\\\]arm64[/\\\\]")
-  message(FATAL_ERROR
-    "DXC '${_dxc_found}' is the ARM64 binary, but this host is ${CMAKE_HOST_SYSTEM_PROCESSOR}.\n"
-    "Use bin/x64/dxc.exe, VULKAN_SDK/Bin/dxc.exe, or -DNID_DXC_EXECUTABLE.")
-elseif(TS_DXC_HOST_ARCH STREQUAL "arm64" AND _dxc_found MATCHES "[/\\\\]x64[/\\\\]")
-  message(FATAL_ERROR
-    "DXC '${_dxc_found}' is the x64 binary, but this host is ${CMAKE_HOST_SYSTEM_PROCESSOR}.\n"
-    "Use bin/arm64/dxc.exe or -DNID_DXC_EXECUTABLE.")
+    "A missing dxil.dll is normal for the Vulkan SDK (DXC 1.8+). "
+    "The fetched bin/${TS_DXC_HOST_ARCH} package is preferred and includes dxil.dll.\n"
+    "${_dxc_notes}")
 endif()
 
 get_filename_component(TS_DXC_DIR "${_dxc_found}" DIRECTORY)
-if(WIN32)
-  foreach(_dll dxcompiler.dll dxil.dll)
-    if(NOT EXISTS "${TS_DXC_DIR}/${_dll}")
-      message(FATAL_ERROR
-        "DXC at '${_dxc_found}' has no ${_dll} beside it.\n"
-        "dxc.exe loads dxcompiler.dll and dxil.dll from its own folder. "
-        "Pick the host arch directory (bin/${TS_DXC_HOST_ARCH}), not a recursive search.")
-    endif()
-  endforeach()
-endif()
-
-execute_process(
-  COMMAND "${_dxc_found}" --version
-  RESULT_VARIABLE _dxc_rc
-  OUTPUT_VARIABLE _dxc_out
-  ERROR_VARIABLE _dxc_err
-)
-if(NOT _dxc_rc EQUAL 0)
-  message(FATAL_ERROR
-    "DXC '${_dxc_found}' did not run (exit ${_dxc_rc}) on host ${CMAKE_HOST_SYSTEM_PROCESSOR}.\n"
-    "WinError 216 means that executable is for another CPU. "
-    "AMD64/x86_64 needs bin/x64; ARM64 needs bin/arm64.\n"
-    "Override with -DNID_DXC_EXECUTABLE or VULKAN_SDK (Bin/dxc.exe).\n"
-    "${_dxc_out}${_dxc_err}")
-endif()
-string(STRIP "${_dxc_out}${_dxc_err}" _dxc_ver)
 set(TS_DXC "${_dxc_found}" CACHE FILEPATH "dxc selected for this host" FORCE)
-set(TS_DXC_DIR "${TS_DXC_DIR}" CACHE PATH "Directory of the selected dxc (DLLs live here on Windows)" FORCE)
+set(TS_DXC_DIR "${TS_DXC_DIR}" CACHE PATH "Directory of the selected dxc" FORCE)
 message(STATUS "DXC (${CMAKE_HOST_SYSTEM_PROCESSOR}): ${TS_DXC}")
 message(STATUS "DXC version: ${_dxc_ver}")
 
-# Windows runtime HLSL compile loads these from the exe directory.
-# CACHE so the copy helper sees them from apps/admin.
+# Copy only the DLLs that sit beside this dxc. dxil.dll is optional:
+# Vulkan SDK 1.4 Bin ships dxc.exe + dxcompiler.dll and no dxil.dll.
 set(_dxc_runtime "")
 if(WIN32)
   foreach(_dll dxcompiler.dll dxil.dll)
-    list(APPEND _dxc_runtime "${TS_DXC_DIR}/${_dll}")
+    if(EXISTS "${TS_DXC_DIR}/${_dll}")
+      list(APPEND _dxc_runtime "${TS_DXC_DIR}/${_dll}")
+    endif()
   endforeach()
 endif()
 set(TS_DXC_RUNTIME_DLLS "${_dxc_runtime}" CACHE INTERNAL
-  "dxcompiler.dll and dxil.dll next to the selected dxc")
+  "dxcompiler.dll and, when shipped, dxil.dll next to the selected dxc")
 
 # Copy dxcompiler.dll and dxil.dll next to an executable that may compile
 # HLSL at runtime. No-op when this host has no Windows DXC DLLs.
