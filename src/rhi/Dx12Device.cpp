@@ -498,17 +498,20 @@ bool DxDevice::open(const DeviceDesc& desc, std::string* error) {
   D3D12_STATIC_SAMPLER_DESC samps[12]{};
   for (int i = 0; i < 12; ++i) {
     samps[i].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    const bool shadow = i == 3;  // register s6, the shadow map
     samps[i].AddressU = samps[i].AddressV = samps[i].AddressW =
-        (i == 3) ? D3D12_TEXTURE_ADDRESS_MODE_CLAMP : D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        shadow ? D3D12_TEXTURE_ADDRESS_MODE_BORDER : D3D12_TEXTURE_ADDRESS_MODE_WRAP;
     samps[i].ShaderRegister = static_cast<UINT>(3 + i);
     samps[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     samps[i].MaxLOD = 16;
     // A zero ComparisonFunc is not NEVER (that enum starts at 1). The runtime
-    // rejects the root signature, and the pipeline creation then fails with
-    // nothing pointing at the sampler.
+    // rejects the root signature. The shadow sample is a manual compare of
+    // R32_FLOAT, so this stays a normal sampler. Out-of-range depth is 1
+    // (far, unshadowed) rather than 0, which would shadow the whole frame.
     samps[i].ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
     samps[i].MaxAnisotropy = 1;
-    samps[i].BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+    samps[i].BorderColor = shadow ? D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE
+                                  : D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
   }
   D3D12_ROOT_SIGNATURE_DESC rsd{};
   rsd.NumParameters = 4;
@@ -775,8 +778,15 @@ Pipeline* DxDevice::create_pipeline(const PipelineDesc& desc, std::string* error
   pso.InputLayout = {elems, static_cast<UINT>(desc.attr_count)};
   pso.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
   pso.RasterizerState.CullMode = desc.cull == Cull::None ? D3D12_CULL_MODE_NONE : D3D12_CULL_MODE_BACK;
-  pso.RasterizerState.DepthBias = desc.polygon_offset ? 2 : 0;
-  pso.RasterizerState.SlopeScaledDepthBias = desc.polygon_offset ? 1.5f : 0;
+  // Screen-space winding: the viewport flips Y, so a CCW mesh (the same
+  // winding GL and Vulkan keep) is clockwise on the render target.
+  pso.RasterizerState.FrontCounterClockwise = FALSE;
+  // DepthBias for a float depth buffer is scaled by a tiny ulp. A bias of 2
+  // does not move a D32 shadow and the whole ground self-shadows. Scale it
+  // up, then clamp so a real shadow (a few centimetres of depth) stays.
+  pso.RasterizerState.DepthBias = desc.polygon_offset ? 100000 : 0;
+  pso.RasterizerState.SlopeScaledDepthBias = desc.polygon_offset ? 1.5f : 0.0f;
+  pso.RasterizerState.DepthBiasClamp = desc.polygon_offset ? 0.005f : 0.0f;
   pso.RasterizerState.DepthClipEnable = TRUE;
   if (desc.blend != Blend::Off) {
     auto& b = pso.BlendState.RenderTarget[0];

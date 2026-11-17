@@ -3070,6 +3070,10 @@ ts::tombstone::plugins::ProviderHold& smoke_provider_hold() {
 namespace ts { namespace tombstone { int run_gfx_smoke(); } }
 
 int main(int argc, char** argv) {
+  // Direct3D 12 (and a killed window) used to swallow the last log lines.
+  // Flush after every insertion, and again when the editor window closes.
+  std::cout.setf(std::ios::unitbuf);
+  std::cerr.setf(std::ios::unitbuf);
   // Global capture flags, stripped so they can sit anywhere on the command
   // line without being read as a shot's project path or output file.
   {

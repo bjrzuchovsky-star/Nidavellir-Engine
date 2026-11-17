@@ -189,7 +189,7 @@ bool Host::open(int width, int height, const char* title) {
   if (g_device && g_device->adapter_name() && g_device->adapter_name()[0]) {
     std::cout << "  " << g_device->adapter_name();
   }
-  std::cout << "\n";
+  std::cout << std::endl;
   return window != nullptr;
 }
 
@@ -280,6 +280,8 @@ void Host::present(float r, float g, float b) {
 }
 
 void Host::shutdown() {
+  std::cout.flush();
+  std::cerr.flush();
   gfx::set_texture_uploader(nullptr);
   delete g_uploader;
   g_uploader = nullptr;
