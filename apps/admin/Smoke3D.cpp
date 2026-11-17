@@ -24,6 +24,7 @@ namespace fs = std::filesystem;
 namespace r3 = ts::tombstone::render3d;
 namespace s3 = ts::tombstone::scene3d;
 namespace w3 = ts::tombstone::world3d;
+namespace rhi = ts::tombstone::rhi;
 
 int run_3d_editor_smoke();  // Smoke3DEditor.cpp
 

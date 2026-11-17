@@ -46,6 +46,13 @@ jobs:
         run: cmake -S . -B build -A x64
       - name: Build (Release)
         run: cmake --build build --config Release --parallel
+      - name: Built ts_admin and ts_game
+        shell: pwsh
+        run: |
+          foreach ($exe in @('build/apps/admin/Release/ts_admin.exe', 'build/apps/game/Release/ts_game.exe')) {
+            if (-not (Test-Path $exe)) { throw "missing $exe" }
+            Write-Host "built $exe"
+          }
       # The D3D12 translation unit and the host-arch DXC bake. A recursive
       # search of the DXC package used to pick bin/arm64/dxc.exe on AMD64
       # (WinError 216). This fails the job if that happens again.
@@ -127,6 +134,10 @@ jobs:
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build --parallel
+      - name: Built ts_admin and ts_game
+        run: |
+          test -x build/apps/admin/ts_admin
+          test -x build/apps/game/ts_game
       - name: Smoke (server + client)
         run: |
           (cd build/apps/server && ./ts_server --smoke)
