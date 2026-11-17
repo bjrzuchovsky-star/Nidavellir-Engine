@@ -95,6 +95,9 @@ class AppFlow {
   // Editor2D helpers.
   void request_back_to_projects();
   void request_quit();
+  // Drop the open editor so its GPU buffers are freed while the device
+  // still exists. Called when the window is closing.
+  void release_screens();
   // Window close button / Alt+F4: true = an editor holds unsaved changes and
   // is asking first (keep the window open; its prompt quits if you agree).
   void set_startup_project(std::string path) { startup_project_ = std::move(path); }

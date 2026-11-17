@@ -202,6 +202,8 @@ class VkDeviceR final : public Device {
   VkBuffer read_buf_ = VK_NULL_HANDLE;
   VkDeviceMemory read_mem_ = VK_NULL_HANDLE;
   void* read_map_ = nullptr;
+  std::vector<VkDeviceMemory> mapped_;
+  void unmap_memory(VkDeviceMemory memory);
   VkDeviceSize read_bytes_ = 0;
   std::vector<std::uint8_t>* read_dst_ = nullptr;
   int* read_w_ = nullptr;

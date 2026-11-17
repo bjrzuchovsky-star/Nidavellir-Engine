@@ -26,12 +26,25 @@ VkBuffer VkDeviceR::make_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkM
   VkDeviceMemory memory = VK_NULL_HANDLE;
   vkAllocateMemory(device_, &ai, nullptr, &memory);
   vkBindBufferMemory(device_, buffer, memory, 0);
-  if (map && (mem & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) vkMapMemory(device_, memory, 0, size, 0, map);
+  if (map && (mem & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
+    vkMapMemory(device_, memory, 0, size, 0, map);
+    if (map && *map) mapped_.push_back(memory);
+  }
   if (out_mem) *out_mem = memory;
   return buffer;
 }
 
+void VkDeviceR::unmap_memory(VkDeviceMemory memory) {
+  if (!device_ || !memory) return;
+  const auto it = std::find(mapped_.begin(), mapped_.end(), memory);
+  if (it == mapped_.end()) return;
+  vkUnmapMemory(device_, memory);
+  mapped_.erase(it);
+}
+
 void VkDeviceR::destroy_buffer_raw(VkBuffer b, VkDeviceMemory m) {
+  if (!device_) return;
+  unmap_memory(m);
   if (b) vkDestroyBuffer(device_, b, nullptr);
   if (m) vkFreeMemory(device_, m, nullptr);
 }
@@ -534,6 +547,13 @@ bool VkDeviceR::open(const DeviceDesc& desc, std::string* error) {
 
 void VkDeviceR::shutdown() {
   if (device_) vkDeviceWaitIdle(device_);
+  // Host-visible buffers stay mapped for the whole frame. Unmap and free
+  // them before the device goes away; vkUnmapMemory after vkDestroyDevice
+  // is an invalid device.
+  {
+    const std::vector<VkDeviceMemory> left = mapped_;
+    for (VkDeviceMemory m : left) unmap_memory(m);
+  }
   rt_reset();
   destroy_texture(white_);
   destroy_texture(flat_);
@@ -546,7 +566,7 @@ void VkDeviceR::shutdown() {
   swap_fbs_.clear();
   swap_views_.clear();
   swap_images_.clear();
-  if (read_map_ && read_mem_) vkUnmapMemory(device_, read_mem_);
+  unmap_memory(read_mem_);
   read_map_ = nullptr;
   destroy_buffer_raw(read_buf_, read_mem_);
   read_buf_ = VK_NULL_HANDLE;
@@ -599,7 +619,7 @@ void VkDeviceR::update_buffer(Buffer* buffer, const void* data, std::size_t size
 void VkDeviceR::destroy_buffer(Buffer* buffer) {
   if (!buffer) return;
   auto* b = static_cast<VkBufferR*>(buffer);
-  if (b->map && b->memory) vkUnmapMemory(device_, b->memory);
+  b->map = nullptr;
   destroy_buffer_raw(b->buffer, b->memory);
   delete b;
 }
@@ -659,7 +679,7 @@ Texture* VkDeviceR::create_texture(const TextureDesc& desc, const void* rgba) {
       vkCmdCopyBufferToImage(c, sb, t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cp);
       transition(c, t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false);
     });
-    if (map) vkUnmapMemory(device_, sm);
+    unmap_memory(sm);
     destroy_buffer_raw(sb, sm);
   } else {
     one_shot([&](VkCommandBuffer c) {
@@ -688,7 +708,7 @@ void VkDeviceR::update_texture(Texture* texture, const void* rgba, int w, int h)
     vkCmdCopyBufferToImage(c, sb, t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cp);
     transition(c, t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false);
   });
-  if (map) vkUnmapMemory(device_, sm);
+    unmap_memory(sm);
   destroy_buffer_raw(sb, sm);
 }
 void VkDeviceR::destroy_texture(Texture* texture) {
@@ -955,7 +975,7 @@ bool VkDeviceR::read_swapchain(std::vector<std::uint8_t>* rgba, int* w, int* h) 
   if (!rgba || !recording_ || !swap_ || image_index_ >= swap_images_.size()) return false;
   const VkDeviceSize bytes = static_cast<VkDeviceSize>(width_) * static_cast<VkDeviceSize>(height_) * 4u;
   if (read_bytes_ < bytes) {
-    if (read_map_ && read_mem_) vkUnmapMemory(device_, read_mem_);
+    unmap_memory(read_mem_);
     read_map_ = nullptr;
     destroy_buffer_raw(read_buf_, read_mem_);
     read_buf_ = make_buffer(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -1024,7 +1044,7 @@ bool VkDeviceR::read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba
                   static_cast<const char*>(map) + static_cast<std::size_t>(y) * row, row);
     }
   }
-  vkUnmapMemory(device_, mem);
+  unmap_memory(mem);
   destroy_buffer_raw(buf, mem);
   if (w) *w = t->width;
   if (h) *h = t->height;
@@ -1059,7 +1079,7 @@ bool VkDeviceR::read_depth(RenderTarget* target, std::vector<float>* depth, int*
                   row * sizeof(float));
     }
   }
-  vkUnmapMemory(device_, mem);
+  unmap_memory(mem);
   destroy_buffer_raw(buf, mem);
   if (w) *w = t->width;
   if (h) *h = t->height;
@@ -1179,7 +1199,7 @@ std::uint32_t VkDeviceR::rt_create_tlas(const RtInstance* instances, std::uint32
   const VkAccelerationStructureBuildRangeInfoKHR* pr = &range;
   one_shot([&](VkCommandBuffer c) { vkCmdBuildAccelerationStructuresKHR(c, 1, &build, &pr); });
   destroy_buffer_raw(scratch, scratch_mem);
-  if (map) vkUnmapMemory(device_, im);
+  unmap_memory(im);
   destroy_buffer_raw(ib, im);
   ases_.push_back(obj);
   return static_cast<std::uint32_t>(ases_.size());

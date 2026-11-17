@@ -655,6 +655,10 @@ bool AppFlow::intercept_close() {
   return false;
 }
 
+void AppFlow::release_screens() {
+  if (state_ != AppState::Quit) transition_to(AppState::Quit);
+}
+
 void AppFlow::request_quit() {
   if (auto* editor = dynamic_cast<Editor2DScreen*>(screen_.get())) {
     editor->request_quit();

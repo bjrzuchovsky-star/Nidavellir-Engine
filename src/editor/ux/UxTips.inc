@@ -350,6 +350,7 @@
 // ---- Menus (tips under the menu item; the shortcut is added automatically) ----
 {"Menu/Save Scene", "Write the scene to scene.json in the realm folder."},
 {"Menu/Save scene", "Write the scene to scene.json in the realm folder."},
+{"Menu/Project settings...", "Which graphics API this realm uses. Saved in project.json for the team. Use engine default follows Editor Settings. Changing it restarts the editor."},
 {"Menu/Reload from disk", "Throw away unsaved changes and load scene.json again."},
 {"Menu/Rescan assets", "Look for new or changed files in the realm's assets folder."},
 {"Menu/Launch Game (ts_game)", "Open the scene in the standalone game player."},

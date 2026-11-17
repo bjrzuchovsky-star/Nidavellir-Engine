@@ -3055,6 +3055,9 @@ int run_imgui_app() {
 
   editor::EditorAudio::get().shutdown();
   engine.shutdown();
+  // The editor still holds mapped Vulkan buffers. Free them before the
+  // device is destroyed.
+  flow.release_screens();
   host.shutdown();
   return 0;
 }
