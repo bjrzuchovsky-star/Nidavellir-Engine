@@ -12,3 +12,7 @@ int run_3d_smoke();
 // --smoke-dump: write the frame and the shadow map under smoke-dump/ and
 // print the shadow depth range. Checked by --smoke-3d.
 void set_smoke_dump(bool on);
+
+// --smoke-present: a few frames into the real swapchain, then read the
+// backbuffer back. Direct3D 12 and Vulkan. 0 = pass.
+int run_present_smoke();

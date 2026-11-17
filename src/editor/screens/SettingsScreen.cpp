@@ -139,7 +139,7 @@ void SettingsScreen::draw_ui() {
   ImGui::SameLine();
   ImGui::TextDisabled("Theme");
 
-  section_header("Graphics", "which API the editor opens with");
+  section_header("Graphics", "engine default, used when a project does not name one");
   {
     const char* apis[] = {"OpenGL 3.3", "Vulkan", "Direct3D 12"};
     const char* keys[] = {"gl", "vk", "dx12"};
@@ -155,8 +155,9 @@ void SettingsScreen::draw_ui() {
       theme::StatusInfo("Direct3D 12 is the Windows editor. This build will stay on OpenGL.");
     }
 #endif
-    theme::StatusInfo("Saved for the next launch. If Vulkan or Direct3D 12 cannot start, the editor opens on OpenGL. "
-                      "A realm can name its own API in the 3D Lighting panel.");
+    theme::StatusInfo("Engine default for the next launch. A new install uses Vulkan when it starts, otherwise OpenGL. "
+                      "A project can override this in Project settings. --gfx= wins over both. "
+                      "If the chosen API cannot start, the editor opens on OpenGL and says why.");
   }
 
   section_header("Supply Run", "engine updates");

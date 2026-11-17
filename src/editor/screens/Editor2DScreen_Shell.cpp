@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/projects/ProjectGraphics.h"
 #include "editor/ux/ShotOpts.h"
 #include "editor/team/TeamPanel.h"
 #include "editor/ux/Tooltip.h"
@@ -194,6 +195,7 @@ void Editor2DScreen::draw_menu_bar() {
 
 void Editor2DScreen::draw_menus() {
   if (ux::BeginMenu("File")) {
+    draw_project_settings_menu(project_);
     if (ux::MenuItem("Save Scene", "Ctrl+S", false, !is_playing())) {
       std::string err;
       if (save_scene(&err)) {

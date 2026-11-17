@@ -2956,6 +2956,8 @@ int run_assets_shot(const char* png) {
   return 0;
 }
 
+std::string g_startup_project;
+
 int run_imgui_app() {
   struct SteamGuard {
     SteamGuard() { ok = ts::tombstone::steam::SteamService::instance().init(); }
@@ -2986,6 +2988,7 @@ int run_imgui_app() {
   }
 
   AppFlow flow;
+  if (!g_startup_project.empty()) flow.set_startup_project(g_startup_project);
   // "New update available" on the Project Manager (docs/updates.md).
   flow.enable_update_checks();
   flow.start();
@@ -3003,7 +3006,7 @@ int run_imgui_app() {
     profiler::Profiler::get().begin_frame();
     // Secondary viewports share this context. A previous frame leaves GL
     // current on the last platform window; the scene FBO belongs on the main one.
-    glfwMakeContextCurrent(window);
+    if (glfwGetWindowAttrib(window, GLFW_CLIENT_API) != GLFW_NO_API) glfwMakeContextCurrent(window);
     glfwPollEvents();
     ts::tombstone::steam::SteamService::instance().run_callbacks();
 
@@ -3110,6 +3113,7 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--gfx-debug") == 0) ts::tombstone::rhi::set_gfx_debug(true);
     if (std::strcmp(argv[i], "--gfx-warp") == 0) ts::tombstone::rhi::set_gfx_warp(true);
     if (std::strcmp(argv[i], "--smoke-dump") == 0) set_smoke_dump(true);
+    if (std::strcmp(argv[i], "--open") == 0 && i + 1 < argc) g_startup_project = argv[++i];
     if (std::strcmp(argv[i], "+connect_lobby") == 0 && i + 1 < argc) {
       ts::tombstone::steam::note_connect_lobby(argv[++i]);
     }
@@ -3284,6 +3288,9 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-3d") == 0) {
       // Just the 3D checks (quick loop while working on the 3D side).
       return run_3d_smoke();
+    }
+    if (std::strcmp(argv[i], "--smoke-present") == 0) {
+      return run_present_smoke();
     }
     if (std::strcmp(argv[i], "--smoke-vr") == 0) {
       // Just the VR checks.

@@ -14,6 +14,7 @@ add_library(ts_editor
   ux/EditorUx.cpp
   settings/Settings.cpp
   projects/ProjectStore.cpp
+  projects/ProjectGraphics.cpp
   projects/ProjectStore_Delete.cpp
   workspace/Workspace2D.cpp
   team/TeamSession.cpp

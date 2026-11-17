@@ -36,8 +36,9 @@ struct ProjectInfo {
   // 3D only: VR on (headset preview, VR rig / grabbable inspectors, mirror,
   // ts_game rides in a headset when one is there, else on the desktop).
   bool vr = false;
-  // Preferred graphics API for this realm ("", "gl", "vk", "dx12").
-  // Empty follows the editor setting. Applied on the next launch.
+  // Project graphics API ("", "gl", "vk", "dx12"). Empty uses the engine
+  // default from Editor Settings. --gfx= wins over both. Saved in
+  // project.json so the team shares it.
   std::string graphics_api;
 };
 

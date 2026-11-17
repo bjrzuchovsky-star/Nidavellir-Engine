@@ -149,6 +149,10 @@ class Renderer3D {
   // Offscreen (true): draw into the renderer's own color+depth target of
   // the frame size (editor viewport, tests); false: the bound framebuffer.
   virtual void set_offscreen(bool /*on*/) {}
+  // With offscreen drawing, also copy the color target to the window's
+  // swapchain at the end of the frame (ts_game). The editor leaves this off
+  // and draws its own UI into the swapchain.
+  virtual void set_present_window(bool /*on*/) {}
   virtual void set_environment(const Environment& /*env*/) {}
 
   virtual void begin_frame(const Camera3D& camera, int width, int height) = 0;

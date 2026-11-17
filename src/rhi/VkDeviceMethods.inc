@@ -459,9 +459,15 @@ bool VkDeviceR::open(const DeviceDesc& desc, std::string* error) {
     vkGetPhysicalDeviceSurfaceFormatsKHR(physical_, surface_, &nf, nullptr);
     std::vector<VkSurfaceFormatKHR> formats(nf);
     vkGetPhysicalDeviceSurfaceFormatsKHR(physical_, surface_, &nf, formats.data());
-    VkSurfaceFormatKHR fmt = formats[0];
+    VkSurfaceFormatKHR fmt = formats.empty() ? VkSurfaceFormatKHR{} : formats[0];
+    if (fmt.format == VK_FORMAT_UNDEFINED) fmt.format = VK_FORMAT_B8G8R8A8_UNORM;
     for (const auto& f : formats) {
-      if (f.format == VK_FORMAT_R8G8B8A8_UNORM || f.format == VK_FORMAT_B8G8R8A8_UNORM) { fmt = f; break; }
+      if (f.format == VK_FORMAT_R8G8B8A8_UNORM) { fmt = f; break; }
+    }
+    if (fmt.format != VK_FORMAT_R8G8B8A8_UNORM) {
+      for (const auto& f : formats) {
+        if (f.format == VK_FORMAT_B8G8R8A8_UNORM) { fmt = f; break; }
+      }
     }
     swap_format_ = fmt.format;
     swap_pass_ = make_pass(true, false, swap_format_, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, true);
@@ -479,7 +485,8 @@ bool VkDeviceR::open(const DeviceDesc& desc, std::string* error) {
     sci.imageColorSpace = fmt.colorSpace;
     sci.imageExtent = extent;
     sci.imageArrayLayers = 1;
-    sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                     VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     sci.preTransform = caps.currentTransform;
     sci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -496,6 +503,7 @@ bool VkDeviceR::open(const DeviceDesc& desc, std::string* error) {
     vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     vi.subresourceRange.levelCount = 1;
     vi.subresourceRange.layerCount = 1;
+    swap_images_ = images;
     for (VkImage image : images) {
       vi.image = image;
       VkImageView view = VK_NULL_HANDLE;
@@ -537,6 +545,12 @@ void VkDeviceR::shutdown() {
   for (VkImageView view : swap_views_) vkDestroyImageView(device_, view, nullptr);
   swap_fbs_.clear();
   swap_views_.clear();
+  swap_images_.clear();
+  if (read_map_ && read_mem_) vkUnmapMemory(device_, read_mem_);
+  read_map_ = nullptr;
+  destroy_buffer_raw(read_buf_, read_mem_);
+  read_buf_ = VK_NULL_HANDLE;
+  read_mem_ = VK_NULL_HANDLE;
   if (acquire_fence_) vkDestroyFence(device_, acquire_fence_, nullptr);
   if (swap_) vkDestroySwapchainKHR(device_, swap_, nullptr);
   if (desc_pool_) vkDestroyDescriptorPool(device_, desc_pool_, nullptr);
@@ -904,6 +918,30 @@ void VkDeviceR::end_frame() {
   si.pCommandBuffers = &command_;
   vkQueueSubmit(queue_, 1, &si, fence_);
   vkWaitForFences(device_, 1, &fence_, VK_TRUE, UINT64_MAX);
+  if (read_dst_ && read_map_) {
+    const bool bgra = swap_format_ == VK_FORMAT_B8G8R8A8_UNORM || swap_format_ == VK_FORMAT_B8G8R8A8_SRGB;
+    const std::size_t row = static_cast<std::size_t>(width_) * 4u;
+    read_dst_->assign(row * static_cast<std::size_t>(height_), 0);
+    for (int y = 0; y < height_; ++y) {
+      const auto* src = static_cast<const unsigned char*>(read_map_) + static_cast<std::size_t>(y) * row;
+      unsigned char* dst = read_dst_->data() + static_cast<std::size_t>(height_ - 1 - y) * row;
+      if (!bgra) {
+        std::memcpy(dst, src, row);
+      } else {
+        for (int x = 0; x < width_; ++x) {
+          dst[x * 4 + 0] = src[x * 4 + 2];
+          dst[x * 4 + 1] = src[x * 4 + 1];
+          dst[x * 4 + 2] = src[x * 4 + 0];
+          dst[x * 4 + 3] = src[x * 4 + 3];
+        }
+      }
+    }
+    if (read_w_) *read_w_ = width_;
+    if (read_h_) *read_h_ = height_;
+    read_dst_ = nullptr;
+    read_w_ = nullptr;
+    read_h_ = nullptr;
+  }
   if (swap_) {
     VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     pi.swapchainCount = 1;
@@ -912,6 +950,54 @@ void VkDeviceR::end_frame() {
     vkQueuePresentKHR(queue_, &pi);
   }
 }
+
+bool VkDeviceR::read_swapchain(std::vector<std::uint8_t>* rgba, int* w, int* h) {
+  if (!rgba || !recording_ || !swap_ || image_index_ >= swap_images_.size()) return false;
+  const VkDeviceSize bytes = static_cast<VkDeviceSize>(width_) * static_cast<VkDeviceSize>(height_) * 4u;
+  if (read_bytes_ < bytes) {
+    if (read_map_ && read_mem_) vkUnmapMemory(device_, read_mem_);
+    read_map_ = nullptr;
+    destroy_buffer_raw(read_buf_, read_mem_);
+    read_buf_ = make_buffer(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &read_mem_,
+                            &read_map_);
+    read_bytes_ = read_buf_ ? bytes : 0;
+  }
+  if (!read_buf_) return false;
+  VkImage image = swap_images_[image_index_];
+  transition(command_, image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false);
+  VkBufferImageCopy cp{};
+  cp.imageExtent = {static_cast<uint32_t>(width_), static_cast<uint32_t>(height_), 1};
+  cp.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  cp.imageSubresource.layerCount = 1;
+  vkCmdCopyImageToBuffer(command_, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, read_buf_, 1, &cp);
+  transition(command_, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, false);
+  read_dst_ = rgba;
+  read_w_ = w;
+  read_h_ = h;
+  return true;
+}
+
+void VkDeviceR::blit_swapchain(Texture* color) {
+  auto* src = static_cast<VkTextureR*>(color);
+  if (!recording_ || !swap_ || !src || !src->image || src->depth || image_index_ >= swap_images_.size()) return;
+  const int cw = std::min(src->width, width_);
+  const int ch = std::min(src->height, height_);
+  if (cw <= 0 || ch <= 0) return;
+  VkImage dst = swap_images_[image_index_];
+  transition(command_, src->image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false);
+  transition(command_, dst, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, false);
+  VkImageCopy cp{};
+  cp.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  cp.srcSubresource.layerCount = 1;
+  cp.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  cp.dstSubresource.layerCount = 1;
+  cp.extent = {static_cast<uint32_t>(cw), static_cast<uint32_t>(ch), 1};
+  vkCmdCopyImage(command_, src->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cp);
+  transition(command_, src->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false);
+  transition(command_, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, false);
+}
+
 bool VkDeviceR::read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba, int* w, int* h) {
   auto* t = static_cast<VkTargetR*>(target);
   if (!t || !t->color || !rgba) return false;

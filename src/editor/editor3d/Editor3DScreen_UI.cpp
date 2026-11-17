@@ -13,6 +13,7 @@
 #include "editor/export/FreightOffice.h"
 #include "editor/scripting/BrandBook.h"
 #include "editor/editor3d/Editor3DScreen.h"
+#include "editor/projects/ProjectGraphics.h"
 
 #include "ui/UiScript.h"
 #include "editor/audio/EditorAudio.h"
@@ -239,6 +240,7 @@ void Editor3DScreen::draw_menu_bar() {
 
 void Editor3DScreen::draw_menus() {
   if (ux::BeginMenu("Realm")) {
+    draw_project_settings_menu(project_);
     if (ux::MenuItem("Save scene", "Ctrl+S")) {
       std::string err;
       if (save_scene(&err)) note("Saved scene.json");

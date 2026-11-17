@@ -21,6 +21,7 @@
 #include "HudText.h"
 
 #include "core/Brand.h"
+#include "rhi/Rhi.h"
 #include "core/JsonMini.h"
 #include "gfx/GlTextureUploader.h"
 #include "gfx/TextureCache.h"
@@ -78,6 +79,7 @@ constexpr const char* kUsage =
     "                   with a friendly message box (--quiet: no box)\n"
     "  --xr-probe       check the OpenXR runtime + headset (creates and destroys\n"
     "                   a session, no window) and exit\n"
+    "  --gfx=gl|vk|dx12 graphics API (wins over project.json and the engine default)\n"
     "Keys: WASD / arrows move P1 | E / Space / pad A action |\n"
     "      gamepads ride P1-P4 | P or F6 pause | F10 step while paused |\n"
     "      R or F5 reload scene.json | K collision overlay | Esc pause menu\n"
@@ -120,6 +122,14 @@ bool parse_args(int argc, char** argv, Options* out, std::string* err) {
       out->xr_probe = true;
     } else if (a == "--collision") {
       out->collision = true;
+    } else if (a.rfind("--gfx=", 0) == 0) {
+      bool ok = false;
+      const auto api = rhi::parse_api(a.substr(6), &ok);
+      if (!ok) {
+        *err = "--gfx= wants gl, vk or dx12";
+        return false;
+      }
+      rhi::set_cli_api(api);
     } else if (a == "--help" || a == "-h") {
       out->help = true;
     } else {

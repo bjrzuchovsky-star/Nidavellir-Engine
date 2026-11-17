@@ -73,6 +73,7 @@ void check_vk(VkResult err) {
 
 bool Host::open(int width, int height, const char* title) {
   editor::Settings boot = editor::SettingsStore::load(nullptr);
+  if (boot.graphics_api.empty()) boot.graphics_api = rhi::default_api_flag();
   rhi::Api want = rhi::resolve_api(boot.graphics_api);
   std::string err;
   if (want != rhi::Api::OpenGL) {
@@ -84,6 +85,7 @@ bool Host::open(int width, int height, const char* title) {
     auto dev = rhi::create_device(desc, &err);
     if (!dev) {
       std::cerr << rhi::api_name(want) << " did not start (" << err << "). Falling back to OpenGL.\n";
+      rhi::note_api_fallback(want, err);
     } else {
       g_device = dev.release();
       rhi::set_active(g_device);
@@ -263,11 +265,24 @@ void Host::present(float r, float g, float b) {
   if (g_device && g_device->api() == rhi::Api::D3D12) {
     rhi::Device::DxInfo info;
     g_device->dx_info(&info);
+    rhi::CommandList* cmd = g_device->commands();
     auto* list = static_cast<ID3D12GraphicsCommandList*>(info.list);
-    if (list && info.srv_heap) {
-      ID3D12DescriptorHeap* heaps[] = {static_cast<ID3D12DescriptorHeap*>(info.srv_heap)};
-      list->SetDescriptorHeaps(1, heaps);
-      ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), list);
+    if (cmd && list) {
+      // The swapchain image is not a render target until this pass. Without
+      // it, ImGui draws into nothing and Present shows a black window.
+      rhi::PassDesc pass;
+      pass.rgba[0] = r;
+      pass.rgba[1] = g;
+      pass.rgba[2] = b;
+      pass.rgba[3] = 1;
+      pass.clear_depth = false;
+      cmd->begin_pass(pass);
+      if (info.srv_heap) {
+        ID3D12DescriptorHeap* heaps[] = {static_cast<ID3D12DescriptorHeap*>(info.srv_heap)};
+        list->SetDescriptorHeaps(1, heaps);
+        ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), list);
+      }
+      cmd->end_pass();
     }
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
       glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);

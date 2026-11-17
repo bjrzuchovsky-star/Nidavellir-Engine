@@ -23,6 +23,11 @@ std::string find_game_executable();
 bool spawn_game(const std::string& exe, const std::string& project_dir,
                 std::string* error_out = nullptr);
 
+// Start this executable again as `--gfx=<flag> --open <project_dir>` and
+// return without waiting. The caller exits so the new process owns the window.
+bool relaunch_editor(const std::string& gfx_flag, const std::string& project_dir,
+                     std::string* error_out = nullptr);
+
 // ts_client next to ts_admin, like ts_game above (build/apps/client).
 std::vector<std::string> client_executable_candidates();
 std::string find_client_executable();

@@ -147,6 +147,13 @@ class DxDevice final : public Device {
   std::uint32_t rt_create_tlas(const RtInstance* instances, std::uint32_t count, std::string* error) override;
   void rt_reset() override;
   bool dx_info(DxInfo* out) const override;
+  bool read_swapchain(std::vector<std::uint8_t>* rgba, int* w, int* h) override;
+  void blit_swapchain(Texture* color) override;
+  bool has_swapchain() const { return static_cast<bool>(swap_); }
+  void bind_swapchain(const PassDesc& pass);
+  void create_backbuffers();
+  void resize_swapchain(int w, int h);
+  void deliver_swapchain_read();
 
   ID3D12Device* device() const { return device_; }
   ID3D12GraphicsCommandList* list() const { return list_; }
@@ -183,6 +190,15 @@ class DxDevice final : public Device {
   UINT srv_used_ = 64;  // 0..63 reserved for Dear ImGui
   UINT rtv_used_ = 0;
   UINT dsv_used_ = 0;
+  ID3D12Resource* back_[2] = {};
+  D3D12_CPU_DESCRIPTOR_HANDLE back_rtv_[2] = {};
+  D3D12_RESOURCE_STATES back_state_[2] = {D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_PRESENT};
+  UINT frame_index_ = 0;
+  bool swap_drawn_ = false;
+  ID3D12Resource* swap_read_ = nullptr;
+  std::vector<std::uint8_t>* swap_read_dst_ = nullptr;
+  int* swap_read_w_ = nullptr;
+  int* swap_read_h_ = nullptr;
   HANDLE fence_event_ = nullptr;
   UINT64 fence_value_ = 0;
   GLFWwindow* window_ = nullptr;
@@ -243,6 +259,8 @@ void DxCmd::begin_pass(const PassDesc& p) {
     rtv = t->color_on ? t->rtv : D3D12_CPU_DESCRIPTOR_HANDLE{};
     dsv = t->depth ? t->dsv : D3D12_CPU_DESCRIPTOR_HANDLE{};
     list->OMSetRenderTargets(t->color_on ? 1 : 0, t->color_on ? &rtv : nullptr, FALSE, t->depth ? &dsv : nullptr);
+  } else if (dev->has_swapchain()) {
+    dev->bind_swapchain(p);
   }
   bound = t;
   pass = true;
@@ -576,6 +594,7 @@ bool DxDevice::open(const DeviceDesc& desc, std::string* error) {
     swap1->QueryInterface(IID_PPV_ARGS(swap_.out()));
     width_ = desc.width;
     height_ = desc.height;
+    create_backbuffers();
   } else {
     width_ = desc.width;
     height_ = desc.height;
@@ -591,6 +610,10 @@ bool DxDevice::open(const DeviceDesc& desc, std::string* error) {
 
 void DxDevice::shutdown() {
   end_frame_wait();
+  for (ID3D12Resource*& b : back_) {
+    if (b) { b->Release(); b = nullptr; }
+  }
+  if (swap_read_) { swap_read_->Release(); swap_read_ = nullptr; }
   rt_reset();
   if (list_) { list_->Release(); list_ = nullptr; }
   if (fence_event_) CloseHandle(fence_event_);
@@ -779,9 +802,11 @@ Pipeline* DxDevice::create_pipeline(const PipelineDesc& desc, std::string* error
   pso.InputLayout = {elems, static_cast<UINT>(desc.attr_count)};
   pso.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
   pso.RasterizerState.CullMode = desc.cull == Cull::None ? D3D12_CULL_MODE_NONE : D3D12_CULL_MODE_BACK;
-  // Screen-space winding: the viewport flips Y, so a CCW mesh (the same
-  // winding GL and Vulkan keep) is clockwise on the render target.
-  pso.RasterizerState.FrontCounterClockwise = FALSE;
+  // CCW meshes (the same winding OpenGL and Vulkan keep) are counter-clockwise
+  // on this render target. Treating them as back faces culled the ground, so
+  // the shadow map only received the cube and the color target showed the sky
+  // where the ground should be. The cube's far side was what survived.
+  pso.RasterizerState.FrontCounterClockwise = TRUE;
   // DepthBias for a float depth buffer is scaled by a tiny ulp. A bias of 2
   // does not move a D32 shadow and the whole ground self-shadows. Scale it
   // up, then clamp so a real shadow (a few centimetres of depth) stays.
@@ -899,26 +924,166 @@ void DxDevice::destroy_target(RenderTarget* target) {
 }
 void DxDevice::begin_frame() {
   if (depth_++ > 0) return;
+  if (window_) {
+    int w = 0, h = 0;
+    glfwGetFramebufferSize(window_, &w, &h);
+    if (w > 0 && h > 0 && swap_ && (w != width_ || h != height_)) resize_swapchain(w, h);
+    if (w > 0 && h > 0) { width_ = w; height_ = h; }
+  }
   alloc_->Reset();
   list_->Reset(alloc_, nullptr);
   cmd_.list = list_;
   cmd_.dev = this;
   cmd_.pass = false;
-  if (window_) {
-    int w = 0, h = 0;
-    glfwGetFramebufferSize(window_, &w, &h);
-    if (w > 0 && h > 0) { width_ = w; height_ = h; }
-  }
+  swap_drawn_ = false;
 }
 void DxDevice::end_frame() {
   if (depth_ == 0) return;
   if (--depth_ > 0) return;
+  if (swap_ && frame_index_ < 2 && back_[frame_index_] && back_state_[frame_index_] != D3D12_RESOURCE_STATE_PRESENT) {
+    barrier(back_[frame_index_], back_state_[frame_index_], D3D12_RESOURCE_STATE_PRESENT);
+    back_state_[frame_index_] = D3D12_RESOURCE_STATE_PRESENT;
+  }
   list_->Close();
   ID3D12CommandList* lists[] = {list_};
   queue_->ExecuteCommandLists(1, lists);
-  if (swap_ && window_) swap_->Present(1, 0);
   end_frame_wait();
+  deliver_swapchain_read();
+  if (swap_ && swap_drawn_) swap_->Present(1, 0);
+  swap_drawn_ = false;
 }
+
+void DxDevice::create_backbuffers() {
+  if (!swap_ || !rtv_heap_ || !device_) return;
+  if (rtv_used_ < 2) rtv_used_ = 2;
+  for (UINT i = 0; i < 2; ++i) {
+    if (back_[i]) { back_[i]->Release(); back_[i] = nullptr; }
+    if (FAILED(swap_->GetBuffer(i, IID_PPV_ARGS(&back_[i])))) continue;
+    D3D12_CPU_DESCRIPTOR_HANDLE h = rtv_heap_->GetCPUDescriptorHandleForHeapStart();
+    h.ptr += static_cast<SIZE_T>(i) * rtv_stride_;
+    device_->CreateRenderTargetView(back_[i], nullptr, h);
+    back_rtv_[i] = h;
+    back_state_[i] = D3D12_RESOURCE_STATE_PRESENT;
+  }
+}
+
+void DxDevice::resize_swapchain(int w, int h) {
+  if (!swap_ || w <= 0 || h <= 0) return;
+  for (ID3D12Resource*& b : back_) {
+    if (b) { b->Release(); b = nullptr; }
+  }
+  swap_->ResizeBuffers(0, static_cast<UINT>(w), static_cast<UINT>(h), DXGI_FORMAT_UNKNOWN, 0);
+  width_ = w;
+  height_ = h;
+  create_backbuffers();
+}
+
+void DxDevice::bind_swapchain(const PassDesc& pass) {
+  if (!swap_ || !list_) return;
+  frame_index_ = swap_->GetCurrentBackBufferIndex();
+  if (frame_index_ > 1 || !back_[frame_index_]) return;
+  barrier(back_[frame_index_], back_state_[frame_index_], D3D12_RESOURCE_STATE_RENDER_TARGET);
+  back_state_[frame_index_] = D3D12_RESOURCE_STATE_RENDER_TARGET;
+  list_->OMSetRenderTargets(1, &back_rtv_[frame_index_], FALSE, nullptr);
+  if (pass.clear_color) {
+    const float c[4] = {pass.rgba[0], pass.rgba[1], pass.rgba[2], pass.rgba[3]};
+    list_->ClearRenderTargetView(back_rtv_[frame_index_], c, 0, nullptr);
+  }
+  swap_drawn_ = true;
+}
+
+void DxDevice::blit_swapchain(Texture* color) {
+  auto* src = static_cast<DxTexture*>(color);
+  if (!swap_ || !list_ || !src || !src->res || src->depth) return;
+  frame_index_ = swap_->GetCurrentBackBufferIndex();
+  if (frame_index_ > 1 || !back_[frame_index_]) return;
+  barrier(back_[frame_index_], back_state_[frame_index_], D3D12_RESOURCE_STATE_COPY_DEST);
+  barrier(src->res, src->state, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  D3D12_TEXTURE_COPY_LOCATION sl{};
+  sl.pResource = src->res;
+  sl.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  D3D12_TEXTURE_COPY_LOCATION dl{};
+  dl.pResource = back_[frame_index_];
+  dl.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  const UINT cw = static_cast<UINT>(std::min(src->width, width_));
+  const UINT ch = static_cast<UINT>(std::min(src->height, height_));
+  D3D12_BOX box{0, 0, 0, cw, ch, 1};
+  list_->CopyTextureRegion(&dl, 0, 0, 0, &sl, &box);
+  barrier(src->res, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  src->state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+  barrier(back_[frame_index_], D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
+  back_state_[frame_index_] = D3D12_RESOURCE_STATE_PRESENT;
+  swap_drawn_ = true;
+}
+
+bool DxDevice::read_swapchain(std::vector<std::uint8_t>* rgba, int* w, int* h) {
+  if (!rgba || !swap_ || !list_ || frame_index_ > 1 || !back_[frame_index_]) return false;
+  const std::size_t row = static_cast<std::size_t>(width_) * 4u;
+  const std::size_t pitch = (row + 255u) & ~255u;
+  if (swap_read_) { swap_read_->Release(); swap_read_ = nullptr; }
+  D3D12_HEAP_PROPERTIES heap{};
+  heap.Type = D3D12_HEAP_TYPE_READBACK;
+  D3D12_RESOURCE_DESC rd{};
+  rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+  rd.Width = pitch * static_cast<UINT64>(height_);
+  rd.Height = 1;
+  rd.DepthOrArraySize = 1;
+  rd.MipLevels = 1;
+  rd.SampleDesc.Count = 1;
+  rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+  if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_COPY_DEST,
+                                              nullptr, IID_PPV_ARGS(&swap_read_)))) {
+    return false;
+  }
+  barrier(back_[frame_index_], back_state_[frame_index_], D3D12_RESOURCE_STATE_COPY_SOURCE);
+  D3D12_TEXTURE_COPY_LOCATION src{};
+  src.pResource = back_[frame_index_];
+  src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  D3D12_TEXTURE_COPY_LOCATION dst{};
+  dst.pResource = swap_read_;
+  dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  dst.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+  dst.PlacedFootprint.Footprint.Width = static_cast<UINT>(width_);
+  dst.PlacedFootprint.Footprint.Height = static_cast<UINT>(height_);
+  dst.PlacedFootprint.Footprint.Depth = 1;
+  dst.PlacedFootprint.Footprint.RowPitch = static_cast<UINT>(pitch);
+  list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+  barrier(back_[frame_index_], D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PRESENT);
+  back_state_[frame_index_] = D3D12_RESOURCE_STATE_PRESENT;
+  swap_drawn_ = true;
+  swap_read_dst_ = rgba;
+  swap_read_w_ = w;
+  swap_read_h_ = h;
+  return true;
+}
+
+void DxDevice::deliver_swapchain_read() {
+  if (!swap_read_dst_ || !swap_read_) {
+    swap_read_dst_ = nullptr;
+    return;
+  }
+  const std::size_t row = static_cast<std::size_t>(width_) * 4u;
+  const std::size_t pitch = (row + 255u) & ~255u;
+  void* map = nullptr;
+  D3D12_RANGE range{0, static_cast<SIZE_T>(pitch * static_cast<std::size_t>(height_))};
+  swap_read_->Map(0, &range, &map);
+  swap_read_dst_->assign(row * static_cast<std::size_t>(height_), 0);
+  if (map) {
+    for (int y = 0; y < height_; ++y) {
+      std::memcpy(swap_read_dst_->data() + static_cast<std::size_t>(height_ - 1 - y) * row,
+                  static_cast<char*>(map) + static_cast<std::size_t>(y) * pitch, row);
+    }
+  }
+  swap_read_->Unmap(0, nullptr);
+  swap_read_->Release();
+  swap_read_ = nullptr;
+  if (swap_read_w_) *swap_read_w_ = width_;
+  if (swap_read_h_) *swap_read_h_ = height_;
+  swap_read_dst_ = nullptr;
+  swap_read_w_ = nullptr;
+  swap_read_h_ = nullptr;
+}
+
 bool DxDevice::read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba, int* w, int* h) {
   auto* t = static_cast<DxTarget*>(target);
   if (!t || !t->color || !rgba) return false;

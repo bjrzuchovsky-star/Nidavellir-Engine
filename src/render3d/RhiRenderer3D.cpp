@@ -309,6 +309,7 @@ class RhiRenderer final : public Renderer3D {
     materials_.erase(it);
   }
   void set_offscreen(bool on) override { offscreen_ = on; }
+  void set_present_window(bool on) override { present_window_ = on; }
   void set_environment(const Environment& env) override { env_ = env; }
   void begin_frame(const Camera3D& camera, int width, int height) override {
     camera_ = camera;
@@ -684,6 +685,10 @@ class RhiRenderer final : public Renderer3D {
     stats_.lights = points_.size() + spots_.size() + areas_.size() + (env_.sun_intensity > 0 ? 1 : 0);
     stats_.meshes = meshes_.size();
     stats_.materials = materials_.size();
+    if (present_window_) {
+      rhi::RenderTarget* shown = show_post_ && shown_ ? shown_ : color_;
+      if (shown) device_->blit_swapchain(device_->target_color(shown));
+    }
     device_->end_frame();
     return stats_;
   }
@@ -770,6 +775,7 @@ class RhiRenderer final : public Renderer3D {
   bool ready_ = false;
   bool shut_ = false;
   bool offscreen_ = true;
+  bool present_window_ = false;
   Environment env_{};
   Camera3D camera_{};
   int width_ = 1;

@@ -10,7 +10,10 @@
 #include "GameUi.h"
 
 #include "render3d/GlRenderer3D.h"
+#include "render3d/RhiRenderer3D.h"
 #include "render3d/HiddenGl.h"
+#include "rhi/Rhi.h"
+#include "core/JsonMini.h"
 #include "render3d/Scene3D.h"
 #include "render3d/SceneView.h"
 #include "runtime/Log.h"
@@ -187,6 +190,25 @@ int run_smoke_3d(const std::string& dir, const std::string& name) {
   return 0;
 }
 
+std::string graphics_flag_for(const std::string& dir) {
+  rhi::Api cli = rhi::Api::OpenGL;
+  if (rhi::cli_api(&cli)) return rhi::api_flag(cli);
+  auto read_key = [](const fs::path& file) {
+    std::ifstream in(file);
+    if (!in) return std::string();
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    auto parsed = json_mini::parse_object(ss.str());
+    if (!parsed || parsed->count("graphics_api") == 0) return std::string();
+    return json_mini::get_string(*parsed, "graphics_api", "");
+  };
+  const std::string project = read_key(fs::path(dir) / "project.json");
+  if (!project.empty()) return project;
+  const std::string settings = read_key(fs::path("TombStoneConfig") / "settings.json");
+  if (!settings.empty()) return settings;
+  return rhi::default_api_flag();
+}
+
 int run_window_3d(const std::string& dir, const std::string& name, long frames) {
   scene3d::Scene3D scene;
   std::string err;
@@ -194,25 +216,51 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
     std::cerr << "[ts_game] " << err << '\n';
     return 1;
   }
-  if (!glfwInit()) {
-    std::cerr << "[ts_game] could not start GLFW\n";
-    return 1;
+  const std::string title = name + " | " + std::string(brand::kProduct);
+  const std::string flag = graphics_flag_for(dir);
+  bool flag_ok = false;
+  const rhi::Api want = rhi::parse_api(flag, &flag_ok);
+  std::unique_ptr<rhi::Device> device;
+  const bool want_rhi = flag_ok && want != rhi::Api::OpenGL && rhi::api_built(want);
+  if (want_rhi) {
+    rhi::DeviceDesc desc;
+    desc.api = want;
+    desc.width = game::window_width();
+    desc.height = game::window_height();
+    desc.title = title.c_str();
+    device = rhi::create_device(desc, &err);
+    if (!device) {
+      std::cerr << "[ts_game] " << rhi::api_name(want) << " did not start (" << err << "). Falling back to OpenGL.\n";
+    } else {
+      rhi::set_active(device.get());
+      game::apply_window_icon(static_cast<GLFWwindow*>(device->window()), dir);
+      std::cout << "[ts_game] Graphics API: " << rhi::api_name(want);
+      if (device->adapter_name() && device->adapter_name()[0]) std::cout << "  " << device->adapter_name();
+      std::cout << '\n';
+    }
   }
-  render3d::hint_gl33_core();
-  GLFWwindow* win = glfwCreateWindow(game::window_width(), game::window_height(), (name + " | " + std::string(brand::kProduct)).c_str(), nullptr,
-                                     nullptr);
+  GLFWwindow* win = device ? static_cast<GLFWwindow*>(device->window()) : nullptr;
   if (!win) {
-    std::cerr << "[ts_game] could not open a GL 3.3 core window\n";
-    game::show_gpu_error(name, game::last_glfw_error());
-    glfwTerminate();
-    return 1;
+    if (!glfwInit()) {
+      std::cerr << "[ts_game] could not start GLFW\n";
+      return 1;
+    }
+    render3d::hint_gl33_core();
+    win = glfwCreateWindow(game::window_width(), game::window_height(), title.c_str(), nullptr, nullptr);
+    if (!win) {
+      std::cerr << "[ts_game] could not open a GL 3.3 core window\n";
+      game::show_gpu_error(name, game::last_glfw_error());
+      glfwTerminate();
+      return 1;
+    }
+    game::apply_window_icon(win, dir);
+    glfwMakeContextCurrent(win);
+    glfwSwapInterval(1);
   }
-  game::apply_window_icon(win, dir);
-  glfwMakeContextCurrent(win);
-  glfwSwapInterval(1);
   int code = 0;
   {
-    auto renderer = render3d::make_gl_renderer3d();
+    std::unique_ptr<render3d::Renderer3D> renderer =
+        device ? render3d::make_rhi_renderer(device.get()) : render3d::make_gl_renderer3d();
     world3d::World3D world;
     ai3d::attach(world, ai_enabled(dir));
     story3d::attach(world, story_enabled(dir));
@@ -226,7 +274,8 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
       std::cerr << "[ts_game] " << err << '\n';
       code = 1;
     } else {
-      renderer->set_offscreen(false);
+      renderer->set_offscreen(device != nullptr);
+      if (device) renderer->set_present_window(true);
       render3d::SceneView view(renderer.get());
       std::vector<render3d::Renderer3D::Billboard> bills;
       view.set_project_dir(dir);
@@ -384,7 +433,7 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
           view.billboards(bills);
           view.end();
           for (const std::string& p : view.take_problems()) std::cerr << "[ts_game] " << p << '\n';
-          glfwSwapBuffers(win);
+          if (!device) glfwSwapBuffers(win);
         }
         if (profiler::Profiler::get().enabled() && n % 15 == 0) {
           profiler::Profiler::get().counter("mem.process_mb", profiler::process_memory_mb());
@@ -400,8 +449,14 @@ int run_window_3d(const std::string& dir, const std::string& name, long frames) 
     }
     renderer->shutdown();
   }
-  glfwDestroyWindow(win);
-  glfwTerminate();
+  if (device) {
+    device->wait_idle();
+    rhi::set_active(nullptr);
+    device.reset();
+  } else {
+    glfwDestroyWindow(win);
+    glfwTerminate();
+  }
   return code;
 }
 

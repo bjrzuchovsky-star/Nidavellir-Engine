@@ -153,6 +153,8 @@ class VkDeviceR final : public Device {
   void wait_idle() override { if (device_) vkDeviceWaitIdle(device_); }
   bool read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba, int* w, int* h) override;
   bool read_depth(RenderTarget* target, std::vector<float>* depth, int* w, int* h) override;
+  bool read_swapchain(std::vector<std::uint8_t>* rgba, int* w, int* h) override;
+  void blit_swapchain(Texture* color) override;
   std::uint32_t rt_create_blas(const RtGeometry& geo, std::string* error) override;
   std::uint32_t rt_create_tlas(const RtInstance* instances, std::uint32_t count, std::string* error) override;
   void rt_reset() override;
@@ -194,8 +196,16 @@ class VkDeviceR final : public Device {
   VkFormat swap_format_ = VK_FORMAT_R8G8B8A8_UNORM;
   std::uint32_t image_count_ = 0;
   std::uint32_t image_index_ = 0;
+  std::vector<VkImage> swap_images_;
   std::vector<VkImageView> swap_views_;
   std::vector<VkFramebuffer> swap_fbs_;
+  VkBuffer read_buf_ = VK_NULL_HANDLE;
+  VkDeviceMemory read_mem_ = VK_NULL_HANDLE;
+  void* read_map_ = nullptr;
+  VkDeviceSize read_bytes_ = 0;
+  std::vector<std::uint8_t>* read_dst_ = nullptr;
+  int* read_w_ = nullptr;
+  int* read_h_ = nullptr;
   VkFence acquire_fence_ = VK_NULL_HANDLE;
 
  private:

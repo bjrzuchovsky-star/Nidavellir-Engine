@@ -177,6 +177,18 @@ class Device {
   virtual CommandList* commands() = 0;
   virtual void wait_idle() = 0;
   virtual bool read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba, int* w, int* h) = 0;
+  // Copy the swapchain image drawn this frame. Call after the swapchain pass
+  // (or blit_swapchain) and before end_frame. The bytes are bottom-up RGBA
+  // and are filled when end_frame returns. False when there is no swapchain.
+  virtual bool read_swapchain(std::vector<std::uint8_t>* rgba, int* w, int* h) {
+    (void)rgba;
+    (void)w;
+    (void)h;
+    return false;
+  }
+  // Copy a color texture onto the current swapchain image and leave that
+  // image in the present state. No-op without a swapchain.
+  virtual void blit_swapchain(Texture* color) { (void)color; }
   // Depth as 0..1 floats, bottom row first (same order as read_color). False
   // when the target has no depth image.
   virtual bool read_depth(RenderTarget* target, std::vector<float>* depth, int* w, int* h) {
@@ -232,6 +244,15 @@ bool api_built(Api api);
 void set_cli_api(Api api);
 bool cli_api(Api* out);
 Api resolve_api(const std::string& settings_api);
+
+// "vk" when an offscreen Vulkan device can be created, otherwise "gl".
+// Direct3D 12 stays opt-in. The result is cached for the process.
+const char* default_api_flag();
+
+// Host::open calls this when the requested API cannot start and OpenGL is
+// used instead, so a later project open does not relaunch into the same failure.
+void note_api_fallback(Api api, const std::string& why);
+bool api_fallback(Api* api, std::string* why);
 
 // --gfx-debug turns on the D3D12 debug layer (and prints ID3D12InfoQueue
 // messages when a call fails). --gfx-warp forces the Direct3D 12 software

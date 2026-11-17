@@ -17,6 +17,7 @@ add_executable(ts_admin
   SmokeShipyard.cpp
   SmokeAudio.cpp
   Smoke3D.cpp
+  SmokePresent.cpp
   Smoke3DEditor.cpp
   SmokeAnim3D.cpp
   SmokeAI.cpp

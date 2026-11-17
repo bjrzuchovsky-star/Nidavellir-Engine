@@ -924,17 +924,13 @@ void Editor3DScreen::draw_environment() {
       ImGui::EndDisabled();
       ImGui::TextDisabled("Shown when the GPU supports DXR or Vulkan ray queries.");
     }
-    const char* gapis[] = {"Editor default", "OpenGL", "Vulkan", "Direct3D 12"};
-    int g = 0;
-    if (project_.graphics_api == "gl") g = 1;
-    else if (project_.graphics_api == "vk") g = 2;
-    else if (project_.graphics_api == "dx12") g = 3;
-    if (ImGui::Combo("Realm graphics API", &g, gapis, 4)) {
-      project_.graphics_api = g == 1 ? "gl" : g == 2 ? "vk" : g == 3 ? "dx12" : "";
-      std::string err;
-      ProjectStore::write_project_json(project_, &err);
+    {
+      const char* shown = "engine default";
+      if (project_.graphics_api == "gl") shown = "OpenGL";
+      else if (project_.graphics_api == "vk") shown = "Vulkan";
+      else if (project_.graphics_api == "dx12") shown = "Direct3D 12";
+      ImGui::TextDisabled("Graphics API: %s (Realm > Project settings)", shown);
     }
-    ImGui::TextDisabled("The realm API is used the next time the editor or the game starts.");
   }
 
   if (t.activated && !inspector_before_) inspector_before_ = scene_;

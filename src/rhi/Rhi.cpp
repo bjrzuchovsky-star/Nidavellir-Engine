@@ -13,6 +13,9 @@ bool g_cli = false;
 Api g_cli_api = Api::OpenGL;
 bool g_gfx_debug = false;
 bool g_gfx_warp = false;
+bool g_fallback = false;
+Api g_fallback_api = Api::OpenGL;
+std::string g_fallback_why;
 std::size_t g_align = 256;
 TextureRegistrar g_add = nullptr;
 TextureUnregistrar g_remove = nullptr;
@@ -104,6 +107,35 @@ Api resolve_api(const std::string& settings_api) {
   bool ok = false;
   Api api = parse_api(settings_api.empty() ? "gl" : settings_api, &ok);
   return ok ? api : Api::OpenGL;
+}
+
+const char* default_api_flag() {
+  static int cached = -1;
+  if (cached < 0) {
+    cached = 0;
+    if (api_built(Api::Vulkan)) {
+      DeviceDesc desc;
+      desc.api = Api::Vulkan;
+      desc.offscreen = true;
+      desc.width = 8;
+      desc.height = 8;
+      std::string err;
+      if (create_device(desc, &err)) cached = 1;
+    }
+  }
+  return cached ? "vk" : "gl";
+}
+
+void note_api_fallback(Api api, const std::string& why) {
+  g_fallback = true;
+  g_fallback_api = api;
+  g_fallback_why = why;
+}
+bool api_fallback(Api* api, std::string* why) {
+  if (!g_fallback) return false;
+  if (api) *api = g_fallback_api;
+  if (why) *why = g_fallback_why;
+  return true;
 }
 
 std::unique_ptr<Device> create_gl_device(const DeviceDesc&, std::string*);

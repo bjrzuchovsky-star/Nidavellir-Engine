@@ -270,7 +270,7 @@ bool ProjectStore::write_project_json(const ProjectInfo& project,
   if (project.plugins_set) {
     fields.emplace_back("plugins", join_plugin_ids(project.plugins));
   }
-  if (!project.graphics_api.empty() && project.graphics_api != "gl") {
+  if (!project.graphics_api.empty()) {
     fields.emplace_back("graphics_api", project.graphics_api);
   }
 
