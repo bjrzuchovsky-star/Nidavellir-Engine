@@ -3103,6 +3103,8 @@ int main(int argc, char** argv) {
       }
       ts::tombstone::rhi::set_cli_api(api);
     }
+    if (std::strcmp(argv[i], "--gfx-debug") == 0) ts::tombstone::rhi::set_gfx_debug(true);
+    if (std::strcmp(argv[i], "--gfx-warp") == 0) ts::tombstone::rhi::set_gfx_warp(true);
     if (std::strcmp(argv[i], "+connect_lobby") == 0 && i + 1 < argc) {
       ts::tombstone::steam::note_connect_lobby(argv[++i]);
     }

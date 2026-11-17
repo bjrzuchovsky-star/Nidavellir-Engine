@@ -165,11 +165,39 @@ bool VkDeviceR::open(const DeviceDesc& desc, std::string* error) {
   }
   std::vector<VkPhysicalDevice> devs(ndev);
   vkEnumeratePhysicalDevices(instance_, &ndev, devs.data());
+  // Discrete GPU with the largest device-local heap. Integrated and virtual
+  // adapters (the iGPU, a virtual display) lose to a real discrete GPU.
   physical_ = devs[0];
+  int best_score = -1;
   for (VkPhysicalDevice d : devs) {
     VkPhysicalDeviceProperties p{};
     vkGetPhysicalDeviceProperties(d, &p);
-    if (p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) { physical_ = d; break; }
+    std::string n = p.deviceName;
+    for (char& c : n) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    int type = 2;
+    switch (p.deviceType) {
+      case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: type = 4; break;
+      case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: type = 3; break;
+      case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU: type = 1; break;
+      case VK_PHYSICAL_DEVICE_TYPE_CPU: type = 0; break;
+      default: break;
+    }
+    if (n.find("llvmpipe") != std::string::npos || n.find("swiftshader") != std::string::npos ||
+        n.find("virtual") != std::string::npos || n.find("microsoft basic") != std::string::npos ||
+        n.find("basic render") != std::string::npos) {
+      type = 0;
+    }
+    VkPhysicalDeviceMemoryProperties mem{};
+    vkGetPhysicalDeviceMemoryProperties(d, &mem);
+    std::uint64_t local = 0;
+    for (std::uint32_t hi = 0; hi < mem.memoryHeapCount; ++hi) {
+      if (mem.memoryHeaps[hi].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) local += mem.memoryHeaps[hi].size;
+    }
+    const int score = type * 1000000 + static_cast<int>(std::min<std::uint64_t>(local >> 20, 900000));
+    if (score > best_score) {
+      best_score = score;
+      physical_ = d;
+    }
   }
   VkPhysicalDeviceProperties props{};
   vkGetPhysicalDeviceProperties(physical_, &props);

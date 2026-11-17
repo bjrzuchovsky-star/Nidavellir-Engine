@@ -3,8 +3,10 @@
 #include "render3d/Gltf.h"
 #include "render3d/GlRenderer3D.h"
 #include "render3d/HiddenGl.h"
+#include "render3d/RhiRenderer3D.h"
 #include "render3d/Scene3D.h"
 #include "render3d/SceneView.h"
+#include "rhi/Rhi.h"
 #include "scene/SceneJson.h"
 #include "world3d/World3D.h"
 
@@ -14,6 +16,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -254,15 +257,43 @@ Px pixel(const std::vector<unsigned char>& rgba, int w, int h, float sx, float s
 }
 
 int gl_render(const fs::path& dir) {
+  rhi::Api api = rhi::Api::OpenGL;
+  rhi::cli_api(&api);
   r3::HiddenGl ctx;
+  std::unique_ptr<rhi::Device> device;
+  std::unique_ptr<r3::Renderer3D> renderer;
   std::string why;
-  if (!ctx.open(&why)) {
-    if (std::getenv("TS_SMOKE_REQUIRE_GL")) return fail("GL context: " + why);
-    std::cout << "[smoke] 3D render SKIPPED (" << why << "; set TS_SMOKE_REQUIRE_GL=1 to fail)\n";
-    return 0;
+  std::string who;
+  if (api == rhi::Api::OpenGL) {
+    if (!ctx.open(&why)) {
+      if (std::getenv("TS_SMOKE_REQUIRE_GL")) return fail("GL context: " + why);
+      std::cout << "[smoke] 3D render SKIPPED (" << why << "; set TS_SMOKE_REQUIRE_GL=1 to fail)\n";
+      return 0;
+    }
+    renderer = r3::make_gl_renderer3d();
+    if (!renderer->init(&why)) return fail("GL renderer init: " + why);
+    who = "OpenGL " + ctx.version() + " raytracing no";
+  } else {
+    if (!rhi::api_built(api)) return fail(std::string(rhi::api_name(api)) + " is not built on this platform");
+    rhi::DeviceDesc desc;
+    desc.api = api;
+    desc.offscreen = true;
+    desc.visible = false;
+    desc.width = 320;
+    desc.height = 180;
+    device = rhi::create_device(desc, &why);
+    if (!device) {
+      if (api == rhi::Api::D3D12 || std::getenv("TS_SMOKE_REQUIRE_GL")) return fail(why);
+      std::cout << "[smoke] 3D render SKIPPED (" << rhi::api_name(api) << ": " << why << ")\n";
+      return 0;
+    }
+    renderer = r3::make_rhi_renderer(device.get());
+    if (!renderer->init(&why)) {
+      return fail(std::string(rhi::api_name(api)) + " renderer init: " + why);
+    }
+    who = std::string(rhi::api_name(api)) + " \"" + device->adapter_name() + "\" raytracing " +
+          (device->raytracing() ? "yes" : "no");
   }
-  auto renderer = r3::make_gl_renderer3d();
-  if (!renderer->init(&why)) return fail("GL renderer init: " + why);
   renderer->set_offscreen(true);
   const int W = 320, H = 180;
 
@@ -365,7 +396,7 @@ int gl_render(const fs::path& dir) {
   }
   view.clear();
   renderer->shutdown();
-  std::cout << "[smoke] 3D render OK (GL " << ctx.version() << "; offscreen " << W << "x" << H
+  std::cout << "[smoke] 3D render OK (" << who << "; offscreen " << W << "x" << H
             << ": " << buf << "; point light r " << before.r << "->" << after.r
             << "; ghost town " << ts.draws << " draws, " << ts.triangles << " tris, "
             << ts.lights << " lights)\n";

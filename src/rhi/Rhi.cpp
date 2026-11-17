@@ -11,6 +11,8 @@ namespace {
 Device* g_active = nullptr;
 bool g_cli = false;
 Api g_cli_api = Api::OpenGL;
+bool g_gfx_debug = false;
+bool g_gfx_warp = false;
 std::size_t g_align = 256;
 TextureRegistrar g_add = nullptr;
 TextureUnregistrar g_remove = nullptr;
@@ -50,6 +52,10 @@ bool cli_api(Api* out) {
   if (out) *out = g_cli_api;
   return true;
 }
+void set_gfx_debug(bool on) { g_gfx_debug = on; }
+bool gfx_debug() { return g_gfx_debug; }
+void set_gfx_warp(bool on) { g_gfx_warp = on; }
+bool gfx_warp() { return g_gfx_warp; }
 
 Api parse_api(const std::string& text, bool* ok) {
   std::string s;

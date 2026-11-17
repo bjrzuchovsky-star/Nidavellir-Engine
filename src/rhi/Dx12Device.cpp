@@ -20,9 +20,12 @@ namespace rhi {
 #include <GLFW/glfw3native.h>
 
 #include <d3d12.h>
+#include <d3d12sdklayers.h>
 #include <dxgi1_6.h>
 
 #include <algorithm>
+#include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -160,6 +163,7 @@ class DxDevice final : public Device {
  private:
   void end_frame_wait();
   ID3D12Resource* upload(const void* data, std::size_t size, ID3D12Resource** keep);
+  void explain(std::string* error, const std::string& head, HRESULT hr);
   DeviceDesc desc_{};
   Com<IDXGIFactory6> factory_;
   Com<ID3D12CommandQueue> queue_;
@@ -328,33 +332,123 @@ void DxCmd::draw_indexed(std::uint32_t indices, std::uint32_t instances, std::ui
   draw(indices, instances, first);
 }
 
+void DxDevice::explain(std::string* error, const std::string& head, HRESULT hr) {
+  if (!error) return;
+  char hex[16];
+  std::snprintf(hex, sizeof(hex), "0x%08X", static_cast<unsigned>(hr));
+  *error = head + " (" + hex + ")";
+  if (!device_) return;
+  Com<ID3D12InfoQueue> queue;
+  if (FAILED(device_->QueryInterface(IID_PPV_ARGS(queue.out())))) return;
+  const UINT64 count = queue->GetNumStoredMessages();
+  for (UINT64 i = 0; i < count; ++i) {
+    SIZE_T bytes = 0;
+    if (FAILED(queue->GetMessage(i, nullptr, &bytes)) || bytes == 0) continue;
+    std::vector<unsigned char> mem(bytes);
+    auto* msg = reinterpret_cast<D3D12_MESSAGE*>(mem.data());
+    if (FAILED(queue->GetMessage(i, msg, &bytes)) || !msg->pDescription) continue;
+    if (gfx_debug()) std::fprintf(stderr, "D3D12: %s\n", msg->pDescription);
+    *error += "\nD3D12: ";
+    *error += msg->pDescription;
+  }
+  queue->ClearStoredMessages();
+}
+
+namespace {
+
+std::string adapter_text(const DXGI_ADAPTER_DESC1& ad) {
+  char name[256] = {};
+  WideCharToMultiByte(CP_UTF8, 0, ad.Description, -1, name, sizeof(name), nullptr, nullptr);
+  return name;
+}
+
+std::string lower_copy(std::string s) {
+  for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return s;
+}
+
+bool software_or_virtual(IDXGIAdapter1* adapter, const DXGI_ADAPTER_DESC1& ad) {
+  if (ad.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) return true;
+  Com<IDXGIAdapter4> newer;
+  if (SUCCEEDED(adapter->QueryInterface(IID_PPV_ARGS(newer.out())))) {
+    DXGI_ADAPTER_DESC3 d3{};
+    if (SUCCEEDED(newer->GetDesc3(&d3)) &&
+        (d3.Flags & (DXGI_ADAPTER_FLAG3_SOFTWARE | DXGI_ADAPTER_FLAG3_REMOTE))) {
+      return true;
+    }
+  }
+  const std::string n = lower_copy(adapter_text(ad));
+  const char* banned[] = {"microsoft basic", "basic render", "remote", "virtual", "indirect", "parsec", "idd sample"};
+  for (const char* word : banned) {
+    if (n.find(word) != std::string::npos) return true;
+  }
+  return false;
+}
+
+}  // namespace
+
 bool DxDevice::open(const DeviceDesc& desc, std::string* error) {
   desc_ = desc;
   set_uniform_align(256);
-  if (CreateDXGIFactory2(0, IID_PPV_ARGS(factory_.out())) != S_OK) {
+  UINT factory_flags = 0;
+  if (gfx_debug()) {
+    Com<ID3D12Debug> dbg;
+    if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(dbg.out())))) {
+      dbg->EnableDebugLayer();
+      factory_flags = DXGI_CREATE_FACTORY_DEBUG;
+    }
+  }
+  if (CreateDXGIFactory2(factory_flags, IID_PPV_ARGS(factory_.out())) != S_OK &&
+      (factory_flags == 0 || CreateDXGIFactory2(0, IID_PPV_ARGS(factory_.out())) != S_OK)) {
     if (error) *error = "CreateDXGIFactory2 failed";
     return false;
   }
-  Com<IDXGIAdapter1> adapter;
-  for (UINT i = 0; factory_->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(adapter.out())) == S_OK; ++i) {
-    DXGI_ADAPTER_DESC1 ad{};
-    adapter->GetDesc1(&ad);
-    if (ad.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue;
-    if (D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device_)) == S_OK) {
-      char name[128] = {};
-      WideCharToMultiByte(CP_UTF8, 0, ad.Description, -1, name, 128, nullptr, nullptr);
-      name_ = name;
-      break;
+  const bool warp_only = gfx_warp();
+  if (!warp_only) {
+    // HIGH_PERFORMANCE lists the discrete GPU first. Dedicated video memory
+    // breaks a tie if a virtual display or the iGPU is enumerated ahead of it.
+    Com<IDXGIAdapter1> best;
+    SIZE_T best_mem = 0;
+    bool have = false;
+    std::string best_name;
+    Com<IDXGIAdapter1> adapter;
+    for (UINT i = 0; factory_->EnumAdapterByGpuPreference(
+                         i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(adapter.out())) == S_OK;
+         ++i) {
+      DXGI_ADAPTER_DESC1 ad{};
+      adapter->GetDesc1(&ad);
+      if (software_or_virtual(adapter, ad)) continue;
+      Com<ID3D12Device> trial;
+      if (FAILED(D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(trial.out())))) continue;
+      if (have && ad.DedicatedVideoMemory <= best_mem) continue;
+      best.reset();
+      adapter->QueryInterface(IID_PPV_ARGS(best.out()));
+      best_mem = ad.DedicatedVideoMemory;
+      best_name = adapter_text(ad);
+      have = true;
     }
+    if (have && FAILED(D3D12CreateDevice(best, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device_)))) {
+      if (device_) { device_->Release(); device_ = nullptr; }
+    }
+    if (device_) name_ = best_name;
   }
   if (!device_) {
     Com<IDXGIAdapter> warp;
     factory_->EnumWarpAdapter(IID_PPV_ARGS(warp.out()));
-    if (!warp || D3D12CreateDevice(warp, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device_)) != S_OK) {
-      if (error) *error = "D3D12CreateDevice failed";
+    HRESULT hr = warp ? D3D12CreateDevice(warp, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device_)) : E_FAIL;
+    if (FAILED(hr)) {
+      explain(error, warp_only ? "D3D12 WARP device failed" : "D3D12CreateDevice failed", hr);
       return false;
     }
     name_ = "D3D12 WARP";
+  }
+  if (gfx_debug()) {
+    Com<ID3D12InfoQueue> queue;
+    if (SUCCEEDED(device_->QueryInterface(IID_PPV_ARGS(queue.out())))) {
+      queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, FALSE);
+      queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, FALSE);
+      queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, FALSE);
+    }
   }
   D3D12_FEATURE_DATA_D3D12_OPTIONS5 opt5{};
   if (device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &opt5, sizeof(opt5)) == S_OK) {
@@ -391,6 +485,12 @@ bool DxDevice::open(const DeviceDesc& desc, std::string* error) {
     samps[i].ShaderRegister = static_cast<UINT>(3 + i);
     samps[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     samps[i].MaxLOD = 16;
+    // A zero ComparisonFunc is not NEVER (that enum starts at 1). The runtime
+    // rejects the root signature, and the pipeline creation then fails with
+    // nothing pointing at the sampler.
+    samps[i].ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+    samps[i].MaxAnisotropy = 1;
+    samps[i].BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
   }
   D3D12_ROOT_SIGNATURE_DESC rsd{};
   rsd.NumParameters = 4;
@@ -399,8 +499,18 @@ bool DxDevice::open(const DeviceDesc& desc, std::string* error) {
   rsd.pStaticSamplers = samps;
   rsd.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
   Com<ID3DBlob> blob, errb;
-  D3D12SerializeRootSignature(&rsd, D3D_ROOT_SIGNATURE_VERSION_1, blob.out(), errb.out());
-  device_->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(root_.out()));
+  HRESULT hr = D3D12SerializeRootSignature(&rsd, D3D_ROOT_SIGNATURE_VERSION_1, blob.out(), errb.out());
+  if (FAILED(hr) || !blob) {
+    std::string head = "D3D12SerializeRootSignature failed";
+    if (errb && errb->GetBufferPointer()) head += std::string(": ") + static_cast<const char*>(errb->GetBufferPointer());
+    explain(error, head, hr);
+    return false;
+  }
+  hr = device_->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(root_.out()));
+  if (FAILED(hr) || !root_) {
+    explain(error, "CreateRootSignature failed", hr);
+    return false;
+  }
 
   D3D12_DESCRIPTOR_HEAP_DESC hd{};
   hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
@@ -661,6 +771,16 @@ Pipeline* DxDevice::create_pipeline(const PipelineDesc& desc, std::string* error
   pso.DepthStencilState.DepthEnable = desc.depth_test ? TRUE : FALSE;
   pso.DepthStencilState.DepthWriteMask = desc.depth_write ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO;
   pso.DepthStencilState.DepthFunc = desc.depth_cmp == Compare::Always ? D3D12_COMPARISON_FUNC_ALWAYS : D3D12_COMPARISON_FUNC_LESS;
+  // Zero is not a legal stencil op (KEEP is 1). CreateGraphicsPipelineState
+  // rejects the whole PSO when these are left at the zero a `{}` gives them,
+  // even with the stencil test off.
+  pso.DepthStencilState.StencilReadMask = 0xff;
+  pso.DepthStencilState.StencilWriteMask = 0xff;
+  pso.DepthStencilState.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
+  pso.DepthStencilState.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
+  pso.DepthStencilState.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
+  pso.DepthStencilState.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+  pso.DepthStencilState.BackFace = pso.DepthStencilState.FrontFace;
   pso.SampleMask = UINT_MAX;
   pso.PrimitiveTopologyType = desc.topology == Topology::Lines ? D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE
                                                                : D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
@@ -669,8 +789,11 @@ Pipeline* DxDevice::create_pipeline(const PipelineDesc& desc, std::string* error
   pso.DSVFormat = DXGI_FORMAT_D32_FLOAT;
   pso.SampleDesc.Count = 1;
   ID3D12PipelineState* p = nullptr;
-  if (device_->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&p)) != S_OK) {
-    if (error) *error = "CreateGraphicsPipelineState failed";
+  const HRESULT phr = device_->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&p));
+  if (FAILED(phr)) {
+    const char* vs = desc.vs ? desc.vs : "?";
+    const char* fs = desc.fs ? desc.fs : "?";
+    explain(error, std::string("CreateGraphicsPipelineState failed for ") + vs + " / " + fs, phr);
     return nullptr;
   }
   auto* out = new DxPipeline();

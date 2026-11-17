@@ -20,6 +20,8 @@
 #endif
 
 #include <algorithm>
+#include <cctype>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <string>

@@ -96,6 +96,11 @@ jobs:
       - name: Smoke (graphics backends)
         working-directory: build/apps/admin/Release
         run: ./ts_admin.exe --smoke-gfx
+      # WARP is always present on Windows. A CreateGraphicsPipelineState
+      # failure here fails the job even when the runner has no GPU.
+      - name: Smoke (Direct3D 12 on WARP)
+        working-directory: build/apps/admin/Release
+        run: ./ts_admin.exe --smoke-gfx --gfx-warp --gfx-debug
 
   linux:
     name: ubuntu-latest / GCC

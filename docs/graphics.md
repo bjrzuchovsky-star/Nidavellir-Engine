@@ -7,6 +7,8 @@ The editor and the 3D renderer can run on OpenGL 3.3, Vulkan, or Direct3D 12. Sh
 - Editor Settings, Graphics: OpenGL, Vulkan, or Direct3D 12. Saved for the next launch.
 - A 3D realm can set its own API in the Lighting panel. That is also used the next time the editor or `ts_game` starts.
 - Command line, which wins over both: `--gfx=gl`, `--gfx=vk`, `--gfx=dx12`.
+- `--gfx-debug` turns on the Direct3D 12 debug layer and prints the `ID3D12InfoQueue` text when a call fails.
+- `--gfx-warp` forces the Direct3D 12 WARP software adapter.
 
 If Vulkan or Direct3D 12 cannot start, the editor opens on OpenGL and says why. Direct3D 12 is built on Windows only. Linux builds are OpenGL and Vulkan.
 
@@ -14,7 +16,11 @@ The classic OpenGL renderer is still what a scene uses when the API is OpenGL an
 
 ## What to try
 
-`ts_admin --smoke-gfx` renders one lit cube on each backend that can start and compares it to the classic OpenGL frame. A backend that is not installed is skipped.
+`ts_admin --smoke-gfx` renders one lit cube on each backend that can start and compares it to the classic OpenGL frame. It prints the backend, the adapter name and whether ray tracing is available. A backend that is not installed is skipped. Direct3D 12 is not skipped: Windows always has WARP, and a pipeline failure fails the run. `--gfx-warp` pins that run to WARP.
+
+`ts_admin --smoke-3d` renders the same 3D scene the editor draws. With no `--gfx` it stays on the classic OpenGL renderer. `--gfx=vk` or `--gfx=dx12` renders that scene on the chosen backend and prints the adapter and ray-tracing support.
+
+The device is the highest-performance discrete GPU (`DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE`, then the largest dedicated video memory). Software, remote and virtual adapters are skipped, and the same preference is applied to the Vulkan physical device.
 
 On a Windows machine with an RTX-class GPU:
 

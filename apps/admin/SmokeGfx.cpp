@@ -81,7 +81,12 @@ bool render_reference(std::vector<unsigned char>* px, int* w, int* h, std::strin
   return ok;
 }
 
-bool render_api(rhi::Api api, std::vector<unsigned char>* px, int* w, int* h, std::string* err) {
+struct ApiFrame {
+  std::string adapter;
+  bool raytracing = false;
+};
+
+bool render_api(rhi::Api api, std::vector<unsigned char>* px, int* w, int* h, ApiFrame* info, std::string* err) {
   rhi::DeviceDesc desc;
   desc.api = api;
   desc.offscreen = true;
@@ -90,6 +95,10 @@ bool render_api(rhi::Api api, std::vector<unsigned char>* px, int* w, int* h, st
   desc.height = 128;
   auto device = rhi::create_device(desc, err);
   if (!device) return false;
+  if (info) {
+    info->adapter = device->adapter_name();
+    info->raytracing = device->raytracing();
+  }
   auto renderer = render3d::make_rhi_renderer(device.get());
   if (!renderer->init(err)) return false;
   render3d::MeshData cube = render3d::make_cube(1.0f);
@@ -140,12 +149,13 @@ int run_gfx_smoke() {
   std::vector<unsigned char> ref;
   int rw = 0, rh = 0;
   std::string err;
-  if (!render_reference(&ref, &rw, &rh, &err)) {
+  const bool have_ref = render_reference(&ref, &rw, &rh, &err);
+  if (!have_ref) {
     std::cout << "[smoke-gfx] OpenGL reference skipped (" << err << ")\n";
-    return 0;
   }
   const rhi::Api apis[] = {rhi::Api::OpenGL, rhi::Api::Vulkan, rhi::Api::D3D12};
   int compared = 0;
+  int ran = 0;
   for (rhi::Api api : apis) {
     if (!rhi::api_built(api)) {
       std::cout << "[smoke-gfx] skip " << rhi::api_flag(api) << " (not built on this platform)\n";
@@ -153,20 +163,35 @@ int run_gfx_smoke() {
     }
     std::vector<unsigned char> px;
     int w = 0, h = 0;
+    ApiFrame info;
     err.clear();
-    if (!render_api(api, &px, &w, &h, &err)) {
+    if (!render_api(api, &px, &w, &h, &info, &err)) {
+      // Direct3D 12 is built into Windows (WARP if there is no GPU). A PSO
+      // or device failure there is a real break, not a missing driver.
+      const bool required = api == rhi::Api::D3D12 || (api == rhi::Api::OpenGL && have_ref);
+      if (required) {
+        std::cerr << "[smoke-gfx] " << rhi::api_name(api) << " failed: " << err << "\n";
+        return 1;
+      }
       std::cout << "[smoke-gfx] skip " << rhi::api_flag(api) << " (" << err << ")\n";
       continue;
     }
+    std::cout << "[smoke-gfx] " << rhi::api_name(api) << " \"" << info.adapter << "\" raytracing "
+              << (info.raytracing ? "yes" : "no");
+    if (!have_ref) {
+      std::cout << "  frame " << w << "x" << h << "\n";
+      ++ran;
+      continue;
+    }
     if (w != rw || h != rh) {
+      std::cout << "\n";
       std::cerr << "[smoke-gfx] " << rhi::api_flag(api) << " frame is " << w << "x" << h << "\n";
       return 1;
     }
     const double mae = mean_abs(ref, px);
     const double flipped = mean_abs(ref, flip_y(px, w, h));
     const double best = std::min(mae, flipped);
-    std::cout << "[smoke-gfx] " << rhi::api_name(api) << " vs OpenGL  mae " << mae << "  flipped " << flipped
-              << "\n";
+    std::cout << "  vs OpenGL  mae " << mae << "  flipped " << flipped << "\n";
     if (best > 28.0) {
       std::cerr << "[smoke-gfx] " << rhi::api_name(api) << " is too far from OpenGL\n";
       return 1;
@@ -176,8 +201,10 @@ int run_gfx_smoke() {
       return 1;
     }
     ++compared;
+    ++ran;
   }
-  std::cout << "[smoke-gfx] " << compared << " backend(s) matched OpenGL\n";
+  if (have_ref) std::cout << "[smoke-gfx] " << compared << " backend(s) matched OpenGL\n";
+  else std::cout << "[smoke-gfx] " << ran << " backend(s) rendered (no OpenGL reference)\n";
   return 0;
 }
 

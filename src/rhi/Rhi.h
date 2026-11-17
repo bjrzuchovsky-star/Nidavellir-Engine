@@ -224,6 +224,14 @@ void set_cli_api(Api api);
 bool cli_api(Api* out);
 Api resolve_api(const std::string& settings_api);
 
+// --gfx-debug turns on the D3D12 debug layer (and prints ID3D12InfoQueue
+// messages when a call fails). --gfx-warp forces the Direct3D 12 software
+// adapter so a headless Windows run does not depend on a GPU.
+void set_gfx_debug(bool on);
+bool gfx_debug();
+void set_gfx_warp(bool on);
+bool gfx_warp();
+
 Device* active();
 void set_active(Device* device);
 

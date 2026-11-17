@@ -204,9 +204,11 @@ class RhiRenderer final : public Renderer3D {
     ssao_ = pipe("fullscreen.vert", "ssao.frag", fs);
     bloom_ = pipe("fullscreen.vert", "bloom.frag", fs);
     overlay_ = pipe("overlay.vert", "overlay.frag", fs);
-    rhi::PipelineDesc rt = mesh;
-    rt.ray_query = true;
-    mesh_rt_ = pipe("mesh.vert", "mesh_rt.frag", rt);
+    if (device_->raytracing()) {
+      rhi::PipelineDesc rt = mesh;
+      rt.ray_query = true;
+      mesh_rt_ = pipe("mesh.vert", "mesh_rt.frag", rt);
+    }
     if (!mesh_ || !depth_ || !sky_ || !line_) return false;
     rhi::TargetDesc sd;
     sd.width = sd.height = kShadow;
