@@ -444,6 +444,22 @@ class GlDevice final : public Device {
     if (h) *h = t->height;
     return true;
   }
+  bool read_depth(RenderTarget* target, std::vector<float>* depth, int* w, int* h) override {
+    if (!target || !depth) return false;
+    auto* t = static_cast<GlTarget*>(target);
+    if (!t->depth || !t->fbo) return false;
+    const Gl33& g = gl33();
+    GLint prev = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev);
+    g.BindFramebuffer(GL_FRAMEBUFFER, t->fbo);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    depth->assign(static_cast<std::size_t>(t->width) * static_cast<std::size_t>(t->height), 0.0f);
+    glReadPixels(0, 0, t->width, t->height, GL_DEPTH_COMPONENT, GL_FLOAT, depth->data());
+    g.BindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prev));
+    if (w) *w = t->width;
+    if (h) *h = t->height;
+    return true;
+  }
 
  private:
   static GLuint compile(GLenum type, const char* src, std::string* err) {

@@ -945,6 +945,41 @@ bool VkDeviceR::read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba
   return true;
 }
 
+bool VkDeviceR::read_depth(RenderTarget* target, std::vector<float>* depth, int* w, int* h) {
+  auto* t = static_cast<VkTargetR*>(target);
+  if (!t || !t->depth || !depth) return false;
+  const VkDeviceSize bytes = static_cast<VkDeviceSize>(t->width) * t->height * sizeof(float);
+  VkDeviceMemory mem = VK_NULL_HANDLE;
+  void* map = nullptr;
+  VkBuffer buf = make_buffer(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &mem, &map);
+  one_shot([&](VkCommandBuffer c) {
+    transition(c, t->depth->image, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+               true);
+    VkBufferImageCopy cp{};
+    cp.imageExtent = {static_cast<uint32_t>(t->width), static_cast<uint32_t>(t->height), 1};
+    cp.imageSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    cp.imageSubresource.layerCount = 1;
+    vkCmdCopyImageToBuffer(c, t->depth->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buf, 1, &cp);
+    transition(c, t->depth->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+               true);
+  });
+  depth->assign(static_cast<std::size_t>(t->width) * static_cast<std::size_t>(t->height), 0.0f);
+  if (map) {
+    const std::size_t row = static_cast<std::size_t>(t->width);
+    const float* src = static_cast<const float*>(map);
+    for (int y = 0; y < t->height; ++y) {
+      std::memcpy(depth->data() + static_cast<std::size_t>(t->height - 1 - y) * row, src + static_cast<std::size_t>(y) * row,
+                  row * sizeof(float));
+    }
+  }
+  vkUnmapMemory(device_, mem);
+  destroy_buffer_raw(buf, mem);
+  if (w) *w = t->width;
+  if (h) *h = t->height;
+  return true;
+}
+
 std::uint32_t VkDeviceR::rt_create_blas(const RtGeometry& geo, std::string* error) {
   if (!raytracing_ || !geo.vertices || !geo.indices) {
     if (error) *error = "ray tracing is not available on this Vulkan device";

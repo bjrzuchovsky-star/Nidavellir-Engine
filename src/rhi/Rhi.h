@@ -177,6 +177,15 @@ class Device {
   virtual CommandList* commands() = 0;
   virtual void wait_idle() = 0;
   virtual bool read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba, int* w, int* h) = 0;
+  // Depth as 0..1 floats, bottom row first (same order as read_color). False
+  // when the target has no depth image.
+  virtual bool read_depth(RenderTarget* target, std::vector<float>* depth, int* w, int* h) {
+    (void)target;
+    (void)depth;
+    (void)w;
+    (void)h;
+    return false;
+  }
 
   virtual std::uint32_t rt_create_blas(const RtGeometry& geo, std::string* error);
   virtual std::uint32_t rt_create_tlas(const RtInstance* instances, std::uint32_t count, std::string* error);

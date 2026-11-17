@@ -142,6 +142,7 @@ class DxDevice final : public Device {
   CommandList* commands() override { return depth_ > 0 ? &cmd_ : nullptr; }
   void wait_idle() override { if (queue_) { end_frame_wait(); } }
   bool read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba, int* w, int* h) override;
+  bool read_depth(RenderTarget* target, std::vector<float>* depth, int* w, int* h) override;
   std::uint32_t rt_create_blas(const RtGeometry& geo, std::string* error) override;
   std::uint32_t rt_create_tlas(const RtInstance* instances, std::uint32_t count, std::string* error) override;
   void rt_reset() override;
@@ -963,6 +964,61 @@ bool DxDevice::read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba,
   for (int y = 0; y < t->height; ++y) {
     std::memcpy(rgba->data() + static_cast<std::size_t>(t->height - 1 - y) * row,
                 static_cast<char*>(map) + static_cast<std::size_t>(y) * pitch, row);
+  }
+  rb->Unmap(0, nullptr);
+  rb->Release();
+  if (w) *w = t->width;
+  if (h) *h = t->height;
+  return true;
+}
+bool DxDevice::read_depth(RenderTarget* target, std::vector<float>* depth, int* w, int* h) {
+  auto* t = static_cast<DxTarget*>(target);
+  if (!t || !t->depth || !t->depth->res || !depth) return false;
+  const UINT row_bytes = (static_cast<UINT>(t->width) * 4u + 255u) & ~255u;
+  D3D12_HEAP_PROPERTIES heap{};
+  heap.Type = D3D12_HEAP_TYPE_READBACK;
+  D3D12_RESOURCE_DESC rd{};
+  rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+  rd.Width = static_cast<UINT64>(row_bytes) * static_cast<UINT64>(t->height);
+  rd.Height = 1;
+  rd.DepthOrArraySize = 1;
+  rd.MipLevels = 1;
+  rd.SampleDesc.Count = 1;
+  rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+  ID3D12Resource* rb = nullptr;
+  if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_COPY_DEST,
+                                              nullptr, IID_PPV_ARGS(&rb)))) {
+    return false;
+  }
+  alloc_->Reset();
+  list_->Reset(alloc_, nullptr);
+  barrier(t->depth->res, t->depth->state, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  D3D12_TEXTURE_COPY_LOCATION src{};
+  src.pResource = t->depth->res;
+  src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  D3D12_TEXTURE_COPY_LOCATION dst{};
+  dst.pResource = rb;
+  dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  dst.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R32_FLOAT;
+  dst.PlacedFootprint.Footprint.Width = static_cast<UINT>(t->width);
+  dst.PlacedFootprint.Footprint.Height = static_cast<UINT>(t->height);
+  dst.PlacedFootprint.Footprint.Depth = 1;
+  dst.PlacedFootprint.Footprint.RowPitch = row_bytes;
+  list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+  barrier(t->depth->res, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  t->depth->state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+  list_->Close();
+  ID3D12CommandList* lists[] = {list_};
+  queue_->ExecuteCommandLists(1, lists);
+  end_frame_wait();
+  void* map = nullptr;
+  D3D12_RANGE range{0, static_cast<SIZE_T>(rd.Width)};
+  rb->Map(0, &range, &map);
+  depth->assign(static_cast<std::size_t>(t->width) * static_cast<std::size_t>(t->height), 0.0f);
+  for (int y = 0; y < t->height; ++y) {
+    const float* src_row = reinterpret_cast<const float*>(static_cast<const char*>(map) + static_cast<std::size_t>(y) * row_bytes);
+    float* dst_row = depth->data() + static_cast<std::size_t>(t->height - 1 - y) * static_cast<std::size_t>(t->width);
+    std::memcpy(dst_row, src_row, static_cast<std::size_t>(t->width) * sizeof(float));
   }
   rb->Unmap(0, nullptr);
   rb->Release();

@@ -103,6 +103,18 @@ jobs:
       - name: Smoke (graphics backends)
         working-directory: build/apps/admin/Release
         run: ./ts_admin.exe --smoke-gfx
+      # WARP has no RTX, but the same D3D12 shadow path runs here. Dumps stay
+      # even when the pixel check fails so the depth range is in the log.
+      - name: Smoke 3D (Direct3D 12 on WARP)
+        working-directory: build/apps/admin/Release
+        run: ./ts_admin.exe --smoke-3d --gfx=dx12 --gfx-warp --gfx-debug --smoke-dump
+      - name: Upload D3D12 smoke dumps
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dx12-smoke-dump
+          path: build/apps/admin/Release/smoke-dump
+          if-no-files-found: ignore
       # WARP is always present on Windows. A CreateGraphicsPipelineState
       # failure here fails the job even when the runner has no GPU.
       - name: Smoke (Direct3D 12 on WARP)

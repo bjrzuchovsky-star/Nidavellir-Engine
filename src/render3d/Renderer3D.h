@@ -207,6 +207,11 @@ class Renderer3D {
                            int* /*h*/) const {
     return false;
   }
+  // Sun shadow map, 0 near .. 1 far, bottom row first. False if this
+  // backend has no shadow image to read.
+  virtual bool read_shadow(std::vector<float>* /*depth*/, int* /*w*/, int* /*h*/) const {
+    return false;
+  }
 };
 
 std::unique_ptr<Renderer3D> make_null_renderer3d();

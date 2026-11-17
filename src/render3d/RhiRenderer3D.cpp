@@ -696,6 +696,9 @@ class RhiRenderer final : public Renderer3D {
     rhi::RenderTarget* shown = show_post_ && shown_ ? shown_ : color_;
     return shown && device_->read_color(shown, rgba, w, h);
   }
+  bool read_shadow(std::vector<float>* depth, int* w, int* h) const override {
+    return shadow_ && device_->read_depth(shadow_, depth, w, h);
+  }
 
  private:
   rhi::Texture* tex2d(const void* rgba, int w, int h, bool mips) {

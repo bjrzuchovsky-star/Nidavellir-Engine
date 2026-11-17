@@ -152,6 +152,7 @@ class VkDeviceR final : public Device {
   CommandList* commands() override { return depth_ > 0 ? &cmd_ : nullptr; }
   void wait_idle() override { if (device_) vkDeviceWaitIdle(device_); }
   bool read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba, int* w, int* h) override;
+  bool read_depth(RenderTarget* target, std::vector<float>* depth, int* w, int* h) override;
   std::uint32_t rt_create_blas(const RtGeometry& geo, std::string* error) override;
   std::uint32_t rt_create_tlas(const RtInstance* instances, std::uint32_t count, std::string* error) override;
   void rt_reset() override;

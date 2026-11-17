@@ -8,3 +8,7 @@
 // a display is available, and the 3D editor (create, place, gizmo drags
 // with snap, undo / redo, pick, drag-drop a .gltf, Play / Stop). 0 = pass.
 int run_3d_smoke();
+
+// --smoke-dump: write the frame and the shadow map under smoke-dump/ and
+// print the shadow depth range. Checked by --smoke-3d.
+void set_smoke_dump(bool on);
