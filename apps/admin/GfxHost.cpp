@@ -120,7 +120,12 @@ bool Host::open(int width, int height, const char* title) {
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     std::cout << "Creating OpenGL window..." << std::endl;
     window = glfwCreateWindow(width, height, title, nullptr, nullptr);
-    if (!window) return false;
+    if (!window) {
+      const char* why = nullptr;
+      glfwGetError(&why);
+      std::cerr << "OpenGL window failed: " << (why ? why : "glfwCreateWindow returned null") << "\n";
+      return false;
+    }
     glfwMakeContextCurrent(window);
     if (glfwGetCurrentContext() != window) {
       std::cerr << "OpenGL context was not created\n";
