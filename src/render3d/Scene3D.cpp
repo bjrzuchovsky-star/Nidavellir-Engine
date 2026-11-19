@@ -169,16 +169,60 @@ Value entity_json(const Entity3D& e) {
     if (!mt.metal_rough_texture.empty()) {
       m.set("metal_rough_texture", Value::string(mt.metal_rough_texture));
     }
+    if (!mt.ao_texture.empty()) m.set("ao_texture", Value::string(mt.ao_texture));
+    if (!mt.height_texture.empty()) m.set("height_texture", Value::string(mt.height_texture));
     if (mt.override_model) m.set("override_model", Value::boolean(true));
     o.set("material", std::move(m));
   }
   if (e.light) {
     Value l = Value::object();
-    l.set("type", Value::string(e.light->type == Light3D::Type::Directional ? "directional" : "point"));
+    const char* kind = "point";
+    switch (e.light->type) {
+      case Light3D::Type::Directional: kind = "directional"; break;
+      case Light3D::Type::Spot: kind = "spot"; break;
+      case Light3D::Type::Area: kind = "area"; break;
+      case Light3D::Type::Emissive: kind = "emissive"; break;
+      case Light3D::Type::Sky: kind = "sky"; break;
+      case Light3D::Type::Point: kind = "point"; break;
+    }
+    l.set("type", Value::string(kind));
     l.set("color", json::floats(e.light->color, 3));
     l.set("intensity", Value::number(e.light->intensity));
     l.set("range", Value::number(e.light->range));
+    if (e.light->type == Light3D::Type::Spot) {
+      l.set("angle", Value::number(e.light->angle));
+      l.set("inner", Value::number(e.light->inner));
+    }
+    if (e.light->type == Light3D::Type::Area) {
+      l.set("size_x", Value::number(e.light->size_x));
+      l.set("size_y", Value::number(e.light->size_y));
+    }
+    if (e.light->kelvin > 0.0f) l.set("kelvin", Value::number(e.light->kelvin));
+    if (e.light->cast_shadows) l.set("cast_shadows", Value::boolean(true));
+    if (e.light->shadow_size != 0) l.set("shadow_size", Value::number(e.light->shadow_size));
+    if (e.light->shadow_bias != 0.002f) l.set("shadow_bias", Value::number(e.light->shadow_bias));
+    if (e.light->shadow_softness != 1.0f) l.set("shadow_softness", Value::number(e.light->shadow_softness));
     o.set("light", std::move(l));
+  }
+  if (e.reflection_probe) {
+    const ReflectionProbe3D& p = *e.reflection_probe;
+    Value v = Value::object();
+    if (p.box[0] > 0.0f) v.set("box", json::floats(p.box, 3));
+    else v.set("radius", Value::number(p.radius));
+    if (p.blend != 1.0f) v.set("blend", Value::number(p.blend));
+    if (p.resolution != 64) v.set("resolution", Value::number(p.resolution));
+    o.set("reflection_probe", std::move(v));
+  }
+  if (e.gi_volume) {
+    const IrradianceVolume3D& g = *e.gi_volume;
+    Value v = Value::object();
+    v.set("extent", json::floats(g.extent, 3));
+    v.set("nx", Value::number(g.nx));
+    v.set("ny", Value::number(g.ny));
+    v.set("nz", Value::number(g.nz));
+    if (g.dynamic_rt) v.set("dynamic_rt", Value::boolean(true));
+    if (!g.sh.empty()) v.set("sh", json::floats(g.sh.data(), g.sh.size()));
+    o.set("gi_volume", std::move(v));
   }
   if (e.collider) o.set("collider", physics_json::collider(*e.collider));
   if (e.player) {
@@ -390,17 +434,57 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     m.albedo_texture = v.str("albedo_texture");
     m.normal_texture = v.str("normal_texture");
     m.metal_rough_texture = v.str("metal_rough_texture");
+    m.ao_texture = v.str("ao_texture");
+    m.height_texture = v.str("height_texture");
     m.override_model = v.flag("override_model", false);
     e.material = m;
   }
   if (o["light"].is_object()) {
     const Value& v = o["light"];
     Light3D l;
-    l.type = v.str("type") == "directional" ? Light3D::Type::Directional : Light3D::Type::Point;
+    const std::string ty = v.str("type");
+    if (ty == "directional") l.type = Light3D::Type::Directional;
+    else if (ty == "spot") l.type = Light3D::Type::Spot;
+    else if (ty == "area") l.type = Light3D::Type::Area;
+    else if (ty == "emissive") l.type = Light3D::Type::Emissive;
+    else if (ty == "sky") l.type = Light3D::Type::Sky;
+    else l.type = Light3D::Type::Point;
+    l.angle = v.flt("angle", l.angle);
+    l.inner = v.flt("inner", l.inner);
+    l.size_x = v.flt("size_x", l.size_x);
+    l.size_y = v.flt("size_y", l.size_y);
     v.floats("color", l.color, 3);
     l.intensity = std::max(0.0f, v.flt("intensity", l.intensity));
     l.range = std::max(0.1f, v.flt("range", l.range));
+    l.kelvin = std::max(0.0f, v.flt("kelvin", l.kelvin));
+    l.cast_shadows = v.flag("cast_shadows", l.cast_shadows);
+    l.shadow_size = std::clamp(static_cast<int>(v.num("shadow_size", l.shadow_size)), 0, 1024);
+    l.shadow_bias = std::clamp(v.flt("shadow_bias", l.shadow_bias), 0.0f, 0.05f);
+    l.shadow_softness = std::clamp(v.flt("shadow_softness", l.shadow_softness), 0.25f, 4.0f);
     e.light = l;
+  }
+  if (o["reflection_probe"].is_object()) {
+    const Value& v = o["reflection_probe"];
+    ReflectionProbe3D p;
+    v.floats("box", p.box, 3);
+    p.radius = std::clamp(v.flt("radius", p.radius), 0.25f, 200.0f);
+    p.blend = std::clamp(v.flt("blend", p.blend), 0.05f, 50.0f);
+    p.resolution = std::clamp(static_cast<int>(v.num("resolution", p.resolution)), 8, 128);
+    e.reflection_probe = p;
+  }
+  if (o["gi_volume"].is_object()) {
+    const Value& v = o["gi_volume"];
+    IrradianceVolume3D g;
+    v.floats("extent", g.extent, 3);
+    g.nx = std::clamp(static_cast<int>(v.num("nx", g.nx)), 1, 8);
+    g.ny = std::clamp(static_cast<int>(v.num("ny", g.ny)), 1, 4);
+    g.nz = std::clamp(static_cast<int>(v.num("nz", g.nz)), 1, 8);
+    g.dynamic_rt = v.flag("dynamic_rt", false);
+    if (v["sh"].is_array()) {
+      g.sh.resize(v["sh"].size());
+      for (std::size_t i = 0; i < g.sh.size(); ++i) g.sh[i] = v["sh"][i].as_float();
+    }
+    e.gi_volume = g;
   }
   if (o["collider"].is_object()) e.collider = physics_json::read_collider(o["collider"]);
   if (o["rigid_body"].is_object()) e.rigid_body = physics_json::read_rigid_body(o["rigid_body"]);
@@ -772,6 +856,39 @@ std::string write(const Scene3D& s) {
   e.set("wind_dir", json::floats(env.wind_dir, 2));
   e.set("wind_strength", Value::number(env.wind_strength));
   e.set("wind_gust", Value::number(env.wind_gust));
+  if (!(env.lighting == render3d::Lighting{})) {
+    Value lit = Value::object();
+    const char* presets[] = {"classic", "fast", "balanced", "cinematic", "custom"};
+    const int preset = std::clamp(env.lighting.preset, 0, 4);
+    lit.set("preset", Value::string(presets[preset]));
+    lit.set("cascades", Value::number(env.lighting.cascades));
+    lit.set("filter", Value::string(env.lighting.filter == 1 ? "pcss" : "pcf"));
+    const char* gis[] = {"none", "baked", "screen", "ray"};
+    lit.set("gi", Value::string(gis[std::clamp(env.lighting.gi, 0, 3)]));
+    const char* aos[] = {"off", "ssao", "rtao"};
+    lit.set("ao", Value::string(aos[std::clamp(env.lighting.ao, 0, 2)]));
+    const char* rfs[] = {"off", "probes", "ssr", "ray"};
+    lit.set("reflections", Value::string(rfs[std::clamp(env.lighting.reflections, 0, 3)]));
+    const char* tones[] = {"reinhard", "post", "aces", "agx"};
+    lit.set("tonemap", Value::string(tones[std::clamp(env.lighting.tonemap, 0, 3)]));
+    lit.set("exposure", Value::number(env.lighting.exposure));
+    lit.set("bloom", Value::number(env.lighting.bloom));
+    lit.set("contrast", Value::number(env.lighting.contrast));
+    lit.set("saturation", Value::number(env.lighting.saturation));
+    lit.set("gain", Value::number(env.lighting.gain));
+    lit.set("pom", Value::number(env.lighting.pom));
+    lit.set("raytracing", Value::boolean(env.lighting.raytracing));
+    if (env.lighting.quality > 0) lit.set("quality", Value::number(env.lighting.quality));
+    if (env.lighting.sun_kelvin > 0.0f) lit.set("sun_kelvin", Value::number(env.lighting.sun_kelvin));
+    if (env.lighting.sky != 1.0f) lit.set("sky", Value::number(env.lighting.sky));
+    if (env.lighting.contact_shadows) lit.set("contact", Value::boolean(true));
+    if (env.lighting.auto_exposure) lit.set("auto_exposure", Value::boolean(true));
+    if (env.lighting.volumetric) lit.set("volumetric", Value::boolean(true));
+    if (env.lighting.point_shadows) lit.set("point_shadows", Value::boolean(true));
+    if (env.lighting.spot_shadows) lit.set("spot_shadows", Value::boolean(true));
+    if (!env.lighting.hdri.empty()) lit.set("hdri", Value::string(env.lighting.hdri));
+    e.set("lighting", std::move(lit));
+  }
   root.set("environment", std::move(e));
   Value ents = Value::array();
   for (const Entity3D& en : s.entities) ents.push(entity_json(en));
@@ -844,6 +961,41 @@ bool parse(const std::string& text, Scene3D* out, std::string* error) {
     env.floats("wind_dir", e.wind_dir, 2);
     e.wind_strength = std::clamp(env.flt("wind_strength", e.wind_strength), 0.0f, 4.0f);
     e.wind_gust = std::clamp(env.flt("wind_gust", e.wind_gust), 0.0f, 4.0f);
+    const Value& lit = env["lighting"];
+    if (lit.is_object()) {
+      const std::string preset = lit.str("preset", "classic");
+      if (preset == "fast") e.lighting.preset = 1;
+      else if (preset == "balanced") e.lighting.preset = 2;
+      else if (preset == "cinematic") e.lighting.preset = 3;
+      else if (preset == "custom") e.lighting.preset = 4;
+      else e.lighting.preset = 0;
+      e.lighting.cascades = std::clamp(static_cast<int>(lit.num("cascades", e.lighting.cascades)), 1, 4);
+      e.lighting.filter = lit.str("filter", "pcf") == "pcss" ? 1 : 0;
+      const std::string gi = lit.str("gi", "none");
+      e.lighting.gi = gi == "baked" ? 1 : gi == "screen" ? 2 : gi == "ray" ? 3 : 0;
+      const std::string ao = lit.str("ao", "off");
+      e.lighting.ao = ao == "ssao" ? 1 : ao == "rtao" ? 2 : 0;
+      const std::string rf = lit.str("reflections", "off");
+      e.lighting.reflections = rf == "probes" ? 1 : rf == "ssr" ? 2 : rf == "ray" ? 3 : 0;
+      const std::string tm = lit.str("tonemap", "reinhard");
+      e.lighting.tonemap = tm == "agx" ? 3 : tm == "aces" ? 2 : tm == "post" ? 1 : 0;
+      e.lighting.exposure = lit.flt("exposure", e.lighting.exposure);
+      e.lighting.bloom = lit.flt("bloom", e.lighting.bloom);
+      e.lighting.contrast = lit.flt("contrast", e.lighting.contrast);
+      e.lighting.saturation = lit.flt("saturation", e.lighting.saturation);
+      e.lighting.gain = lit.flt("gain", e.lighting.gain);
+      e.lighting.pom = lit.flt("pom", e.lighting.pom);
+      e.lighting.raytracing = lit.flag("raytracing", false);
+      e.lighting.quality = std::clamp(static_cast<int>(lit.num("quality", 0)), 0, 5);
+      e.lighting.sun_kelvin = std::max(0.0f, lit.flt("sun_kelvin", 0.0f));
+      e.lighting.sky = std::clamp(lit.flt("sky", 1.0f), 0.0f, 4.0f);
+      e.lighting.contact_shadows = lit.flag("contact", false);
+      e.lighting.auto_exposure = lit.flag("auto_exposure", false);
+      e.lighting.volumetric = lit.flag("volumetric", false);
+      e.lighting.point_shadows = lit.flag("point_shadows", false);
+      e.lighting.spot_shadows = lit.flag("spot_shadows", false);
+      e.lighting.hdri = lit.str("hdri", "");
+    }
   }
   for (const Value& v : root["entities"].items()) {
     Entity3D en;

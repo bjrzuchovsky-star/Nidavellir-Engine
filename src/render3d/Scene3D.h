@@ -91,6 +91,8 @@ struct Material3D {
   std::string albedo_texture;       // project-relative image paths
   std::string normal_texture;
   std::string metal_rough_texture;
+  std::string ao_texture;
+  std::string height_texture;
   // glTF meshes keep their own materials unless this is set.
   bool override_model = false;
   // Runtime only (not saved): show the albedo as is, no lighting -- the VR
@@ -100,12 +102,41 @@ struct Material3D {
 };
 
 struct Light3D {
-  enum class Type : std::uint8_t { Point, Directional };
+  enum class Type : std::uint8_t { Point, Directional, Spot, Area, Emissive, Sky };
   Type type = Type::Point;
   float color[3] = {1.0f, 0.78f, 0.5f};
   float intensity = 6.0f;
-  float range = 8.0f;  // point only
+  float range = 8.0f;  // point / spot
+  float angle = 40.0f;  // spot outer cone, degrees
+  float inner = 0.75f;  // spot inner cone as a fraction of the outer
+  float size_x = 1.0f;  // area light
+  float size_y = 1.0f;
+  float kelvin = 0.0f;  // 0 = use Color. Otherwise a black-body multiplier.
+  bool cast_shadows = false;
+  int shadow_size = 0;  // 0 = 512 when this light casts
+  float shadow_bias = 0.002f;
+  float shadow_softness = 1.0f;
   bool operator==(const Light3D& o) const = default;
+};
+
+// A captured cubemap. Sphere when box extents are 0.
+struct ReflectionProbe3D {
+  float radius = 8.0f;
+  float box[3] = {0, 0, 0};
+  float blend = 1.0f;
+  int resolution = 64;
+  bool operator==(const ReflectionProbe3D& o) const = default;
+};
+
+// Irradiance grid. sh is 12 floats per probe (L1 red, green, blue), empty
+// until Bake. dynamic_rt refreshes one probe a frame when ray queries exist.
+struct IrradianceVolume3D {
+  float extent[3] = {16.0f, 8.0f, 16.0f};
+  int nx = 4, ny = 2, nz = 4;
+  bool dynamic_rt = false;
+  bool bake = false;  // set by the button, cleared once the SH is stored
+  std::vector<float> sh;
+  bool operator==(const IrradianceVolume3D& o) const = default;
 };
 
 // Collider shapes. Sizes are local (times the entity scale):
@@ -385,6 +416,8 @@ struct Entity3D {
   std::optional<MeshRef> mesh;
   std::optional<Material3D> material;
   std::optional<Light3D> light;
+  std::optional<ReflectionProbe3D> reflection_probe;
+  std::optional<IrradianceVolume3D> gi_volume;
   std::optional<Collider3D> collider;
   std::optional<Player3D> player;
   std::optional<ScriptData> script;

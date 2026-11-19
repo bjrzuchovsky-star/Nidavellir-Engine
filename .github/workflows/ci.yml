@@ -46,6 +46,41 @@ jobs:
         run: cmake -S . -B build -A x64
       - name: Build (Release)
         run: cmake --build build --config Release --parallel
+      - name: Built ts_admin and ts_game
+        shell: pwsh
+        run: |
+          foreach ($exe in @('build/apps/admin/Release/ts_admin.exe', 'build/apps/game/Release/ts_game.exe')) {
+            if (-not (Test-Path $exe)) { throw "missing $exe" }
+            Write-Host "built $exe"
+          }
+      # The D3D12 translation unit and the host-arch DXC bake. A recursive
+      # search of the DXC package used to pick bin/arm64/dxc.exe on AMD64
+      # (WinError 216). This fails the job if that happens again.
+      - name: Direct3D 12 (host x64 DXC)
+        shell: pwsh
+        run: |
+          $line = Select-String -Path build/CMakeCache.txt -Pattern '^TS_DXC:FILEPATH=' | Select-Object -First 1
+          if (-not $line) { throw "TS_DXC was not recorded in CMakeCache.txt" }
+          $dxc = $line.Line.Substring("TS_DXC:FILEPATH=".Length).Trim()
+          Write-Host "DXC: $dxc"
+          if ($dxc -match '[\\/]arm64[\\/]') { throw "x64 Windows CI resolved an ARM64 dxc: $dxc" }
+          & $dxc --version
+          if ($LASTEXITCODE) { throw "dxc --version failed: $dxc" }
+          $obj = Get-ChildItem -Path build -Recurse -File -Filter 'Dx12Device*.obj' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -eq 'Dx12Device.obj' -or $_.Name -eq 'Dx12Device.cpp.obj' } |
+            Select-Object -First 1
+          if (-not $obj) { throw "D3D12 path was not built (Dx12Device.obj missing)" }
+          $dxcDir = Split-Path $dxc
+          foreach ($dll in @('dxcompiler.dll', 'dxil.dll')) {
+            $beside = Join-Path $dxcDir $dll
+            if (-not (Test-Path $beside)) { continue }
+            $copied = Join-Path 'build/apps/admin/Release' $dll
+            if (-not (Test-Path $copied)) { throw "$dll sits beside dxc but was not copied next to ts_admin.exe ($copied)" }
+          }
+          if (-not (Test-Path (Join-Path 'build/apps/admin/Release' 'dxcompiler.dll'))) {
+            throw "dxcompiler.dll was not copied next to ts_admin.exe"
+          }
+          Write-Host "D3D12 built: $($obj.FullName)"
       - name: Smoke (server + client)
         shell: pwsh
         run: |
@@ -65,6 +100,40 @@ jobs:
       - name: Smoke (full ts_admin --smoke)
         working-directory: build/apps/admin/Release
         run: ./ts_admin.exe --smoke
+      - name: Smoke (graphics backends)
+        working-directory: build/apps/admin/Release
+        run: ./ts_admin.exe --smoke-gfx
+      # WARP has no RTX, but the same D3D12 shadow path runs here. Dumps stay
+      # even when the pixel check fails so the depth range is in the log.
+      - name: Smoke 3D (Direct3D 12 on WARP)
+        working-directory: build/apps/admin/Release
+        run: ./ts_admin.exe --smoke-3d --gfx=dx12 --gfx-warp --gfx-debug --smoke-dump
+      - name: Smoke present (Direct3D 12 on WARP)
+        working-directory: build/apps/admin/Release
+        run: ./ts_admin.exe --smoke-present --gfx=dx12 --gfx-warp --gfx-debug
+      - name: Smoke realm (Direct3D 12 on WARP)
+        working-directory: build/apps/admin/Release
+        run: ./ts_admin.exe --smoke-realm --gfx=dx12 --gfx-warp --gfx-debug
+      - name: Smoke switch (Project Manager to Editor3D, Direct3D 12 on WARP)
+        working-directory: build/apps/admin/Release
+        run: ./ts_admin.exe --smoke-switch --gfx=dx12 --gfx-warp --gfx-debug
+      - name: Smoke lighting (Direct3D 12 on WARP)
+        working-directory: build/apps/admin/Release
+        run: ./ts_admin.exe --smoke-lighting --gfx=dx12 --gfx-warp --gfx-debug
+      # windows-latest has no OpenGL ICD, so this step skips. The visible
+      # window is checked on the Linux job under Xvfb.
+      - name: Upload D3D12 smoke dumps
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dx12-smoke-dump
+          path: build/apps/admin/Release/smoke-dump
+          if-no-files-found: ignore
+      # WARP is always present on Windows. A CreateGraphicsPipelineState
+      # failure here fails the job even when the runner has no GPU.
+      - name: Smoke (Direct3D 12 on WARP)
+        working-directory: build/apps/admin/Release
+        run: ./ts_admin.exe --smoke-gfx --gfx-warp --gfx-debug
 
   linux:
     name: ubuntu-latest / GCC
@@ -77,7 +146,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ninja-build \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libgl1-mesa-dev libwayland-dev libxkbcommon-dev wayland-protocols xvfb
+            libgl1-mesa-dev libwayland-dev libxkbcommon-dev wayland-protocols xvfb \
+            mesa-vulkan-drivers python3
       - name: .NET 8 SDK
         run: |
           curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
@@ -90,6 +160,10 @@ jobs:
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build --parallel
+      - name: Built ts_admin and ts_game
+        run: |
+          test -x build/apps/admin/ts_admin
+          test -x build/apps/game/ts_game
       - name: Smoke (server + client)
         run: |
           (cd build/apps/server && ./ts_server --smoke)
@@ -107,3 +181,15 @@ jobs:
       - name: Smoke (full ts_admin --smoke, under Xvfb)
         working-directory: build/apps/admin
         run: xvfb-run -a -s "-screen 0 1280x800x24" ./ts_admin --smoke
+      - name: Smoke (graphics backends, under Xvfb)
+        working-directory: build/apps/admin
+        run: xvfb-run -a -s "-screen 0 1280x800x24" ./ts_admin --smoke-gfx
+      - name: Smoke window (visible OpenGL, under Xvfb)
+        working-directory: build/apps/admin
+        run: xvfb-run -a -s "-screen 0 1280x800x24" ./ts_admin --smoke-window --gfx=gl
+      - name: Smoke switch (Project Manager to Editor3D, under Xvfb)
+        working-directory: build/apps/admin
+        run: xvfb-run -a -s "-screen 0 1280x800x24" ./ts_admin --smoke-switch
+      - name: Smoke lighting (under Xvfb)
+        working-directory: build/apps/admin
+        run: xvfb-run -a -s "-screen 0 1280x800x24" ./ts_admin --smoke-lighting

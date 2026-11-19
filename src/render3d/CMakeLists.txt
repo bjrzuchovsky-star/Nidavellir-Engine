@@ -25,14 +25,16 @@ add_library(ts_render3d
   Retarget.cpp
   Animator.cpp
   Scene3D.cpp
+  HdrImage.cpp
   Attach3D.cpp
   CameraMigrate3D.cpp
   Scene3D_Physics.cpp
   SceneView.cpp
   UploadStage.cpp
   Renderer3D.cpp
-  GlApi.cpp
   GlRenderer3D.cpp
+  RhiRenderer3D.cpp
+  lighting/Lighting.cpp
   GlTerrainFoliage.cpp
   ../terrain/Terrain.cpp
   ../terrain/Foliage.cpp
@@ -51,6 +53,7 @@ target_link_libraries(ts_render3d
     ts_core
     ts_scene
     ts_profiler
+    ts_rhi
     glfw
     OpenGL::GL
   PRIVATE

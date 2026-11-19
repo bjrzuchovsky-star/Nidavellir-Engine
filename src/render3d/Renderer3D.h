@@ -35,6 +35,39 @@ struct FrameStats {
   std::size_t gpu_bytes = 0;
 };
 
+// Modular lighting. Defaults reproduce the classic forward frame (one
+// shadowed sun, Reinhard in the mesh shader, no extra passes).
+struct Lighting {
+  int preset = 0;          // 0 classic, 1 fast, 2 balanced, 3 cinematic, 4 custom
+  int cascades = 1;        // 1..4
+  int filter = 0;          // 0 PCF, 1 PCSS
+  int gi = 0;              // 0 none, 1 baked probes, 2 screen-space, 3 ray traced
+  int ao = 0;              // 0 off, 1 SSAO, 2 RTAO
+  int reflections = 0;     // 0 off, 1 probes, 2 SSR, 3 ray traced
+  int tonemap = 0;         // 0 Reinhard in-shader, 1 Reinhard post, 2 ACES, 3 AgX
+  int quality = 0;         // 0 unset, 1 low, 2 medium, 3 high, 4 ultra, 5 ray traced
+  float exposure = 1.0f;
+  float bloom = 0.0f;
+  float contrast = 1.0f;
+  float saturation = 1.0f;
+  float gain = 1.0f;
+  float pom = 0.0f;        // parallax scale, 0 off
+  float pcss = 0.08f;
+  float sky = 1.0f;        // sky-light multiplier on ambient
+  float sun_kelvin = 0.0f; // 0 = use the authored sun colour
+  float contact = 0.02f;   // contact-shadow gap in shadow-map space
+  bool point_shadows = false;
+  bool spot_shadows = false;
+  int max_shadow_lights = 4;  // point lights spend 6 of the 8 atlas tiles
+  bool contact_shadows = false;
+  bool auto_exposure = false;
+  bool volumetric = false;
+  bool raytracing = false; // off unless a scene asks, and only if the GPU can
+  std::string hdri;
+  std::string modules;     // plugin passes: "id=1,other=0"
+  bool operator==(const Lighting& o) const = default;
+};
+
 // Sky, ambient and sun for a frame.
 struct Environment {
   float sky_top[3] = {0.16f, 0.22f, 0.36f};
@@ -56,6 +89,7 @@ struct Environment {
   float wind_dir[2] = {1.0f, 0.0f};
   float wind_strength = 0.0f;
   float wind_gust = 0.0f;
+  Lighting lighting{};
   bool operator==(const Environment& o) const = default;
 };
 
@@ -64,6 +98,35 @@ struct PointLight {
   float color[3] = {1.0f, 0.75f, 0.45f};
   float intensity = 6.0f;
   float range = 8.0f;
+  bool shadows = false;
+  int shadow_size = 0;       // 0 = 512. Otherwise 256, 512 or 1024.
+  float shadow_bias = 0.002f;
+  float shadow_softness = 1.0f;
+};
+
+// Cone along `direction` (the direction light travels). outer_cos / inner_cos
+// are cosines of the half-angles.
+struct SpotLight {
+  Vec3 position;
+  Vec3 direction{0, -1, 0};
+  float color[3] = {1.0f, 0.9f, 0.7f};
+  float intensity = 8.0f;
+  float range = 12.0f;
+  float outer_cos = 0.8f;
+  float inner_cos = 0.9f;
+  bool shadows = false;
+  int shadow_size = 0;
+  float shadow_bias = 0.002f;
+  float shadow_softness = 1.0f;
+};
+
+// A flat rectangle centred at position, spanned by axis_u and axis_v.
+struct AreaLight {
+  Vec3 position;
+  Vec3 axis_u{0.5f, 0, 0};
+  Vec3 axis_v{0, 0, 0.5f};
+  float color[3] = {1.0f, 0.95f, 0.85f};
+  float intensity = 4.0f;
 };
 
 // One instanced foliage batch (terrain/Foliage.h): a mesh repeated at
@@ -85,6 +148,28 @@ struct FoliageBatch {
   std::size_t count = 0;
 };
 
+// Reflection probe placed in the scene. box == 0 is a sphere of `radius`.
+struct ReflectionProbeDesc {
+  Vec3 position;
+  Vec3 box;
+  float radius = 8.0f;
+  float blend = 1.0f;
+  int resolution = 64;
+  std::uint64_t id = 0;
+};
+// Irradiance volume. sh is 12 floats per probe (L1), or null until baked.
+// bake asks this frame to fill take_gi_bake.
+struct GiVolumeDesc {
+  Vec3 origin;
+  Vec3 spacing{4, 4, 4};
+  int nx = 1, ny = 1, nz = 1;
+  bool dynamic = false;
+  bool bake = false;
+  std::uint64_t id = 0;
+  const float* sh = nullptr;
+  int sh_count = 0;
+};
+
 class Renderer3D {
  public:
   static constexpr std::size_t kMaxPointLights = 8;
@@ -102,10 +187,22 @@ class Renderer3D {
   // Offscreen (true): draw into the renderer's own color+depth target of
   // the frame size (editor viewport, tests); false: the bound framebuffer.
   virtual void set_offscreen(bool /*on*/) {}
+  // With offscreen drawing, also copy the color target to the window's
+  // swapchain at the end of the frame (ts_game). The editor leaves this off
+  // and draws its own UI into the swapchain.
+  virtual void set_present_window(bool /*on*/) {}
   virtual void set_environment(const Environment& /*env*/) {}
 
   virtual void begin_frame(const Camera3D& camera, int width, int height) = 0;
   virtual void add_point_light(const PointLight& /*light*/) {}
+  virtual void add_spot_light(const SpotLight& /*light*/) {}
+  virtual void add_area_light(const AreaLight& /*light*/) {}
+
+  virtual void set_reflection_probes(const ReflectionProbeDesc* /*probes*/, int /*count*/) {}
+  virtual void set_gi_volume(const GiVolumeDesc& /*volume*/) {}
+  virtual void clear_gi_volume() {}
+  virtual bool take_gi_bake(std::vector<float>* /*sh*/) { return false; }
+  virtual void set_hdri_image(const unsigned char* /*rgba*/, int /*w*/, int /*h*/, float /*rgbm_range*/) {}
   virtual void draw(MeshHandle mesh, MaterialHandle material,
                     const Transform& transform) = 0;
   virtual void draw_matrix(MeshHandle mesh, MaterialHandle material,
@@ -152,8 +249,15 @@ class Renderer3D {
   // Offscreen color texture (GL name; 0 when none) and its pixels, RGBA8
   // bottom row first. False when there is nothing to read.
   virtual std::uint64_t color_texture() const { return 0; }
+  // True when row 0 of color_texture() is the bottom of the image (OpenGL).
+  virtual bool color_bottom_up() const { return true; }
   virtual bool read_pixels(std::vector<unsigned char>* /*rgba*/, int* /*w*/,
                            int* /*h*/) const {
+    return false;
+  }
+  // Sun shadow map, 0 near .. 1 far, bottom row first. False if this
+  // backend has no shadow image to read.
+  virtual bool read_shadow(std::vector<float>* /*depth*/, int* /*w*/, int* /*h*/) const {
     return false;
   }
 };

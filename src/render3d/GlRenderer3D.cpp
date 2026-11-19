@@ -1080,6 +1080,21 @@ class GlRenderer3D final : public Renderer3D {
     return true;
   }
 
+  bool read_shadow(std::vector<float>* depth, int* w, int* h) const override {
+    if (!depth || !shadow_fbo_) return false;
+    const Gl33& g = gl33();
+    GLint prev = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev);
+    g.BindFramebuffer(GL_FRAMEBUFFER, shadow_fbo_);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    depth->assign(static_cast<std::size_t>(kShadowSize) * kShadowSize, 0.0f);
+    glReadPixels(0, 0, kShadowSize, kShadowSize, GL_DEPTH_COMPONENT, GL_FLOAT, depth->data());
+    g.BindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prev));
+    if (w) *w = kShadowSize;
+    if (h) *h = kShadowSize;
+    return true;
+  }
+
  private:
   // Upload a draw's palette into the bone UBO (binding 0). False = rigid.
   bool bind_bones(const DrawItem& d) {

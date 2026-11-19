@@ -4,6 +4,9 @@
 #include "render3d/import/SourceMaterials.h"
 #include "editor/scripting/ScriptComponents.h"
 #include "editor/AppFlow.h"
+#include "editor/launch/GameLauncher.h"
+#include "editor/projects/ProjectGraphics.h"
+#include "rhi/Rhi.h"
 
 #include "editor/plugins/EditorPlugins.h"
 #include "editor/screens/Editor2DScreen.h"
@@ -59,10 +62,12 @@ void AppFlow::start() {
                       " project(s) from " + settings_.projects_root;
   }
 
+  if (settings_.graphics_api.empty() && !rhi::cli_api(nullptr)) settings_.graphics_api = rhi::default_api_flag();
   // Persist defaults on first run so the config file exists and is discoverable.
   persist_settings();
 
   transition_to(AppState::Loading);
+  open_startup_project();
 }
 
 bool AppFlow::reload_projects() {
@@ -143,6 +148,11 @@ void AppFlow::tick(float delta_seconds) {
   if (!screen_ || state_ == AppState::Quit) {
     return;
   }
+  ProjectInfo changed;
+  if (take_graphics_relaunch(&changed) && apply_project_graphics(changed)) {
+    transition_to(AppState::Quit);
+    return;
+  }
 
   tick_updates();
   if (state_ == AppState::Quit) {
@@ -170,6 +180,10 @@ void AppFlow::tick(float delta_seconds) {
       if (auto* pm = dynamic_cast<ProjectManagerScreen*>(screen_.get())) {
         if (next == AppState::Editor2D || next == AppState::Editor3D) {
           if (const ProjectInfo* selected = pm->selected_project()) {
+            if (apply_project_graphics(*selected)) {
+              transition_to(AppState::Quit);
+              return;
+            }
             active_project_ = std::make_unique<ProjectInfo>(*selected);
             project_store_.touch_last_opened(selected->path);
             settings_.last_project_path = selected->path;
@@ -204,6 +218,73 @@ void AppFlow::tick(float delta_seconds) {
   open_requested_claim();
 }
 
+bool AppFlow::apply_project_graphics(const ProjectInfo& project) {
+  if (rhi::cli_api(nullptr)) return false;
+  std::string flag = project.graphics_api;
+  const char* why = "project graphics API";
+  if (flag.empty()) {
+    flag = settings_.graphics_api.empty() ? rhi::default_api_flag() : settings_.graphics_api;
+    why = "engine default";
+  }
+  bool parsed = false;
+  const rhi::Api want = rhi::parse_api(flag, &parsed);
+  if (!parsed || !rhi::api_built(want)) {
+    status_message_ = std::string(rhi::api_name(want)) + " is not in this build. Staying on OpenGL.";
+    std::cout << "[gfx] " << status_message_ << '\n';
+    return false;
+  }
+  rhi::Api failed = rhi::Api::OpenGL;
+  std::string fail_why;
+  if (rhi::api_fallback(&failed, &fail_why) && failed == want) {
+    status_message_ = std::string(rhi::api_name(want)) + " did not start (" + fail_why + "). Staying on OpenGL.";
+    std::cout << "[gfx] " << status_message_ << '\n';
+    return false;
+  }
+  const rhi::Api have = rhi::active() ? rhi::active()->api() : rhi::Api::OpenGL;
+  if (have == want) return false;
+  std::cout << "[gfx] Restarting on " << rhi::api_name(want) << " for \"" << project.name << "\" (" << why
+            << ").\n";
+  std::string err;
+  if (!launcher::relaunch_editor(rhi::api_flag(want), project.path, &err)) {
+    status_message_ = err.empty() ? "could not restart the editor" : err;
+    std::cerr << "[gfx] " << status_message_ << '\n';
+    return false;
+  }
+  return true;
+}
+
+void AppFlow::open_startup_project() {
+  if (startup_project_.empty()) return;
+  const std::string path = startup_project_;
+  startup_project_.clear();
+  ProjectInfo info;
+  std::string err;
+  if (!ProjectStore::load_project_json(path, &info, &err)) {
+    status_message_ = err.empty() ? "Could not open " + path : err;
+    std::cerr << "[gfx] " << status_message_ << '\n';
+    return;
+  }
+  if (apply_project_graphics(info)) {
+    transition_to(AppState::Quit);
+    return;
+  }
+  active_project_ = std::make_unique<ProjectInfo>(info);
+  project_store_.touch_last_opened(info.path);
+  settings_.last_project_path = info.path;
+  ux::add_recent("claim", info.path, info.name);
+  persist_settings();
+  rhi::Api failed = rhi::Api::OpenGL;
+  std::string why;
+  if (rhi::api_fallback(&failed, &why)) {
+    status_message_ = std::string(rhi::api_name(failed)) + " did not start (" + why + "). Opened on OpenGL.";
+  } else {
+    const rhi::Api have = rhi::active() ? rhi::active()->api() : rhi::Api::OpenGL;
+    status_message_ = "Opened \"" + info.name + "\" on " + rhi::api_name(have) + ".";
+  }
+  std::cout << "[gfx] " << status_message_ << '\n';
+  transition_to(info.kind == ProjectKind::TwoD ? AppState::Editor2D : AppState::Editor3D);
+}
+
 void AppFlow::open_requested_claim() {
   // "Recent > claim" in an editor's palette: the editor goes back to the
   // Project Manager first (saving on exit), then we ride straight on.
@@ -212,6 +293,10 @@ void AppFlow::open_requested_claim() {
   if (path.empty()) return;
   for (const ProjectInfo& p : project_store_.projects()) {
     if (p.path != path) continue;
+    if (apply_project_graphics(p)) {
+      transition_to(AppState::Quit);
+      return;
+    }
     active_project_ = std::make_unique<ProjectInfo>(p);
     project_store_.touch_last_opened(p.path);
     settings_.last_project_path = p.path;
@@ -568,6 +653,10 @@ bool AppFlow::intercept_close() {
     return true;
   }
   return false;
+}
+
+void AppFlow::release_screens() {
+  if (state_ != AppState::Quit) transition_to(AppState::Quit);
 }
 
 void AppFlow::request_quit() {

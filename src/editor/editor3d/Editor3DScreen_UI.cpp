@@ -13,6 +13,7 @@
 #include "editor/export/FreightOffice.h"
 #include "editor/scripting/BrandBook.h"
 #include "editor/editor3d/Editor3DScreen.h"
+#include "editor/projects/ProjectGraphics.h"
 
 #include "ui/UiScript.h"
 #include "editor/audio/EditorAudio.h"
@@ -230,15 +231,20 @@ void Editor3DScreen::draw_ui() {
 }
 
 void Editor3DScreen::draw_menu_bar() {
-  if (!ImGui::BeginMainMenuBar()) return;
-  draw_menus();
-  ImGui::SameLine(ImGui::GetWindowWidth() - 360.0f);
-  ImGui::TextDisabled("%s  [3D]%s", project_.name.c_str(), playing() ? "  [RIDING]" : "");
-  ImGui::EndMainMenuBar();
+  if (ImGui::BeginMainMenuBar()) {
+    draw_menus();
+    ImGui::SameLine(ImGui::GetWindowWidth() - 360.0f);
+    ImGui::TextDisabled("%s  [3D]%s", project_.name.c_str(), playing() ? "  [RIDING]" : "");
+    ImGui::EndMainMenuBar();
+  }
+  // After the menu bar, so OpenPopup is not stacked on a menu that closes this click.
+  draw_project_settings_popup(project_);
+  about::draw_popup();
 }
 
 void Editor3DScreen::draw_menus() {
   if (ux::BeginMenu("Realm")) {
+    draw_project_settings_menu(project_);
     if (ux::MenuItem("Save scene", "Ctrl+S")) {
       std::string err;
       if (save_scene(&err)) note("Saved scene.json");
@@ -637,7 +643,9 @@ void Editor3DScreen::draw_viewport() {
       ImGui::GetWindowDrawList()->AddRectFilled(origin, ImVec2(origin.x + vw, origin.y + vh), IM_COL32(8, 6, 5, 255));
       ImGui::SetCursorScreenPos(ImVec2(origin.x + rx, origin.y + ry));
     }
-    ImGui::Image(static_cast<ImTextureID>(tex), ImVec2(rw, rh), ImVec2(0, 1), ImVec2(1, 0));
+    const bool bottom = renderer_ && renderer_->color_bottom_up();
+    ImGui::Image(static_cast<ImTextureID>(tex), ImVec2(rw, rh),
+                 bottom ? ImVec2(0, 1) : ImVec2(0, 0), bottom ? ImVec2(1, 0) : ImVec2(1, 1));
   } else {
     ImGui::InvisibleButton("##vp_null", ImVec2(vw, vh));
   }

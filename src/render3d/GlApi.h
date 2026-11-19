@@ -178,6 +178,7 @@ struct Gl33 {
   GLuint(TS_GLAPI* GetUniformBlockIndex)(GLuint, const char*);
   void(TS_GLAPI* UniformBlockBinding)(GLuint, GLuint, GLuint);
   void(TS_GLAPI* BindBufferBase)(GLenum, GLuint, GLuint);
+  void(TS_GLAPI* BindBufferRange)(GLenum, GLuint, GLuint, GLintptr_ts, GLsizeiptr_ts);
   void(TS_GLAPI* BlitFramebuffer)(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint,
                                   GLbitfield, GLenum);
   // Timer queries (GL 3.3 core / ARB_timer_query); optional: null when the

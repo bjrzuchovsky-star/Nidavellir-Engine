@@ -182,6 +182,64 @@ bool spawn_game(const std::string& exe, const std::string& project_dir,
 #endif
 }
 
+bool relaunch_editor(const std::string& gfx_flag, const std::string& project_dir,
+                     std::string* error_out) {
+  const std::string exe = self_executable_path();
+  std::error_code ec;
+  if (exe.empty() || !fs::is_regular_file(fs::path(exe), ec)) {
+    if (error_out) *error_out = "cannot find this editor to restart it";
+    return false;
+  }
+  const fs::path project = clean_project_path(project_dir);
+  const std::string flag = gfx_flag.empty() ? "gl" : gfx_flag;
+#if defined(_WIN32)
+  const std::wstring exe_w = fs::path(exe).wstring();
+  std::wstring cmd = L"\"" + exe_w + L"\" --gfx=" + std::wstring(flag.begin(), flag.end()) +
+                     L" --open \"" + project.wstring() + L"\"";
+  STARTUPINFOW si{};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi{};
+  if (!CreateProcessW(exe_w.c_str(), cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+    if (error_out) *error_out = "could not restart the editor";
+    return false;
+  }
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+  return true;
+#else
+  if (access(exe.c_str(), X_OK) != 0) {
+    if (error_out) *error_out = "editor is not executable: " + exe;
+    return false;
+  }
+  const std::string project_s = project.string();
+  const std::string gfx = "--gfx=" + flag;
+  const pid_t child = fork();
+  if (child < 0) {
+    if (error_out) *error_out = "fork failed";
+    return false;
+  }
+  if (child == 0) {
+    const pid_t grandchild = fork();
+    if (grandchild == 0) {
+      const char* argv[] = {exe.c_str(), gfx.c_str(), "--open", project_s.c_str(), nullptr};
+      execv(exe.c_str(), const_cast<char* const*>(argv));
+      _exit(127);
+    }
+    _exit(grandchild < 0 ? 1 : 0);
+  }
+  int status = 0;
+  pid_t waited = 0;
+  do {
+    waited = waitpid(child, &status, 0);
+  } while (waited < 0 && errno == EINTR);
+  if (waited < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    if (error_out) *error_out = "could not restart the editor";
+    return false;
+  }
+  return true;
+#endif
+}
+
 // --- ts_client (Play with posse > Open a client window) ------------------------
 
 namespace {

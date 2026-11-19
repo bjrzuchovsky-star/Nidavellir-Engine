@@ -44,13 +44,13 @@ Plugins can add lighting through the Registrar with `add_light_source`, `add_lig
 
 ## 3D lighting
 
-The 3D renderer supports:
+The 3D renderer supports the classic frame and, on the shared forward path, the modules in [graphics.md](graphics.md):
 
-- one directional sun with a 2048² shadow map and 3×3 PCF
-- up to 8 point lights per frame
+- one directional sun with a 2048² shadow map and 3×3 PCF (more cascades and PCSS on Balanced / Cinematic)
+- up to 8 point lights, plus spot and area lights
 - hemisphere ambient
 - a gradient sky
-- Reinhard tone mapping
+- Reinhard tone mapping (ACES and bloom when a preset asks for them)
 
 Set these up in the 3D editor's Environment panel.
 

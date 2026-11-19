@@ -3,8 +3,11 @@
 #include "render3d/Gltf.h"
 #include "render3d/GlRenderer3D.h"
 #include "render3d/HiddenGl.h"
+#include "render3d/RhiRenderer3D.h"
 #include "render3d/Scene3D.h"
 #include "render3d/SceneView.h"
+#include "rhi/Rhi.h"
+#include "core/PngWrite.h"
 #include "scene/SceneJson.h"
 #include "world3d/World3D.h"
 
@@ -13,7 +16,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -21,8 +26,15 @@ namespace fs = std::filesystem;
 namespace r3 = ts::tombstone::render3d;
 namespace s3 = ts::tombstone::scene3d;
 namespace w3 = ts::tombstone::world3d;
+namespace rhi = ts::tombstone::rhi;
 
 int run_3d_editor_smoke();  // Smoke3DEditor.cpp
+
+namespace {
+bool g_smoke_dump = false;
+}
+
+void set_smoke_dump(bool on) { g_smoke_dump = on; }
 
 namespace {
 
@@ -254,15 +266,43 @@ Px pixel(const std::vector<unsigned char>& rgba, int w, int h, float sx, float s
 }
 
 int gl_render(const fs::path& dir) {
+  rhi::Api api = rhi::Api::OpenGL;
+  rhi::cli_api(&api);
   r3::HiddenGl ctx;
+  std::unique_ptr<rhi::Device> device;
+  std::unique_ptr<r3::Renderer3D> renderer;
   std::string why;
-  if (!ctx.open(&why)) {
-    if (std::getenv("TS_SMOKE_REQUIRE_GL")) return fail("GL context: " + why);
-    std::cout << "[smoke] 3D render SKIPPED (" << why << "; set TS_SMOKE_REQUIRE_GL=1 to fail)\n";
-    return 0;
+  std::string who;
+  if (api == rhi::Api::OpenGL) {
+    if (!ctx.open(&why)) {
+      if (std::getenv("TS_SMOKE_REQUIRE_GL")) return fail("GL context: " + why);
+      std::cout << "[smoke] 3D render SKIPPED (" << why << "; set TS_SMOKE_REQUIRE_GL=1 to fail)\n";
+      return 0;
+    }
+    renderer = r3::make_gl_renderer3d();
+    if (!renderer->init(&why)) return fail("GL renderer init: " + why);
+    who = "OpenGL " + ctx.version() + " raytracing no";
+  } else {
+    if (!rhi::api_built(api)) return fail(std::string(rhi::api_name(api)) + " is not built on this platform");
+    rhi::DeviceDesc desc;
+    desc.api = api;
+    desc.offscreen = true;
+    desc.visible = false;
+    desc.width = 320;
+    desc.height = 180;
+    device = rhi::create_device(desc, &why);
+    if (!device) {
+      if (api == rhi::Api::D3D12 || std::getenv("TS_SMOKE_REQUIRE_GL")) return fail(why);
+      std::cout << "[smoke] 3D render SKIPPED (" << rhi::api_name(api) << ": " << why << ")\n";
+      return 0;
+    }
+    renderer = r3::make_rhi_renderer(device.get());
+    if (!renderer->init(&why)) {
+      return fail(std::string(rhi::api_name(api)) + " renderer init: " + why);
+    }
+    who = std::string(rhi::api_name(api)) + " \"" + device->adapter_name() + "\" raytracing " +
+          (device->raytracing() ? "yes" : "no");
   }
-  auto renderer = r3::make_gl_renderer3d();
-  if (!renderer->init(&why)) return fail("GL renderer init: " + why);
   renderer->set_offscreen(true);
   const int W = 320, H = 180;
 
@@ -298,6 +338,54 @@ int gl_render(const fs::path& dir) {
   std::vector<unsigned char> px;
   int w = 0, h = 0;
   if (!renderer->read_pixels(&px, &w, &h) || w != W || h != H) return fail("read_pixels");
+  if (g_smoke_dump) {
+    const std::string tag = api == rhi::Api::D3D12 ? "dx12" : api == rhi::Api::Vulkan ? "vk" : "gl";
+    const fs::path dir = "smoke-dump";
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    const std::string frame = (dir / (tag + "-frame.png")).string();
+    const std::string shadow = (dir / (tag + "-shadow.png")).string();
+    std::cout << "[smoke-dump] " << tag << " frame "
+              << (ts::tombstone::write_png_rgba(frame, w, h, px) ? frame : "write failed")
+              << " casters " << st.shadow_casters << " draws " << st.draws << "\n";
+    std::vector<float> depth;
+    int dw = 0, dh = 0;
+    if (!renderer->read_shadow(&depth, &dw, &dh) || depth.empty() || dw < 1 || dh < 1) {
+      std::cout << "[smoke-dump] " << tag << " shadow read failed\n";
+    } else {
+      float mn = depth[0], mx = depth[0];
+      double sum = 0;
+      int near_n = 0, far_n = 0;
+      for (float d : depth) {
+        mn = std::min(mn, d);
+        mx = std::max(mx, d);
+        sum += d;
+        if (d <= 0.001f) ++near_n;
+        if (d >= 0.999f) ++far_n;
+      }
+      std::cout << "[smoke-dump] " << tag << " shadow " << dw << "x" << dh << " min " << mn << " max " << mx
+                << " mean " << (sum / static_cast<double>(depth.size())) << " near " << near_n << " far " << far_n
+                << " of " << depth.size() << " (row 0 is the bottom)\n";
+      std::cout << "[smoke-dump] " << tag << " shadow grid";
+      for (int gy = 0; gy < 8; ++gy) {
+        std::cout << "\n ";
+        for (int gx = 0; gx < 8; ++gx) {
+          const int x = std::min(dw - 1, (gx * dw) / 8 + dw / 16);
+          const int y = std::min(dh - 1, (gy * dh) / 8 + dh / 16);
+          std::cout << " " << std::fixed << std::setprecision(3) << depth[static_cast<std::size_t>(y * dw + x)];
+        }
+      }
+      std::cout << "\n";
+      std::vector<unsigned char> gray(depth.size() * 4u);
+      for (std::size_t i = 0; i < depth.size(); ++i) {
+        const int g = std::clamp(static_cast<int>(depth[i] * 255.0f), 0, 255);
+        gray[i * 4u] = gray[i * 4u + 1] = gray[i * 4u + 2] = static_cast<unsigned char>(g);
+        gray[i * 4u + 3] = 255;
+      }
+      std::cout << "[smoke-dump] " << tag << " shadow png "
+                << (ts::tombstone::write_png_rgba(shadow, dw, dh, gray) ? shadow : "write failed") << "\n";
+    }
+  }
   float sx = 0, sy = 0;
   cam.project({0, 0.5f, 0.5f}, W, H, &sx, &sy);  // front face of the cube
   const Px red = pixel(px, w, h, sx, sy);
@@ -308,9 +396,9 @@ int gl_render(const fs::path& dir) {
   const Px lit = pixel(px, w, h, sx, sy);
   char buf[400];
   std::snprintf(buf, sizeof(buf),
-                "cube rgb(%d,%d,%d) sky rgb(%d,%d,%d) shadow lum %d lit lum %d, %zu draws %zu tris",
+                "cube rgb(%d,%d,%d) sky rgb(%d,%d,%d) shadow lum %d lit lum %d, %zu draws %zu tris, %zu casters",
                 red.r, red.g, red.b, sky.r, sky.g, sky.b, shade.lum(), lit.lum(), st.draws,
-                st.triangles);
+                st.triangles, st.shadow_casters);
   if (!(red.r > red.g + 60 && red.r > red.b + 60)) return fail(std::string("cube not red: ") + buf);
   // Top row looks above the horizon: between the sky's top and horizon
   // colors (gradient), nothing like the cube.
@@ -365,7 +453,7 @@ int gl_render(const fs::path& dir) {
   }
   view.clear();
   renderer->shutdown();
-  std::cout << "[smoke] 3D render OK (GL " << ctx.version() << "; offscreen " << W << "x" << H
+  std::cout << "[smoke] 3D render OK (" << who << "; offscreen " << W << "x" << H
             << ": " << buf << "; point light r " << before.r << "->" << after.r
             << "; ghost town " << ts.draws << " draws, " << ts.triangles << " tris, "
             << ts.lights << " lights)\n";

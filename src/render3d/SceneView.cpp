@@ -1,4 +1,6 @@
 #include "render3d/SceneView.h"
+#include "render3d/HdrImage.h"
+#include "render3d/lighting/Lighting.h"
 #include "render3d/ClipFile.h"
 #include "render3d/Retarget.h"
 #include "render3d/HullFit.h"
@@ -311,7 +313,8 @@ MaterialHandle SceneView::material_for(const scene3d::Material3D& m) {
                 m.albedo[2], m.albedo[3], m.metallic, m.roughness, m.emissive[0],
                 m.emissive[1], m.emissive[2]);
   std::string k = std::string(key) + m.albedo_texture + "|" + m.normal_texture + "|" +
-                  m.metal_rough_texture + (m.unlit ? "|unlit" : "");
+                  m.metal_rough_texture + "|" + m.ao_texture + "|" + m.height_texture +
+                  (m.unlit ? "|unlit" : "");
   if (mem_images::is_key(m.albedo_texture)) {
     // A new raster version replaces the old material (and its texture).
     const mem_images::MemImage* mi = mem_images::get(m.albedo_texture);
@@ -338,10 +341,14 @@ MaterialHandle SceneView::material_for(const scene3d::Material3D& m) {
   d.base_color_texture = m.albedo_texture;
   d.normal_texture = m.normal_texture;
   d.metal_rough_texture = m.metal_rough_texture;
+  d.ao_texture = m.ao_texture;
+  d.height_texture = m.height_texture;
   d.unlit = m.unlit;
   d.base_color_image = image(m.albedo_texture);
   d.normal_image = image(m.normal_texture);
   d.metal_rough_image = image(m.metal_rough_texture);
+  d.ao_image = image(m.ao_texture);
+  d.height_image = image(m.height_texture);
   MaterialEntry e;
   e.handle = r_ ? r_->create_material(d) : MaterialHandle{};
   materials_[k] = e;
@@ -547,6 +554,63 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
   upload_used_ = 0;
   r_->set_environment(env);
   r_->begin_frame(camera, width, height);
+  std::vector<ReflectionProbeDesc> probes;
+  const scene3d::IrradianceVolume3D* gi = nullptr;
+  Vec3 gi_pos;
+  std::uint64_t gi_id = 0;
+  for (const scene3d::Entity3D& e : entities) {
+    if (!e.visible) continue;
+    if (e.reflection_probe && probes.size() < 2) {
+      ReflectionProbeDesc p;
+      p.position = e.transform.position;
+      p.radius = e.reflection_probe->radius;
+      p.blend = e.reflection_probe->blend;
+      p.resolution = e.reflection_probe->resolution;
+      p.id = e.id;
+      if (e.reflection_probe->box[0] > 0.0f)
+        p.box = {e.reflection_probe->box[0], e.reflection_probe->box[1], e.reflection_probe->box[2]};
+      probes.push_back(p);
+    }
+    if (e.gi_volume && !gi) {
+      gi = &*e.gi_volume;
+      gi_pos = e.transform.position;
+      gi_id = e.id;
+    }
+  }
+  r_->set_reflection_probes(probes.data(), static_cast<int>(probes.size()));
+  if (gi) {
+    GiVolumeDesc d;
+    const float ex = std::max(gi->extent[0], 0.5f);
+    const float ey = std::max(gi->extent[1], 0.5f);
+    const float ez = std::max(gi->extent[2], 0.5f);
+    d.nx = std::clamp(gi->nx, 1, 8);
+    d.ny = std::clamp(gi->ny, 1, 4);
+    d.nz = std::clamp(gi->nz, 1, 8);
+    d.origin = gi_pos - Vec3{ex * 0.5f, ey * 0.5f, ez * 0.5f};
+    d.spacing = {ex / d.nx, ey / d.ny, ez / d.nz};
+    d.dynamic = gi->dynamic_rt;
+    d.bake = gi->bake;
+    d.id = gi_id;
+    d.sh = gi->sh.empty() ? nullptr : gi->sh.data();
+    d.sh_count = static_cast<int>(gi->sh.size() / 12);
+    r_->set_gi_volume(d);
+  } else {
+    r_->clear_gi_volume();
+  }
+  if (env.lighting.hdri != hdri_loaded_) {
+    hdri_loaded_ = env.lighting.hdri;
+    if (hdri_loaded_.empty()) {
+      r_->set_hdri_image(nullptr, 0, 0, 0);
+    } else {
+      std::string err;
+      Image img;
+      float range = 0;
+      if (load_hdr_rgba((fs::path(dir_) / fs::path(hdri_loaded_)).string(), &img, &range, &err))
+        r_->set_hdri_image(img.rgba.data(), img.width, img.height, range);
+      else
+        problem("hdri", err);
+    }
+  }
   terrain_->reset_stats();
   // Nearest point lights first when there are more than the shader takes.
   std::vector<std::pair<float, PointLight>> points;
@@ -560,13 +624,72 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
       l.position = e.transform.matrix().transform_point({b.min.x + 0.1f, b.max.y - 0.35f, 0.0f});
     }
     for (int i = 0; i < 3; ++i) l.color[i] = e.light->color[i];
+    if (e.light->kelvin > 0.0f) {
+      float k[3];
+      kelvin_to_rgb(e.light->kelvin, k);
+      for (int i = 0; i < 3; ++i) l.color[i] *= k[i];
+    }
     l.intensity = e.light->intensity;
     l.range = e.light->range;
+    l.shadows = e.light->cast_shadows;
+    l.shadow_size = e.light->shadow_size;
+    l.shadow_bias = e.light->shadow_bias;
+    l.shadow_softness = e.light->shadow_softness;
     points.push_back({length(l.position - camera.target), l});
   }
   std::sort(points.begin(), points.end(),
             [](const auto& a, const auto& b) { return a.first < b.first; });
   for (const auto& [d, l] : points) r_->add_point_light(l);
+  for (const scene3d::Entity3D& e : entities) {
+    if (!e.visible || !e.light) continue;
+    if (e.light->type == scene3d::Light3D::Type::Spot) {
+      SpotLight s;
+      s.position = e.transform.position;
+      s.direction = e.transform.rotation.rotate({0, 0, -1});
+      for (int i = 0; i < 3; ++i) s.color[i] = e.light->color[i];
+      if (e.light->kelvin > 0.0f) {
+        float k[3];
+        kelvin_to_rgb(e.light->kelvin, k);
+        for (int i = 0; i < 3; ++i) s.color[i] *= k[i];
+      }
+      s.intensity = e.light->intensity;
+      s.range = e.light->range;
+      s.shadows = e.light->cast_shadows;
+      s.shadow_size = e.light->shadow_size;
+      s.shadow_bias = e.light->shadow_bias;
+      s.shadow_softness = e.light->shadow_softness;
+      const float outer = radians(std::max(1.0f, e.light->angle));
+      s.outer_cos = std::cos(outer * 0.5f);
+      s.inner_cos = std::cos(outer * 0.5f * std::clamp(e.light->inner, 0.05f, 0.99f));
+      r_->add_spot_light(s);
+    } else if (e.light->type == scene3d::Light3D::Type::Area) {
+      AreaLight a;
+      a.position = e.transform.position;
+      a.axis_u = e.transform.rotation.rotate({e.light->size_x * 0.5f, 0, 0});
+      a.axis_v = e.transform.rotation.rotate({0, 0, e.light->size_y * 0.5f});
+      for (int i = 0; i < 3; ++i) a.color[i] = e.light->color[i];
+      if (e.light->kelvin > 0.0f) {
+        float k[3];
+        kelvin_to_rgb(e.light->kelvin, k);
+        for (int i = 0; i < 3; ++i) a.color[i] *= k[i];
+      }
+      a.intensity = e.light->intensity;
+      r_->add_area_light(a);
+    } else if (e.light->type == scene3d::Light3D::Type::Emissive || e.light->type == scene3d::Light3D::Type::Sky) {
+      PointLight l;
+      l.position = e.transform.position;
+      for (int i = 0; i < 3; ++i) l.color[i] = e.light->color[i];
+      if (e.light->kelvin > 0.0f) {
+        float k[3];
+        kelvin_to_rgb(e.light->kelvin, k);
+        for (int i = 0; i < 3; ++i) l.color[i] *= k[i];
+      }
+      l.intensity = e.light->intensity;
+      l.range = e.light->type == scene3d::Light3D::Type::Sky ? std::max(e.light->range, 40.0f) : e.light->range;
+      l.shadows = e.light->cast_shadows;
+      r_->add_point_light(l);
+    }
+  }
   for (const scene3d::Entity3D& e : entities) {
     if (!e.visible) continue;
     if (e.light && e.light->type == scene3d::Light3D::Type::Directional) {
@@ -575,6 +698,7 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
       env2.sun_direction = e.transform.rotation.rotate({0, 0, -1});
       for (int i = 0; i < 3; ++i) env2.sun_color[i] = e.light->color[i];
       env2.sun_intensity = e.light->intensity;
+      if (e.light->kelvin > 0.0f) env2.lighting.sun_kelvin = e.light->kelvin;
       r_->set_environment(env2);
     }
     if (e.terrain) {
@@ -657,7 +781,54 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
       r_->draw_line(p - Vec3{0, 0, s}, p + Vec3{0, 0, s}, col, false);
       if (e.light->type == scene3d::Light3D::Type::Directional) {
         r_->draw_line(p, p + e.transform.rotation.rotate({0, 0, -1}) * 1.5f, col, false);
+      } else if (e.light->type == scene3d::Light3D::Type::Point || e.light->type == scene3d::Light3D::Type::Emissive) {
+        const float rad = std::max(e.light->range, 0.2f);
+        const int n = 24;
+        for (int i = 0; i < n; ++i) {
+          const float a0 = static_cast<float>(i) / n * 6.2831853f;
+          const float a1 = static_cast<float>(i + 1) / n * 6.2831853f;
+          r_->draw_line(p + Vec3{std::cos(a0) * rad, 0, std::sin(a0) * rad},
+                        p + Vec3{std::cos(a1) * rad, 0, std::sin(a1) * rad}, col, false);
+        }
+      } else if (e.light->type == scene3d::Light3D::Type::Spot) {
+        const Vec3 dir = e.transform.rotation.rotate({0, 0, -1});
+        const float len = std::max(e.light->range, 0.2f);
+        const float radius = len * std::tan(radians(std::max(e.light->angle, 1.0f)) * 0.5f);
+        const Vec3 tip = p + dir * len;
+        Vec3 side = std::fabs(dir.y) > 0.9f ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
+        Vec3 u = normalize(cross(dir, side));
+        Vec3 v = cross(dir, u);
+        r_->draw_line(p, tip, col, false);
+        const int n = 16;
+        for (int i = 0; i < n; ++i) {
+          const float a0 = static_cast<float>(i) / n * 6.2831853f;
+          const float a1 = static_cast<float>(i + 1) / n * 6.2831853f;
+          const Vec3 q0 = tip + (u * std::cos(a0) + v * std::sin(a0)) * radius;
+          const Vec3 q1 = tip + (u * std::cos(a1) + v * std::sin(a1)) * radius;
+          r_->draw_line(q0, q1, col, false);
+          if (i % 4 == 0) r_->draw_line(p, q0, col, false);
+        }
       }
+    }
+    if (opt.light_gizmos && e.reflection_probe) {
+      const float col[4] = {0.45f, 0.75f, 1.0f, 0.9f};
+      const Vec3 p = e.transform.position;
+      const float rad = e.reflection_probe->box[0] > 0 ? e.reflection_probe->box[0] : e.reflection_probe->radius;
+      r_->draw_line(p - Vec3{rad, 0, 0}, p + Vec3{rad, 0, 0}, col, false);
+      r_->draw_line(p - Vec3{0, rad, 0}, p + Vec3{0, rad, 0}, col, false);
+      r_->draw_line(p - Vec3{0, 0, rad}, p + Vec3{0, 0, rad}, col, false);
+    }
+    if (opt.light_gizmos && e.gi_volume) {
+      const float col[4] = {0.55f, 0.9f, 0.55f, 0.85f};
+      const Vec3 p = e.transform.position;
+      const Vec3 e2{e.gi_volume->extent[0] * 0.5f, e.gi_volume->extent[1] * 0.5f, e.gi_volume->extent[2] * 0.5f};
+      const Vec3 a = p - e2, b = p + e2;
+      r_->draw_line({a.x, a.y, a.z}, {b.x, a.y, a.z}, col, false);
+      r_->draw_line({a.x, a.y, a.z}, {a.x, b.y, a.z}, col, false);
+      r_->draw_line({a.x, a.y, a.z}, {a.x, a.y, b.z}, col, false);
+      r_->draw_line({b.x, b.y, b.z}, {a.x, b.y, b.z}, col, false);
+      r_->draw_line({b.x, b.y, b.z}, {b.x, a.y, b.z}, col, false);
+      r_->draw_line({b.x, b.y, b.z}, {b.x, b.y, a.z}, col, false);
     }
   }
 }

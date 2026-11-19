@@ -1,4 +1,5 @@
 #include "editor/screens/Editor2DScreen.h"
+#include "editor/projects/ProjectGraphics.h"
 #include "editor/ux/ShotOpts.h"
 #include "editor/team/TeamPanel.h"
 #include "editor/ux/Tooltip.h"
@@ -158,10 +159,7 @@ void Editor2DScreen::draw_help_menu_contents() {
 }
 
 void Editor2DScreen::draw_menu_bar() {
-  if (!ImGui::BeginMainMenuBar()) {
-    return;
-  }
-
+  if (ImGui::BeginMainMenuBar()) {
   // Brand mark in the menu strip.
   {
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -190,10 +188,15 @@ void Editor2DScreen::draw_menu_bar() {
                        is_paused() ? "  [PAUSED]" : "  [RIDING]");
   }
   ImGui::EndMainMenuBar();
+  }
+  // After the menu bar, so OpenPopup is not stacked on a menu that closes this click.
+  draw_project_settings_popup(project_);
+  about::draw_popup();
 }
 
 void Editor2DScreen::draw_menus() {
   if (ux::BeginMenu("File")) {
+    draw_project_settings_menu(project_);
     if (ux::MenuItem("Save Scene", "Ctrl+S", false, !is_playing())) {
       std::string err;
       if (save_scene(&err)) {

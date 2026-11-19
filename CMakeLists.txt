@@ -44,6 +44,8 @@ if(TS_BUILD_ADMIN OR TS_BUILD_GAME OR TS_BUILD_CLIENT)
   # 3D: renderer (GL 3.3 core + null), glTF via cgltf (fetched by hash),
   # scene.json v8; VR: OpenXR loader (fetched by hash) + desktop simulator.
   include(FetchCgltf)
+  include(FetchRhi)
+  add_subdirectory(src/rhi)
   # Universal model import: Assimp importers (BSD-3, fetched by hash).
   if(TS_WITH_ASSIMP)
     include(FetchAssimp)

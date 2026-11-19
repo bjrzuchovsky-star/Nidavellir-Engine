@@ -737,15 +737,16 @@ int check_ride_in_vault() {
     j.port = server.port();
     j.key = k_annie;
     j.claim = "_team_ridein";
+    if (!a.team().join(j, &err) || !pump(ticks, [&] { return a.team().joined(); }, 5)) return fail("ride-in A join");
     {
-      // A is a joiner, so the shared copy lives in the session cache, not in A's realm.
+      // A joiner's cache is wiped on ride-in, so the shared copy has to land
+      // after that, not in a folder the next join deletes.
       const fs::path seed = fs::u8path(ed::TeamSession::clan_mirror_dir(a.team().project().id, "_team_ridein"));
       fs::create_directories((seed / ghost).parent_path(), ec);
       fs::create_directories(meta_file(seed, ghost).parent_path(), ec);
       fs::copy_file(pa / ghost, seed / ghost, fs::copy_options::overwrite_existing, ec);
       fs::copy_file(meta_file(pa, ghost), meta_file(seed, ghost), fs::copy_options::overwrite_existing, ec);
     }
-    if (!a.team().join(j, &err) || !pump(ticks, [&] { return a.team().joined(); }, 5)) return fail("ride-in A join");
     // A's own files go up to the posse.
     if (!pump(ticks, [&] {
           const tc::Docs* d = server.docs("_team_ridein");

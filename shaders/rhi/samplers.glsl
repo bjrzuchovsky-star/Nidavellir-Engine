@@ -1,0 +1,12 @@
+layout(set = 0, binding = 3) uniform sampler2D u_albedo_tex;
+layout(set = 0, binding = 4) uniform sampler2D u_normal_tex;
+layout(set = 0, binding = 5) uniform sampler2D u_mr_tex;
+layout(set = 0, binding = 6) uniform sampler2D u_shadow;
+layout(set = 0, binding = 7) uniform sampler2D u_splat;
+layout(set = 0, binding = 8) uniform sampler2D u_layer0;
+layout(set = 0, binding = 9) uniform sampler2D u_layer1;
+layout(set = 0, binding = 10) uniform sampler2D u_layer2;
+layout(set = 0, binding = 11) uniform sampler2D u_layer3;
+layout(set = 0, binding = 12) uniform sampler2D u_hdri;
+layout(set = 0, binding = 13) uniform sampler2D u_ao;
+layout(set = 0, binding = 14) uniform sampler2D u_bloom;

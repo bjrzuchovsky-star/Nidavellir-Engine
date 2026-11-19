@@ -139,6 +139,27 @@ void SettingsScreen::draw_ui() {
   ImGui::SameLine();
   ImGui::TextDisabled("Theme");
 
+  section_header("Graphics", "engine default, used when a project does not name one");
+  {
+    const char* apis[] = {"OpenGL 3.3", "Vulkan", "Direct3D 12"};
+    const char* keys[] = {"gl", "vk", "dx12"};
+    int api = 0;
+    if (draft_.graphics_api == "vk") api = 1;
+    else if (draft_.graphics_api == "dx12") api = 2;
+    ImGui::SetNextItemWidth(280.0f);
+    if (ImGui::Combo("##gfx", &api, apis, 3)) draft_.graphics_api = keys[api];
+    ImGui::SameLine();
+    ImGui::TextDisabled("Graphics API");
+#ifndef _WIN32
+    if (draft_.graphics_api == "dx12") {
+      theme::StatusInfo("Direct3D 12 is the Windows editor. This build will stay on OpenGL.");
+    }
+#endif
+    theme::StatusInfo("Engine default for the next launch. A new install uses Vulkan when it starts, otherwise OpenGL. "
+                      "A project can override this in Project settings. --gfx= wins over both. "
+                      "If the chosen API cannot start, the editor opens on OpenGL and says why.");
+  }
+
   section_header("Supply Run", "engine updates");
   ImGui::Checkbox("Check for updates on start", &draft_.check_updates_on_start);
   if (update::url_supported(update::kLatestReleaseUrl)) {

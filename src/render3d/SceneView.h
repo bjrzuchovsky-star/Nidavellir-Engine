@@ -69,6 +69,7 @@ class SceneView {
              const Camera3D& camera, int width, int height,
              const SceneViewOptions& options = {});
   FrameStats end();
+  bool take_gi_bake(std::vector<float>* sh) { return r_ && r_->take_gi_bake(sh); }
 
   std::vector<std::string> take_problems();
 
@@ -142,6 +143,7 @@ class SceneView {
 
   Renderer3D* r_;
   std::string dir_;
+  std::string hdri_loaded_;
   std::map<const void*, std::pair<std::uint64_t, Aabb>> terrain_bounds_;
   std::vector<Mat4> prim_palette_;  // scratch: joint_map palettes
   std::map<std::string, ModelEntry> models_;

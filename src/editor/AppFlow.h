@@ -95,8 +95,12 @@ class AppFlow {
   // Editor2D helpers.
   void request_back_to_projects();
   void request_quit();
+  // Drop the open editor so its GPU buffers are freed while the device
+  // still exists. Called when the window is closing.
+  void release_screens();
   // Window close button / Alt+F4: true = an editor holds unsaved changes and
   // is asking first (keep the window open; its prompt quits if you agree).
+  void set_startup_project(std::string path) { startup_project_ = std::move(path); }
   bool intercept_close();
   Workspace2D* editor_workspace();
   const Workspace2D* editor_workspace() const;
@@ -127,6 +131,9 @@ class AppFlow {
   bool reload_projects();
   void persist_settings();
   void open_requested_claim();
+  void open_startup_project();
+  // True when a new process was started and this one should quit.
+  bool apply_project_graphics(const ProjectInfo& project);
   void handle_pending_screen_actions();
   // Returns false if apply failed (caller must stay on Settings).
   bool try_apply_settings_from_screen();
@@ -134,6 +141,7 @@ class AppFlow {
   void tick_updates();
   void push_update_banner();
 
+  std::string startup_project_;
   AppState state_ = AppState::Quit;
   AppState settings_return_state_ = AppState::ProjectManager;
   std::unique_ptr<IScreen> screen_;

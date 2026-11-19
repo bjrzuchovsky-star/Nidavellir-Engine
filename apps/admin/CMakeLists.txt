@@ -1,5 +1,7 @@
 add_executable(ts_admin
   main.cpp
+  GfxHost.cpp
+  SmokeGfx.cpp
   ShowcaseShot.cpp
   SmokeRuntime.cpp
   SmokeCollision.cpp
@@ -15,6 +17,11 @@ add_executable(ts_admin
   SmokeShipyard.cpp
   SmokeAudio.cpp
   Smoke3D.cpp
+  SmokePresent.cpp
+  SmokeRealm.cpp
+  SmokeWindow.cpp
+  SmokeSwitch.cpp
+  SmokeLighting.cpp
   Smoke3DEditor.cpp
   SmokeAnim3D.cpp
   SmokeAI.cpp
@@ -92,6 +99,7 @@ target_link_libraries(ts_admin
     ts_plugins_3d
     ts_xr
     ts_imgui
+    ts_imgui_vk
     ts_audio
     ts_audio3d
     ts_ui
@@ -101,6 +109,15 @@ target_link_libraries(ts_admin
     ts_export
     ts_vfs
 )
+
+if(WIN32)
+  target_link_libraries(ts_admin PRIVATE ts_imgui_dx12)
+endif()
+# dxcompiler.dll / dxil.dll from the same arch folder as the dxc that baked
+# the shaders, so a runtime HLSL compile loads the host compiler.
+if(COMMAND nidavellir_copy_dxc_runtime)
+  nidavellir_copy_dxc_runtime(ts_admin)
+endif()
 
 target_compile_features(ts_admin PRIVATE cxx_std_20)
 
