@@ -257,6 +257,18 @@ void Editor3DScreen::draw_inspector() {
     if (l.type == scene3d::Light3D::Type::Point || l.type == scene3d::Light3D::Type::Spot) {
       ImGui::Checkbox("Light shadows", &l.cast_shadows);
       t.after("Light shadows");
+      if (l.cast_shadows) {
+        const char* sizes[] = {"256", "512", "1024"};
+        int which = l.shadow_size >= 1024 ? 2 : l.shadow_size > 0 && l.shadow_size <= 256 ? 0 : 1;
+        if (ImGui::Combo("Shadow size", &which, sizes, 3)) {
+          l.shadow_size = which == 0 ? 256 : which == 2 ? 1024 : 512;
+          t.after("Shadow size");
+        }
+        ImGui::DragFloat("Shadow bias", &l.shadow_bias, 0.0001f, 0.0f, 0.02f, "%.4f");
+        t.after("Shadow bias");
+        ImGui::SliderFloat("Shadow softness", &l.shadow_softness, 0.25f, 3.0f);
+        t.after("Shadow softness");
+      }
     }
     if (l.type == scene3d::Light3D::Type::Point || l.type == scene3d::Light3D::Type::Spot ||
         l.type == scene3d::Light3D::Type::Emissive) {
@@ -274,6 +286,54 @@ void Editor3DScreen::draw_inspector() {
       ImGui::DragFloat("Height", &l.size_y, 0.05f, 0.05f, 50.0f);
       t.after("Area size");
     }
+  }
+  if (component("Reflection probe", e.reflection_probe.has_value(),
+                [&] { e.reflection_probe = scene3d::ReflectionProbe3D{}; },
+                [&] { e.reflection_probe.reset(); })) {
+    scene3d::ReflectionProbe3D& p = *e.reflection_probe;
+    bool box = p.box[0] > 0.0f;
+    if (ImGui::Checkbox("Box probe", &box)) {
+      if (box) {
+        p.box[0] = p.box[1] = p.box[2] = p.radius;
+      } else {
+        p.radius = p.box[0] > 0 ? p.box[0] : p.radius;
+        p.box[0] = p.box[1] = p.box[2] = 0;
+      }
+      t.after("Box probe");
+    }
+    if (box) {
+      ImGui::DragFloat3("Extents", p.box, 0.1f, 0.25f, 200.0f);
+      t.after("Probe extents");
+    } else {
+      ImGui::DragFloat("Probe radius", &p.radius, 0.1f, 0.25f, 200.0f);
+      t.after("Probe radius");
+    }
+    ImGui::DragFloat("Blend", &p.blend, 0.05f, 0.05f, 20.0f);
+    t.after("Probe blend");
+    ImGui::DragInt("Capture size", &p.resolution, 1, 8, 128);
+    t.after("Capture size");
+    ImGui::TextDisabled("The cubemap is captured when the probe moves, and prefiltered for roughness.");
+  }
+  if (component("Irradiance volume", e.gi_volume.has_value(),
+                [&] { e.gi_volume = scene3d::IrradianceVolume3D{}; },
+                [&] { e.gi_volume.reset(); })) {
+    scene3d::IrradianceVolume3D& g = *e.gi_volume;
+    ImGui::DragFloat3("Volume size", g.extent, 0.1f, 1.0f, 200.0f);
+    t.after("Volume size");
+    ImGui::DragInt("Probes X", &g.nx, 0.1f, 1, 8);
+    ImGui::DragInt("Probes Y", &g.ny, 0.1f, 1, 4);
+    ImGui::DragInt("Probes Z", &g.nz, 0.1f, 1, 8);
+    t.after("Probe grid");
+    const int n = std::clamp(g.nx, 1, 8) * std::clamp(g.ny, 1, 4) * std::clamp(g.nz, 1, 8);
+    ImGui::TextDisabled("%d probes (32 stored). Baked SH L1.", std::min(n, 32));
+    if (ImGui::Button("Bake irradiance")) {
+      g.bake = true;
+      t.after("Bake irradiance");
+    }
+    ImGui::Checkbox("Dynamic ray update", &g.dynamic_rt);
+    t.after("Dynamic ray update");
+    if (!rhi::active() || !rhi::active()->raytracing())
+      ImGui::TextDisabled("Dynamic update runs when the GPU has ray queries. Bake still uses the raster scene.");
   }
   if (component("Collider", e.collider.has_value(), [&] { e.collider = scene3d::Collider3D{}; },
                 [&] { e.collider.reset(); })) {
@@ -931,6 +991,14 @@ void Editor3DScreen::draw_environment() {
     if (ImGui::SliderFloat("Saturation", &L.saturation, 0.0f, 2.0f)) { L.preset = 4; t.after("Colour grade"); }
     if (ImGui::SliderFloat("Parallax", &L.pom, 0.0f, 0.1f)) { L.preset = 4; t.after("Parallax"); }
     if (ImGui::SliderFloat("Sky light", &L.sky, 0.0f, 4.0f)) { L.preset = 4; t.after("Sky light"); }
+    char hdri[260];
+    std::snprintf(hdri, sizeof(hdri), "%s", L.hdri.c_str());
+    if (ImGui::InputText("HDRI", hdri, sizeof(hdri))) {
+      L.hdri = hdri;
+      L.preset = 4;
+      t.after("HDRI");
+    }
+    ImGui::TextDisabled("A .hdr or uncompressed .exr becomes the sky and the image-based light.");
     if (ImGui::DragFloat("Sun temperature", &L.sun_kelvin, 50.0f, 0.0f, 12000.0f,
                          L.sun_kelvin <= 0.0f ? "off" : "%.0f K")) {
       L.preset = 4;
@@ -943,14 +1011,12 @@ void Editor3DScreen::draw_environment() {
     }
     if (ImGui::Checkbox("Point shadows", &L.point_shadows)) { L.preset = 4; t.after("Point shadows"); }
     if (ImGui::Checkbox("Spot shadows", &L.spot_shadows)) { L.preset = 4; t.after("Spot shadows"); }
+    if (ImGui::SliderInt("Shadow budget", &L.max_shadow_lights, 1, 4)) { L.preset = 4; t.after("Shadow budget"); }
+    ImGui::TextDisabled("Point lights use 6 atlas tiles. At most 8 tiles, so one point and two spots, or four spots.");
     if (ImGui::Checkbox("Volumetric fog", &L.volumetric)) { L.preset = 4; t.after("Volumetric fog"); }
     if (rt) {
       if (ImGui::Checkbox("Hardware ray tracing", &L.raytracing)) { L.preset = 4; t.after("Ray tracing"); }
-      if (rhi::active()->api() == rhi::Api::D3D12) {
-        ImGui::TextDisabled("DXR is detected. Direct3D 12 does not build acceleration structures yet, so ray modules use shadow maps.");
-      } else {
-        ImGui::TextDisabled("Vulkan ray queries are available. Hardware ray tracing traces shadows, reflections, AO and GI.");
-      }
+      ImGui::TextDisabled("Ray queries are available. Skinned meshes stay on the shadow map (the acceleration structure is the bind pose).");
     } else {
       ImGui::BeginDisabled();
       bool off = false;

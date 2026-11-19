@@ -37,6 +37,9 @@ SHADERS = [
     ("post.frag", "frag", "post.frag", []),
     ("ssao.frag", "frag", "ssao.frag", []),
     ("bloom.frag", "frag", "bloom.frag", []),
+    ("ssr.frag", "frag", "ssr.frag", []),
+    ("prefilter.frag", "frag", "prefilter.frag", []),
+    ("probe_rt.frag", "frag", "probe_rt.frag", ["TS_RAY"]),
 ]
 
 

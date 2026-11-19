@@ -199,7 +199,30 @@ Value entity_json(const Entity3D& e) {
     }
     if (e.light->kelvin > 0.0f) l.set("kelvin", Value::number(e.light->kelvin));
     if (e.light->cast_shadows) l.set("cast_shadows", Value::boolean(true));
+    if (e.light->shadow_size != 0) l.set("shadow_size", Value::number(e.light->shadow_size));
+    if (e.light->shadow_bias != 0.002f) l.set("shadow_bias", Value::number(e.light->shadow_bias));
+    if (e.light->shadow_softness != 1.0f) l.set("shadow_softness", Value::number(e.light->shadow_softness));
     o.set("light", std::move(l));
+  }
+  if (e.reflection_probe) {
+    const ReflectionProbe3D& p = *e.reflection_probe;
+    Value v = Value::object();
+    if (p.box[0] > 0.0f) v.set("box", json::floats(p.box, 3));
+    else v.set("radius", Value::number(p.radius));
+    if (p.blend != 1.0f) v.set("blend", Value::number(p.blend));
+    if (p.resolution != 64) v.set("resolution", Value::number(p.resolution));
+    o.set("reflection_probe", std::move(v));
+  }
+  if (e.gi_volume) {
+    const IrradianceVolume3D& g = *e.gi_volume;
+    Value v = Value::object();
+    v.set("extent", json::floats(g.extent, 3));
+    v.set("nx", Value::number(g.nx));
+    v.set("ny", Value::number(g.ny));
+    v.set("nz", Value::number(g.nz));
+    if (g.dynamic_rt) v.set("dynamic_rt", Value::boolean(true));
+    if (!g.sh.empty()) v.set("sh", json::floats(g.sh.data(), g.sh.size()));
+    o.set("gi_volume", std::move(v));
   }
   if (e.collider) o.set("collider", physics_json::collider(*e.collider));
   if (e.player) {
@@ -435,7 +458,33 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     l.range = std::max(0.1f, v.flt("range", l.range));
     l.kelvin = std::max(0.0f, v.flt("kelvin", l.kelvin));
     l.cast_shadows = v.flag("cast_shadows", l.cast_shadows);
+    l.shadow_size = std::clamp(static_cast<int>(v.num("shadow_size", l.shadow_size)), 0, 1024);
+    l.shadow_bias = std::clamp(v.flt("shadow_bias", l.shadow_bias), 0.0f, 0.05f);
+    l.shadow_softness = std::clamp(v.flt("shadow_softness", l.shadow_softness), 0.25f, 4.0f);
     e.light = l;
+  }
+  if (o["reflection_probe"].is_object()) {
+    const Value& v = o["reflection_probe"];
+    ReflectionProbe3D p;
+    v.floats("box", p.box, 3);
+    p.radius = std::clamp(v.flt("radius", p.radius), 0.25f, 200.0f);
+    p.blend = std::clamp(v.flt("blend", p.blend), 0.05f, 50.0f);
+    p.resolution = std::clamp(static_cast<int>(v.num("resolution", p.resolution)), 8, 128);
+    e.reflection_probe = p;
+  }
+  if (o["gi_volume"].is_object()) {
+    const Value& v = o["gi_volume"];
+    IrradianceVolume3D g;
+    v.floats("extent", g.extent, 3);
+    g.nx = std::clamp(static_cast<int>(v.num("nx", g.nx)), 1, 8);
+    g.ny = std::clamp(static_cast<int>(v.num("ny", g.ny)), 1, 4);
+    g.nz = std::clamp(static_cast<int>(v.num("nz", g.nz)), 1, 8);
+    g.dynamic_rt = v.flag("dynamic_rt", false);
+    if (v["sh"].is_array()) {
+      g.sh.resize(v["sh"].size());
+      for (std::size_t i = 0; i < g.sh.size(); ++i) g.sh[i] = v["sh"][i].as_float();
+    }
+    e.gi_volume = g;
   }
   if (o["collider"].is_object()) e.collider = physics_json::read_collider(o["collider"]);
   if (o["rigid_body"].is_object()) e.rigid_body = physics_json::read_rigid_body(o["rigid_body"]);

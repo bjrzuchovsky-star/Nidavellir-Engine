@@ -93,6 +93,7 @@ class DxCmd final : public CommandList {
   DxBuffer* ubo[3] = {};
   std::size_t ubo_off[3] = {};
   DxTexture* tex[16] = {};
+  std::uint32_t tlas = 0;
   bool pass = false;
   void begin_pass(const PassDesc& p) override;
   void end_pass() override;
@@ -102,7 +103,7 @@ class DxCmd final : public CommandList {
   void set_index_buffer(Buffer* buffer) override;
   void set_uniform(int slot, Buffer* buffer, std::size_t offset, std::size_t size) override;
   void set_texture(int slot, Texture* texture, Sampler*) override;
-  void set_tlas(std::uint32_t) override;
+  void set_tlas(std::uint32_t id) override { tlas = id; }
   void draw(std::uint32_t vertices, std::uint32_t instances, std::uint32_t first) override;
   void draw_indexed(std::uint32_t indices, std::uint32_t instances, std::uint32_t first) override;
   DxTarget* bound = nullptr;
@@ -166,6 +167,8 @@ class DxDevice final : public Device {
   ID3D12DescriptorHeap* srv_heap() const { return srv_; }
   D3D12_CPU_DESCRIPTOR_HANDLE white_cpu() const { return white_ ? white_->cpu : D3D12_CPU_DESCRIPTOR_HANDLE{}; }
   DxTexture* white_ = nullptr;
+  D3D12_CPU_DESCRIPTOR_HANDLE tlas_cpu_{};
+  bool tlas_srv_ = false;
 
   ID3D12Device* device_ = nullptr;
   // list_ is whichever list barrier() records into. It is the frame list
@@ -354,7 +357,6 @@ void DxCmd::set_uniform(int slot, Buffer* buffer, std::size_t offset, std::size_
 void DxCmd::set_texture(int slot, Texture* texture, Sampler*) {
   if (slot >= 0 && slot < 16) tex[slot] = static_cast<DxTexture*>(texture);
 }
-void DxCmd::set_tlas(std::uint32_t) {}
 void DxCmd::draw(std::uint32_t count, std::uint32_t instances, std::uint32_t first) {
   if (!pipe || !pass || !dev->device()) return;
   for (int i = 0; i < 3; ++i) {
@@ -367,8 +369,12 @@ void DxCmd::draw(std::uint32_t count, std::uint32_t instances, std::uint32_t fir
     dst.ptr += static_cast<SIZE_T>(512) * stride;
     D3D12_CPU_DESCRIPTOR_HANDLE base = dst;
     for (int i = 0; i < 13; ++i) {
-      DxTexture* t = tex[i + 3];
-      D3D12_CPU_DESCRIPTOR_HANDLE src = (t && t->has_srv) ? t->cpu : dev->white_cpu();
+      D3D12_CPU_DESCRIPTOR_HANDLE src;
+      if (i == 12 && pipe && pipe->ray && tlas && dev->tlas_srv_) src = dev->tlas_cpu_;
+      else {
+        DxTexture* t = tex[i + 3];
+        src = (t && t->has_srv) ? t->cpu : dev->white_cpu();
+      }
       dev->device()->CopyDescriptorsSimple(1, dst, src, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
       dst.ptr += stride;
     }
@@ -1453,16 +1459,187 @@ bool DxDevice::read_depth(RenderTarget* target, std::vector<float>* depth, int* 
   if (h) *h = t->height;
   return true;
 }
-std::uint32_t DxDevice::rt_create_blas(const RtGeometry&, std::string* error) {
-  if (error) *error = raytracing_ ? "Direct3D 12 ray query acceleration structures are built by the forward renderer when a scene asks for them"
-                                  : "this GPU does not support DirectX Raytracing tier 1.1";
-  return 0;
+namespace {
+struct RtBuf {
+  ID3D12Resource* res = nullptr;
+  D3D12_GPU_VIRTUAL_ADDRESS addr = 0;
+};
+ID3D12Resource* rt_default(ID3D12Device* device, UINT64 bytes, D3D12_RESOURCE_STATES state) {
+  D3D12_HEAP_PROPERTIES heap{};
+  heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+  D3D12_RESOURCE_DESC rd{};
+  rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+  rd.Width = std::max<UINT64>(bytes, 256);
+  rd.Height = 1;
+  rd.DepthOrArraySize = 1;
+  rd.MipLevels = 1;
+  rd.SampleDesc.Count = 1;
+  rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+  rd.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+  ID3D12Resource* res = nullptr;
+  if (FAILED(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &rd, state, nullptr, IID_PPV_ARGS(&res))))
+    return nullptr;
+  return res;
 }
-std::uint32_t DxDevice::rt_create_tlas(const RtInstance*, std::uint32_t, std::string* error) {
-  if (error) *error = "Direct3D 12 TLAS build is reported by the device capability; the scene falls back to shadow maps";
-  return 0;
+std::vector<RtBuf> g_rt_as;
+}  // namespace
+
+std::uint32_t DxDevice::rt_create_blas(const RtGeometry& geo, std::string* error) {
+  if (!raytracing_ || !device_ || !geo.vertices || !geo.indices || geo.vertex_count < 3 || geo.index_count < 3) {
+    if (error) *error = raytracing_ ? "ray tracing geometry is empty" : "this GPU does not support DirectX Raytracing tier 1.1";
+    return 0;
+  }
+  Com<ID3D12Device5> dev5;
+  if (FAILED(device_->QueryInterface(IID_PPV_ARGS(dev5.out())))) return 0;
+  auto* vb = static_cast<DxBuffer*>(geo.vertices);
+  auto* ib = static_cast<DxBuffer*>(geo.indices);
+  D3D12_RAYTRACING_GEOMETRY_DESC geom{};
+  geom.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+  geom.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+  geom.Triangles.VertexBuffer.StartAddress = vb->gpu;
+  geom.Triangles.VertexBuffer.StrideInBytes = geo.stride;
+  geom.Triangles.VertexCount = geo.vertex_count;
+  geom.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+  geom.Triangles.IndexBuffer = ib->gpu;
+  geom.Triangles.IndexCount = geo.index_count;
+  geom.Triangles.IndexFormat = DXGI_FORMAT_R32_UINT;
+  D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs{};
+  inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+  inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+  inputs.NumDescs = 1;
+  inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+  inputs.pGeometryDescs = &geom;
+  D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO info{};
+  dev5->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &info);
+  ID3D12Resource* result = rt_default(device_, info.ResultDataMaxSizeInBytes, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+  ID3D12Resource* scratch = rt_default(device_, info.ScratchDataSizeInBytes, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  if (!result || !scratch) {
+    if (result) result->Release();
+    if (scratch) scratch->Release();
+    if (error) *error = "Direct3D 12 acceleration structure allocation failed";
+    return 0;
+  }
+  D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build{};
+  build.Inputs = inputs;
+  build.DestAccelerationStructureData = result->GetGPUVirtualAddress();
+  build.ScratchAccelerationStructureData = scratch->GetGPUVirtualAddress();
+  if (!begin_copy()) {
+    result->Release();
+    scratch->Release();
+    return 0;
+  }
+  Com<ID3D12GraphicsCommandList4> cl;
+  if (FAILED(copy_list_->QueryInterface(IID_PPV_ARGS(cl.out())))) {
+    end_copy();
+    result->Release();
+    scratch->Release();
+    return 0;
+  }
+  cl->BuildRaytracingAccelerationStructure(&build, 0, nullptr);
+  D3D12_RESOURCE_BARRIER bar{};
+  bar.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+  cl->ResourceBarrier(1, &bar);
+  end_copy();
+  scratch->Release();
+  g_rt_as.push_back({result, result->GetGPUVirtualAddress()});
+  return static_cast<std::uint32_t>(g_rt_as.size());
 }
-void DxDevice::rt_reset() {}
+
+std::uint32_t DxDevice::rt_create_tlas(const RtInstance* instances, std::uint32_t count, std::string* error) {
+  if (!raytracing_ || !device_ || !instances || !count) {
+    if (error) *error = "ray tracing is not available on this Direct3D 12 device";
+    return 0;
+  }
+  Com<ID3D12Device5> dev5;
+  if (FAILED(device_->QueryInterface(IID_PPV_ARGS(dev5.out())))) return 0;
+  std::vector<D3D12_RAYTRACING_INSTANCE_DESC> desc(count);
+  for (std::uint32_t i = 0; i < count; ++i) {
+    std::memcpy(desc[i].Transform, instances[i].transform, sizeof(desc[i].Transform));
+    desc[i].InstanceMask = 0xFF;
+    const std::uint32_t id = instances[i].blas;
+    desc[i].AccelerationStructure = (id > 0 && id <= g_rt_as.size()) ? g_rt_as[id - 1].addr : 0;
+  }
+  D3D12_HEAP_PROPERTIES heap{};
+  heap.Type = D3D12_HEAP_TYPE_UPLOAD;
+  D3D12_RESOURCE_DESC rd{};
+  rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+  rd.Width = sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * count;
+  rd.Height = 1;
+  rd.DepthOrArraySize = 1;
+  rd.MipLevels = 1;
+  rd.SampleDesc.Count = 1;
+  rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+  ID3D12Resource* upload = nullptr;
+  if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                              IID_PPV_ARGS(&upload)))) {
+    if (error) *error = "TLAS instance buffer failed";
+    return 0;
+  }
+  void* map = nullptr;
+  upload->Map(0, nullptr, &map);
+  if (map) std::memcpy(map, desc.data(), rd.Width);
+  upload->Unmap(0, nullptr);
+  D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs{};
+  inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+  inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+  inputs.NumDescs = count;
+  inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+  inputs.InstanceDescs = upload->GetGPUVirtualAddress();
+  D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO info{};
+  dev5->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &info);
+  ID3D12Resource* result = rt_default(device_, info.ResultDataMaxSizeInBytes, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+  ID3D12Resource* scratch = rt_default(device_, info.ScratchDataSizeInBytes, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  if (!result || !scratch) {
+    if (result) result->Release();
+    if (scratch) scratch->Release();
+    upload->Release();
+    return 0;
+  }
+  D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build{};
+  build.Inputs = inputs;
+  build.DestAccelerationStructureData = result->GetGPUVirtualAddress();
+  build.ScratchAccelerationStructureData = scratch->GetGPUVirtualAddress();
+  if (!begin_copy()) {
+    result->Release();
+    scratch->Release();
+    upload->Release();
+    return 0;
+  }
+  Com<ID3D12GraphicsCommandList4> cl;
+  if (FAILED(copy_list_->QueryInterface(IID_PPV_ARGS(cl.out())))) {
+    end_copy();
+    result->Release();
+    scratch->Release();
+    upload->Release();
+    return 0;
+  }
+  cl->BuildRaytracingAccelerationStructure(&build, 0, nullptr);
+  D3D12_RESOURCE_BARRIER bar{};
+  bar.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+  cl->ResourceBarrier(1, &bar);
+  end_copy();
+  scratch->Release();
+  upload->Release();
+  const D3D12_GPU_VIRTUAL_ADDRESS addr = result->GetGPUVirtualAddress();
+  if (!tlas_srv_) {
+    tlas_cpu_ = alloc_cpu();
+    tlas_srv_ = true;
+  }
+  D3D12_SHADER_RESOURCE_VIEW_DESC sv{};
+  sv.Format = DXGI_FORMAT_UNKNOWN;
+  sv.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+  sv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  sv.RaytracingAccelerationStructure.Location = addr;
+  device_->CreateShaderResourceView(nullptr, &sv, tlas_cpu_);
+  g_rt_as.push_back({result, addr});
+  return static_cast<std::uint32_t>(g_rt_as.size());
+}
+
+void DxDevice::rt_reset() {
+  for (RtBuf& a : g_rt_as)
+    if (a.res) a.res->Release();
+  g_rt_as.clear();
+}
 
 int DxDevice::debug_error_count() const {
   if (!device_) return debug_errors_;

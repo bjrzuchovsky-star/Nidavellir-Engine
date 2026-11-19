@@ -35,7 +35,18 @@ struct FrameBlock {
   Vec4 area_color[2];
   Vec4 probe_pos[4];
   Vec4 probe_color[4];
+  Mat4 local_vp[8];
+  Vec4 local_rect[8];
+  Vec4 local_soft[8];
+  Vec4 refl_pos[2];
+  Vec4 refl_ext[2];
+  Vec4 gi_origin;
+  Vec4 gi_spacing;
+  Vec4 gi_dim;
+  Vec4 gi_sh[96];
+  Vec4 ibl;
 };
+static_assert(offsetof(FrameBlock, local_vp) == offsetof(FrameBlock, probe_color) + sizeof(Vec4) * 4);
 static_assert(offsetof(FrameBlock, cam) == 384);
 
 struct DrawBlock {
@@ -211,11 +222,16 @@ class RhiRenderer final : public Renderer3D {
     post_ = pipe("fullscreen.vert", "post.frag", fs);
     ssao_ = pipe("fullscreen.vert", "ssao.frag", fs);
     bloom_ = pipe("fullscreen.vert", "bloom.frag", fs);
+    ssr_ = pipe("fullscreen.vert", "ssr.frag", fs);
+    prefilter_ = pipe("fullscreen.vert", "prefilter.frag", fs);
     overlay_ = pipe("overlay.vert", "overlay.frag", fs);
     if (device_->raytracing()) {
       rhi::PipelineDesc rt = mesh;
       rt.ray_query = true;
       mesh_rt_ = pipe("mesh.vert", "mesh_rt.frag", rt);
+      rhi::PipelineDesc pr = fs;
+      pr.ray_query = true;
+      probe_rt_ = pipe("fullscreen.vert", "probe_rt.frag", pr);
     }
     if (!mesh_ || !depth_ || !sky_ || !line_) return false;
     rhi::TargetDesc sd;
@@ -246,6 +262,12 @@ class RhiRenderer final : public Renderer3D {
     materials_.clear();
     device_->destroy_target(color_);
     device_->destroy_target(shadow_);
+    device_->destroy_target(local_);
+    device_->destroy_target(face_);
+    device_->destroy_target(prefilter_t_);
+    device_->destroy_target(ssr_t_);
+    device_->destroy_target(dyn_gi_);
+    if (hdri_tex_) device_->destroy_texture(hdri_tex_);
     device_->destroy_target(ao_);
     device_->destroy_target(bloom_t_);
     device_->destroy_target(shown_);
@@ -259,7 +281,7 @@ class RhiRenderer final : public Renderer3D {
     white_ = flat_ = overlay_tex_ = nullptr;
     device_->destroy_sampler(wrap_);
     device_->destroy_sampler(clamp_);
-    for (rhi::Pipeline* p : {mesh_, mesh_2s_, mesh_blend_, skin_, depth_, depth_skin_, foliage_, sky_, line_, line_top_, bill_, post_, ssao_, bloom_, overlay_, mesh_rt_}) {
+    for (rhi::Pipeline* p : {mesh_, mesh_2s_, mesh_blend_, skin_, depth_, depth_skin_, foliage_, sky_, line_, line_top_, bill_, post_, ssao_, bloom_, ssr_, prefilter_, overlay_, mesh_rt_, probe_rt_}) {
       device_->destroy_pipeline(p);
     }
     ready_ = false;
@@ -408,6 +430,37 @@ class RhiRenderer final : public Renderer3D {
   void add_area_light(const AreaLight& l) override {
     if (areas_.size() < 2) areas_.push_back(l);
   }
+  void set_reflection_probes(const ReflectionProbeDesc* probes, int count) override {
+    probes_.clear();
+    for (int i = 0; i < count && i < 2; ++i)
+      if (probes) probes_.push_back(probes[i]);
+  }
+  void set_gi_volume(const GiVolumeDesc& volume) override {
+    gi_ = volume;
+    gi_on_ = true;
+    if (volume.sh && volume.sh_count > 0 && volume.id != gi_id_) {
+      gi_id_ = volume.id;
+      gi_sh_.assign(volume.sh, volume.sh + volume.sh_count * 12);
+    }
+  }
+  void clear_gi_volume() override { gi_on_ = false; }
+  bool take_gi_bake(std::vector<float>* sh) override {
+    if (!gi_baked_ || !sh) return false;
+    *sh = gi_sh_;
+    gi_baked_ = false;
+    return true;
+  }
+  void set_hdri_image(const unsigned char* rgba, int w, int h, float rgbm_range) override {
+    if (!rgba || w < 1 || h < 1) {
+      if (hdri_tex_) device_->destroy_texture(hdri_tex_);
+      hdri_tex_ = nullptr;
+      hdri_range_ = 0;
+      return;
+    }
+    if (hdri_tex_) device_->destroy_texture(hdri_tex_);
+    hdri_tex_ = tex2d(rgba, w, h, true);
+    hdri_range_ = rgbm_range;
+  }
   void draw(MeshHandle mesh, MaterialHandle material, const Transform& t) override {
     draw_matrix(mesh, material, t.matrix(), true);
   }
@@ -467,8 +520,9 @@ class RhiRenderer final : public Renderer3D {
     const Lighting& L = env_.lighting;
     int cascades = std::clamp(L.cascades, 1, 4);
     if (L.preset == 0) cascades = 1;
+    const bool ssr_on = L.reflections == 2;
     const bool post = L.tonemap != 0 || L.auto_exposure || L.bloom > 0 || L.ao != 0 || L.contrast != 1 ||
-                      L.saturation != 1 || L.gain != 1;
+                      L.saturation != 1 || L.gain != 1 || ssr_on;
     const bool want_rt = L.raytracing && device_->raytracing();
     if (!want_rt) {
       if (tlas_ != 0) drop_ray_scene();
@@ -526,25 +580,92 @@ class RhiRenderer final : public Renderer3D {
     frame.atlas = {static_cast<float>(tiles), static_cast<float>(tiles), static_cast<float>(kShadow),
                    device_->shadow_flip_v() ? 1.0f : 0.0f};
     device_->clip_params(&frame.clip.x);
-    frame.clip.w = L.hdri.empty() ? 0.0f : 1.0f;
+    frame.clip.w = hdri_tex_ ? 1.0f : 0.0f;
+    frame.ibl.x = hdri_range_;
     frame.grade = {L.contrast, L.saturation, L.gain, L.bloom};
-    if (L.gi != 0) {
+    if (gi_on_ && gi_sh_.size() >= 12) {
+      const int n = std::min(32, static_cast<int>(gi_sh_.size() / 12));
+      frame.gi_origin = {gi_.origin.x, gi_.origin.y, gi_.origin.z, static_cast<float>(n)};
+      frame.gi_spacing = {gi_.spacing.x, gi_.spacing.y, gi_.spacing.z, 1};
+      frame.gi_dim = {static_cast<float>(std::max(gi_.nx, 1)), static_cast<float>(std::max(gi_.ny, 1)),
+                      static_cast<float>(std::max(gi_.nz, 1)), 0};
+      for (int p = 0; p < n; ++p) {
+        for (int c = 0; c < 3; ++c) {
+          const float* s = gi_sh_.data() + p * 12 + c * 4;
+          frame.gi_sh[p * 3 + c] = {s[0], s[1], s[2], s[3]};
+        }
+      }
+    } else if (L.gi != 0) {
       frame.probe_pos[0] = {camera_.position.x, camera_.position.y, camera_.position.z, 80.0f};
       frame.probe_color[0] = {env_.sky_horizon[0] * 0.65f, env_.sky_horizon[1] * 0.65f, env_.sky_horizon[2] * 0.65f,
                               static_cast<float>(L.gi)};
     }
+    for (int i = 0; i < 2 && i < static_cast<int>(probes_.size()); ++i) {
+      frame.refl_pos[i] = {probes_[i].position.x, probes_[i].position.y, probes_[i].position.z,
+                           probes_[i].box.x <= 0 ? probes_[i].radius : 0};
+      frame.refl_ext[i] = {probes_[i].box.x, probes_[i].box.y, probes_[i].box.z, probes_[i].blend};
+    }
+    frame.ibl.y = probes_.empty() ? 1.0f : static_cast<float>(probes_.size() * 4);
+    tiles_.clear();
+    int shadow_lights = 0;
+    const int light_budget = std::clamp(L.max_shadow_lights, 1, 4);
+    auto take_tile = [&](const Mat4& vp, int px, float bias, float soft, float kind) -> int {
+      if (static_cast<int>(tiles_.size()) >= 8) return -1;
+      const int index = static_cast<int>(tiles_.size());
+      frame.local_vp[index] = vp;
+      frame.local_rect[index].w = bias;
+      frame.local_soft[index] = {soft, kind, 0, 0};
+      tiles_.push_back({vp, index, px});
+      return index;
+    };
     for (std::size_t i = 0; i < points_.size(); ++i) {
       const PointLight& l = points_[i];
-      frame.point_pos[i] = {l.position.x, l.position.y, l.position.z, (L.point_shadows && l.shadows) ? -1.0f : 1.0f};
+      float marker = 1.0f;
+      if (L.point_shadows && l.shadows && shadow_lights < light_budget && tiles_.size() + 6 <= 8) {
+        const int px = shadow_px(l.shadow_size);
+        const int base = static_cast<int>(tiles_.size());
+        bool ok = true;
+        for (int f = 0; f < 6; ++f) {
+          if (take_tile(cube_vp(l.position, f, l.range), px, l.shadow_bias, l.shadow_softness, f == 0 ? 2.0f : 0.0f) < 0)
+            ok = false;
+        }
+        if (ok) {
+          marker = -static_cast<float>(base + 1);
+          ++shadow_lights;
+        }
+      }
+      frame.point_pos[i] = {l.position.x, l.position.y, l.position.z, marker};
       frame.point_color[i] = {l.color[0] * l.intensity, l.color[1] * l.intensity, l.color[2] * l.intensity,
                               std::max(0.1f, l.range)};
     }
     for (std::size_t i = 0; i < spots_.size(); ++i) {
       const SpotLight& l = spots_[i];
       const Vec3 dir = normalize(l.direction);
-      frame.spot_pos[i] = {l.position.x, l.position.y, l.position.z, (L.spot_shadows && l.shadows) ? -1.0f : 1.0f};
+      float marker = 1.0f;
+      if (L.spot_shadows && l.shadows && shadow_lights < light_budget) {
+        const int px = shadow_px(l.shadow_size);
+        const int slot = take_tile(spot_vp(l), px, l.shadow_bias, l.shadow_softness, 1.0f);
+        if (slot >= 0) {
+          marker = -static_cast<float>(slot + 1);
+          ++shadow_lights;
+        }
+      }
+      frame.spot_pos[i] = {l.position.x, l.position.y, l.position.z, marker};
       frame.spot_dir[i] = {dir.x, dir.y, dir.z, l.outer_cos};
       frame.spot_color[i] = {l.color[0] * l.intensity, l.color[1] * l.intensity, l.color[2] * l.intensity, l.inner_cos};
+    }
+    if (!tiles_.empty()) {
+      int cell = 256;
+      for (const LocalTile& t : tiles_) cell = std::max(cell, t.px);
+      for (const LocalTile& t : tiles_) {
+        const int col = t.index % 4;
+        const int row = t.index / 4;
+        frame.local_rect[t.index].x = col / 4.0f;
+        frame.local_rect[t.index].y = row / 2.0f;
+        frame.local_rect[t.index].z = t.px / static_cast<float>(cell * 4);
+        frame.local_soft[t.index].z = t.px / static_cast<float>(cell * 2);
+      }
+      local_cell_ = cell;
     }
     for (std::size_t i = 0; i < areas_.size(); ++i) {
       const AreaLight& l = areas_[i];
@@ -584,6 +705,42 @@ class RhiRenderer final : public Renderer3D {
       }
       cmd->end_pass();
     }
+    if (!tiles_.empty() && depth_ && local_cell_ > 0) {
+      ensure_local_shadow(local_cell_);
+      if (local_) {
+        rhi::PassDesc lp;
+        lp.target = local_;
+        lp.color = false;
+        lp.clear_color = false;
+        lp.clear_depth = true;
+        cmd->begin_pass(lp);
+        for (const LocalTile& t : tiles_) {
+          FrameBlock copy = frame;
+          copy.light_vp[0] = t.vp;
+          const std::size_t off = bump(sizeof(FrameBlock));
+          device_->update_buffer(ubo_, &copy, sizeof(copy), off);
+          const int col = t.index % 4;
+          const int row = t.index / 4;
+          cmd->set_viewport(col * local_cell_, row * local_cell_, t.px, t.px);
+          cmd->set_uniform(0, ubo_, off, sizeof(FrameBlock));
+          cmd->set_pipeline(depth_);
+          for (const DrawItem& d : draws_) {
+            if (!d.shadow || d.bone >= 0) continue;
+            DrawBlock db{};
+            db.model = d.model;
+            upload_draw(cmd, db, d);
+            const GpuMesh& m = meshes_[d.mesh];
+            cmd->set_vertex_buffer(0, m.vb);
+            cmd->set_index_buffer(m.ib);
+            cmd->draw_indexed(m.count, 1, 0);
+          }
+        }
+        cmd->end_pass();
+      }
+    }
+    capture_reflection_probes(cmd, frame);
+    if (gi_on_ && gi_.bake) bake_gi(cmd, frame);
+    if (gi_on_ && gi_.dynamic && rt_ok && probe_rt_) dynamic_gi(cmd, frame);
     ensure_color();
     rhi::PassDesc mp;
     mp.target = offscreen_ ? color_ : nullptr;
@@ -600,6 +757,9 @@ class RhiRenderer final : public Renderer3D {
       cmd->set_texture(3, white_, wrap_);
       cmd->set_texture(4, flat_, wrap_);
       cmd->set_texture(5, white_, wrap_);
+      cmd->set_texture(12, hdri_tex_ ? hdri_tex_ : white_, clamp_);
+      cmd->set_texture(13, probe_tex_ ? probe_tex_ : white_, clamp_);
+      cmd->set_texture(14, local_ ? device_->target_depth(local_) : device_->target_depth(shadow_), clamp_);
     };
     cmd->set_pipeline(sky_);
     bind_frame();
@@ -747,6 +907,19 @@ class RhiRenderer final : public Renderer3D {
         cmd->draw(3, 1, 0);
         cmd->end_pass();
       }
+      if (ssr_on && ssr_ && color_) {
+        ensure_aux(ssr_t_, width_, height_);
+        rhi::PassDesc spss;
+        spss.target = ssr_t_;
+        cmd->begin_pass(spss);
+        cmd->set_viewport(0, 0, width_, height_);
+        cmd->set_pipeline(ssr_);
+        cmd->set_uniform(0, ubo_, frame_off, sizeof(FrameBlock));
+        cmd->set_texture(3, device_->target_color(color_), clamp_);
+        cmd->set_texture(6, device_->target_depth(color_), clamp_);
+        cmd->draw(3, 1, 0);
+        cmd->end_pass();
+      }
       if (L.bloom > 0 && bloom_) {
         ensure_aux(bloom_t_, width_ / 2, height_ / 2);
         rhi::PassDesc bp;
@@ -755,7 +928,7 @@ class RhiRenderer final : public Renderer3D {
         cmd->set_viewport(0, 0, width_ / 2, height_ / 2);
         cmd->set_pipeline(bloom_);
         cmd->set_uniform(0, ubo_, frame_off, sizeof(FrameBlock));
-        cmd->set_texture(3, device_->target_color(color_), clamp_);
+        cmd->set_texture(3, ssr_on && ssr_t_ ? device_->target_color(ssr_t_) : device_->target_color(color_), clamp_);
         cmd->draw(3, 1, 0);
         cmd->end_pass();
       }
@@ -770,7 +943,7 @@ class RhiRenderer final : public Renderer3D {
         cmd->set_viewport(0, 0, width_, height_);
         cmd->set_pipeline(post_);
         cmd->set_uniform(0, ubo_, frame_off, sizeof(FrameBlock));
-        cmd->set_texture(3, device_->target_color(color_), clamp_);
+        cmd->set_texture(3, ssr_on && ssr_t_ ? device_->target_color(ssr_t_) : device_->target_color(color_), clamp_);
         cmd->set_texture(13, ao_ ? device_->target_color(ao_) : white_, clamp_);
         cmd->set_texture(14, bloom_t_ ? device_->target_color(bloom_t_) : white_, clamp_);
         cmd->draw(3, 1, 0);
@@ -870,6 +1043,293 @@ class RhiRenderer final : public Renderer3D {
     clear_[1] = rgba[1];
     clear_[2] = rgba[2];
     clear_[3] = rgba[3];
+  }
+  struct LocalTile {
+    Mat4 vp;
+    int index = 0;
+    int px = 512;
+  };
+  static int shadow_px(int requested) {
+    if (requested >= 1024) return 1024;
+    if (requested > 0 && requested <= 384) return 256;
+    return 512;
+  }
+  static Mat4 cube_vp(const Vec3& pos, int face, float range) {
+    const Vec3 dirs[6] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+    const Vec3 ups[6] = {{0, -1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}, {0, -1, 0}};
+    const float far = std::max(range, 0.5f);
+    return Mat4::perspective(1.5707963f, 1.0f, 0.05f, far) * Mat4::look_at(pos, pos + dirs[face], ups[face]);
+  }
+  static Mat4 spot_vp(const SpotLight& l) {
+    const Vec3 dir = normalize(l.direction);
+    const Vec3 up = std::fabs(dir.y) > 0.9f ? Vec3{0, 0, 1} : Vec3{0, 1, 0};
+    float fov = std::acos(std::clamp(l.outer_cos, -1.0f, 1.0f)) * 2.0f;
+    if (!(fov > 0.05f)) fov = 0.6f;
+    return Mat4::perspective(fov, 1.0f, 0.05f, std::max(l.range, 0.5f)) * Mat4::look_at(l.position, l.position + dir, up);
+  }
+  void ensure_local_shadow(int cell) {
+    const int w = cell * 4;
+    const int h = cell * 2;
+    if (local_ && local_w_ == w && local_h_ == h) return;
+    device_->destroy_target(local_);
+    rhi::TargetDesc td;
+    td.width = w;
+    td.height = h;
+    td.color = false;
+    td.depth = true;
+    std::string err;
+    local_ = device_->create_target(td, &err);
+    local_w_ = w;
+    local_h_ = h;
+  }
+  void draw_scene_color(rhi::CommandList* cmd, const FrameBlock& frame, std::size_t off) {
+    cmd->set_uniform(0, ubo_, off, sizeof(FrameBlock));
+    cmd->set_pipeline(sky_);
+    cmd->set_texture(12, hdri_tex_ ? hdri_tex_ : white_, clamp_);
+    cmd->draw(3, 1, 0);
+    cmd->set_pipeline(mesh_);
+    for (const DrawItem& d : draws_) {
+      if (d.bone >= 0) continue;
+      const GpuMat* mat = materials_.count(d.material) ? &materials_[d.material] : nullptr;
+      const MaterialDesc& md = mat ? mat->desc : fallback_;
+      if (md.alpha_mode == MaterialDesc::kAlphaBlend) continue;
+      DrawBlock db{};
+      db.model = d.model;
+      db.albedo = {md.base_color[0], md.base_color[1], md.base_color[2], md.base_color[3]};
+      db.emissive = {md.emissive[0], md.emissive[1], md.emissive[2], md.unlit ? 1.0f : 0.0f};
+      db.mr = {md.metallic, md.roughness, md.alpha_cutoff, 0};
+      upload_draw(cmd, db, d);
+      cmd->set_texture(3, mat && mat->albedo ? mat->albedo : white_, wrap_);
+      cmd->set_texture(4, mat && mat->normal ? mat->normal : flat_, wrap_);
+      cmd->set_texture(5, mat && mat->mr ? mat->mr : white_, wrap_);
+      cmd->set_texture(6, device_->target_depth(shadow_), clamp_);
+      cmd->set_texture(12, hdri_tex_ ? hdri_tex_ : white_, clamp_);
+      cmd->set_texture(13, white_, clamp_);
+      cmd->set_texture(14, local_ ? device_->target_depth(local_) : device_->target_depth(shadow_), clamp_);
+      const GpuMesh& m = meshes_[d.mesh];
+      cmd->set_vertex_buffer(0, m.vb);
+      cmd->set_index_buffer(m.ib);
+      cmd->draw_indexed(m.count, 1, 0);
+    }
+    (void)frame;
+  }
+  void capture_reflection_probes(rhi::CommandList* cmd, const FrameBlock& frame) {
+    if (probes_.empty() || !mesh_ || !sky_) return;
+    std::string key;
+    for (const ReflectionProbeDesc& p : probes_) {
+      key += std::to_string(p.id) + ":" + std::to_string(p.resolution) + ":" + std::to_string(p.position.x) + "," +
+             std::to_string(p.position.y) + "," + std::to_string(p.position.z) + ";";
+    }
+    if (key == probe_key_ && probe_tex_) return;
+    const int res = std::clamp(probes_[0].resolution, 8, 128);
+    const int rows = static_cast<int>(probes_.size()) * 4;
+    probe_tex_ = nullptr;
+    rhi::TargetDesc td;
+    td.width = res * 6;
+    td.height = res * static_cast<int>(probes_.size());
+    td.depth = true;
+    std::string err;
+    device_->destroy_target(face_);
+    face_ = device_->create_target(td, &err);
+    if (!face_) return;
+    {
+      rhi::PassDesc pass;
+      pass.target = face_;
+      pass.rgba[0] = env_.sky_horizon[0];
+      pass.rgba[1] = env_.sky_horizon[1];
+      pass.rgba[2] = env_.sky_horizon[2];
+      pass.rgba[3] = 1;
+      cmd->begin_pass(pass);
+      for (int i = 0; i < static_cast<int>(probes_.size()); ++i) {
+        for (int f = 0; f < 6; ++f) {
+          FrameBlock copy = frame;
+          copy.view_proj = cube_vp(probes_[i].position, f, 80.0f);
+          copy.inv_view_proj = copy.view_proj.inverse();
+          copy.cam = {probes_[i].position.x, probes_[i].position.y, probes_[i].position.z, 1};
+          const std::size_t off = bump(sizeof(FrameBlock));
+          device_->update_buffer(ubo_, &copy, sizeof(copy), off);
+          cmd->set_viewport(f * res, i * res, res, res);
+          draw_scene_color(cmd, copy, off);
+        }
+      }
+      cmd->end_pass();
+    }
+    rhi::Texture* sharp = device_->target_color(face_);
+    rhi::TargetDesc pd;
+    pd.width = res * 6;
+    pd.height = res * rows;
+    pd.depth = false;
+    device_->destroy_target(prefilter_t_);
+    prefilter_t_ = device_->create_target(pd, &err);
+    if (!prefilter_t_ || !prefilter_) {
+      probe_tex_ = sharp;
+      probe_key_ = key;
+      return;
+    }
+    {
+      rhi::PassDesc pass;
+      pass.target = prefilter_t_;
+      cmd->begin_pass(pass);
+      for (int i = 0; i < static_cast<int>(probes_.size()); ++i) {
+        for (int level = 0; level < 4; ++level) {
+          for (int f = 0; f < 6; ++f) {
+            FrameBlock copy = frame;
+            copy.ibl.z = static_cast<float>(level);
+            copy.ibl.w = static_cast<float>(f);
+            const std::size_t off = bump(sizeof(FrameBlock));
+            device_->update_buffer(ubo_, &copy, sizeof(copy), off);
+            cmd->set_viewport(f * res, (i * 4 + level) * res, res, res);
+            cmd->set_pipeline(prefilter_);
+            cmd->set_uniform(0, ubo_, off, sizeof(FrameBlock));
+            cmd->set_texture(3, sharp, clamp_);
+            cmd->draw(3, 1, 0);
+          }
+        }
+      }
+      cmd->end_pass();
+    }
+    probe_tex_ = device_->target_color(prefilter_t_);
+    probe_key_ = key;
+  }
+  void bake_gi(rhi::CommandList* cmd, const FrameBlock& frame) {
+    const int nx = std::clamp(gi_.nx, 1, 8);
+    const int ny = std::clamp(gi_.ny, 1, 4);
+    const int nz = std::clamp(gi_.nz, 1, 8);
+    const int n = std::min(32, nx * ny * nz);
+    gi_sh_.assign(static_cast<std::size_t>(n) * 12, 0.0f);
+    const int res = 8;
+    rhi::TargetDesc td;
+    td.width = res * 6;
+    td.height = res;
+    td.depth = true;
+    std::string err;
+    device_->destroy_target(face_);
+    face_ = device_->create_target(td, &err);
+    if (!face_) return;
+    const float y0 = 0.282095f;
+    const float y1 = 0.488603f;
+    const float dw = (4.0f * 3.14159265f) / (6.0f * res * res);
+    for (int p = 0; p < n; ++p) {
+      const int x = p % nx;
+      const int y = (p / nx) % ny;
+      const int z = p / (nx * ny);
+      const Vec3 pos = gi_.origin + Vec3{gi_.spacing.x * (x + 0.5f), gi_.spacing.y * (y + 0.5f), gi_.spacing.z * (z + 0.5f)};
+      rhi::PassDesc pass;
+      pass.target = face_;
+      pass.rgba[0] = env_.sky_horizon[0];
+      pass.rgba[1] = env_.sky_horizon[1];
+      pass.rgba[2] = env_.sky_horizon[2];
+      pass.rgba[3] = 1;
+      cmd->begin_pass(pass);
+      for (int f = 0; f < 6; ++f) {
+        FrameBlock copy = frame;
+        copy.view_proj = cube_vp(pos, f, 40.0f);
+        copy.inv_view_proj = copy.view_proj.inverse();
+        copy.cam = {pos.x, pos.y, pos.z, 1};
+        const std::size_t off = bump(sizeof(FrameBlock));
+        device_->update_buffer(ubo_, &copy, sizeof(copy), off);
+        cmd->set_viewport(f * res, 0, res, res);
+        draw_scene_color(cmd, copy, off);
+      }
+      cmd->end_pass();
+      std::vector<unsigned char> px;
+      int w = 0, h = 0;
+      if (!device_->read_color(face_, &px, &w, &h) || w < res * 6 || h < res) continue;
+      float sh[12] = {};
+      const Vec3 dirs[6] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+      const Vec3 ups[6] = {{0, -1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}, {0, -1, 0}};
+      for (int f = 0; f < 6; ++f) {
+        const Vec3 right = normalize(cross(dirs[f], ups[f]));
+        for (int yy = 0; yy < res; ++yy) {
+          for (int xx = 0; xx < res; ++xx) {
+            const int row = h - 1 - (yy);
+            const unsigned char* s = px.data() + (static_cast<std::size_t>(row) * w + (f * res + xx)) * 4;
+            Vec3 rgb{s[0] / 255.0f, s[1] / 255.0f, s[2] / 255.0f};
+            const float u = (xx + 0.5f) / res * 2.0f - 1.0f;
+            const float v = (yy + 0.5f) / res * 2.0f - 1.0f;
+            Vec3 dir = normalize(dirs[f] + right * u + ups[f] * v);
+            const float basis[4] = {y0, y1 * dir.y, y1 * dir.z, y1 * dir.x};
+            for (int c = 0; c < 3; ++c)
+              for (int k = 0; k < 4; ++k) (&sh[c * 4])[k] += (&rgb.x)[c] * basis[k] * dw;
+          }
+        }
+      }
+      const float a0 = 3.14159265f;
+      const float a1 = 2.094395f;
+      for (int c = 0; c < 3; ++c) {
+        sh[c * 4] *= a0;
+        sh[c * 4 + 1] *= a1;
+        sh[c * 4 + 2] *= a1;
+        sh[c * 4 + 3] *= a1;
+      }
+      std::memcpy(gi_sh_.data() + static_cast<std::size_t>(p) * 12, sh, sizeof(sh));
+    }
+    gi_baked_ = true;
+    gi_.bake = false;
+    gi_id_ = gi_.id;
+  }
+  void dynamic_gi(rhi::CommandList* cmd, const FrameBlock& frame) {
+    if (gi_sh_.size() < 12) return;
+    const int n = std::min(32, static_cast<int>(gi_sh_.size() / 12));
+    const int p = gi_cursor_ % n;
+    ++gi_cursor_;
+    const int nx = std::max(gi_.nx, 1);
+    const int ny = std::max(gi_.ny, 1);
+    const int x = p % nx;
+    const int y = (p / nx) % ny;
+    const int z = p / (nx * ny);
+    const Vec3 pos = gi_.origin + Vec3{gi_.spacing.x * (x + 0.5f), gi_.spacing.y * (y + 0.5f), gi_.spacing.z * (z + 0.5f)};
+    rhi::TargetDesc td;
+    td.width = 16;
+    td.height = 8;
+    td.depth = false;
+    std::string err;
+    ensure_aux(dyn_gi_, 16, 8);
+    if (!dyn_gi_) return;
+    FrameBlock copy = frame;
+    copy.cam = {pos.x, pos.y, pos.z, 1};
+    const std::size_t off = bump(sizeof(FrameBlock));
+    device_->update_buffer(ubo_, &copy, sizeof(copy), off);
+    rhi::PassDesc pass;
+    pass.target = dyn_gi_;
+    cmd->begin_pass(pass);
+    cmd->set_viewport(0, 0, 16, 8);
+    cmd->set_pipeline(probe_rt_);
+    cmd->set_uniform(0, ubo_, off, sizeof(FrameBlock));
+    if (tlas_ != 0) cmd->set_tlas(tlas_);
+    cmd->draw(3, 1, 0);
+    cmd->end_pass();
+    std::vector<unsigned char> px;
+    int w = 0, h = 0;
+    if (!device_->read_color(dyn_gi_, &px, &w, &h) || w < 1 || h < 1) return;
+    float sh[12] = {};
+    const float y0 = 0.282095f;
+    const float y1 = 0.488603f;
+    const float dw = (4.0f * 3.14159265f) / static_cast<float>(w * h);
+    for (int yy = 0; yy < h; ++yy) {
+      for (int xx = 0; xx < w; ++xx) {
+        const unsigned char* s = px.data() + (static_cast<std::size_t>(h - 1 - yy) * w + xx) * 4;
+        const float u = (xx + 0.5f) / w;
+        const float v = (yy + 0.5f) / h;
+        const float cy = std::cos((v - 0.5f) * 3.14159265f);
+        Vec3 dir{std::cos(u * 6.2831853f) * cy, std::sin((v - 0.5f) * 3.14159265f), std::sin(u * 6.2831853f) * cy};
+        Vec3 rgb{s[0] / 255.0f, s[1] / 255.0f, s[2] / 255.0f};
+        const float basis[4] = {y0, y1 * dir.y, y1 * dir.z, y1 * dir.x};
+        for (int c = 0; c < 3; ++c)
+          for (int k = 0; k < 4; ++k) (&sh[c * 4])[k] += (&rgb.x)[c] * basis[k] * dw;
+      }
+    }
+    const float a0 = 3.14159265f, a1 = 2.094395f;
+    float* dst = gi_sh_.data() + static_cast<std::size_t>(p) * 12;
+    for (int c = 0; c < 3; ++c) {
+      sh[c * 4] *= a0;
+      sh[c * 4 + 1] *= a1;
+      sh[c * 4 + 2] *= a1;
+      sh[c * 4 + 3] *= a1;
+      for (int k = 0; k < 4; ++k) dst[c * 4 + k] = dst[c * 4 + k] * 0.75f + sh[c * 4 + k] * 0.25f;
+    }
+    (void)td;
+    (void)err;
   }
   void drop_ray_scene() {
     if (device_ && device_live()) device_->rt_reset();
@@ -971,12 +1431,33 @@ class RhiRenderer final : public Renderer3D {
   rhi::Pipeline* post_ = nullptr;
   rhi::Pipeline* ssao_ = nullptr;
   rhi::Pipeline* bloom_ = nullptr;
+  rhi::Pipeline* ssr_ = nullptr;
+  rhi::Pipeline* prefilter_ = nullptr;
+  rhi::Pipeline* probe_rt_ = nullptr;
   rhi::Pipeline* overlay_ = nullptr;
   rhi::RenderTarget* color_ = nullptr;
   rhi::RenderTarget* shadow_ = nullptr;
+  rhi::RenderTarget* local_ = nullptr;
+  rhi::RenderTarget* face_ = nullptr;
+  rhi::RenderTarget* prefilter_t_ = nullptr;
   rhi::RenderTarget* ao_ = nullptr;
   rhi::RenderTarget* bloom_t_ = nullptr;
+  rhi::RenderTarget* ssr_t_ = nullptr;
+  rhi::RenderTarget* dyn_gi_ = nullptr;
   rhi::RenderTarget* shown_ = nullptr;
+  rhi::Texture* hdri_tex_ = nullptr;
+  rhi::Texture* probe_tex_ = nullptr;
+  int local_w_ = 0, local_h_ = 0, local_cell_ = 0;
+  float hdri_range_ = 0;
+  std::vector<LocalTile> tiles_;
+  std::vector<ReflectionProbeDesc> probes_;
+  std::string probe_key_;
+  GiVolumeDesc gi_{};
+  bool gi_on_ = false;
+  bool gi_baked_ = false;
+  std::uint64_t gi_id_ = ~0ull;
+  int gi_cursor_ = 0;
+  std::vector<float> gi_sh_;
   bool show_post_ = false;
   std::unordered_map<std::uint32_t, GpuMesh> meshes_;
   std::unordered_map<std::uint32_t, GpuMat> materials_;

@@ -34,6 +34,17 @@ layout(std140, set = 0, binding = 0) uniform Frame {
   vec4 area_color[2];
   vec4 probe_pos[4];    // xyz, radius
   vec4 probe_color[4];
+  // Appended. Classic leaves these at zero and never samples them.
+  mat4 local_vp[8];     // spot map, or one cube face of a point light
+  vec4 local_rect[8];   // atlas uv origin xy, uv size, depth bias
+  vec4 local_soft[8];   // softness, 2 = cube face, 0 = empty
+  vec4 refl_pos[2];     // xyz centre, sphere radius (0 = none)
+  vec4 refl_ext[2];     // xyz box half-extent (0 = sphere), blend distance
+  vec4 gi_origin;       // volume min corner, probe count
+  vec4 gi_spacing;      // xyz spacing, 1 when SH is valid
+  vec4 gi_dim;          // nx, ny, nz
+  vec4 gi_sh[96];       // 32 probes, 3 vec4 each (L1 red, green, blue)
+  vec4 ibl;             // x = RGBM range (0 = straight colour)
 } frame;
 
 layout(std140, set = 0, binding = 1) uniform Draw {

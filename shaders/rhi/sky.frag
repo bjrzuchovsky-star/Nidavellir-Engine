@@ -12,6 +12,8 @@ void main() {
   if (frame.clip.w > 0.5) {
     vec2 uv = vec2(atan(d.z, d.x) / 6.2831853 + 0.5, asin(clamp(d.y, -1.0, 1.0)) / 3.14159265 + 0.5);
     c = texture(u_hdri, uv).rgb;
+    if (frame.ibl.x > 0.0) c *= texture(u_hdri, uv).a * frame.ibl.x;
+    c = c / (c + vec3(1.0));
   } else if (d.y >= 0.0) {
     c = mix(frame.sky_horizon.rgb, frame.sky_top.rgb, pow(d.y, 0.55));
   } else {

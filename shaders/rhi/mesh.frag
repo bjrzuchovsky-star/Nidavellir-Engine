@@ -116,6 +116,113 @@ int ts_cascade() {
   return n - 1;
 }
 
+float ts_local_map(int use, vec4 light) {
+  vec4 rect = frame.local_rect[use];
+  vec4 soft = frame.local_soft[use];
+  if (rect.z <= 0.0) return 1.0;
+  vec3 ndc = light.xyz / light.w;
+  vec2 uv = ndc.xy * 0.5 + 0.5;
+  if (frame.atlas.w > 0.5) uv.y = 1.0 - uv.y;
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0) return 1.0;
+  float ref = ndc.z * 0.5 + 0.5 - rect.w;
+  vec2 size = vec2(rect.z, max(soft.z, 0.0001));
+  vec2 auv = rect.xy + clamp(uv, 0.001, 0.999) * size;
+  float texel = max(size.x, size.y) / 512.0 * max(soft.x, 0.25);
+  float s = 0.0;
+  float n = 0.0;
+  int rad = soft.x > 1.5 ? 2 : 1;
+  for (int y = -rad; y <= rad; ++y) {
+    for (int x = -rad; x <= rad; ++x) {
+      vec2 p = clamp(auv + vec2(float(x), float(y)) * texel, rect.xy + vec2(0.0005), rect.xy + size - vec2(0.0005));
+      float d = texture(u_bloom, p).r;
+      s += (ref <= d) ? 1.0 : 0.0;
+      n += 1.0;
+    }
+  }
+  return s / n;
+}
+
+int ts_cube_face(vec3 dir) {
+  vec3 a = abs(dir);
+  if (a.x >= a.y && a.x >= a.z) return dir.x >= 0.0 ? 0 : 1;
+  if (a.y >= a.z) return dir.y >= 0.0 ? 2 : 3;
+  return dir.z >= 0.0 ? 4 : 5;
+}
+
+float ts_local_shadow(float marker, vec3 light_pos, vec3 world) {
+  if (marker >= 0.0) return 1.0;
+  int tile = int(-marker + 0.5) - 1;
+  if (tile < 0 || tile >= 8) return 1.0;
+  int use = tile;
+  if (frame.local_soft[tile].y > 1.5) use = tile + ts_cube_face(world - light_pos);
+  if (use < 0 || use >= 8) return 1.0;
+  return ts_local_map(use, frame.local_vp[use] * vec4(world, 1.0));
+}
+
+vec3 ts_face_uv(vec3 dir, float level, int probe) {
+  int face = ts_cube_face(dir);
+  vec3 a = abs(dir);
+  vec2 uv;
+  if (face < 2) uv = vec2(-dir.z * sign(dir.x), -dir.y) / max(a.x, 0.0001);
+  else if (face < 4) uv = vec2(dir.x, dir.z * sign(dir.y)) / max(a.y, 0.0001);
+  else uv = vec2(dir.x * sign(dir.z), -dir.y) / max(a.z, 0.0001);
+  uv = uv * 0.5 + 0.5;
+  float row = float(probe) * 4.0 + clamp(level, 0.0, 3.0);
+  return vec3((uv.x + float(face)) / 6.0, (uv.y + row) / max(frame.ibl.y, 1.0), 0.0);
+}
+
+vec3 ts_reflection_probe(vec3 dir, float rough, vec3 world) {
+  vec3 sum = vec3(0.0);
+  float wsum = 0.0;
+  for (int i = 0; i < 2; ++i) {
+    float sphere = frame.refl_pos[i].w;
+    vec3 ext = frame.refl_ext[i].xyz;
+    float w = 0.0;
+    if (sphere > 0.0) w = clamp(1.0 - length(world - frame.refl_pos[i].xyz) / sphere, 0.0, 1.0);
+    else if (ext.x > 0.0) {
+      vec3 q = abs(world - frame.refl_pos[i].xyz) / max(ext, vec3(0.001));
+      w = clamp(1.0 - max(q.x, max(q.y, q.z)), 0.0, 1.0);
+    }
+    float blend = max(frame.refl_ext[i].w, 0.05);
+    w = smoothstep(0.0, blend / max(sphere, ext.x), w);
+    if (w <= 0.0) continue;
+    vec3 uv = ts_face_uv(dir, rough * 3.0, i);
+    sum += texture(u_ao, uv.xy).rgb * w;
+    wsum += w;
+  }
+  if (wsum <= 0.0) return vec3(0.0);
+  return sum / wsum;
+}
+
+vec3 ts_gi_sh(vec3 n, vec3 world) {
+  if (frame.gi_spacing.w < 0.5) return vec3(0.0);
+  vec3 p = (world - frame.gi_origin.xyz) / max(frame.gi_spacing.xyz, vec3(0.001));
+  vec3 dim = max(frame.gi_dim.xyz, vec3(1.0));
+  vec3 ip = clamp(floor(p), vec3(0.0), dim - 1.0);
+  vec3 f = clamp(p - ip, 0.0, 1.0);
+  vec3 irr = vec3(0.0);
+  float y0 = 0.282095;
+  float y1 = 0.488603;
+  for (int z = 0; z < 2; ++z) {
+    for (int y = 0; y < 2; ++y) {
+      for (int x = 0; x < 2; ++x) {
+        vec3 c = min(ip + vec3(float(x), float(y), float(z)), dim - 1.0);
+        int idx = int(c.x) + int(c.y) * int(dim.x) + int(c.z) * int(dim.x) * int(dim.y);
+        if (idx < 0 || idx >= 32) continue;
+        float wt = (x == 0 ? 1.0 - f.x : f.x) * (y == 0 ? 1.0 - f.y : f.y) * (z == 0 ? 1.0 - f.z : f.z);
+        vec4 r = frame.gi_sh[idx * 3];
+        vec4 g = frame.gi_sh[idx * 3 + 1];
+        vec4 b = frame.gi_sh[idx * 3 + 2];
+        vec3 e = vec3(r.x * y0 + y1 * (r.y * n.y + r.z * n.z + r.w * n.x),
+                      g.x * y0 + y1 * (g.y * n.y + g.z * n.z + g.w * n.x),
+                      b.x * y0 + y1 * (b.y * n.y + b.z * n.z + b.w * n.x));
+        irr += max(e, vec3(0.0)) * wt;
+      }
+    }
+  }
+  return irr;
+}
+
 float ts_sun_shadow(vec3 n) {
   if (frame.flags.x < 0.5) return 1.0;
 #ifdef TS_RAY
@@ -232,7 +339,7 @@ void main() {
     float range = max(frame.point_color[i].w, 0.001);
     float fall = clamp(1.0 - pow(dist / range, 4.0), 0.0, 1.0);
     fall = fall * fall / (dist * dist + 1.0);
-    float shade = frame.point_pos[i].w < 0.0 ? ts_sun_shadow(n) : 1.0;
+    float shade = ts_local_shadow(frame.point_pos[i].w, frame.point_pos[i].xyz, v_world);
     color += ts_brdf(n, view_dir, d / max(dist, 0.0001), frame.point_color[i].rgb * fall, albedo, metal, rough) * shade;
   }
   int ns = int(frame.counts.y + 0.5);
@@ -248,7 +355,7 @@ void main() {
     float range = 12.0;
     float fall = clamp(1.0 - pow(dist / range, 4.0), 0.0, 1.0);
     fall = fall * fall / (dist * dist + 1.0) * cone;
-    float shade = frame.spot_pos[i].w < 0.0 ? ts_sun_shadow(n) : 1.0;
+    float shade = ts_local_shadow(frame.spot_pos[i].w, frame.spot_pos[i].xyz, v_world);
     color += ts_brdf(n, view_dir, ld, frame.spot_color[i].rgb * fall, albedo, metal, rough) * shade;
   }
   int na = int(frame.counts.z + 0.5);
@@ -269,13 +376,17 @@ void main() {
   vec3 sky = mix(pow(frame.ground.rgb, vec3(2.2)),
                  mix(pow(frame.sky_horizon.rgb, vec3(2.2)), pow(frame.sky_top.rgb, vec3(2.2)), clamp(n.y, 0.0, 1.0)),
                  clamp(n.y * 0.5 + 0.5, 0.0, 1.0));
-  vec3 probe = ts_nearest_probe(v_world);
+  vec3 gi = ts_gi_sh(n, v_world);
+  vec3 probe = gi.x + gi.y + gi.z > 0.0 ? gi : ts_nearest_probe(v_world);
   if (dot(probe, probe) > 0.0) sky = mix(sky, probe, 0.65);
   vec3 f0 = mix(vec3(0.04), albedo, metal);
   color += frame.fog_extra.w * sky * (albedo * (1.0 - metal) + f0 * (1.0 - rough) * 0.5) * ao;
-  if (frame.ground.w > 1.5) {
+  if (frame.ground.w > 1.5 && frame.ground.w < 2.5) {
     float fres = pow(1.0 - max(dot(n, view_dir), 0.0), 4.0);
-    color += sky * fres * (1.0 - rough) * 0.35;
+    vec3 rdir = reflect(-view_dir, n);
+    vec3 env = ts_reflection_probe(rdir, rough, v_world);
+    if (dot(env, env) <= 0.0) env = sky;
+    color += env * fres * (1.0 - rough) * 0.45;
   }
 #ifdef TS_RAY
   if (frame.ground.w > 3.5) {
@@ -317,5 +428,7 @@ void main() {
     mapped = color / (color + vec3(1.0));
     mapped *= frame.flags.w;
   }
-  o_color = vec4(ts_apply_fog(pow(max(mapped, vec3(0.0)), vec3(1.0 / 2.2)), v_world), base.a);
+  float out_a = base.a;
+  if (frame.ground.w > 2.5 && frame.ground.w < 3.5) out_a = rough;
+  o_color = vec4(ts_apply_fog(pow(max(mapped, vec3(0.0)), vec3(1.0 / 2.2)), v_world), out_a);
 }

@@ -981,6 +981,15 @@ render3d::FrameStats Editor3DScreen::render_frame(int width, int height) {
     draw_camera_lines();  // frustums / view cones (cameras are hidden in Play)
   }
   last_stats_ = view_->end();
+  std::vector<float> baked;
+  if (view_->take_gi_bake(&baked)) {
+    for (scene3d::Entity3D& ent : scene_.entities) {
+      if (!ent.gi_volume || !ent.gi_volume->bake) continue;
+      ent.gi_volume->sh = std::move(baked);
+      ent.gi_volume->bake = false;
+      break;
+    }
+  }
   collect_problems();
   return last_stats_;
 }

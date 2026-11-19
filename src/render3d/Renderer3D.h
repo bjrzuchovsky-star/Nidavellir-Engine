@@ -58,6 +58,7 @@ struct Lighting {
   float contact = 0.02f;   // contact-shadow gap in shadow-map space
   bool point_shadows = false;
   bool spot_shadows = false;
+  int max_shadow_lights = 4;  // point lights spend 6 of the 8 atlas tiles
   bool contact_shadows = false;
   bool auto_exposure = false;
   bool volumetric = false;
@@ -98,6 +99,9 @@ struct PointLight {
   float intensity = 6.0f;
   float range = 8.0f;
   bool shadows = false;
+  int shadow_size = 0;       // 0 = 512. Otherwise 256, 512 or 1024.
+  float shadow_bias = 0.002f;
+  float shadow_softness = 1.0f;
 };
 
 // Cone along `direction` (the direction light travels). outer_cos / inner_cos
@@ -111,6 +115,9 @@ struct SpotLight {
   float outer_cos = 0.8f;
   float inner_cos = 0.9f;
   bool shadows = false;
+  int shadow_size = 0;
+  float shadow_bias = 0.002f;
+  float shadow_softness = 1.0f;
 };
 
 // A flat rectangle centred at position, spanned by axis_u and axis_v.
@@ -141,6 +148,28 @@ struct FoliageBatch {
   std::size_t count = 0;
 };
 
+// Reflection probe placed in the scene. box == 0 is a sphere of `radius`.
+struct ReflectionProbeDesc {
+  Vec3 position;
+  Vec3 box;
+  float radius = 8.0f;
+  float blend = 1.0f;
+  int resolution = 64;
+  std::uint64_t id = 0;
+};
+// Irradiance volume. sh is 12 floats per probe (L1), or null until baked.
+// bake asks this frame to fill take_gi_bake.
+struct GiVolumeDesc {
+  Vec3 origin;
+  Vec3 spacing{4, 4, 4};
+  int nx = 1, ny = 1, nz = 1;
+  bool dynamic = false;
+  bool bake = false;
+  std::uint64_t id = 0;
+  const float* sh = nullptr;
+  int sh_count = 0;
+};
+
 class Renderer3D {
  public:
   static constexpr std::size_t kMaxPointLights = 8;
@@ -168,6 +197,12 @@ class Renderer3D {
   virtual void add_point_light(const PointLight& /*light*/) {}
   virtual void add_spot_light(const SpotLight& /*light*/) {}
   virtual void add_area_light(const AreaLight& /*light*/) {}
+
+  virtual void set_reflection_probes(const ReflectionProbeDesc* /*probes*/, int /*count*/) {}
+  virtual void set_gi_volume(const GiVolumeDesc& /*volume*/) {}
+  virtual void clear_gi_volume() {}
+  virtual bool take_gi_bake(std::vector<float>* /*sh*/) { return false; }
+  virtual void set_hdri_image(const unsigned char* /*rgba*/, int /*w*/, int /*h*/, float /*rgbm_range*/) {}
   virtual void draw(MeshHandle mesh, MaterialHandle material,
                     const Transform& transform) = 0;
   virtual void draw_matrix(MeshHandle mesh, MaterialHandle material,

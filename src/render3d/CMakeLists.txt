@@ -25,6 +25,7 @@ add_library(ts_render3d
   Retarget.cpp
   Animator.cpp
   Scene3D.cpp
+  HdrImage.cpp
   Attach3D.cpp
   CameraMigrate3D.cpp
   Scene3D_Physics.cpp
