@@ -140,7 +140,7 @@ class DxDevice final : public Device {
   void begin_frame() override;
   void end_frame() override;
   CommandList* commands() override { return depth_ > 0 ? &cmd_ : nullptr; }
-  void wait_idle() override { if (queue_) { end_frame_wait(); } }
+  void wait_idle() override { wait_fence(fence_value_); }
   bool read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba, int* w, int* h) override;
   bool read_depth(RenderTarget* target, std::vector<float>* depth, int* w, int* h) override;
   std::uint32_t rt_create_blas(const RtGeometry& geo, std::string* error) override;
@@ -168,12 +168,18 @@ class DxDevice final : public Device {
   DxTexture* white_ = nullptr;
 
   ID3D12Device* device_ = nullptr;
+  // list_ is whichever list barrier() records into. It is the frame list
+  // except during an immediate copy, which has its own list.
   ID3D12GraphicsCommandList* list_ = nullptr;
   bool raytracing_ = false;
 
  private:
-  void end_frame_wait();
-  ID3D12Resource* upload(const void* data, std::size_t size, ID3D12Resource** keep);
+  void wait_fence(UINT64 value);
+  UINT64 signal_fence();
+  void collect();
+  void retire(IUnknown* obj);
+  bool begin_copy();
+  void end_copy();
   void explain(std::string* error, const std::string& head, HRESULT hr);
   void note_removed(const char* where, HRESULT hr);
   bool failed(HRESULT hr, const char* where);
@@ -183,8 +189,25 @@ class DxDevice final : public Device {
   Com<IDXGIFactory6> factory_;
   Com<ID3D12CommandQueue> queue_;
   Com<IDXGISwapChain3> swap_;
-  Com<ID3D12CommandAllocator> alloc_;
+  // One allocator per frame. Reset only after the fence that covered its
+  // last ExecuteCommandLists has completed.
+  Com<ID3D12CommandAllocator> frame_alloc_[2];
+  UINT64 frame_fence_[2] = {};
+  int frame_slot_ = 0;
+  ID3D12GraphicsCommandList* frame_list_ = nullptr;
+  bool list_open_ = false;
+  // Immediate uploads and readbacks. Never the frame list: resetting that
+  // while Project Manager -> Editor3D is recording closes it and the rest
+  // of the frame (hundreds of thousands of draws) hits a closed list.
+  Com<ID3D12CommandAllocator> copy_alloc_;
+  ID3D12GraphicsCommandList* copy_list_ = nullptr;
+  UINT64 copy_fence_ = 0;
   Com<ID3D12Fence> fence_;
+  struct Grave {
+    UINT64 fence = 0;
+    IUnknown* obj = nullptr;
+  };
+  std::vector<Grave> grave_;
   Com<ID3D12RootSignature> root_;
   Com<ID3D12RootSignature> root_rt_;
   Com<ID3D12DescriptorHeap> rtv_heap_;
@@ -560,9 +583,15 @@ bool DxDevice::open(const DeviceDesc& desc, std::string* error) {
   D3D12_COMMAND_QUEUE_DESC qd{};
   qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
   device_->CreateCommandQueue(&qd, IID_PPV_ARGS(queue_.out()));
-  device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(alloc_.out()));
-  device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc_, nullptr, IID_PPV_ARGS(&list_));
-  list_->Close();
+  for (int i = 0; i < 2; ++i) {
+    device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(frame_alloc_[i].out()));
+  }
+  device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, frame_alloc_[0], nullptr, IID_PPV_ARGS(&frame_list_));
+  frame_list_->Close();
+  list_ = frame_list_;
+  device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(copy_alloc_.out()));
+  device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, copy_alloc_, nullptr, IID_PPV_ARGS(&copy_list_));
+  copy_list_->Close();
   device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(fence_.out()));
   fence_event_ = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 
@@ -681,27 +710,89 @@ bool DxDevice::open(const DeviceDesc& desc, std::string* error) {
 }
 
 void DxDevice::shutdown() {
-  end_frame_wait();
+  if (list_open_ && frame_list_) {
+    frame_list_->Close();
+    list_open_ = false;
+  }
+  wait_fence(fence_value_);
+  for (Grave& g : grave_) {
+    if (g.obj) g.obj->Release();
+    g.obj = nullptr;
+  }
+  grave_.clear();
   for (ID3D12Resource*& b : back_) {
     if (b) { b->Release(); b = nullptr; }
   }
   if (swap_read_) { swap_read_->Release(); swap_read_ = nullptr; }
   rt_reset();
-  if (list_) { list_->Release(); list_ = nullptr; }
+  if (frame_list_) { frame_list_->Release(); frame_list_ = nullptr; }
+  if (copy_list_) { copy_list_->Release(); copy_list_ = nullptr; }
+  list_ = nullptr;
   if (fence_event_) CloseHandle(fence_event_);
   if (owned_window_ && window_) glfwDestroyWindow(window_);
   if (owned_glfw_) glfwTerminate();
   if (device_) { device_->Release(); device_ = nullptr; }
 }
 
-void DxDevice::end_frame_wait() {
-  if (removed_ || !queue_ || !fence_) return;
+void DxDevice::wait_fence(UINT64 value) {
+  if (!fence_ || !fence_event_ || value == 0) return;
+  if (fence_->GetCompletedValue() >= value) return;
+  fence_->SetEventOnCompletion(value, fence_event_);
+  WaitForSingleObject(fence_event_, INFINITE);
+}
+
+UINT64 DxDevice::signal_fence() {
+  if (removed_ || !queue_ || !fence_) return fence_value_;
   const UINT64 v = ++fence_value_;
   queue_->Signal(fence_, v);
-  if (fence_->GetCompletedValue() < v) {
-    fence_->SetEventOnCompletion(v, fence_event_);
-    WaitForSingleObject(fence_event_, INFINITE);
+  return v;
+}
+
+void DxDevice::collect() {
+  const UINT64 done = fence_ ? fence_->GetCompletedValue() : UINT64_MAX;
+  std::size_t w = 0;
+  for (std::size_t i = 0; i < grave_.size(); ++i) {
+    if (grave_[i].fence <= done) {
+      if (grave_[i].obj) grave_[i].obj->Release();
+    } else {
+      grave_[w++] = grave_[i];
+    }
   }
+  grave_.resize(w);
+}
+
+void DxDevice::retire(IUnknown* obj) {
+  if (!obj) return;
+  // An open frame list may still name this object. The signal at end_frame
+  // is fence_value_ + 1, which has not been issued yet.
+  const UINT64 when = list_open_ ? fence_value_ + 1 : fence_value_;
+  grave_.push_back({when, obj});
+  collect();
+}
+
+bool DxDevice::begin_copy() {
+  if (removed_ || !copy_list_ || !copy_alloc_) return false;
+  wait_fence(copy_fence_);
+  if (failed(copy_alloc_->Reset(), "copy allocator Reset") ||
+      failed(copy_list_->Reset(copy_alloc_, nullptr), "copy list Reset")) {
+    return false;
+  }
+  list_ = copy_list_;
+  return true;
+}
+
+void DxDevice::end_copy() {
+  if (!copy_list_ || !queue_) {
+    list_ = frame_list_;
+    return;
+  }
+  copy_list_->Close();
+  ID3D12CommandList* lists[] = {copy_list_};
+  queue_->ExecuteCommandLists(1, lists);
+  copy_fence_ = signal_fence();
+  wait_fence(copy_fence_);
+  list_ = frame_list_;
+  collect();
 }
 
 Buffer* DxDevice::create_buffer(const BufferDesc& desc, const void* data) {
@@ -740,7 +831,10 @@ void DxDevice::destroy_buffer(Buffer* buffer) {
   auto* b = static_cast<DxBuffer*>(buffer);
   if (b->res) {
     b->res->Unmap(0, nullptr);
-    b->res->Release();
+    b->map = nullptr;
+    // The open frame list may still hold this buffer's GPU address.
+    retire(b->res);
+    b->res = nullptr;
   }
   delete b;
 }
@@ -831,9 +925,12 @@ void DxDevice::update_texture(Texture* texture, const void* rgba, int w, int h) 
     std::memcpy(static_cast<char*>(map) + static_cast<std::size_t>(y) * pitch, static_cast<const char*>(rgba) + static_cast<std::size_t>(y) * row, row);
   }
   up->Unmap(0, nullptr);
-  // Record on a tiny immediate list if the main list is closed.
-  alloc_->Reset();
-  list_->Reset(alloc_, nullptr);
+  // Own list and fence. The frame list stays open across Project Manager ->
+  // Editor3D, which uploads meshes while ImGui's frame is recording.
+  if (!begin_copy()) {
+    up->Release();
+    return;
+  }
   barrier(t->res, t->state, D3D12_RESOURCE_STATE_COPY_DEST);
   D3D12_TEXTURE_COPY_LOCATION dst{};
   dst.pResource = t->res;
@@ -846,19 +943,19 @@ void DxDevice::update_texture(Texture* texture, const void* rgba, int w, int h) 
   src.PlacedFootprint.Footprint.Height = static_cast<UINT>(h);
   src.PlacedFootprint.Footprint.Depth = 1;
   src.PlacedFootprint.Footprint.RowPitch = static_cast<UINT>(pitch);
-  list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+  copy_list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
   barrier(t->res, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   t->state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-  list_->Close();
-  ID3D12CommandList* lists[] = {list_};
-  queue_->ExecuteCommandLists(1, lists);
-  end_frame_wait();
-  up->Release();
+  end_copy();
+  retire(up);
 }
 void DxDevice::destroy_texture(Texture* texture) {
   if (!texture) return;
   auto* t = static_cast<DxTexture*>(texture);
-  if (t->res) t->res->Release();
+  if (t->res) {
+    retire(t->res);
+    t->res = nullptr;
+  }
   delete t;
 }
 std::uint64_t DxDevice::imgui_texture(Texture* texture) {
@@ -975,7 +1072,10 @@ Pipeline* DxDevice::create_pipeline(const PipelineDesc& desc, std::string* error
 void DxDevice::destroy_pipeline(Pipeline* pipeline) {
   if (!pipeline) return;
   auto* p = static_cast<DxPipeline*>(pipeline);
-  if (p->pso) p->pso->Release();
+  if (p->pso) {
+    retire(p->pso);
+    p->pso = nullptr;
+  }
   delete p;
 }
 RenderTarget* DxDevice::create_target(const TargetDesc& desc, std::string* error) {
@@ -1045,25 +1145,38 @@ void DxDevice::begin_frame() {
     if (w > 0 && h > 0 && swap_ && (w != width_ || h != height_)) resize_swapchain(w, h);
     if (w > 0 && h > 0) { width_ = w; height_ = h; }
   }
-  alloc_->Reset();
-  list_->Reset(alloc_, nullptr);
-  cmd_.list = list_;
+  // This allocator's last submit has to be done. Resetting one the GPU is
+  // still reading is COMMAND_ALLOCATOR_CANNOT_RESET.
+  wait_fence(frame_fence_[frame_slot_]);
+  if (failed(frame_alloc_[frame_slot_]->Reset(), "frame allocator Reset") ||
+      failed(frame_list_->Reset(frame_alloc_[frame_slot_], nullptr), "frame list Reset")) {
+    return;
+  }
+  list_ = frame_list_;
+  cmd_.list = frame_list_;
   cmd_.dev = this;
   cmd_.pass = false;
+  list_open_ = true;
   swap_drawn_ = false;
 }
 void DxDevice::end_frame() {
   if (depth_ == 0) return;
   if (--depth_ > 0) return;
-  if (removed_ || !device_ || !list_) return;
+  if (removed_ || !device_ || !frame_list_) return;
+  if (!list_open_) return;
+  list_ = frame_list_;
   if (swap_ && frame_index_ < 2 && back_[frame_index_] && back_state_[frame_index_] != D3D12_RESOURCE_STATE_PRESENT) {
     barrier(back_[frame_index_], back_state_[frame_index_], D3D12_RESOURCE_STATE_PRESENT);
     back_state_[frame_index_] = D3D12_RESOURCE_STATE_PRESENT;
   }
-  list_->Close();
-  ID3D12CommandList* lists[] = {list_};
+  frame_list_->Close();
+  list_open_ = false;
+  ID3D12CommandList* lists[] = {frame_list_};
   queue_->ExecuteCommandLists(1, lists);
-  end_frame_wait();
+  frame_fence_[frame_slot_] = signal_fence();
+  wait_fence(frame_fence_[frame_slot_]);
+  frame_slot_ = (frame_slot_ + 1) % 2;
+  collect();
   deliver_swapchain_read();
   if (swap_ && swap_drawn_ && !removed_) {
     const HRESULT phr = swap_->Present(1, 0);
@@ -1225,8 +1338,10 @@ bool DxDevice::read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba,
       !rb) {
     return false;
   }
-  alloc_->Reset();
-  list_->Reset(alloc_, nullptr);
+  if (!begin_copy()) {
+    rb->Release();
+    return false;
+  }
   barrier(t->color->res, t->color->state, D3D12_RESOURCE_STATE_COPY_SOURCE);
   D3D12_TEXTURE_COPY_LOCATION src{};
   src.pResource = t->color->res;
@@ -1239,13 +1354,10 @@ bool DxDevice::read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba,
   dst.PlacedFootprint.Footprint.Height = static_cast<UINT>(t->height);
   dst.PlacedFootprint.Footprint.Depth = 1;
   dst.PlacedFootprint.Footprint.RowPitch = static_cast<UINT>(pitch);
-  list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+  copy_list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
   barrier(t->color->res, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   t->color->state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-  list_->Close();
-  ID3D12CommandList* lists[] = {list_};
-  queue_->ExecuteCommandLists(1, lists);
-  end_frame_wait();
+  end_copy();
   void* map = nullptr;
   D3D12_RANGE range{0, static_cast<SIZE_T>(rd.Width)};
   rb->Map(0, &range, &map);
@@ -1255,7 +1367,7 @@ bool DxDevice::read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba,
                 static_cast<char*>(map) + static_cast<std::size_t>(y) * pitch, row);
   }
   rb->Unmap(0, nullptr);
-  rb->Release();
+  retire(rb);
   if (w) *w = t->width;
   if (h) *h = t->height;
   return true;
@@ -1279,8 +1391,10 @@ bool DxDevice::read_depth(RenderTarget* target, std::vector<float>* depth, int* 
                                               nullptr, IID_PPV_ARGS(&rb)))) {
     return false;
   }
-  alloc_->Reset();
-  list_->Reset(alloc_, nullptr);
+  if (!begin_copy()) {
+    rb->Release();
+    return false;
+  }
   barrier(t->depth->res, t->depth->state, D3D12_RESOURCE_STATE_COPY_SOURCE);
   D3D12_TEXTURE_COPY_LOCATION src{};
   src.pResource = t->depth->res;
@@ -1293,13 +1407,10 @@ bool DxDevice::read_depth(RenderTarget* target, std::vector<float>* depth, int* 
   dst.PlacedFootprint.Footprint.Height = static_cast<UINT>(t->height);
   dst.PlacedFootprint.Footprint.Depth = 1;
   dst.PlacedFootprint.Footprint.RowPitch = row_bytes;
-  list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+  copy_list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
   barrier(t->depth->res, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   t->depth->state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-  list_->Close();
-  ID3D12CommandList* lists[] = {list_};
-  queue_->ExecuteCommandLists(1, lists);
-  end_frame_wait();
+  end_copy();
   void* map = nullptr;
   D3D12_RANGE range{0, static_cast<SIZE_T>(rd.Width)};
   rb->Map(0, &range, &map);
@@ -1310,7 +1421,7 @@ bool DxDevice::read_depth(RenderTarget* target, std::vector<float>* depth, int* 
     std::memcpy(dst_row, src_row, static_cast<std::size_t>(t->width) * sizeof(float));
   }
   rb->Unmap(0, nullptr);
-  rb->Release();
+  retire(rb);
   if (w) *w = t->width;
   if (h) *h = t->height;
   return true;
