@@ -52,6 +52,7 @@ struct VkTextureR : Texture {
   int height = 1;
   bool depth = false;
   std::uint64_t imgui = 0;
+  VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
 };
 struct VkSamplerR : Sampler {
   VkSampler sampler = VK_NULL_HANDLE;
@@ -101,6 +102,7 @@ class VkCmd final : public CommandList {
   Bind ubo[3]{};
   Bind tex[16]{};
   VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
+  VkTargetR* pass_target = nullptr;
   void begin_pass(const PassDesc& p) override;
   void end_pass() override;
   void set_viewport(int x, int y, int w, int h) override;
@@ -219,6 +221,12 @@ class VkDeviceR final : public Device {
   VkImageView swap_view_ = VK_NULL_HANDLE;
   VkCommandPool pool_ = VK_NULL_HANDLE;
   VkFence fence_ = VK_NULL_HANDLE;
+  // Immediate copies. The frame pool is reset while its buffer is recording;
+  // allocating the copy from that pool would be the same class of bug as
+  // Direct3D 12 resetting the frame allocator mid-frame.
+  VkCommandPool upload_pool_ = VK_NULL_HANDLE;
+  VkCommandBuffer upload_cmd_ = VK_NULL_HANDLE;
+  VkFence upload_fence_ = VK_NULL_HANDLE;
   GLFWwindow* window_ = nullptr;
   bool owned_window_ = false;
   bool owned_glfw_ = false;
@@ -254,11 +262,19 @@ void VkCmd::begin_pass(const PassDesc& p) {
   }
   vkCmdBeginRenderPass(cmd, &info, VK_SUBPASS_CONTENTS_INLINE);
   pass = true;
+  pass_target = t;
   set_viewport(0, 0, w, h);
 }
 void VkCmd::end_pass() {
   if (!pass) return;
   vkCmdEndRenderPass(cmd);
+  // finalLayout of the color and depth passes. A later copy has to leave
+  // this layout, not a layout guessed from the last upload.
+  if (pass_target) {
+    if (pass_target->color) pass_target->color->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    if (pass_target->depth) pass_target->depth->layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+  }
+  pass_target = nullptr;
   pass = false;
 }
 void VkCmd::set_viewport(int x, int y, int w, int h) {

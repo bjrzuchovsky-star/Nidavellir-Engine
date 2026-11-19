@@ -50,23 +50,20 @@ void VkDeviceR::destroy_buffer_raw(VkBuffer b, VkDeviceMemory m) {
 }
 
 void VkDeviceR::one_shot(const std::function<void(VkCommandBuffer)>& fn) {
-  VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-  ai.commandPool = pool_;
-  ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  ai.commandBufferCount = 1;
-  VkCommandBuffer c = VK_NULL_HANDLE;
-  vkAllocateCommandBuffers(device_, &ai, &c);
+  if (!upload_cmd_ || !upload_fence_) return;
+  vkWaitForFences(device_, 1, &upload_fence_, VK_TRUE, UINT64_MAX);
+  vkResetFences(device_, 1, &upload_fence_);
+  vkResetCommandBuffer(upload_cmd_, 0);
   VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(c, &bi);
-  fn(c);
-  vkEndCommandBuffer(c);
+  vkBeginCommandBuffer(upload_cmd_, &bi);
+  fn(upload_cmd_);
+  vkEndCommandBuffer(upload_cmd_);
   VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   si.commandBufferCount = 1;
-  si.pCommandBuffers = &c;
-  vkQueueSubmit(queue_, 1, &si, VK_NULL_HANDLE);
-  vkQueueWaitIdle(queue_);
-  vkFreeCommandBuffers(device_, pool_, 1, &c);
+  si.pCommandBuffers = &upload_cmd_;
+  vkQueueSubmit(queue_, 1, &si, upload_fence_);
+  vkWaitForFences(device_, 1, &upload_fence_, VK_TRUE, UINT64_MAX);
 }
 
 void VkDeviceR::transition(VkCommandBuffer c, VkImage image, VkImageLayout from, VkImageLayout to, bool depth) {
@@ -330,6 +327,10 @@ bool VkDeviceR::open(const DeviceDesc& desc, std::string* error) {
   VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
   fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
   vkCreateFence(device_, &fci, nullptr, &fence_);
+  vkCreateCommandPool(device_, &pci, nullptr, &upload_pool_);
+  cbai.commandPool = upload_pool_;
+  vkAllocateCommandBuffers(device_, &cbai, &upload_cmd_);
+  vkCreateFence(device_, &fci, nullptr, &upload_fence_);
 
   auto make_pass = [&](bool color, bool depth, VkFormat cf, VkImageLayout final_color, bool present) {
     VkAttachmentDescription att[2]{};
@@ -583,6 +584,11 @@ void VkDeviceR::shutdown() {
   if (color_pass_) vkDestroyRenderPass(device_, color_pass_, nullptr);
   if (depth_pass_) vkDestroyRenderPass(device_, depth_pass_, nullptr);
   if (swap_pass_) vkDestroyRenderPass(device_, swap_pass_, nullptr);
+  if (upload_fence_) vkDestroyFence(device_, upload_fence_, nullptr);
+  if (upload_pool_) vkDestroyCommandPool(device_, upload_pool_, nullptr);
+  upload_fence_ = VK_NULL_HANDLE;
+  upload_pool_ = VK_NULL_HANDLE;
+  upload_cmd_ = VK_NULL_HANDLE;
   if (fence_) vkDestroyFence(device_, fence_, nullptr);
   if (pool_) vkDestroyCommandPool(device_, pool_, nullptr);
   if (device_) vkDestroyDevice(device_, nullptr);
@@ -671,7 +677,7 @@ Texture* VkDeviceR::create_texture(const TextureDesc& desc, const void* rgba) {
                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &sm, &map);
     if (map) std::memcpy(map, src, static_cast<std::size_t>(bytes));
     one_shot([&](VkCommandBuffer c) {
-      transition(c, t->image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, false);
+      transition(c, t->image, t->layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, false);
       VkBufferImageCopy cp{};
       cp.imageExtent = {static_cast<uint32_t>(desc.width), static_cast<uint32_t>(desc.height), 1};
       cp.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -679,12 +685,14 @@ Texture* VkDeviceR::create_texture(const TextureDesc& desc, const void* rgba) {
       vkCmdCopyBufferToImage(c, sb, t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cp);
       transition(c, t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false);
     });
+    t->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     unmap_memory(sm);
     destroy_buffer_raw(sb, sm);
   } else {
     one_shot([&](VkCommandBuffer c) {
-      transition(c, t->image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, true);
+      transition(c, t->image, t->layout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, true);
     });
+    t->layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
   }
   return t;
 }
@@ -700,7 +708,7 @@ void VkDeviceR::update_texture(Texture* texture, const void* rgba, int w, int h)
                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &sm, &map);
   if (map) std::memcpy(map, rgba, static_cast<std::size_t>(bytes));
   one_shot([&](VkCommandBuffer c) {
-    transition(c, t->image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, false);
+    transition(c, t->image, t->layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, false);
     VkBufferImageCopy cp{};
     cp.imageExtent = {static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1};
     cp.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -708,7 +716,8 @@ void VkDeviceR::update_texture(Texture* texture, const void* rgba, int w, int h)
     vkCmdCopyBufferToImage(c, sb, t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cp);
     transition(c, t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false);
   });
-    unmap_memory(sm);
+  t->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  unmap_memory(sm);
   destroy_buffer_raw(sb, sm);
 }
 void VkDeviceR::destroy_texture(Texture* texture) {
@@ -1027,7 +1036,7 @@ bool VkDeviceR::read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba
   VkBuffer buf = make_buffer(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &mem, &map);
   one_shot([&](VkCommandBuffer c) {
-    transition(c, t->color->image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false);
+    transition(c, t->color->image, t->color->layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false);
     VkBufferImageCopy cp{};
     cp.imageExtent = {static_cast<uint32_t>(t->width), static_cast<uint32_t>(t->height), 1};
     cp.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -1035,6 +1044,7 @@ bool VkDeviceR::read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba
     vkCmdCopyImageToBuffer(c, t->color->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buf, 1, &cp);
     transition(c, t->color->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false);
   });
+  t->color->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   rgba->resize(static_cast<std::size_t>(bytes));
   // Image memory is top-down. The renderer contract is bottom row first.
   if (map) {
@@ -1060,8 +1070,7 @@ bool VkDeviceR::read_depth(RenderTarget* target, std::vector<float>* depth, int*
   VkBuffer buf = make_buffer(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &mem, &map);
   one_shot([&](VkCommandBuffer c) {
-    transition(c, t->depth->image, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-               true);
+    transition(c, t->depth->image, t->depth->layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, true);
     VkBufferImageCopy cp{};
     cp.imageExtent = {static_cast<uint32_t>(t->width), static_cast<uint32_t>(t->height), 1};
     cp.imageSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -1070,6 +1079,7 @@ bool VkDeviceR::read_depth(RenderTarget* target, std::vector<float>* depth, int*
     transition(c, t->depth->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
                true);
   });
+  t->depth->layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
   depth->assign(static_cast<std::size_t>(t->width) * static_cast<std::size_t>(t->height), 0.0f);
   if (map) {
     const std::size_t row = static_cast<std::size_t>(t->width);
