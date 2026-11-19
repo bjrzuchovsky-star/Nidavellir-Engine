@@ -3315,6 +3315,9 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-switch") == 0) {
       return run_switch_smoke();
     }
+    if (std::strcmp(argv[i], "--smoke-lighting") == 0) {
+      return run_lighting_smoke();
+    }
     if (std::strcmp(argv[i], "--smoke-vr") == 0) {
       // Just the VR checks.
       return run_vr_smoke();

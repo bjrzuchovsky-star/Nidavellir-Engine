@@ -21,6 +21,7 @@ add_executable(ts_admin
   SmokeRealm.cpp
   SmokeWindow.cpp
   SmokeSwitch.cpp
+  SmokeLighting.cpp
   Smoke3DEditor.cpp
   SmokeAnim3D.cpp
   SmokeAI.cpp

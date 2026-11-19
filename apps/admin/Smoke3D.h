@@ -29,3 +29,8 @@ int run_window_smoke();
 // on the same device (no relaunch), then more frames. Direct3D 12 with
 // --gfx-debug fails if the debug layer stored an error. 0 = pass.
 int run_switch_smoke();
+
+// --smoke-lighting: a lit test scene with each lighting module and quality
+// preset, on every backend this process can start. Writes screenshots under
+// smoke-dump/. Direct3D 12 with --gfx-debug fails on a debug-layer error.
+int run_lighting_smoke();
