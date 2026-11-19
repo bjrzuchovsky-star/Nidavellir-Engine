@@ -33,7 +33,12 @@ mat4 skin_matrix() {
   return a_weights.x * u_bones[int(a_joints.x)] + a_weights.y * u_bones[int(a_joints.y)] +
          a_weights.z * u_bones[int(a_joints.z)] + a_weights.w * u_bones[int(a_joints.w)];
 }
+layout(location = 6) in vec4 i_m0;
+layout(location = 7) in vec4 i_m1;
+layout(location = 8) in vec4 i_m2;
+layout(location = 9) in vec4 i_m3;
 uniform mat4 u_model;
+uniform int u_instanced;
 uniform mat4 u_view_proj;
 uniform mat4 u_light_vp;
 out vec3 v_world;
@@ -42,7 +47,8 @@ out vec2 v_uv;
 out vec4 v_tan;
 out vec4 v_light;
 void main() {
-  mat4 model = u_model * skin_matrix();
+  mat4 placed = u_instanced != 0 ? mat4(i_m0, i_m1, i_m2, i_m3) : u_model;
+  mat4 model = placed * skin_matrix();
   vec4 w = model * vec4(a_pos, 1.0);
   mat3 nm = transpose(inverse(mat3(model)));
   v_world = w.xyz;
@@ -169,8 +175,17 @@ mat4 skin_matrix() {
   return a_weights.x * u_bones[int(a_joints.x)] + a_weights.y * u_bones[int(a_joints.y)] +
          a_weights.z * u_bones[int(a_joints.z)] + a_weights.w * u_bones[int(a_joints.w)];
 }
-uniform mat4 u_mvp;
-void main() { gl_Position = u_mvp * (skin_matrix() * vec4(a_pos, 1.0)); }
+layout(location = 6) in vec4 i_m0;
+layout(location = 7) in vec4 i_m1;
+layout(location = 8) in vec4 i_m2;
+layout(location = 9) in vec4 i_m3;
+uniform mat4 u_model;
+uniform mat4 u_light_vp;
+uniform int u_instanced;
+void main() {
+  mat4 placed = u_instanced != 0 ? mat4(i_m0, i_m1, i_m2, i_m3) : u_model;
+  gl_Position = u_light_vp * (placed * (skin_matrix() * vec4(a_pos, 1.0)));
+}
 )glsl";
 
 const char* kDepthFS = R"glsl(#version 330 core
@@ -320,6 +335,8 @@ struct DrawItem {
   bool shadow;
   int bone_offset = -1;  // into the frame's bone pool (-1 = rigid)
   int bones = 0;
+  int inst_first = 0;
+  int inst_count = 1;
 };
 
 struct LineVertex {
@@ -543,6 +560,9 @@ class GlRenderer3D final : public Renderer3D {
       if (shadow_tex_) glDeleteTextures(1, &shadow_tex_);
       if (shadow_fbo_) g.DeleteFramebuffers(1, &shadow_fbo_);
       if (line_vbo_) g.DeleteBuffers(1, &line_vbo_);
+      if (inst_vbo_) g.DeleteBuffers(1, &inst_vbo_);
+      inst_vbo_ = 0;
+      inst_bytes_ = 0;
       if (bones_ubo_) g.DeleteBuffers(1, &bones_ubo_);
       bones_ubo_ = 0;
       if (line_vao_) g.DeleteVertexArrays(1, &line_vao_);
@@ -674,6 +694,7 @@ class GlRenderer3D final : public Renderer3D {
     width_ = std::max(1, width);
     height_ = std::max(1, height);
     draws_.clear();
+    instances_.clear();
     bone_pool_.clear();
     points_.clear();
     lines_depth_.clear();
@@ -700,6 +721,20 @@ class GlRenderer3D final : public Renderer3D {
                    bool cast_shadow) override {
     if (!meshes_.count(mesh.id)) return;
     draws_.push_back({mesh.id, material.id, world, cast_shadow});
+  }
+
+  void draw_instanced(MeshHandle mesh, MaterialHandle material, const Mat4* worlds, std::size_t count,
+                      bool cast_shadow) override {
+    if (!meshes_.count(mesh.id) || !worlds || count == 0) return;
+    if (count == 1) {
+      draw_matrix(mesh, material, worlds[0], cast_shadow);
+      return;
+    }
+    DrawItem d{mesh.id, material.id, worlds[0], cast_shadow};
+    d.inst_first = static_cast<int>(instances_.size());
+    d.inst_count = static_cast<int>(count);
+    instances_.insert(instances_.end(), worlds, worlds + count);
+    draws_.push_back(d);
   }
 
   void draw_skinned(MeshHandle mesh, MaterialHandle material, const Mat4& world,
@@ -758,6 +793,7 @@ class GlRenderer3D final : public Renderer3D {
                                           std::fabs(sun.y) > 0.95f ? Vec3{0, 0, 1} : Vec3{0, 1, 0});
     const Mat4 light_vp = Mat4::ortho(-sd, sd, -sd, sd, 0.1f, sd * 4.0f) * light_view;
     const bool shadows = env_.shadows && env_.sun_intensity > 0.0f;
+    upload_instances();
     if (shadows) {
       g.BindFramebuffer(GL_FRAMEBUFFER, shadow_fbo_);
       glViewport(0, 0, kShadowSize, kShadowSize);
@@ -769,18 +805,27 @@ class GlRenderer3D final : public Renderer3D {
       glEnable(GL_POLYGON_OFFSET_FILL);
       glPolygonOffset(1.5f, 2.0f);
       g.UseProgram(depth_prog_);
-      const GLint u_mvp = g.GetUniformLocation(depth_prog_, "u_mvp");
+      const GLint u_light = g.GetUniformLocation(depth_prog_, "u_light_vp");
+      const GLint u_dmodel = g.GetUniformLocation(depth_prog_, "u_model");
+      const GLint u_dinst = g.GetUniformLocation(depth_prog_, "u_instanced");
       const GLint u_dskin = g.GetUniformLocation(depth_prog_, "u_skinned");
+      g.UniformMatrix4fv(u_light, 1, GL_FALSE, light_vp.m);
       for (const DrawItem& d : draws_) {
         if (!d.shadow) continue;
         const GpuMesh& m = meshes_[d.mesh];
-        const Mat4 mvp = light_vp * d.model;
-        g.UniformMatrix4fv(u_mvp, 1, GL_FALSE, mvp.m);
+        const int ninst = std::max(1, d.inst_count);
+        g.UniformMatrix4fv(u_dmodel, 1, GL_FALSE, d.model.m);
+        g.Uniform1i(u_dinst, ninst > 1 ? 1 : 0);
         g.Uniform1i(u_dskin, bind_bones(d) ? 1 : 0);
         g.BindVertexArray(m.vao);
-        glDrawElements(GL_TRIANGLES, m.count, GL_UNSIGNED_INT, nullptr);
+        bind_instance_attribs(d);
+        if (ninst > 1) {
+          g.DrawElementsInstanced(GL_TRIANGLES, m.count, GL_UNSIGNED_INT, nullptr, ninst);
+        } else {
+          glDrawElements(GL_TRIANGLES, m.count, GL_UNSIGNED_INT, nullptr);
+        }
         ++stats_.shadow_casters;
-        stats_.shadow_triangles += static_cast<std::size_t>(m.count) / 3;
+        stats_.shadow_triangles += static_cast<std::size_t>(m.count) / 3 * static_cast<std::size_t>(ninst);
       }
       if (foliage_ok_) stats_.shadow_casters += foliage_.draw_shadows(light_vp, env_);  // TS_TERRAIN
       glDisable(GL_POLYGON_OFFSET_FILL);
@@ -861,7 +906,7 @@ class GlRenderer3D final : public Renderer3D {
     const GLint u_model = U("u_model"), u_alb = U("u_albedo"), u_met = U("u_metallic"),
                 u_rgh = U("u_roughness"), u_emi = U("u_emissive"), u_hn = U("u_has_normal"),
                 u_unl = U("u_unlit"), u_skn = U("u_skinned"), u_amode = U("u_alpha_mode"),
-                u_acut = U("u_alpha_cutoff");
+                u_acut = U("u_alpha_cutoff"), u_inst = U("u_instanced");
     const MaterialDesc fallback;
     // Opaque + alpha-tested first, then alpha-blended materials (no depth
     // writes, drawn in submission order).
@@ -884,7 +929,9 @@ class GlRenderer3D final : public Renderer3D {
           glEnable(GL_CULL_FACE);
           glCullFace(GL_BACK);
         }
+        const int ninst = std::max(1, d.inst_count);
         g.UniformMatrix4fv(u_model, 1, GL_FALSE, d.model.m);
+        g.Uniform1i(u_inst, ninst > 1 ? 1 : 0);
         const bool skinned = bind_bones(d);
         g.Uniform1i(u_skn, skinned ? 1 : 0);
         if (skinned) ++stats_.skinned;
@@ -902,9 +949,14 @@ class GlRenderer3D final : public Renderer3D {
         g.ActiveTexture(GL_TEXTURE0 + 2);
         glBindTexture(GL_TEXTURE_2D, mat && mat->mr ? mat->mr : white_tex_);
         g.BindVertexArray(m.vao);
-        glDrawElements(GL_TRIANGLES, m.count, GL_UNSIGNED_INT, nullptr);
+        bind_instance_attribs(d);
+        if (ninst > 1) {
+          g.DrawElementsInstanced(GL_TRIANGLES, m.count, GL_UNSIGNED_INT, nullptr, ninst);
+        } else {
+          glDrawElements(GL_TRIANGLES, m.count, GL_UNSIGNED_INT, nullptr);
+        }
         ++stats_.draws;
-        stats_.triangles += static_cast<std::size_t>(m.count) / 3;
+        stats_.triangles += static_cast<std::size_t>(m.count) / 3 * static_cast<std::size_t>(ninst);
       }
     }
     glDisable(GL_BLEND);
@@ -1098,6 +1150,43 @@ class GlRenderer3D final : public Renderer3D {
 
  private:
   // Upload a draw's palette into the bone UBO (binding 0). False = rigid.
+  void upload_instances() {
+    if (instances_.empty()) return;
+    const Gl33& g = gl33();
+    if (!inst_vbo_) g.GenBuffers(1, &inst_vbo_);
+    g.BindBuffer(GL_ARRAY_BUFFER, inst_vbo_);
+    const auto bytes = static_cast<GLsizeiptr_ts>(instances_.size() * sizeof(Mat4));
+    if (bytes > inst_bytes_) {
+      g.BufferData(GL_ARRAY_BUFFER, bytes, instances_.data(), GL_DYNAMIC_DRAW);
+      inst_bytes_ = bytes;
+    } else {
+      g.BufferSubData(GL_ARRAY_BUFFER, 0, bytes, instances_.data());
+    }
+  }
+
+  // Locations 6..9 are a column-major mat4, one per instance. A single
+  // object keeps the uniform matrix (u_instanced = 0) so a lone cube draws
+  // the same pixels as before.
+  void bind_instance_attribs(const DrawItem& d) {
+    const Gl33& g = gl33();
+    const int n = std::max(1, d.inst_count);
+    if (n <= 1 || !inst_vbo_) {
+      for (int i = 0; i < 4; ++i) {
+        if (g.VertexAttribDivisor) g.VertexAttribDivisor(static_cast<GLuint>(6 + i), 0);
+        if (g.DisableVertexAttribArray) g.DisableVertexAttribArray(static_cast<GLuint>(6 + i));
+      }
+      return;
+    }
+    g.BindBuffer(GL_ARRAY_BUFFER, inst_vbo_);
+    const auto base = static_cast<std::uintptr_t>(d.inst_first) * sizeof(Mat4);
+    for (int i = 0; i < 4; ++i) {
+      g.EnableVertexAttribArray(static_cast<GLuint>(6 + i));
+      g.VertexAttribPointer(static_cast<GLuint>(6 + i), 4, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(sizeof(Mat4)),
+                            reinterpret_cast<const void*>(base + static_cast<std::uintptr_t>(i) * sizeof(float) * 4));
+      g.VertexAttribDivisor(static_cast<GLuint>(6 + i), 1);
+    }
+  }
+
   bool bind_bones(const DrawItem& d) {
     if (d.bone_offset < 0 || d.bones <= 0 || !bones_ubo_) return false;
     const Gl33& g = gl33();
@@ -1184,6 +1273,9 @@ class GlRenderer3D final : public Renderer3D {
   Camera3D camera_;
   int width_ = 1, height_ = 1;
   std::vector<DrawItem> draws_;
+  std::vector<Mat4> instances_;
+  GLuint inst_vbo_ = 0;
+  GLsizeiptr_ts inst_bytes_ = 0;
   std::vector<Mat4> bone_pool_;
   GLuint bones_ubo_ = 0;
   std::vector<PointLight> points_;

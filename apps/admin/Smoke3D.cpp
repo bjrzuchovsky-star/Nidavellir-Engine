@@ -415,6 +415,51 @@ int gl_render(const fs::path& dir) {
   }
   if (!(shade.lum() * 4 < lit.lum() * 3)) return fail(std::string("shadow not darker: ") + buf);
   if (st.draws != 2 || st.shadow_casters != 2) return fail(std::string("stats: ") + buf);
+  // Two copies of one mesh: one instanced draw in the color pass and one
+  // in the shadow pass. Both cubes have to land on screen (a swapped
+  // instance matrix throws them off the view).
+  {
+    s3::Scene3D pile;
+    s3::Material3D red_mat;
+    red_mat.albedo[0] = 0.9f;
+    red_mat.albedo[1] = 0.1f;
+    red_mat.albedo[2] = 0.08f;
+    auto cube_at = [&](std::uint64_t id, float x) {
+      s3::Entity3D e;
+      e.id = id;
+      e.name = "Twin";
+      e.transform.position = {x, 0.5f, 0};
+      e.mesh = s3::MeshRef{"primitive:cube", true};
+      e.material = red_mat;
+      return e;
+    };
+    pile.entities = {cube_at(1, -1.2f), cube_at(2, 1.2f)};
+    pile.environment = s.environment;
+    view.begin(pile.environment, pile.entities, cam, W, H);
+    const r3::FrameStats inst = view.end();
+    if (inst.draws != 1 || inst.shadow_casters != 1 || inst.triangles < 12 ||
+        inst.triangles != inst.shadow_triangles) {
+      return fail("instanced pair: draws " + std::to_string(inst.draws) + " tris " +
+                  std::to_string(inst.triangles) + " shadow tris " +
+                  std::to_string(inst.shadow_triangles) + " casters " +
+                  std::to_string(inst.shadow_casters));
+    }
+    std::vector<unsigned char> ipx;
+    int iw = 0, ih = 0;
+    if (!renderer->read_pixels(&ipx, &iw, &ih)) return fail("instanced pair: no pixels");
+    float ax = 0, ay = 0, bx = 0, by = 0;
+    cam.project({-1.2f, 0.5f, 0.5f}, W, H, &ax, &ay);
+    cam.project({1.2f, 0.5f, 0.5f}, W, H, &bx, &by);
+    const Px left = pixel(ipx, iw, ih, ax, ay);
+    const Px right = pixel(ipx, iw, ih, bx, by);
+    if (!(left.r > left.g + 40 && left.r > left.b + 40) ||
+        !(right.r > right.g + 40 && right.r > right.b + 40)) {
+      return fail("instanced pair missed a cube: left rgb(" + std::to_string(left.r) + "," +
+                  std::to_string(left.g) + "," + std::to_string(left.b) + ") right rgb(" +
+                  std::to_string(right.r) + "," + std::to_string(right.g) + "," +
+                  std::to_string(right.b) + ")");
+    }
+  }
   // A red point light near the ground brightens it red.
   s3::Entity3D lamp;
   lamp.id = 3;
