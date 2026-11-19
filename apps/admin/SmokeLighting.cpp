@@ -1,6 +1,7 @@
 #include "Smoke3D.h"
 
 #include "core/PngWrite.h"
+#include "render3d/HdrImage.h"
 #include "render3d/Camera3D.h"
 #include "render3d/Mesh.h"
 #include "render3d/Renderer3D.h"
@@ -8,8 +9,11 @@
 #include "render3d/lighting/Lighting.h"
 #include "rhi/Rhi.h"
 
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -148,6 +152,34 @@ int open_one(ts::tombstone::rhi::Api api, bool required) {
     code = render_one(device.get(), *renderer, cube, plane, copper_h, ground_h, L,
                       std::string(rhi::api_flag(api)) + "-" + mod->id(), dump);
   }
+  {
+    render3d::ReflectionProbeDesc probe;
+    probe.position = {0.0f, 1.2f, 0.0f};
+    probe.radius = 8.0f;
+    probe.resolution = 16;
+    probe.id = 1;
+    renderer->set_reflection_probes(&probe, 1);
+    render3d::GiVolumeDesc volume;
+    volume.origin = {-2.0f, 0.0f, -2.0f};
+    volume.spacing = {2.0f, 2.0f, 2.0f};
+    volume.nx = volume.ny = volume.nz = 1;
+    volume.bake = true;
+    volume.id = 7;
+    renderer->set_gi_volume(volume);
+    render3d::Lighting lit;
+    lit.preset = 4;
+    lit.reflections = 1;
+    lit.gi = 1;
+    lit.point_shadows = true;
+    lit.spot_shadows = true;
+    code = render_one(device.get(), *renderer, cube, plane, copper_h, ground_h, lit,
+                      std::string(rhi::api_flag(api)) + "-probes", dump);
+    std::vector<float> sh;
+    if (code == 0 && (!renderer->take_gi_bake(&sh) || sh.size() < 12))
+      code = fail(std::string(name) + " irradiance bake produced no coefficients");
+    else if (code == 0)
+      std::cout << "[smoke-lighting] " << name << " baked " << (sh.size() / 12) << " irradiance probes\n";
+  }
   renderer->shutdown();
   device.reset();
   if (code == 0) std::cout << "[smoke-lighting] " << name << " modules ok\n";
@@ -156,7 +188,91 @@ int open_one(ts::tombstone::rhi::Api api, bool required) {
 
 }  // namespace
 
+int check_images() {
+  const fs::path dir = "smoke-dump";
+  fs::create_directories(dir);
+  {
+    std::ofstream out(dir / "tiny.hdr", std::ios::binary);
+    out << "#?RADIANCE\nFORMAT=32-bit_rgbe\n\n-Y 1 +X 4\n";
+    const unsigned char px[] = {10, 20, 30, 128, 40, 50, 60, 129, 1, 2, 3, 140, 255, 255, 255, 150};
+    out.write(reinterpret_cast<const char*>(px), sizeof(px));
+  }
+  ts::tombstone::render3d::Image img;
+  float range = 0;
+  std::string err;
+  if (!ts::tombstone::render3d::load_hdr_rgba((dir / "tiny.hdr").string(), &img, &range, &err) || img.width != 4 ||
+      range < 1.0f)
+    return fail("Radiance HDR: " + err);
+  {
+    // Uncompressed one-pixel OpenEXR, half RGB = 1.
+    std::ofstream out(dir / "tiny.exr", std::ios::binary);
+    auto u32 = [&](std::uint32_t v) {
+      unsigned char b[4] = {static_cast<unsigned char>(v), static_cast<unsigned char>(v >> 8),
+                            static_cast<unsigned char>(v >> 16), static_cast<unsigned char>(v >> 24)};
+      out.write(reinterpret_cast<char*>(b), 4);
+    };
+    auto u64 = [&](std::uint64_t v) {
+      for (int i = 0; i < 8; ++i) {
+        char c = static_cast<char>((v >> (8 * i)) & 0xff);
+        out.write(&c, 1);
+      }
+    };
+    auto str = [&](const char* s) { out.write(s, std::strlen(s) + 1); };
+    const unsigned char magic[] = {0x76, 0x2f, 0x31, 0x01, 2, 0, 0, 0};
+    out.write(reinterpret_cast<const char*>(magic), 8);
+    str("channels");
+    u32(1);  // chlist
+    std::string chans;
+    auto add = [&](const char* n) {
+      chans.append(n);
+      chans.push_back(0);
+      chans.push_back(1);  // half
+      chans.push_back(0);
+      chans.push_back(0);
+      chans.push_back(0);
+      chans.append(4, 0);  // xSampling
+      chans.push_back(1);
+      chans.append(3, 0);
+      chans.push_back(1);  // ySampling
+      chans.append(3, 0);
+    };
+    add("B");
+    add("G");
+    add("R");
+    chans.push_back(0);
+    u32(static_cast<std::uint32_t>(chans.size()));
+    out.write(chans.data(), chans.size());
+    str("compression");
+    u32(0);
+    u32(1);
+    out.put(0);
+    str("dataWindow");
+    u32(3);
+    u32(16);
+    for (int i = 0; i < 3; ++i) u32(0);
+    u32(0);  // x1,y1 = 0 so 1x1. Wait I wrote 3 zeros then one more. That's x0 y0 x1. Need y1.
+    // The loop wrote 3 zeros and then u32(0) is the 4th. That's 16 bytes. Good, all zero = 1x1.
+    str("type");
+    u32(1);
+    const char* scan = "scanlineimage";
+    u32(static_cast<std::uint32_t>(std::strlen(scan) + 1));
+    out.write(scan, std::strlen(scan) + 1);
+    out.put(0);  // end of header
+    const auto table = static_cast<std::uint64_t>(out.tellp()) + 8;
+    u64(table);
+    u32(0);  // y
+    u32(6);  // 3 channels * 2 bytes
+    const unsigned char half_one[] = {0x00, 0x3c, 0x00, 0x3c, 0x00, 0x3c};
+    out.write(reinterpret_cast<const char*>(half_one), 6);
+  }
+  if (!ts::tombstone::render3d::load_hdr_rgba((dir / "tiny.exr").string(), &img, &range, &err) || img.width != 1)
+    return fail("OpenEXR: " + err);
+  std::cout << "[smoke-lighting] HDR and EXR decode ok\n";
+  return 0;
+}
+
 int run_lighting_smoke() {
+  if (int code = check_images()) return code;
   using ts::tombstone::rhi::Api;
   Api only = Api::OpenGL;
   const bool pinned = ts::tombstone::rhi::cli_api(&only);
