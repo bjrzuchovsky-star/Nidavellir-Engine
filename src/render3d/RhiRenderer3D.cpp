@@ -231,6 +231,9 @@ class RhiRenderer final : public Renderer3D {
       device_ = nullptr;
       return;
     }
+    // Meshes, targets and pipelines are named by the last frame and by
+    // Present. Idle the frame, upload and present fences before Release.
+    device_->wait_idle();
     for (auto& [id, m] : meshes_) free_mesh(m);
     meshes_.clear();
     for (auto& [id, m] : materials_) free_mat(m);

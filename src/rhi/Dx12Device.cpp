@@ -140,7 +140,7 @@ class DxDevice final : public Device {
   void begin_frame() override;
   void end_frame() override;
   CommandList* commands() override { return depth_ > 0 ? &cmd_ : nullptr; }
-  void wait_idle() override { wait_fence(fence_value_); }
+  void wait_idle() override;
   bool read_color(RenderTarget* target, std::vector<std::uint8_t>* rgba, int* w, int* h) override;
   bool read_depth(RenderTarget* target, std::vector<float>* depth, int* w, int* h) override;
   std::uint32_t rt_create_blas(const RtGeometry& geo, std::string* error) override;
@@ -176,6 +176,7 @@ class DxDevice final : public Device {
  private:
   void wait_fence(UINT64 value);
   UINT64 signal_fence();
+  void gpu_idle();
   void collect();
   void retire(IUnknown* obj);
   bool begin_copy();
@@ -202,6 +203,9 @@ class DxDevice final : public Device {
   Com<ID3D12CommandAllocator> copy_alloc_;
   ID3D12GraphicsCommandList* copy_list_ = nullptr;
   UINT64 copy_fence_ = 0;
+  // Signaled on the direct queue after Present. Present is more GPU work
+  // than the frame signal, which is waited before Present so readback can map.
+  UINT64 present_fence_ = 0;
   Com<ID3D12Fence> fence_;
   struct Grave {
     UINT64 fence = 0;
@@ -709,17 +713,34 @@ bool DxDevice::open(const DeviceDesc& desc, std::string* error) {
   return true;
 }
 
-void DxDevice::shutdown() {
-  if (list_open_ && frame_list_) {
+void DxDevice::wait_idle() { gpu_idle(); }
+
+void DxDevice::gpu_idle() {
+  // Submit anything still being recorded, then wait until the frame, the
+  // upload, and the present have all retired. The debug layer aborts on
+  // final Release if a resource is still named by in-flight GPU work.
+  if (list_open_ && frame_list_ && queue_ && !removed_) {
     frame_list_->Close();
     list_open_ = false;
+    ID3D12CommandList* lists[] = {frame_list_};
+    queue_->ExecuteCommandLists(1, lists);
+    frame_fence_[frame_slot_] = signal_fence();
   }
+  wait_fence(frame_fence_[0]);
+  wait_fence(frame_fence_[1]);
+  wait_fence(copy_fence_);
+  wait_fence(present_fence_);
   wait_fence(fence_value_);
+  collect();
   for (Grave& g : grave_) {
     if (g.obj) g.obj->Release();
     g.obj = nullptr;
   }
   grave_.clear();
+}
+
+void DxDevice::shutdown() {
+  gpu_idle();
   for (ID3D12Resource*& b : back_) {
     if (b) { b->Release(); b = nullptr; }
   }
@@ -1181,6 +1202,9 @@ void DxDevice::end_frame() {
   if (swap_ && swap_drawn_ && !removed_) {
     const HRESULT phr = swap_->Present(1, 0);
     if (FAILED(phr)) failed(phr, "Present");
+    // DXGI queues the present on this same command queue, after the signal
+    // waited above. A later signal is the one shutdown has to wait for.
+    else present_fence_ = signal_fence();
   }
   swap_drawn_ = false;
 }
@@ -1201,6 +1225,9 @@ void DxDevice::create_backbuffers() {
 
 void DxDevice::resize_swapchain(int w, int h) {
   if (!swap_ || w <= 0 || h <= 0) return;
+  // ResizeBuffers and the back-buffer Releases are use-after-free if a
+  // present is still reading them.
+  gpu_idle();
   for (ID3D12Resource*& b : back_) {
     if (b) { b->Release(); b = nullptr; }
   }
