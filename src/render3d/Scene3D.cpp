@@ -169,6 +169,8 @@ Value entity_json(const Entity3D& e) {
     if (!mt.metal_rough_texture.empty()) {
       m.set("metal_rough_texture", Value::string(mt.metal_rough_texture));
     }
+    if (!mt.ao_texture.empty()) m.set("ao_texture", Value::string(mt.ao_texture));
+    if (!mt.height_texture.empty()) m.set("height_texture", Value::string(mt.height_texture));
     if (mt.override_model) m.set("override_model", Value::boolean(true));
     o.set("material", std::move(m));
   }
@@ -195,6 +197,8 @@ Value entity_json(const Entity3D& e) {
       l.set("size_x", Value::number(e.light->size_x));
       l.set("size_y", Value::number(e.light->size_y));
     }
+    if (e.light->kelvin > 0.0f) l.set("kelvin", Value::number(e.light->kelvin));
+    if (e.light->cast_shadows) l.set("cast_shadows", Value::boolean(true));
     o.set("light", std::move(l));
   }
   if (e.collider) o.set("collider", physics_json::collider(*e.collider));
@@ -407,6 +411,8 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     m.albedo_texture = v.str("albedo_texture");
     m.normal_texture = v.str("normal_texture");
     m.metal_rough_texture = v.str("metal_rough_texture");
+    m.ao_texture = v.str("ao_texture");
+    m.height_texture = v.str("height_texture");
     m.override_model = v.flag("override_model", false);
     e.material = m;
   }
@@ -427,6 +433,8 @@ bool entity_from(const Value& o, Entity3D* out, std::string* why) {
     v.floats("color", l.color, 3);
     l.intensity = std::max(0.0f, v.flt("intensity", l.intensity));
     l.range = std::max(0.1f, v.flt("range", l.range));
+    l.kelvin = std::max(0.0f, v.flt("kelvin", l.kelvin));
+    l.cast_shadows = v.flag("cast_shadows", l.cast_shadows);
     e.light = l;
   }
   if (o["collider"].is_object()) e.collider = physics_json::read_collider(o["collider"]);
@@ -812,7 +820,8 @@ std::string write(const Scene3D& s) {
     lit.set("ao", Value::string(aos[std::clamp(env.lighting.ao, 0, 2)]));
     const char* rfs[] = {"off", "probes", "ssr", "ray"};
     lit.set("reflections", Value::string(rfs[std::clamp(env.lighting.reflections, 0, 3)]));
-    lit.set("tonemap", Value::string(env.lighting.tonemap == 2 ? "aces" : env.lighting.tonemap == 1 ? "post" : "reinhard"));
+    const char* tones[] = {"reinhard", "post", "aces", "agx"};
+    lit.set("tonemap", Value::string(tones[std::clamp(env.lighting.tonemap, 0, 3)]));
     lit.set("exposure", Value::number(env.lighting.exposure));
     lit.set("bloom", Value::number(env.lighting.bloom));
     lit.set("contrast", Value::number(env.lighting.contrast));
@@ -820,6 +829,14 @@ std::string write(const Scene3D& s) {
     lit.set("gain", Value::number(env.lighting.gain));
     lit.set("pom", Value::number(env.lighting.pom));
     lit.set("raytracing", Value::boolean(env.lighting.raytracing));
+    if (env.lighting.quality > 0) lit.set("quality", Value::number(env.lighting.quality));
+    if (env.lighting.sun_kelvin > 0.0f) lit.set("sun_kelvin", Value::number(env.lighting.sun_kelvin));
+    if (env.lighting.sky != 1.0f) lit.set("sky", Value::number(env.lighting.sky));
+    if (env.lighting.contact_shadows) lit.set("contact", Value::boolean(true));
+    if (env.lighting.auto_exposure) lit.set("auto_exposure", Value::boolean(true));
+    if (env.lighting.volumetric) lit.set("volumetric", Value::boolean(true));
+    if (env.lighting.point_shadows) lit.set("point_shadows", Value::boolean(true));
+    if (env.lighting.spot_shadows) lit.set("spot_shadows", Value::boolean(true));
     if (!env.lighting.hdri.empty()) lit.set("hdri", Value::string(env.lighting.hdri));
     e.set("lighting", std::move(lit));
   }
@@ -912,7 +929,7 @@ bool parse(const std::string& text, Scene3D* out, std::string* error) {
       const std::string rf = lit.str("reflections", "off");
       e.lighting.reflections = rf == "probes" ? 1 : rf == "ssr" ? 2 : rf == "ray" ? 3 : 0;
       const std::string tm = lit.str("tonemap", "reinhard");
-      e.lighting.tonemap = tm == "aces" ? 2 : tm == "post" ? 1 : 0;
+      e.lighting.tonemap = tm == "agx" ? 3 : tm == "aces" ? 2 : tm == "post" ? 1 : 0;
       e.lighting.exposure = lit.flt("exposure", e.lighting.exposure);
       e.lighting.bloom = lit.flt("bloom", e.lighting.bloom);
       e.lighting.contrast = lit.flt("contrast", e.lighting.contrast);
@@ -920,6 +937,14 @@ bool parse(const std::string& text, Scene3D* out, std::string* error) {
       e.lighting.gain = lit.flt("gain", e.lighting.gain);
       e.lighting.pom = lit.flt("pom", e.lighting.pom);
       e.lighting.raytracing = lit.flag("raytracing", false);
+      e.lighting.quality = std::clamp(static_cast<int>(lit.num("quality", 0)), 0, 5);
+      e.lighting.sun_kelvin = std::max(0.0f, lit.flt("sun_kelvin", 0.0f));
+      e.lighting.sky = std::clamp(lit.flt("sky", 1.0f), 0.0f, 4.0f);
+      e.lighting.contact_shadows = lit.flag("contact", false);
+      e.lighting.auto_exposure = lit.flag("auto_exposure", false);
+      e.lighting.volumetric = lit.flag("volumetric", false);
+      e.lighting.point_shadows = lit.flag("point_shadows", false);
+      e.lighting.spot_shadows = lit.flag("spot_shadows", false);
       e.lighting.hdri = lit.str("hdri", "");
     }
   }

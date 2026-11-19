@@ -1,5 +1,7 @@
 #include "render3d/lighting/Lighting.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 
 namespace ts {
@@ -74,6 +76,15 @@ void register_builtin_lighting() {
   register_lighting_module(fn("raytracing", "Hardware ray tracing",
                               [](const Lighting& l) { return l.raytracing; },
                               [](Lighting* l, bool on) { l->raytracing = on; }));
+  register_lighting_module(fn("contact", "Contact shadows",
+                              [](const Lighting& l) { return l.contact_shadows; },
+                              [](Lighting* l, bool on) { l->contact_shadows = on; }));
+  register_lighting_module(fn("volumetric", "Volumetric fog",
+                              [](const Lighting& l) { return l.volumetric; },
+                              [](Lighting* l, bool on) { l->volumetric = on; }));
+  register_lighting_module(fn("auto_exposure", "Auto exposure",
+                              [](const Lighting& l) { return l.auto_exposure; },
+                              [](Lighting* l, bool on) { l->auto_exposure = on; }));
 }
 
 const char* lighting_preset_name(int preset) {
@@ -117,6 +128,87 @@ void apply_lighting_preset(Lighting* lighting, int preset) {
     next.preset = 4;
   }
   *lighting = next;
+}
+
+const char* lighting_quality_name(int quality) {
+  switch (quality) {
+    case 1: return "Low";
+    case 2: return "Medium";
+    case 3: return "High";
+    case 4: return "Ultra";
+    case 5: return "Ray traced";
+    default: return "Custom";
+  }
+}
+
+void apply_lighting_quality(Lighting* lighting, int quality, bool raytracing_supported) {
+  if (!lighting) return;
+  Lighting next;
+  next.hdri = lighting->hdri;
+  next.modules = lighting->modules;
+  next.sun_kelvin = lighting->sun_kelvin;
+  next.quality = std::clamp(quality, 1, 5);
+  next.preset = 4;
+  if (quality <= 1) {
+    next.cascades = 1;
+    next.filter = 0;
+    next.tonemap = 0;
+  } else if (quality == 2) {
+    next.cascades = 2;
+    next.ao = 1;
+    next.gi = 1;
+    next.bloom = 0.15f;
+    next.tonemap = 1;
+  } else if (quality == 3) {
+    next.cascades = 3;
+    next.filter = 1;
+    next.ao = 1;
+    next.gi = 1;
+    next.reflections = 1;
+    next.bloom = 0.25f;
+    next.tonemap = 2;
+    next.contact_shadows = true;
+    next.spot_shadows = true;
+  } else {
+    next.cascades = 4;
+    next.filter = 1;
+    next.ao = 1;
+    next.gi = 1;
+    next.reflections = 2;
+    next.bloom = 0.35f;
+    next.tonemap = 3;
+    next.exposure = 1.05f;
+    next.pom = 0.03f;
+    next.contact_shadows = true;
+    next.spot_shadows = true;
+    next.point_shadows = true;
+    next.volumetric = quality >= 4;
+    if (quality >= 5 && raytracing_supported) {
+      next.raytracing = true;
+      next.gi = 3;
+      next.ao = 2;
+      next.reflections = 3;
+    }
+  }
+  *lighting = next;
+}
+
+void kelvin_to_rgb(float kelvin, float rgb[3]) {
+  float k = std::clamp(kelvin, 1000.0f, 40000.0f) / 100.0f;
+  float r, g, b;
+  if (k <= 66.0f) {
+    r = 255.0f;
+    g = 99.4708025861f * std::log(k) - 161.1195681661f;
+    b = k <= 19.0f ? 0.0f : 138.5177312231f * std::log(k - 10.0f) - 305.0447927307f;
+  } else {
+    r = 329.698727446f * std::pow(k - 60.0f, -0.1332047592f);
+    g = 288.1221695283f * std::pow(k - 60.0f, -0.0755148492f);
+    b = 255.0f;
+  }
+  auto c = [](float v) { return std::clamp(v, 0.0f, 255.0f) / 255.0f; };
+  rgb[0] = c(r);
+  rgb[1] = c(g);
+  rgb[2] = c(b);
 }
 
 bool lighting_is_classic(const Lighting& lighting) {

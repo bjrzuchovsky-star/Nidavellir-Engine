@@ -91,6 +91,8 @@ struct Material3D {
   std::string albedo_texture;       // project-relative image paths
   std::string normal_texture;
   std::string metal_rough_texture;
+  std::string ao_texture;
+  std::string height_texture;
   // glTF meshes keep their own materials unless this is set.
   bool override_model = false;
   // Runtime only (not saved): show the albedo as is, no lighting -- the VR
@@ -109,6 +111,8 @@ struct Light3D {
   float inner = 0.75f;  // spot inner cone as a fraction of the outer
   float size_x = 1.0f;  // area light
   float size_y = 1.0f;
+  float kelvin = 0.0f;  // 0 = use Color. Otherwise a black-body multiplier.
+  bool cast_shadows = false;
   bool operator==(const Light3D& o) const = default;
 };
 

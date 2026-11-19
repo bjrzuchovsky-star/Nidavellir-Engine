@@ -78,8 +78,9 @@ float ts_shadow_map(vec4 light, vec3 n, int cascade) {
   vec2 auv = ts_atlas(uv, cascade);
   float tiles = max(frame.atlas.x, 1.0);
   float texel = frame.fog_extra.z * tiles;
-  if (frame.flags.y < 0.5) return ts_pcf(auv, ref, texel, 1);
-  // PCSS: blocker search, then a kernel that grows with the penumbra.
+  float lit;
+  if (frame.flags.y < 0.5) lit = ts_pcf(auv, ref, texel, 1);
+  else {
   float search = 0.0;
   float blockers = 0.0;
   float wide = texel * 6.0;
@@ -95,7 +96,15 @@ float ts_shadow_map(vec4 light, vec3 n, int cascade) {
   if (blockers < 1.0) return 1.0;
   float avg = search / blockers;
   float pen = clamp((ref - avg) / max(avg, 0.001) * frame.timev.y, 1.0, 8.0);
-  return ts_pcf(auv, ref, texel * pen, 2);
+  lit = ts_pcf(auv, ref, texel * pen, 2);
+  }
+  // Contact: darken when the occluder is only just in front of the receiver.
+  if (frame.sun_color.w > 0.0) {
+    float d = texture(u_shadow, auv).r;
+    float gap = ref - d;
+    if (gap > 0.0 && gap < frame.sun_color.w) lit *= mix(0.62, 1.0, gap / frame.sun_color.w);
+  }
+  return lit;
 }
 
 int ts_cascade() {
@@ -198,6 +207,7 @@ void main() {
 #endif
   vec3 albedo = pow(base.rgb, vec3(2.2));
   vec4 mr = texture(u_mr_tex, uv);
+  float ao = draw.extra.x > 0.5 ? mr.r : 1.0;
   float rough = clamp(draw.mr.y * mr.g, 0.04, 1.0);
   float metal = clamp(draw.mr.x * mr.b, 0.0, 1.0);
   vec3 n = n0;
@@ -222,7 +232,8 @@ void main() {
     float range = max(frame.point_color[i].w, 0.001);
     float fall = clamp(1.0 - pow(dist / range, 4.0), 0.0, 1.0);
     fall = fall * fall / (dist * dist + 1.0);
-    color += ts_brdf(n, view_dir, d / max(dist, 0.0001), frame.point_color[i].rgb * fall, albedo, metal, rough);
+    float shade = frame.point_pos[i].w < 0.0 ? ts_sun_shadow(n) : 1.0;
+    color += ts_brdf(n, view_dir, d / max(dist, 0.0001), frame.point_color[i].rgb * fall, albedo, metal, rough) * shade;
   }
   int ns = int(frame.counts.y + 0.5);
   for (int i = 0; i < 4; ++i) {
@@ -237,7 +248,8 @@ void main() {
     float range = 12.0;
     float fall = clamp(1.0 - pow(dist / range, 4.0), 0.0, 1.0);
     fall = fall * fall / (dist * dist + 1.0) * cone;
-    color += ts_brdf(n, view_dir, ld, frame.spot_color[i].rgb * fall, albedo, metal, rough);
+    float shade = frame.spot_pos[i].w < 0.0 ? ts_sun_shadow(n) : 1.0;
+    color += ts_brdf(n, view_dir, ld, frame.spot_color[i].rgb * fall, albedo, metal, rough) * shade;
   }
   int na = int(frame.counts.z + 0.5);
   for (int i = 0; i < 2; ++i) {
@@ -260,7 +272,43 @@ void main() {
   vec3 probe = ts_nearest_probe(v_world);
   if (dot(probe, probe) > 0.0) sky = mix(sky, probe, 0.65);
   vec3 f0 = mix(vec3(0.04), albedo, metal);
-  color += frame.fog_extra.w * sky * (albedo * (1.0 - metal) + f0 * (1.0 - rough) * 0.5);
+  color += frame.fog_extra.w * sky * (albedo * (1.0 - metal) + f0 * (1.0 - rough) * 0.5) * ao;
+  if (frame.ground.w > 1.5) {
+    float fres = pow(1.0 - max(dot(n, view_dir), 0.0), 4.0);
+    color += sky * fres * (1.0 - rough) * 0.35;
+  }
+#ifdef TS_RAY
+  if (frame.ground.w > 3.5) {
+    vec3 rdir = reflect(-view_dir, n);
+    rayQueryEXT rq;
+    rayQueryInitializeEXT(rq, u_tlas, gl_RayFlagsTerminateOnFirstHitEXT, 0xFFu, v_world + n * 0.05, 0.02, rdir, 80.0);
+    while (rayQueryProceedEXT(rq)) {}
+    if (rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionNoneEXT)
+      color += sky * (1.0 - rough) * 0.25;
+  }
+  if (frame.probe_color[0].w > 2.5) {
+    rayQueryEXT gq;
+    rayQueryInitializeEXT(gq, u_tlas, gl_RayFlagsTerminateOnFirstHitEXT, 0xFFu, v_world + n * 0.05, 0.02, n, 40.0);
+    while (rayQueryProceedEXT(gq)) {}
+    if (rayQueryGetIntersectionTypeEXT(gq, true) == gl_RayQueryCommittedIntersectionNoneEXT)
+      color += sky * albedo * 0.18;
+  }
+  if (frame.sky_top.w > 1.5) {
+    float occ = 0.0;
+    vec3 basis = abs(n.y) > 0.9 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+    vec3 t = normalize(cross(basis, n));
+    vec3 b = cross(n, t);
+    for (int i = 0; i < 4; ++i) {
+      float a = float(i) * 2.399;
+      vec3 dir = normalize(n + t * cos(a) * 0.6 + b * sin(a) * 0.6);
+      rayQueryEXT aq;
+      rayQueryInitializeEXT(aq, u_tlas, gl_RayFlagsTerminateOnFirstHitEXT, 0xFFu, v_world + n * 0.05, 0.02, dir, 8.0);
+      while (rayQueryProceedEXT(aq)) {}
+      if (rayQueryGetIntersectionTypeEXT(aq, true) != gl_RayQueryCommittedIntersectionNoneEXT) occ += 1.0;
+    }
+    color *= mix(1.0, 0.35, occ / 4.0);
+  }
+#endif
 #ifndef TS_FOLIAGE
   color += draw.emissive.rgb;
 #endif

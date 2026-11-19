@@ -44,7 +44,8 @@ struct Lighting {
   int gi = 0;              // 0 none, 1 baked probes, 2 screen-space, 3 ray traced
   int ao = 0;              // 0 off, 1 SSAO, 2 RTAO
   int reflections = 0;     // 0 off, 1 probes, 2 SSR, 3 ray traced
-  int tonemap = 0;         // 0 Reinhard in-shader, 1 Reinhard post, 2 ACES
+  int tonemap = 0;         // 0 Reinhard in-shader, 1 Reinhard post, 2 ACES, 3 AgX
+  int quality = 0;         // 0 unset, 1 low, 2 medium, 3 high, 4 ultra, 5 ray traced
   float exposure = 1.0f;
   float bloom = 0.0f;
   float contrast = 1.0f;
@@ -52,8 +53,14 @@ struct Lighting {
   float gain = 1.0f;
   float pom = 0.0f;        // parallax scale, 0 off
   float pcss = 0.08f;
+  float sky = 1.0f;        // sky-light multiplier on ambient
+  float sun_kelvin = 0.0f; // 0 = use the authored sun colour
+  float contact = 0.02f;   // contact-shadow gap in shadow-map space
   bool point_shadows = false;
   bool spot_shadows = false;
+  bool contact_shadows = false;
+  bool auto_exposure = false;
+  bool volumetric = false;
   bool raytracing = false; // off unless a scene asks, and only if the GPU can
   std::string hdri;
   std::string modules;     // plugin passes: "id=1,other=0"
@@ -90,6 +97,7 @@ struct PointLight {
   float color[3] = {1.0f, 0.75f, 0.45f};
   float intensity = 6.0f;
   float range = 8.0f;
+  bool shadows = false;
 };
 
 // Cone along `direction` (the direction light travels). outer_cos / inner_cos
@@ -102,6 +110,7 @@ struct SpotLight {
   float range = 12.0f;
   float outer_cos = 0.8f;
   float inner_cos = 0.9f;
+  bool shadows = false;
 };
 
 // A flat rectangle centred at position, spanned by axis_u and axis_v.

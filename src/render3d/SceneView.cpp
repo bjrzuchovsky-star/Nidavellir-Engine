@@ -1,4 +1,5 @@
 #include "render3d/SceneView.h"
+#include "render3d/lighting/Lighting.h"
 #include "render3d/ClipFile.h"
 #include "render3d/Retarget.h"
 #include "render3d/HullFit.h"
@@ -311,7 +312,8 @@ MaterialHandle SceneView::material_for(const scene3d::Material3D& m) {
                 m.albedo[2], m.albedo[3], m.metallic, m.roughness, m.emissive[0],
                 m.emissive[1], m.emissive[2]);
   std::string k = std::string(key) + m.albedo_texture + "|" + m.normal_texture + "|" +
-                  m.metal_rough_texture + (m.unlit ? "|unlit" : "");
+                  m.metal_rough_texture + "|" + m.ao_texture + "|" + m.height_texture +
+                  (m.unlit ? "|unlit" : "");
   if (mem_images::is_key(m.albedo_texture)) {
     // A new raster version replaces the old material (and its texture).
     const mem_images::MemImage* mi = mem_images::get(m.albedo_texture);
@@ -338,10 +340,14 @@ MaterialHandle SceneView::material_for(const scene3d::Material3D& m) {
   d.base_color_texture = m.albedo_texture;
   d.normal_texture = m.normal_texture;
   d.metal_rough_texture = m.metal_rough_texture;
+  d.ao_texture = m.ao_texture;
+  d.height_texture = m.height_texture;
   d.unlit = m.unlit;
   d.base_color_image = image(m.albedo_texture);
   d.normal_image = image(m.normal_texture);
   d.metal_rough_image = image(m.metal_rough_texture);
+  d.ao_image = image(m.ao_texture);
+  d.height_image = image(m.height_texture);
   MaterialEntry e;
   e.handle = r_ ? r_->create_material(d) : MaterialHandle{};
   materials_[k] = e;
@@ -560,8 +566,14 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
       l.position = e.transform.matrix().transform_point({b.min.x + 0.1f, b.max.y - 0.35f, 0.0f});
     }
     for (int i = 0; i < 3; ++i) l.color[i] = e.light->color[i];
+    if (e.light->kelvin > 0.0f) {
+      float k[3];
+      kelvin_to_rgb(e.light->kelvin, k);
+      for (int i = 0; i < 3; ++i) l.color[i] *= k[i];
+    }
     l.intensity = e.light->intensity;
     l.range = e.light->range;
+    l.shadows = e.light->cast_shadows;
     points.push_back({length(l.position - camera.target), l});
   }
   std::sort(points.begin(), points.end(),
@@ -574,8 +586,14 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
       s.position = e.transform.position;
       s.direction = e.transform.rotation.rotate({0, 0, -1});
       for (int i = 0; i < 3; ++i) s.color[i] = e.light->color[i];
+      if (e.light->kelvin > 0.0f) {
+        float k[3];
+        kelvin_to_rgb(e.light->kelvin, k);
+        for (int i = 0; i < 3; ++i) s.color[i] *= k[i];
+      }
       s.intensity = e.light->intensity;
       s.range = e.light->range;
+      s.shadows = e.light->cast_shadows;
       const float outer = radians(std::max(1.0f, e.light->angle));
       s.outer_cos = std::cos(outer * 0.5f);
       s.inner_cos = std::cos(outer * 0.5f * std::clamp(e.light->inner, 0.05f, 0.99f));
@@ -586,14 +604,25 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
       a.axis_u = e.transform.rotation.rotate({e.light->size_x * 0.5f, 0, 0});
       a.axis_v = e.transform.rotation.rotate({0, 0, e.light->size_y * 0.5f});
       for (int i = 0; i < 3; ++i) a.color[i] = e.light->color[i];
+      if (e.light->kelvin > 0.0f) {
+        float k[3];
+        kelvin_to_rgb(e.light->kelvin, k);
+        for (int i = 0; i < 3; ++i) a.color[i] *= k[i];
+      }
       a.intensity = e.light->intensity;
       r_->add_area_light(a);
-    } else if (e.light->type == scene3d::Light3D::Type::Emissive) {
+    } else if (e.light->type == scene3d::Light3D::Type::Emissive || e.light->type == scene3d::Light3D::Type::Sky) {
       PointLight l;
       l.position = e.transform.position;
       for (int i = 0; i < 3; ++i) l.color[i] = e.light->color[i];
+      if (e.light->kelvin > 0.0f) {
+        float k[3];
+        kelvin_to_rgb(e.light->kelvin, k);
+        for (int i = 0; i < 3; ++i) l.color[i] *= k[i];
+      }
       l.intensity = e.light->intensity;
-      l.range = e.light->range;
+      l.range = e.light->type == scene3d::Light3D::Type::Sky ? std::max(e.light->range, 40.0f) : e.light->range;
+      l.shadows = e.light->cast_shadows;
       r_->add_point_light(l);
     }
   }
@@ -605,6 +634,7 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
       env2.sun_direction = e.transform.rotation.rotate({0, 0, -1});
       for (int i = 0; i < 3; ++i) env2.sun_color[i] = e.light->color[i];
       env2.sun_intensity = e.light->intensity;
+      if (e.light->kelvin > 0.0f) env2.lighting.sun_kelvin = e.light->kelvin;
       r_->set_environment(env2);
     }
     if (e.terrain) {

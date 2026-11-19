@@ -1,10 +1,13 @@
 #include "render3d/RhiRenderer3D.h"
 #include "render3d/Skeleton.h"
+#include "render3d/lighting/Lighting.h"
 
 #include "rhi/Rhi.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -58,12 +61,14 @@ struct GpuMesh {
   std::uint32_t count = 0;
   std::uint32_t verts = 0;
   std::size_t bytes = 0;
+  std::uint32_t blas = 0;
 };
 struct GpuMat {
   MaterialDesc desc;
   rhi::Texture* albedo = nullptr;
   rhi::Texture* normal = nullptr;
   rhi::Texture* mr = nullptr;
+  bool has_ao = false;
   rhi::Texture* splat = nullptr;
   rhi::Texture* layer[4] = {};
   std::size_t bytes = 0;
@@ -234,6 +239,7 @@ class RhiRenderer final : public Renderer3D {
     // Meshes, targets and pipelines are named by the last frame and by
     // Present. Idle the frame, upload and present fences before Release.
     device_->wait_idle();
+    drop_ray_scene();
     for (auto& [id, m] : meshes_) free_mesh(m);
     meshes_.clear();
     for (auto& [id, m] : materials_) free_mat(m);
@@ -302,9 +308,54 @@ class RhiRenderer final : public Renderer3D {
       ++m.textures;
       return tex2d(img->rgba.data(), img->width, img->height, true);
     };
+    auto clone_img = [](const std::shared_ptr<const Image>& src, int w, int h, unsigned char fill) {
+      auto out = std::make_shared<Image>();
+      out->width = w;
+      out->height = h;
+      out->rgba.assign(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4u, fill);
+      if (src && src->valid() && src->width == w && src->height == h) out->rgba = src->rgba;
+      return out;
+    };
+    auto sample_r = [](const Image& im, int x, int y, int w, int h) {
+      const int sx = std::min(im.width - 1, x * im.width / std::max(1, w));
+      const int sy = std::min(im.height - 1, y * im.height / std::max(1, h));
+      return im.rgba[(static_cast<std::size_t>(sy) * im.width + sx) * 4];
+    };
+    std::shared_ptr<const Image> normal = d.normal_image;
+    std::shared_ptr<const Image> mr = d.metal_rough_image;
+    if (d.height_image && d.height_image->valid()) {
+      const int w = d.height_image->width;
+      const int h = d.height_image->height;
+      auto packed = clone_img(normal, w, h, 255);
+      if (!normal || !normal->valid()) {
+        for (std::size_t i = 0; i + 3 < packed->rgba.size(); i += 4) {
+          packed->rgba[i] = 128;
+          packed->rgba[i + 1] = 128;
+          packed->rgba[i + 2] = 255;
+        }
+      }
+      for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+          packed->rgba[(static_cast<std::size_t>(y) * w + x) * 4 + 3] = sample_r(*d.height_image, x, y, w, h);
+        }
+      }
+      normal = packed;
+    }
+    if (d.ao_image && d.ao_image->valid()) {
+      const int w = d.ao_image->width;
+      const int h = d.ao_image->height;
+      auto packed = clone_img(mr, w, h, 255);
+      for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+          packed->rgba[(static_cast<std::size_t>(y) * w + x) * 4] = sample_r(*d.ao_image, x, y, w, h);
+        }
+      }
+      mr = packed;
+      m.has_ao = true;
+    }
     m.albedo = up(d.base_color_image);
-    m.normal = up(d.normal_image);
-    m.mr = up(d.metal_rough_image);
+    m.normal = up(normal);
+    m.mr = up(mr);
     if (d.terrain()) {
       m.splat = up(d.splat_image);
       for (int i = 0; i < 4; ++i) m.layer[i] = up(d.layer_images[i]);
@@ -316,6 +367,7 @@ class RhiRenderer final : public Renderer3D {
   void destroy_mesh(MeshHandle h) override {
     auto it = meshes_.find(h.id);
     if (it == meshes_.end()) return;
+    if (it->second.blas) drop_ray_scene();
     free_mesh(it->second);
     meshes_.erase(it);
     tris_.erase(h.id);
@@ -415,8 +467,16 @@ class RhiRenderer final : public Renderer3D {
     const Lighting& L = env_.lighting;
     int cascades = std::clamp(L.cascades, 1, 4);
     if (L.preset == 0) cascades = 1;
-    const bool post = L.tonemap != 0 || L.bloom > 0 || L.ao != 0 || L.contrast != 1 || L.saturation != 1 || L.gain != 1;
-    const bool shadows = env_.shadows && env_.sun_intensity > 0 && cascades > 0 && !L.raytracing;
+    const bool post = L.tonemap != 0 || L.auto_exposure || L.bloom > 0 || L.ao != 0 || L.contrast != 1 ||
+                      L.saturation != 1 || L.gain != 1;
+    const bool want_rt = L.raytracing && device_->raytracing();
+    if (!want_rt) {
+      if (tlas_ != 0) drop_ray_scene();
+    } else {
+      ensure_ray_scene();
+    }
+    const bool rt_ok = want_rt && tlas_ != 0;
+    const bool shadows = env_.shadows && env_.sun_intensity > 0 && cascades > 0 && !rt_ok;
     const Vec3 sun = normalize(env_.sun_direction);
     const Vec3 focus = camera_.target;
     const float sd = env_.shadow_distance;
@@ -437,18 +497,27 @@ class RhiRenderer final : public Renderer3D {
     frame.view_proj = proj * view;
     frame.inv_view_proj = frame.view_proj.inverse();
     frame.cam = {camera_.position.x, camera_.position.y, camera_.position.z, 1};
-    frame.sun_dir = {sun.x, sun.y, sun.z, 0};
-    frame.sun_color = {env_.sun_color[0] * env_.sun_intensity, env_.sun_color[1] * env_.sun_intensity,
-                       env_.sun_color[2] * env_.sun_intensity, 0};
-    frame.sky_top = {env_.sky_top[0], env_.sky_top[1], env_.sky_top[2], 1};
+    frame.sun_dir = {sun.x, sun.y, sun.z, L.volumetric ? 1.0f : 0.0f};
+    float sun_r = env_.sun_color[0], sun_g = env_.sun_color[1], sun_b = env_.sun_color[2];
+    if (L.sun_kelvin > 0.0f) {
+      float kelvin[3];
+      kelvin_to_rgb(L.sun_kelvin, kelvin);
+      sun_r *= kelvin[0];
+      sun_g *= kelvin[1];
+      sun_b *= kelvin[2];
+    }
+    frame.sun_color = {sun_r * env_.sun_intensity, sun_g * env_.sun_intensity, sun_b * env_.sun_intensity,
+                       L.contact_shadows ? L.contact : 0.0f};
+    frame.sky_top = {env_.sky_top[0], env_.sky_top[1], env_.sky_top[2], L.ao == 2 ? 2.0f : 1.0f};
     frame.sky_horizon = {env_.sky_horizon[0], env_.sky_horizon[1], env_.sky_horizon[2], 1};
-    frame.ground = {env_.ground[0], env_.ground[1], env_.ground[2], 1};
+    frame.ground = {env_.ground[0], env_.ground[1], env_.ground[2], 1.0f + static_cast<float>(L.reflections)};
     frame.fog = {env_.fog_color[0], env_.fog_color[1], env_.fog_color[2], env_.fog_density};
-    frame.fog_extra = {env_.fog_height, env_.fog_falloff, 1.0f / kShadow, env_.ambient};
+    frame.fog_extra = {env_.fog_height, env_.fog_falloff, 1.0f / kShadow, env_.ambient * L.sky};
     frame.counts = {static_cast<float>(points_.size()), static_cast<float>(spots_.size()),
                     static_cast<float>(areas_.size()), static_cast<float>(cascades)};
-    frame.flags = {shadows ? 1.0f : 0.0f, L.filter == 1 ? 1.0f : 0.0f, post ? (L.tonemap == 2 ? 2.0f : 1.0f) : 0.0f,
-                   L.exposure};
+    const float tone = !post ? 0.0f : L.tonemap >= 3 ? 3.0f : L.tonemap == 2 ? 2.0f : 1.0f;
+    frame.flags = {shadows ? 1.0f : 0.0f, L.filter == 1 ? 1.0f : 0.0f, tone,
+                   L.auto_exposure ? -std::abs(L.exposure) : L.exposure};
     float dx = env_.wind_dir[0], dz = env_.wind_dir[1];
     const float wl = std::sqrt(dx * dx + dz * dz);
     if (wl > 1e-5f) { dx /= wl; dz /= wl; } else { dx = 1; dz = 0; }
@@ -459,16 +528,21 @@ class RhiRenderer final : public Renderer3D {
     device_->clip_params(&frame.clip.x);
     frame.clip.w = L.hdri.empty() ? 0.0f : 1.0f;
     frame.grade = {L.contrast, L.saturation, L.gain, L.bloom};
+    if (L.gi != 0) {
+      frame.probe_pos[0] = {camera_.position.x, camera_.position.y, camera_.position.z, 80.0f};
+      frame.probe_color[0] = {env_.sky_horizon[0] * 0.65f, env_.sky_horizon[1] * 0.65f, env_.sky_horizon[2] * 0.65f,
+                              static_cast<float>(L.gi)};
+    }
     for (std::size_t i = 0; i < points_.size(); ++i) {
       const PointLight& l = points_[i];
-      frame.point_pos[i] = {l.position.x, l.position.y, l.position.z, 1};
+      frame.point_pos[i] = {l.position.x, l.position.y, l.position.z, (L.point_shadows && l.shadows) ? -1.0f : 1.0f};
       frame.point_color[i] = {l.color[0] * l.intensity, l.color[1] * l.intensity, l.color[2] * l.intensity,
                               std::max(0.1f, l.range)};
     }
     for (std::size_t i = 0; i < spots_.size(); ++i) {
       const SpotLight& l = spots_[i];
       const Vec3 dir = normalize(l.direction);
-      frame.spot_pos[i] = {l.position.x, l.position.y, l.position.z, 1};
+      frame.spot_pos[i] = {l.position.x, l.position.y, l.position.z, (L.spot_shadows && l.shadows) ? -1.0f : 1.0f};
       frame.spot_dir[i] = {dir.x, dir.y, dir.z, l.outer_cos};
       frame.spot_color[i] = {l.color[0] * l.intensity, l.color[1] * l.intensity, l.color[2] * l.intensity, l.inner_cos};
     }
@@ -522,6 +596,7 @@ class RhiRenderer final : public Renderer3D {
     auto bind_frame = [&]() {
       cmd->set_uniform(0, ubo_, frame_off, sizeof(FrameBlock));
       cmd->set_texture(6, device_->target_depth(shadow_), clamp_);
+      if (rt_ok) cmd->set_tlas(tlas_);
       cmd->set_texture(3, white_, wrap_);
       cmd->set_texture(4, flat_, wrap_);
       cmd->set_texture(5, white_, wrap_);
@@ -536,7 +611,7 @@ class RhiRenderer final : public Renderer3D {
         const bool is_blend = md.alpha_mode == MaterialDesc::kAlphaBlend;
         if (is_blend != blend) continue;
         rhi::Pipeline* p = d.bone >= 0 ? skin_ : (is_blend ? mesh_blend_ : (md.double_sided ? mesh_2s_ : mesh_));
-        if (L.raytracing && mesh_rt_ && !is_blend && d.bone < 0) p = mesh_rt_;
+        if (rt_ok && mesh_rt_ && !is_blend && d.bone < 0) p = mesh_rt_;
         cmd->set_pipeline(p);
         bind_frame();
         DrawBlock db{};
@@ -546,6 +621,7 @@ class RhiRenderer final : public Renderer3D {
         db.mr = {md.metallic, md.roughness, md.alpha_cutoff, L.pom};
         db.draw_flags = {mat && mat->normal ? 1.0f : 0.0f, static_cast<float>(md.alpha_mode), d.bone >= 0 ? 1.0f : 0.0f,
                          md.terrain() ? 1.0f : 0.0f};
+        db.extra.x = mat && mat->has_ao ? 1.0f : 0.0f;
         db.extra.y = L.pom > 0 ? 1.0f : 0.0f;
         if (md.terrain()) {
           for (int i = 0; i < 4; ++i) {
@@ -795,6 +871,52 @@ class RhiRenderer final : public Renderer3D {
     clear_[2] = rgba[2];
     clear_[3] = rgba[3];
   }
+  void drop_ray_scene() {
+    if (device_ && device_live()) device_->rt_reset();
+    for (auto& [id, m] : meshes_) m.blas = 0;
+    tlas_ = 0;
+    rt_key_.clear();
+  }
+  void ensure_ray_scene() {
+    std::string key;
+    key.reserve(draws_.size() * 24);
+    for (const DrawItem& d : draws_) {
+      if (d.bone >= 0) continue;
+      key.append(reinterpret_cast<const char*>(&d.mesh), sizeof(d.mesh));
+      key.append(reinterpret_cast<const char*>(&d.model), sizeof(d.model));
+    }
+    if (key == rt_key_ && tlas_ != 0) return;
+    drop_ray_scene();
+    std::vector<rhi::RtInstance> inst;
+    inst.reserve(draws_.size());
+    for (const DrawItem& d : draws_) {
+      if (d.bone >= 0) continue;
+      auto it = meshes_.find(d.mesh);
+      if (it == meshes_.end() || !it->second.vb || !it->second.ib || it->second.count < 3) continue;
+      GpuMesh& m = it->second;
+      if (m.blas == 0) {
+        rhi::RtGeometry geo;
+        geo.vertices = m.vb;
+        geo.stride = static_cast<std::uint32_t>(sizeof(Vertex3D));
+        geo.vertex_count = m.verts;
+        geo.indices = m.ib;
+        geo.index_count = m.count;
+        std::string err;
+        m.blas = device_->rt_create_blas(geo, &err);
+      }
+      if (m.blas == 0) continue;
+      rhi::RtInstance one;
+      one.blas = m.blas;
+      for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 4; ++col) one.transform[row * 4 + col] = d.model.at(row, col);
+      }
+      inst.push_back(one);
+    }
+    if (inst.empty()) return;
+    std::string err;
+    tlas_ = device_->rt_create_tlas(inst.data(), static_cast<std::uint32_t>(inst.size()), &err);
+    if (tlas_ != 0) rt_key_ = key;
+  }
   void ensure_aux(rhi::RenderTarget*& t, int w, int h) {
     w = std::max(1, w);
     h = std::max(1, h);
@@ -836,6 +958,8 @@ class RhiRenderer final : public Renderer3D {
   rhi::Pipeline* mesh_2s_ = nullptr;
   rhi::Pipeline* mesh_blend_ = nullptr;
   rhi::Pipeline* mesh_rt_ = nullptr;
+  std::uint32_t tlas_ = 0;
+  std::string rt_key_;
   rhi::Pipeline* skin_ = nullptr;
   rhi::Pipeline* depth_ = nullptr;
   rhi::Pipeline* depth_skin_ = nullptr;

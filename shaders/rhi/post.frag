@@ -10,6 +10,13 @@ vec3 aces(vec3 x) {
   return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
+vec3 agx(vec3 x) {
+  vec3 c = max(x, vec3(0.0));
+  vec3 a = c * (c + 0.0245786) - 0.000090537;
+  vec3 b = c * (0.983729 * c + 0.4329510) + 0.238081;
+  return clamp(a / b, 0.0, 1.0);
+}
+
 void main() {
   vec2 uv = v_uv;
   vec3 color = texture(u_albedo_tex, uv).rgb;
@@ -18,9 +25,15 @@ void main() {
   color *= mix(1.0, ao, frame.timev.w);
   vec3 bloom = texture(u_bloom, uv).rgb;
   color += bloom * frame.grade.w;
-  color *= frame.flags.w;
+  float exposure = frame.flags.w;
+  if (exposure < 0.0) {
+    float luma = max(dot(color, vec3(0.2126, 0.7152, 0.0722)), 0.001);
+    exposure = clamp((-exposure) * 0.18 / luma, 0.2, 4.0);
+  }
+  color *= exposure;
   if (frame.flags.z < 1.5) color = color / (color + vec3(1.0));
-  else color = aces(color);
+  else if (frame.flags.z < 2.5) color = aces(color);
+  else color = agx(color);
   color = pow(max(color, vec3(0.0)), vec3(1.0 / 2.2));
   float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
   color = mix(vec3(luma), color, frame.grade.y);

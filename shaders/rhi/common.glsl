@@ -70,7 +70,14 @@ float ts_fog_amount(vec3 world) {
 }
 
 vec3 ts_apply_fog(vec3 display_color, vec3 world) {
-  return mix(display_color, frame.fog.rgb, ts_fog_amount(world));
+  float amt = ts_fog_amount(world);
+  // sun_dir.w marks volumetric fog: a soft shaft toward the sun.
+  if (frame.sun_dir.w > 0.5 && frame.fog.a > 0.0) {
+    vec3 view = normalize(world - frame.cam.xyz);
+    float shafts = pow(clamp(dot(view, normalize(-frame.sun_dir.xyz)), 0.0, 1.0), 8.0);
+    amt = clamp(amt + shafts * frame.fog.a * 4.0, 0.0, 1.0);
+  }
+  return mix(display_color, frame.fog.rgb, amt);
 }
 
 vec3 ts_sky_fog(vec3 c, vec3 dir) {

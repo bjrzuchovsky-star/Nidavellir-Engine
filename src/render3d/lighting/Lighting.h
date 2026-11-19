@@ -28,6 +28,12 @@ const std::vector<std::shared_ptr<LightingModule>>& lighting_modules();
 
 void apply_lighting_preset(Lighting* lighting, int preset);
 const char* lighting_preset_name(int preset);
+// 1 low, 2 medium, 3 high, 4 ultra, 5 ray traced. Ray traced stays on the
+// raster modules when the device has no ray queries.
+void apply_lighting_quality(Lighting* lighting, int quality, bool raytracing_supported);
+const char* lighting_quality_name(int quality);
+// 6500 K is near white. Returns a linear RGB multiplier.
+void kelvin_to_rgb(float kelvin, float rgb[3]);
 bool lighting_is_classic(const Lighting& lighting);
 
 // "id=1,other=0" helpers for plugin modules.

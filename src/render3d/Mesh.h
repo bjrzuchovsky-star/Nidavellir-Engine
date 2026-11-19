@@ -69,9 +69,13 @@ struct MaterialDesc {
   std::string base_color_texture;
   std::string normal_texture;
   std::string metal_rough_texture;  // glTF layout: G = rough, B = metal
+  std::string ao_texture;
+  std::string height_texture;
   std::shared_ptr<const Image> base_color_image;
   std::shared_ptr<const Image> normal_image;
   std::shared_ptr<const Image> metal_rough_image;
+  std::shared_ptr<const Image> ao_image;
+  std::shared_ptr<const Image> height_image;
   bool double_sided = false;
   bool unlit = false;  // albedo straight out (UI panels)
   // Alpha: kAlphaOpaque ignores the albedo alpha, kAlphaMask discards
