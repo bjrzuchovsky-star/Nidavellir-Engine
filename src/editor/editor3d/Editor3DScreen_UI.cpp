@@ -231,11 +231,15 @@ void Editor3DScreen::draw_ui() {
 }
 
 void Editor3DScreen::draw_menu_bar() {
-  if (!ImGui::BeginMainMenuBar()) return;
-  draw_menus();
-  ImGui::SameLine(ImGui::GetWindowWidth() - 360.0f);
-  ImGui::TextDisabled("%s  [3D]%s", project_.name.c_str(), playing() ? "  [RIDING]" : "");
-  ImGui::EndMainMenuBar();
+  if (ImGui::BeginMainMenuBar()) {
+    draw_menus();
+    ImGui::SameLine(ImGui::GetWindowWidth() - 360.0f);
+    ImGui::TextDisabled("%s  [3D]%s", project_.name.c_str(), playing() ? "  [RIDING]" : "");
+    ImGui::EndMainMenuBar();
+  }
+  // After the menu bar, so OpenPopup is not stacked on a menu that closes this click.
+  draw_project_settings_popup(project_);
+  about::draw_popup();
 }
 
 void Editor3DScreen::draw_menus() {

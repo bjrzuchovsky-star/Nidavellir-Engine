@@ -3,6 +3,8 @@
 #include "SmokeUx.h"
 
 #include "editor/editor3d/Editor3DScreen.h"
+#include "editor/projects/ProjectGraphics.h"
+#include "editor/projects/ProjectStore.h"
 #include "editor/screens/Editor2DScreen.h"
 #include "editor/settings/Settings.h"
 #include "editor/store/TradingPostPanel.h"
@@ -705,6 +707,44 @@ struct ScopedVaultDir {
   }
 };
 
+// Menu items only raise a flag. The next real frame, outside the menu, opens
+// the modal. Choosing Vulkan goes through the same save the combo uses.
+template <class Screen>
+int check_settings_and_about(Ctx& ctx, Screen& s, const char* settings_id, const fs::path* project_dir) {
+  const std::string who = settings_id;
+  if (!s.field_guide().run_now(settings_id)) return fail(who + " did not run");
+  bool settings = false;
+  ctx.frames(2, [&] {
+    s.on_update(1.0f / 60.0f);
+    if (ImGuiWindow* w = ImGui::FindWindowByName("Project settings")) settings = w->Active || w->WasActive;
+  });
+  if (!settings) return fail(who + ": Project settings modal did not open");
+  if (project_dir) {
+    editor::ProjectInfo project;
+    std::string err;
+    if (!editor::ProjectStore::load_project_json(project_dir->string(), &project, &err)) {
+      project.id = project_dir->filename().string();
+      project.name = project.id;
+      project.kind = editor::ProjectKind::ThreeD;
+      project.path = project_dir->string();
+    }
+    editor::save_project_graphics_choice(project, 2);  // Vulkan, same path as the combo
+    editor::ProjectInfo loaded;
+    if (!editor::ProjectStore::load_project_json(project_dir->string(), &loaded, &err))
+      return fail(who + ": project.json: " + err);
+    if (loaded.graphics_api != "vk")
+      return fail(who + ": graphics_api in project.json is '" + loaded.graphics_api + "', wanted vk");
+  }
+  if (!s.field_guide().run_now("Help/About")) return fail(who + ": About did not run");
+  bool about = false;
+  ctx.frames(2, [&] {
+    s.on_update(1.0f / 60.0f);
+    if (ImGuiWindow* w = ImGui::FindWindowByName("##AboutNidavellir")) about = w->Active || w->WasActive;
+  });
+  if (!about) return fail(who + ": About modal did not open");
+  return 0;
+}
+
 int run_ux_smoke() {
   SettingsBackup keep;
   const fs::path root = fs::absolute("./TombStoneProjects/_ux_smoke");
@@ -771,6 +811,7 @@ int run_ux_smoke() {
     ux::set_audit(false);
     ImGui::GetIO().DisplaySize = ImVec2(1600, 900);
     if (int r = check_tips("2D", {"Toolbar2D", "Inspector2D"}, 60)) return r;
+    if (int r = check_settings_and_about(ctx, s, "File/Project settings...", nullptr)) return r;
     tips2d = 0;
     for (const auto& it : ux::audit_items()) tips2d += it.scope == "Toolbar2D" || it.scope == "Inspector2D";
     s.on_exit();
@@ -855,6 +896,8 @@ int run_ux_smoke() {
     ux::set_audit(false);
     ImGui::GetIO().DisplaySize = ImVec2(1600, 900);
     if (int r = check_tips("3D", {"Toolbar3D", "Inspector3D"}, 60)) return r;
+    const fs::path p3d = root / "p3d";
+    if (int r = check_settings_and_about(ctx, e, "Realm/Project settings...", &p3d)) return r;
     tips3d = 0;
     for (const auto& it : ux::audit_items()) tips3d += it.scope == "Toolbar3D" || it.scope == "Inspector3D";
     e.on_exit();

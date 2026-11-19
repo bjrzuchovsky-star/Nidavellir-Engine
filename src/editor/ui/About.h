@@ -12,8 +12,20 @@ namespace tombstone {
 namespace editor {
 namespace about {
 
+inline bool& open_flag() {
+  static bool open = false;
+  return open;
+}
+
 inline void draw_menu_item() {
-  if (ux::MenuItem("About")) ImGui::OpenPopup("##AboutNidavellir");
+  if (ux::MenuItem("About")) open_flag() = true;
+}
+
+inline void draw_popup() {
+  if (open_flag()) {
+    ImGui::OpenPopup("##AboutNidavellir");
+    open_flag() = false;
+  }
   if (ImGui::BeginPopupModal("##AboutNidavellir", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::TextUnformatted(brand::kProduct);
     ImGui::TextUnformatted(brand::kCompany);
