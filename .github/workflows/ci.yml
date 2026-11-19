@@ -114,6 +114,9 @@ jobs:
       - name: Smoke realm (Direct3D 12 on WARP)
         working-directory: build/apps/admin/Release
         run: ./ts_admin.exe --smoke-realm --gfx=dx12 --gfx-warp --gfx-debug
+      - name: Smoke switch (Project Manager to Editor3D, Direct3D 12 on WARP)
+        working-directory: build/apps/admin/Release
+        run: ./ts_admin.exe --smoke-switch --gfx=dx12 --gfx-warp --gfx-debug
       # windows-latest has no OpenGL ICD, so this step skips. The visible
       # window is checked on the Linux job under Xvfb.
       - name: Upload D3D12 smoke dumps
@@ -181,3 +184,6 @@ jobs:
       - name: Smoke window (visible OpenGL, under Xvfb)
         working-directory: build/apps/admin
         run: xvfb-run -a -s "-screen 0 1280x800x24" ./ts_admin --smoke-window --gfx=gl
+      - name: Smoke switch (Project Manager to Editor3D, under Xvfb)
+        working-directory: build/apps/admin
+        run: xvfb-run -a -s "-screen 0 1280x800x24" ./ts_admin --smoke-switch

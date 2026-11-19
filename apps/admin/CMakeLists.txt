@@ -20,6 +20,7 @@ add_executable(ts_admin
   SmokePresent.cpp
   SmokeRealm.cpp
   SmokeWindow.cpp
+  SmokeSwitch.cpp
   Smoke3DEditor.cpp
   SmokeAnim3D.cpp
   SmokeAI.cpp
