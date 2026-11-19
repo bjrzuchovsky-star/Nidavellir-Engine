@@ -12,6 +12,12 @@ layout(location = 5) in vec4 a_weights;
 layout(location = 6) in vec4 a_inst;
 layout(location = 7) in vec2 a_inst2;
 #endif
+#ifdef TS_INSTANCE
+layout(location = 8) in vec4 i_m0;
+layout(location = 9) in vec4 i_m1;
+layout(location = 10) in vec4 i_m2;
+layout(location = 11) in vec4 i_m3;
+#endif
 
 mat4 ts_skin_matrix() {
 #ifdef TS_SKIN
@@ -40,7 +46,11 @@ void main() {
   world = a_inst.xyz + r + vec3(frame.wind.x * k, -abs(k) * 0.15, frame.wind.y * k);
   if (a_inst2.y < 0.5) world = vec3(0.0, -1.0e6, 0.0);
 #else
+#ifdef TS_INSTANCE
+  world = (mat4(i_m0, i_m1, i_m2, i_m3) * vec4(a_pos, 1.0)).xyz;
+#else
   world = (draw.model * ts_skin_matrix() * vec4(a_pos, 1.0)).xyz;
+#endif
 #endif
   int cascade = int(draw.extra.x + 0.5);
   mat4 lp = frame.light_vp[clamp(cascade, 0, 3)];

@@ -780,6 +780,7 @@ class GlRenderer3D final : public Renderer3D {
         g.BindVertexArray(m.vao);
         glDrawElements(GL_TRIANGLES, m.count, GL_UNSIGNED_INT, nullptr);
         ++stats_.shadow_casters;
+        stats_.shadow_triangles += static_cast<std::size_t>(m.count) / 3;
       }
       if (foliage_ok_) stats_.shadow_casters += foliage_.draw_shadows(light_vp, env_);  // TS_TERRAIN
       glDisable(GL_POLYGON_OFFSET_FILL);

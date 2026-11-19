@@ -126,8 +126,14 @@ class GlCmd final : public CommandList {
       glDisable(GL_POLYGON_OFFSET_FILL);
     }
   }
+  void set_vertex_buffer_offset(int slot, std::size_t offset) override {
+    if (slot >= 0 && slot < 2) vb_off_[slot] = offset;
+  }
   void set_vertex_buffer(int slot, Buffer* buffer) override {
-    if (slot >= 0 && slot < 2) vb_[slot] = static_cast<GlBuffer*>(buffer);
+    if (slot >= 0 && slot < 2) {
+      vb_[slot] = static_cast<GlBuffer*>(buffer);
+      vb_off_[slot] = 0;
+    }
   }
   void set_index_buffer(Buffer* buffer) override { ib_ = static_cast<GlBuffer*>(buffer); }
   void set_uniform(int slot, Buffer* buffer, std::size_t offset, std::size_t size) override {
@@ -184,9 +190,10 @@ class GlCmd final : public CommandList {
       auto* b = a.buffer < 2 ? vb_[a.buffer] : nullptr;
       g.BindBuffer(GL_ARRAY_BUFFER, b ? b->id : 0);
       g.EnableVertexAttribArray(a.location);
+      const std::size_t off = a.offset + (a.buffer < 2 ? vb_off_[a.buffer] : 0);
       g.VertexAttribPointer(a.location, static_cast<GLint>(a.components), GL_FLOAT, GL_FALSE,
                             static_cast<GLsizei>(pipe_->desc.strides[a.buffer]),
-                            reinterpret_cast<const void*>(static_cast<std::uintptr_t>(a.offset)));
+                            reinterpret_cast<const void*>(off));
       if (g.VertexAttribDivisor) g.VertexAttribDivisor(a.location, a.instance ? 1u : 0u);
     }
     if (ib_) g.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, ib_->id);
@@ -196,6 +203,7 @@ class GlCmd final : public CommandList {
   bool open_ = false;
   GlPipeline* pipe_ = nullptr;
   GlBuffer* vb_[2] = {};
+  std::size_t vb_off_[2] = {};
   GlBuffer* ib_ = nullptr;
 };
 

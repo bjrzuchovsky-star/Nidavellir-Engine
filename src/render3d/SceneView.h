@@ -69,6 +69,22 @@ class SceneView {
              const Camera3D& camera, int width, int height,
              const SceneViewOptions& options = {});
   FrameStats end();
+  // What the last begin() submitted. `main_triangles` is one color pass
+  // after frustum culling and LOD. `shadow_triangles` is one cascade
+  // (multiply by the cascade count for the GPU total). `triangles` on
+  // FrameStats is the same main-pass number and does not include shadows.
+  struct SubmitStats {
+    int entities = 0;
+    int visible = 0;
+    int culled = 0;
+    int draws = 0;
+    int lod_full = 0;
+    int lod_mid = 0;
+    int lod_far = 0;
+    std::size_t main_triangles = 0;
+    std::size_t shadow_triangles = 0;
+  };
+  const SubmitStats& last_submit() const { return submit_; }
 
   std::vector<std::string> take_problems();
 
@@ -112,6 +128,11 @@ class SceneView {
   struct GpuPiece {
     MeshHandle mesh;
     int prim = 0;
+    MeshHandle lod_mid;
+    MeshHandle lod_far;
+    int tris = 0;
+    int tris_mid = 0;
+    int tris_far = 0;
   };
   struct ModelEntry {
     bool tried = false;
@@ -154,6 +175,7 @@ class SceneView {
   bool fixed_time_ = false;
   std::size_t upload_budget_ = 0;
   std::size_t upload_used_ = 0;
+  SubmitStats submit_;
 };
 
 }  // namespace render3d

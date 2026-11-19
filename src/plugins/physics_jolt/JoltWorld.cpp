@@ -7,7 +7,7 @@
 #include <Jolt/Jolt.h>
 
 #include <Jolt/Core/Factory.h>
-#include <Jolt/Core/JobSystemSingleThreaded.h>
+#include <Jolt/Core/JobSystem.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyLockInterface.h>
@@ -35,10 +35,14 @@
 #include <Jolt/RegisterTypes.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <string>
+#include <tuple>
+#include <unordered_map>
 
 namespace ts {
 namespace tombstone {
@@ -235,8 +239,109 @@ JPH::RefConst<JPH::Shape> make_shape(const ShapeDesc& d, bool dynamic, std::stri
       break;
     }
   }
+  // Identical crates share one shape. Creation of a few thousand boxes was
+  // allocating a convex shape per body; the simulation result is the same.
+  if (base && (d.type == ShapeType::Box || d.type == ShapeType::Sphere || d.type == ShapeType::Capsule)) {
+    struct Key {
+      int type;
+      int x, y, z;
+      bool operator<(const Key& o) const { return std::tie(type, x, y, z) < std::tie(o.type, o.x, o.y, o.z); }
+    };
+    auto q = [](float v) { return static_cast<int>(std::lround(static_cast<double>(v) * 10000.0)); };
+    static std::map<Key, JPH::RefConst<JPH::Shape>> cache;
+    const Key key{static_cast<int>(d.type), q(d.size.x), q(d.size.y), q(d.size.z)};
+    auto it = cache.find(key);
+    if (it != cache.end()) return it->second;
+    cache.emplace(key, base);
+  }
   return base;
 }
+
+// Single-threaded on purpose: Jolt's thread pool finishes the same scene with
+// different contact order, and the physics smokes hash the exact floats.
+// Jobs are still timed, so a step reports broadphase / narrowphase / solver.
+class TimingJobSystem final : public JPH::JobSystem {
+ public:
+  void reset() {
+    broad_ = narrow_ = solver_ = other_ = 0;
+    child_s_ = 0;
+    named_.clear();
+  }
+  World::StepProfile profile() const {
+    World::StepProfile p;
+    p.broadphase_ms = broad_ * 1e3;
+    p.narrowphase_ms = narrow_ * 1e3;
+    p.solver_ms = solver_ * 1e3;
+    p.other_ms = other_ * 1e3;
+    for (const auto& [name, sec] : named_) {
+      if (p.job_count >= 24) break;
+      p.jobs[p.job_count++] = {name, sec * 1e3};
+    }
+    return p;
+  }
+
+  int GetMaxConcurrency() const override { return 1; }
+  JobHandle CreateJob(const char* inName, JPH::ColorArg inColor, const JobFunction& inJobFunction,
+                      JPH::uint32 inNumDependencies = 0) override {
+    Job* job = new Job(inName, inColor, this, inJobFunction, inNumDependencies);
+    names_[job] = inName ? inName : "";
+    JobHandle handle(job);
+    if (inNumDependencies == 0) QueueJob(job);
+    return handle;
+  }
+  Barrier* CreateBarrier() override { return &barrier_; }
+  void DestroyBarrier(Barrier*) override {}
+  void WaitForJobs(Barrier*) override {}
+
+ protected:
+  class BarrierImpl : public Barrier {
+   public:
+    void AddJob(const JobHandle&) override {}
+    void AddJobs(const JobHandle*, JPH::uint) override {}
+
+   protected:
+    void OnJobFinished(Job*) override {}
+  };
+
+  void QueueJob(Job* inJob) override {
+    const char* name = "";
+    auto it = names_.find(inJob);
+    if (it != names_.end()) name = it->second;
+    const double before = child_s_;
+    const auto t0 = std::chrono::steady_clock::now();
+    inJob->Execute();
+    const double incl = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    const double excl = std::max(0.0, incl - (child_s_ - before));
+    child_s_ += excl;
+    note(name, excl);
+  }
+  void QueueJobs(Job** inJobs, JPH::uint inNumJobs) override {
+    for (JPH::uint i = 0; i < inNumJobs; ++i) QueueJob(inJobs[i]);
+  }
+  void FreeJob(Job* inJob) override {
+    names_.erase(inJob);
+    delete inJob;
+  }
+
+ private:
+  void note(const char* name, double sec) {
+    const std::string n = name ? name : "";
+    auto has = [&](const char* s) { return n.find(s) != std::string::npos; };
+    if (has("Broad")) broad_ += sec;
+    else if (has("Collis") || has("Contact") || has("CCD")) narrow_ += sec;
+    else if (has("Veloc") || has("Position") || has("Island") || has("Constraint") || has("Integrat") ||
+             has("Gravity") || has("Solve"))
+      solver_ += sec;
+    else other_ += sec;
+    named_[name ? name : ""] += sec;
+  }
+
+  BarrierImpl barrier_;
+  std::unordered_map<Job*, const char*> names_;
+  std::map<const char*, double> named_;
+  double broad_ = 0, narrow_ = 0, solver_ = 0, other_ = 0;
+  double child_s_ = 0;
+};
 
 }  // namespace
 
@@ -248,7 +353,8 @@ struct JoltWorld::Impl final : public JPH::ContactListener {
   ObjVsBp obj_vs_bp;
   PairFilter pairs{&settings};
   std::unique_ptr<JPH::TempAllocatorImpl> temp;
-  std::unique_ptr<JPH::JobSystemSingleThreaded> jobs;
+  std::unique_ptr<TimingJobSystem> jobs;
+  World::StepProfile profile;
   JPH::PhysicsSystem system;
   struct Info {
     std::uint8_t layer = kLayerDefault;
@@ -447,9 +553,12 @@ struct JoltWorld::Impl final : public JPH::ContactListener {
 JoltWorld::JoltWorld(const Settings& settings) : impl_(std::make_unique<Impl>()) {
   jolt_init();
   impl_->settings = settings;
-  impl_->temp = std::make_unique<JPH::TempAllocatorImpl>(8 * 1024 * 1024);
-  impl_->jobs = std::make_unique<JPH::JobSystemSingleThreaded>(JPH::cMaxPhysicsJobs);
-  impl_->system.Init(8192, 0, 16384, 8192, impl_->bp, impl_->obj_vs_bp, impl_->pairs);
+  // 8 MB ran out once a few thousand bodies were awake and Jolt fell back to
+  // the heap every step. 32 MB covers a 5k stack. The body / pair caps used
+  // to be 8192 / 16384, which drops contacts in a dense pile.
+  impl_->temp = std::make_unique<JPH::TempAllocatorImpl>(32 * 1024 * 1024);
+  impl_->jobs = std::make_unique<TimingJobSystem>();
+  impl_->system.Init(16384, 0, 65536, 32768, impl_->bp, impl_->obj_vs_bp, impl_->pairs);
   impl_->system.SetGravity(jv(settings.gravity));
   impl_->system.SetContactListener(impl_.get());
 }
@@ -879,13 +988,20 @@ void JoltWorld::set_character_position(const Vec3& p) {
 
 CharacterState JoltWorld::character() const { return impl_->char_state; }
 
+void JoltWorld::optimize_broadphase() { impl_->system.OptimizeBroadPhase(); }
+
+World::StepProfile JoltWorld::step_profile() const { return impl_->profile; }
+
 void JoltWorld::step(float dt) {
   impl_->contacts.clear();
   impl_->sensor_events.swap(impl_->pending_events);
   impl_->pending_events.clear();
+  impl_->profile = {};
   if (!(dt > 0.0f)) return;
+  impl_->jobs->reset();
   impl_->system.Update(dt, std::clamp(impl_->settings.collision_steps, 1, 8), impl_->temp.get(),
                        impl_->jobs.get());
+  impl_->profile = impl_->jobs->profile();
   impl_->settle_dormant();
   ++impl_->steps;
 }

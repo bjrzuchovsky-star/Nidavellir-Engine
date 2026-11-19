@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <iterator>
+#include <unordered_map>
 
 namespace ts {
 namespace tombstone {
@@ -56,7 +57,11 @@ void SceneView::clear() {
   for (auto& [k, m] : models_) stop_load(m);
   if (r_) {
     for (auto& [k, m] : models_) {
-      for (const GpuPiece& piece : m.pieces) r_->destroy_mesh(piece.mesh);
+      for (const GpuPiece& piece : m.pieces) {
+        r_->destroy_mesh(piece.mesh);
+        if (piece.lod_mid.id) r_->destroy_mesh(piece.lod_mid);
+        if (piece.lod_far.id) r_->destroy_mesh(piece.lod_far);
+      }
       for (MaterialHandle h : m.materials) r_->destroy_material(h);
     }
     for (auto& [k, m] : materials_) r_->destroy_material(m.handle);
@@ -198,6 +203,87 @@ Aabb SceneView::local_bounds(const scene3d::Entity3D& e) {
   return mesh_bounds(e.mesh->source);
 }
 
+namespace {
+
+// Merge vertices that land in the same grid cell and drop degenerate
+// triangles. Used as a cheap LOD when a model has no authored LOD chain.
+MeshData cluster_lod(const MeshData& src, int target_tris) {
+  MeshData out;
+  const int tris = static_cast<int>(src.indices.size() / 3);
+  if (tris <= target_tris || src.vertices.empty() || target_tris < 4) return src;
+  const Aabb box = src.bounds();
+  const Vec3 ext = box.extent();
+  const float span = std::max(ext.x, std::max(ext.y, ext.z));
+  if (span < 1e-5f) return src;
+  const int cells = std::max(2, static_cast<int>(std::ceil(std::cbrt(static_cast<double>(target_tris) * 2.0))));
+  const float cell = span / static_cast<float>(cells);
+  auto key_of = [&](const Vec3& p) {
+    const int x = static_cast<int>(std::floor((p.x - box.min.x) / cell));
+    const int y = static_cast<int>(std::floor((p.y - box.min.y) / cell));
+    const int z = static_cast<int>(std::floor((p.z - box.min.z) / cell));
+    return (static_cast<std::uint64_t>(x) * 73856093ull) ^ (static_cast<std::uint64_t>(y) * 19349663ull) ^
+           (static_cast<std::uint64_t>(z) * 83492791ull);
+  };
+  std::unordered_map<std::uint64_t, std::uint32_t> map;
+  std::vector<std::uint32_t> remap(src.vertices.size(), 0);
+  map.reserve(src.vertices.size());
+  for (std::size_t i = 0; i < src.vertices.size(); ++i) {
+    const std::uint64_t k = key_of(src.vertices[i].position);
+    auto it = map.find(k);
+    if (it == map.end()) {
+      const auto id = static_cast<std::uint32_t>(out.vertices.size());
+      map.emplace(k, id);
+      out.vertices.push_back(src.vertices[i]);
+      remap[i] = id;
+    } else {
+      remap[i] = it->second;
+    }
+  }
+  out.indices.reserve(static_cast<std::size_t>(target_tris) * 3);
+  for (std::size_t i = 0; i + 2 < src.indices.size(); i += 3) {
+    const std::uint32_t a = src.indices[i], b = src.indices[i + 1], c = src.indices[i + 2];
+    if (a >= remap.size() || b >= remap.size() || c >= remap.size()) continue;
+    const std::uint32_t ra = remap[a], rb = remap[b], rc = remap[c];
+    if (ra == rb || rb == rc || rc == ra) continue;
+    out.indices.push_back(ra);
+    out.indices.push_back(rb);
+    out.indices.push_back(rc);
+  }
+  if (out.indices.size() < 12 || !out.valid()) return src;
+  return out;
+}
+
+struct ClipPlane {
+  Vec3 n;
+  float d = 0;
+};
+
+Vec4 v4add(Vec4 a, Vec4 b, float s) { return {a.x + s * b.x, a.y + s * b.y, a.z + s * b.z, a.w + s * b.w}; }
+
+void frustum_planes(const Mat4& vp, ClipPlane out[6]) {
+  auto row = [&](int r) { return Vec4{vp.at(r, 0), vp.at(r, 1), vp.at(r, 2), vp.at(r, 3)}; };
+  const Vec4 r0 = row(0), r1 = row(1), r2 = row(2), r3 = row(3);
+  const Vec4 raw[6] = {v4add(r3, r0, 1), v4add(r3, r0, -1), v4add(r3, r1, 1), v4add(r3, r1, -1), v4add(r3, r2, 1),
+                       v4add(r3, r2, -1)};
+  for (int i = 0; i < 6; ++i) {
+    const float len = std::sqrt(raw[i].x * raw[i].x + raw[i].y * raw[i].y + raw[i].z * raw[i].z);
+    const float inv = len > 1e-8f ? 1.0f / len : 0.0f;
+    out[i].n = {raw[i].x * inv, raw[i].y * inv, raw[i].z * inv};
+    out[i].d = raw[i].w * inv;
+  }
+}
+
+bool outside_frustum(const Aabb& b, const ClipPlane planes[6]) {
+  for (int i = 0; i < 6; ++i) {
+    const Vec3 p{planes[i].n.x >= 0 ? b.max.x : b.min.x, planes[i].n.y >= 0 ? b.max.y : b.min.y,
+                 planes[i].n.z >= 0 ? b.max.z : b.min.z};
+    if (dot(planes[i].n, p) + planes[i].d < 0.0f) return true;
+  }
+  return false;
+}
+
+}  // namespace
+
 void SceneView::upload(ModelEntry& m) {
   if (m.uploaded || m.upload_stopped || !m.model || !r_) return;
   if (import_was_cancelled()) {
@@ -244,7 +330,26 @@ void SceneView::upload(ModelEntry& m) {
       const std::size_t whole = mesh_upload_bytes(mesh);
       if (room(whole, false)) {
         const MeshHandle h = r_->create_mesh(mesh);
-        if (h.id) m.pieces.push_back({h, static_cast<int>(m.prim_cursor)});
+        if (h.id) {
+          GpuPiece piece{h, static_cast<int>(m.prim_cursor)};
+          piece.tris = static_cast<int>(mesh.indices.size() / 3);
+          // Ordinary props stay on the mesh that was imported. LOD is for the
+          // piles of high-poly copies (a crate is 1,682; a 10k-tri prop too).
+          if (!mesh.skinned() && piece.tris >= 1500) {
+            MeshData mid = cluster_lod(mesh, std::max(24, piece.tris / 8));
+            MeshData far = cluster_lod(mesh, std::max(12, piece.tris / 48));
+            if (static_cast<int>(mid.indices.size() / 3) + 8 < piece.tris) {
+              piece.lod_mid = r_->create_mesh(mid);
+              piece.tris_mid = static_cast<int>(mid.indices.size() / 3);
+            }
+            const int finer = piece.tris_mid > 0 ? piece.tris_mid : piece.tris;
+            if (static_cast<int>(far.indices.size() / 3) + 4 < finer) {
+              piece.lod_far = r_->create_mesh(far);
+              piece.tris_far = static_cast<int>(far.indices.size() / 3);
+            }
+          }
+          m.pieces.push_back(piece);
+        }
         ++m.prim_cursor;
         continue;
       }
@@ -545,6 +650,7 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
                       const SceneViewOptions& opt) {
   if (!r_) return;
   upload_used_ = 0;
+  submit_ = {};
   r_->set_environment(env);
   r_->begin_frame(camera, width, height);
   terrain_->reset_stats();
@@ -597,6 +703,27 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
       r_->add_point_light(l);
     }
   }
+  ClipPlane planes[6];
+  const float aspect = height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
+  frustum_planes(camera.projection(aspect) * camera.view(), planes);
+  const float half_tan = std::tan(radians(std::max(1.0f, camera.fov_y_degrees)) * 0.5f);
+  struct Batch {
+    MeshHandle mesh;
+    MaterialHandle mat;
+    bool shadow = true;
+    int tris = 0;
+    std::vector<Mat4> worlds;
+  };
+  std::vector<Batch> batches;
+  auto push_batch = [&](MeshHandle mesh, MaterialHandle mat, bool shadow, int tris, const Mat4& w) {
+    for (Batch& b : batches) {
+      if (b.mesh.id == mesh.id && b.mat.id == mat.id && b.shadow == shadow && b.tris == tris) {
+        b.worlds.push_back(w);
+        return;
+      }
+    }
+    batches.push_back(Batch{mesh, mat, shadow, tris, {w}});
+  };
   for (const scene3d::Entity3D& e : entities) {
     if (!e.visible) continue;
     if (e.light && e.light->type == scene3d::Light3D::Type::Directional) {
@@ -614,7 +741,26 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
     ModelEntry& m = entry(e.mesh->source);
     if (!m.model) continue;
     upload(m);
+    ++submit_.entities;
     const Mat4 world = e.transform.matrix();
+    const Aabb world_box = local_bounds(e).transformed(world);
+    if (outside_frustum(world_box, planes)) {
+      ++submit_.culled;
+      continue;
+    }
+    ++submit_.visible;
+    const Vec3 center = world_box.center();
+    const float dist = std::max(0.5f, length(center - camera.position));
+    const Vec3 wext = world_box.extent();
+    const float ext = std::max(wext.x, std::max(wext.y, wext.z));
+    const float pixels = half_tan > 1e-4f ? (ext / dist) * (static_cast<float>(std::max(height, 1)) * 0.5f) / half_tan
+                                          : 1000.0f;
+    bool shadow = e.mesh->cast_shadows && env.shadows;
+    if (shadow) {
+      const float reach = std::max(1.0f, env.shadow_distance) + ext;
+      const Vec3 flat{center.x - camera.target.x, 0.0f, center.z - camera.target.z};
+      if (length(flat) > reach) shadow = false;
+    }
     const bool own_material = e.material && (e.mesh->is_primitive() || e.material->override_model);
     const MaterialHandle override_mat = own_material ? material_for(*e.material) : MaterialHandle{};
     for (const GpuPiece& piece : m.pieces) {
@@ -635,17 +781,42 @@ void SceneView::begin(const Environment& env, const std::vector<scene3d::Entity3
             (e.skin_palette && !e.skin_palette->empty()) ? *e.skin_palette : m.rest_palette;
         const ModelPrimitive& prim = m.model->primitives[i];
         if (prim.joint_map.empty()) {
-          r_->draw_skinned(piece.mesh, mat, world, full.data(), full.size(), e.mesh->cast_shadows);
+          r_->draw_skinned(piece.mesh, mat, world, full.data(), full.size(), shadow);
         } else {
           // Big skeleton: this primitive's own <= kMaxBones palette.
           primitive_palette(prim, full, &prim_palette_);
-          r_->draw_skinned(piece.mesh, mat, world, prim_palette_.data(), prim_palette_.size(),
-                           e.mesh->cast_shadows);
+          r_->draw_skinned(piece.mesh, mat, world, prim_palette_.data(), prim_palette_.size(), shadow);
         }
+        const int tris = piece.tris > 0 ? piece.tris : static_cast<int>(prim.mesh.indices.size() / 3);
+        submit_.main_triangles += static_cast<std::size_t>(tris);
+        if (shadow) submit_.shadow_triangles += static_cast<std::size_t>(tris);
+        ++submit_.draws;
+        ++submit_.lod_full;
       } else {
-        r_->draw_matrix(piece.mesh, mat, world, e.mesh->cast_shadows);
+        MeshHandle mesh = piece.mesh;
+        int tris = piece.tris;
+        if (pixels < 28.0f && piece.lod_far.id) {
+          mesh = piece.lod_far;
+          tris = piece.tris_far;
+          ++submit_.lod_far;
+        } else if (pixels < 96.0f && piece.lod_mid.id) {
+          mesh = piece.lod_mid;
+          tris = piece.tris_mid;
+          ++submit_.lod_mid;
+        } else {
+          ++submit_.lod_full;
+        }
+        push_batch(mesh, mat, shadow, tris, world);
       }
     }
+  }
+  for (const Batch& b : batches) {
+    if (b.worlds.empty()) continue;
+    submit_.main_triangles += static_cast<std::size_t>(b.tris) * b.worlds.size();
+    if (b.shadow) submit_.shadow_triangles += static_cast<std::size_t>(b.tris) * b.worlds.size();
+    ++submit_.draws;
+    if (b.worlds.size() == 1) r_->draw_matrix(b.mesh, b.mat, b.worlds[0], b.shadow);
+    else r_->draw_instanced(b.mesh, b.mat, b.worlds.data(), b.worlds.size(), b.shadow);
   }
   terrain_->prune();
   if (opt.grid) {

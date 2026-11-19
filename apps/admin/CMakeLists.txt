@@ -53,6 +53,7 @@ add_executable(ts_admin
   SmokeTradingPost.cpp
   SmokeCSharp.cpp
   SmokePhysics.cpp
+  BenchPhysics.cpp
   SmokePhysics2D.cpp
   SmokePhysicsEditor.cpp
   SmokeLocTiles.cpp

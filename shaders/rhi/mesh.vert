@@ -14,6 +14,12 @@ layout(location = 5) in vec4 a_weights;
 layout(location = 6) in vec4 a_inst;
 layout(location = 7) in vec2 a_inst2;
 #endif
+#ifdef TS_INSTANCE
+layout(location = 8) in vec4 i_m0;
+layout(location = 9) in vec4 i_m1;
+layout(location = 10) in vec4 i_m2;
+layout(location = 11) in vec4 i_m3;
+#endif
 
 layout(location = 0) out vec3 v_world;
 layout(location = 1) out vec3 v_nrm;
@@ -60,7 +66,11 @@ void main() {
   v_fade = a_inst2.y;
   vec4 w = vec4(world, 1.0);
 #else
+#ifdef TS_INSTANCE
+  mat4 model = mat4(i_m0, i_m1, i_m2, i_m3);
+#else
   mat4 model = draw.model * ts_skin_matrix();
+#endif
   vec4 w = model * vec4(a_pos, 1.0);
   mat3 nm = transpose(inverse(mat3(model)));
   v_world = w.xyz;

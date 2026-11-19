@@ -13,6 +13,8 @@
 #include "editor/export/FreightOffice.h"
 #include "editor/scripting/BrandBook.h"
 #include "editor/editor3d/Editor3DScreen.h"
+
+#include <unordered_map>
 #include "editor/projects/ProjectGraphics.h"
 
 #include "ui/UiScript.h"
@@ -41,6 +43,10 @@ namespace {
 constexpr const char* kViewport = "Viewport###Viewport3D";
 constexpr const char* kHierarchy = "Hierarchy###Hierarchy3D";
 constexpr const char* kInspector = "Inspector###Inspector3D";
+
+// One hierarchy paint. Rows look up children here instead of scanning the
+// whole scene (that scan was O(n) per row).
+const std::unordered_map<std::uint64_t, std::vector<std::uint64_t>>* g_hier_kids = nullptr;
 constexpr const char* kAssets = "Assets###Assets3D";
 constexpr const char* kEnvironment = "Environment###Environment3D";
 constexpr const char* kTelegraph = "Telegraph###Telegraph3D";
@@ -932,17 +938,42 @@ void Editor3DScreen::draw_hierarchy() {
   hier_toggle_lock_ = hier_toggle_hide_ = 0;
   std::string needle = hier_filter_;
   for (char& c : needle) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  std::size_t rows = 0;
+  std::unordered_map<std::uint64_t, std::vector<std::uint64_t>> kids_map;
+  std::vector<const scene3d::Entity3D*> roots;
+  bool any_parent = false;
+  roots.reserve(scene_.entities.size());
   for (const scene3d::Entity3D& e : scene_.entities) {
-    if (filtering) {
-      std::string name = e.name;
-      for (char& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-      if (name.find(needle) != std::string::npos) draw_hierarchy_row(e, 0), ++rows;
-    } else if (e.parent == 0) {
-      draw_hierarchy_row(e, 0);
-      ++rows;
+    if (e.parent != 0) {
+      any_parent = true;
+      kids_map[e.parent].push_back(e.id);
+    } else {
+      roots.push_back(&e);
     }
   }
+  g_hier_kids = &kids_map;
+  std::size_t rows = 0;
+  // A flat pile of hundreds of bodies used to build a widget for every row
+  // every frame. Clip when they are all roots; parented trees stay expanded.
+  if (!filtering && !any_parent && roots.size() > 400) {
+    rows = roots.size();
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(roots.size()));
+    while (clipper.Step()) {
+      for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) draw_hierarchy_row(*roots[static_cast<std::size_t>(i)], 0);
+    }
+  } else {
+    for (const scene3d::Entity3D& e : scene_.entities) {
+      if (filtering) {
+        std::string name = e.name;
+        for (char& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (name.find(needle) != std::string::npos) draw_hierarchy_row(e, 0), ++rows;
+      } else if (e.parent == 0) {
+        draw_hierarchy_row(e, 0);
+        ++rows;
+      }
+    }
+  }
+  g_hier_kids = nullptr;
   if (rows == 0 && filtering) {
     const std::string body = std::string("Nothing in the scene is named like \"") + hier_filter_ + "\".";
     ux::EmptyState("search", {{"Clear search", [this] { hier_filter_[0] = '\0'; }}}, body.c_str());
@@ -1003,7 +1034,15 @@ void Editor3DScreen::draw_hierarchy() {
 void Editor3DScreen::draw_hierarchy_row(const scene3d::Entity3D& e, int depth) {
   const bool sel = std::find(selection().begin(), selection().end(), e.id) != selection().end();
   const bool filtering = hier_filter_[0] != '\0';
-  const std::vector<std::uint64_t> kids = filtering ? std::vector<std::uint64_t>{} : children_of(e.id);
+  std::vector<std::uint64_t> kids_owned;
+  const std::vector<std::uint64_t>* kids_ptr = &kids_owned;
+  if (!filtering && g_hier_kids) {
+    auto it = g_hier_kids->find(e.id);
+    if (it != g_hier_kids->end()) kids_ptr = &it->second;
+  } else if (!filtering) {
+    kids_owned = children_of(e.id);
+  }
+  const std::vector<std::uint64_t>& kids = *kids_ptr;
   ImGui::PushID(static_cast<int>(e.id));
   ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2.0f, 0.0f));
   ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));

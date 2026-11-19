@@ -62,6 +62,8 @@ class JoltWorld final : public World {
   void set_character_position(const Vec3& p) override;
   CharacterState character() const override;
   void step(float dt) override;
+  void optimize_broadphase() override;
+  StepProfile step_profile() const override;
   std::uint64_t steps() const override;
   const std::vector<Contact>& contacts() const override;
   const std::vector<SensorEvent>& sensor_events() const override;

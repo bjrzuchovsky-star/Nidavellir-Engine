@@ -271,26 +271,33 @@ void World3D::phys_add(const Entity3D& e) {
       s.indices = m->indices;
       s.offset = render3d::mul(c.offset, scale);
       d.shapes.push_back(std::move(s));
-    } else if (m && m->vertices.size() <= 8000) {
+    } else if (m && !m->vertices.empty()) {
+      // A dynamic body never takes the render mesh. The hull is capped
+      // (the fitted cache is 64; this fallback is 128) so a 10k-tri prop
+      // does not become an 8k-vertex convex.
       p3::ShapeDesc s;
       s.type = p3::ShapeType::ConvexHull;
-      s.points.reserve(m->vertices.size());
-      for (const auto& v : m->vertices) {
-        s.points.push_back(render3d::mul(Vec3{v.position.x, v.position.y, v.position.z}, scale));
+      std::vector<Vec3> raw;
+      raw.reserve(std::min<std::size_t>(m->vertices.size(), 8000));
+      const std::size_t step = std::max<std::size_t>(1, m->vertices.size() / 8000);
+      for (std::size_t i = 0; i < m->vertices.size(); i += step) {
+        const auto& v = m->vertices[i];
+        raw.push_back(render3d::mul(Vec3{v.position.x, v.position.y, v.position.z}, scale));
       }
-      s.indices = m->indices;
-      d.shapes.push_back(std::move(s));
-    } else if (m) {
-      // No small hull and too many vertices to hand to Jolt raw.
-      p3::ShapeDesc s;
-      s.type = p3::ShapeType::Box;
-      const render3d::Aabb box = m->bounds();
-      const render3d::Vec3 ext = box.extent();
-      s.size = {std::max(0.02f, ext.x * std::fabs(scale.x)), std::max(0.02f, ext.y * std::fabs(scale.y)),
-                std::max(0.02f, ext.z * std::fabs(scale.z))};
-      s.offset = render3d::mul(box.center(), scale);
-      d.shapes.push_back(std::move(s));
-      post(LogLevel::Warn, "physics", e.name + ": collider fell back to a box", e.id);
+      s.points = render3d::convex_hull(raw, 128);
+      if (s.points.size() >= 4) {
+        d.shapes.push_back(std::move(s));
+      } else {
+        p3::ShapeDesc boxs;
+        boxs.type = p3::ShapeType::Box;
+        const render3d::Aabb box = m->bounds();
+        const render3d::Vec3 ext = box.extent();
+        boxs.size = {std::max(0.02f, ext.x * std::fabs(scale.x)), std::max(0.02f, ext.y * std::fabs(scale.y)),
+                     std::max(0.02f, ext.z * std::fabs(scale.z))};
+        boxs.offset = render3d::mul(box.center(), scale);
+        d.shapes.push_back(std::move(boxs));
+        post(LogLevel::Warn, "physics", e.name + ": collider fell back to a box", e.id);
+      }
     }
   } else {
     p3::ShapeDesc s = prim_shape(c.shape, c.size, scale);
@@ -365,6 +372,7 @@ void World3D::phys_build() {
   for (const Entity3D& e : ents_) {
     if (phys_wants_body(e)) phys_add(e);
   }
+  phys_->optimize_broadphase();
   // Joints (this entity's body to its target, or the world).
   for (const Entity3D& e : ents_) {
     if (!e.joint) continue;

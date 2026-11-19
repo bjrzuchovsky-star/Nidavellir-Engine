@@ -5,9 +5,11 @@
 #include "world3d/RiderController3D.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <iterator>
+#include <unordered_set>
 
 namespace ts {
 namespace tombstone {
@@ -101,6 +103,8 @@ bool World3D::start(const scene3d::Scene3D& scene, const std::string& project_di
   authored_ = scene;
   env_ = scene.environment;
   ents_ = scene.entities;
+  note_entities_changed();
+  surf_cache_.clear();
   has_parents_ = std::any_of(ents_.begin(), ents_.end(),
                              [](const Entity3D& e) { return e.parent != 0; });
   project_dir_ = project_dir;
@@ -247,6 +251,8 @@ void World3D::stop() {
   particles_.clear();
   running_ = false;
   ents_.clear();
+  note_entities_changed();
+  surf_cache_.clear();
   proxies_.clear();
   statics_.clear();
   inside_.clear();
@@ -278,7 +284,20 @@ void World3D::stop() {
 
 std::size_t World3D::script_count() const { return host_ ? host_->instance_count() : 0; }
 
+void World3D::reindex() {
+  id_index_.clear();
+  id_index_.reserve(ents_.size() * 2);
+  for (std::size_t i = 0; i < ents_.size(); ++i) id_index_[ents_[i].id] = i;
+  id_index_dirty_ = false;
+}
+
 const Entity3D* World3D::find(std::uint64_t id) const {
+  if (id == 0) return nullptr;
+  if (id_index_dirty_) const_cast<World3D*>(this)->reindex();
+  auto it = id_index_.find(id);
+  if (it != id_index_.end() && it->second < ents_.size() && ents_[it->second].id == id) {
+    return &ents_[it->second];
+  }
   for (const Entity3D& e : ents_) {
     if (e.id == id) return &e;
   }
@@ -287,10 +306,7 @@ const Entity3D* World3D::find(std::uint64_t id) const {
 
 Entity3D* World3D::live(std::uint64_t id) {
   if (id == 0 || dead_.count(id)) return nullptr;
-  for (Entity3D& e : ents_) {
-    if (e.id == id) return &e;
-  }
-  return nullptr;
+  return const_cast<Entity3D*>(find(id));
 }
 
 Aabb World3D::collider_box(const Entity3D& e) const {
@@ -309,47 +325,80 @@ Aabb World3D::collider_box(const Entity3D& e) const {
 
 void World3D::rebuild_statics() {
   statics_.clear();
+  statics_.reserve(ents_.size());
+  std::unordered_set<std::uint64_t> keep;
+  keep.reserve(ents_.size());
   for (const Entity3D& e : ents_) {
     if (!e.collider || e.collider->trigger || e.player || e.grabbable || e.vr_rig ||
         dead_.count(e.id) ||
         collider_off_.count(e.id)) {
       continue;
     }
+    // A dynamic or kinematic body is simulated by Jolt. Walking its triangles
+    // every tick was the 16M-vertex sync (and it still ran for box piles).
+    const bool simulated = e.rigid_body && e.rigid_body->motion != scene3d::RigidBody3D::Motion::Static;
+    const auto shape = e.collider->shape;
+    const bool surface = !simulated && e.mesh &&
+                         (shape == scene3d::Collider3D::Shape::Mesh ||
+                          shape == scene3d::Collider3D::Shape::ConvexHull);
     Static s;
     s.id = e.id;
-    const auto shape = e.collider->shape;
-    const bool surface = shape == scene3d::Collider3D::Shape::Mesh ||
-                         shape == scene3d::Collider3D::Shape::ConvexHull;
-    if (surface && e.mesh) {
-      if (const render3d::MeshData* m = phys_mesh(e.mesh->source)) {
-        const render3d::Mat4 M = e.transform.matrix();
-        const std::size_t nv = m->vertices.size();
-        s.tris.reserve(m->indices.size() / 3);
-        for (std::size_t i = 0; i + 2 < m->indices.size() && s.tris.size() < 20000; i += 3) {
-          const std::uint32_t ia = m->indices[i], ib = m->indices[i + 1], ic = m->indices[i + 2];
-          if (ia >= nv || ib >= nv || ic >= nv) continue;
-          SurfTri t;
-          t.a = M.transform_point(m->vertices[ia].position);
-          t.b = M.transform_point(m->vertices[ib].position);
-          t.c = M.transform_point(m->vertices[ic].position);
-          s.tris.push_back(t);
-        }
+    if (!surface) {
+      s.volume = true;
+      s.box = collider_box(e);
+      statics_.push_back(std::move(s));
+      continue;
+    }
+    keep.insert(e.id);
+    auto cached = surf_cache_.find(e.id);
+    if (cached != surf_cache_.end() && cached->second.shape == static_cast<std::uint8_t>(shape) &&
+        cached->second.xf == e.transform) {
+      s.volume = cached->second.volume;
+      s.box = cached->second.box;
+      s.tris = cached->second.tris;
+      statics_.push_back(std::move(s));
+      continue;
+    }
+    SurfCache built;
+    built.xf = e.transform;
+    built.shape = static_cast<std::uint8_t>(shape);
+    if (const render3d::MeshData* m = phys_mesh(e.mesh->source)) {
+      const render3d::Mat4 M = e.transform.matrix();
+      const std::size_t nv = m->vertices.size();
+      built.tris.reserve(std::min<std::size_t>(m->indices.size() / 3, 20000));
+      for (std::size_t i = 0; i + 2 < m->indices.size() && built.tris.size() < 20000; i += 3) {
+        const std::uint32_t ia = m->indices[i], ib = m->indices[i + 1], ic = m->indices[i + 2];
+        if (ia >= nv || ib >= nv || ic >= nv) continue;
+        SurfTri t;
+        t.a = M.transform_point(m->vertices[ia].position);
+        t.b = M.transform_point(m->vertices[ib].position);
+        t.c = M.transform_point(m->vertices[ic].position);
+        built.tris.push_back(t);
       }
     }
-    if (!s.tris.empty()) {
-      s.volume = false;
-      s.box = {s.tris[0].a, s.tris[0].a};
-      for (const SurfTri& t : s.tris) {
+    if (!built.tris.empty()) {
+      built.volume = false;
+      built.box = {built.tris[0].a, built.tris[0].a};
+      for (const SurfTri& t : built.tris) {
         for (const Vec3& p : {t.a, t.b, t.c}) {
-          s.box.min = render3d::vmin(s.box.min, p);
-          s.box.max = render3d::vmax(s.box.max, p);
+          built.box.min = render3d::vmin(built.box.min, p);
+          built.box.max = render3d::vmax(built.box.max, p);
         }
       }
     } else {
-      s.volume = true;
-      s.box = collider_box(e);
+      built.volume = true;
+      built.box = collider_box(e);
     }
+    s.volume = built.volume;
+    s.box = built.box;
+    s.tris = built.tris;
+    surf_cache_[e.id] = std::move(built);
     statics_.push_back(std::move(s));
+  }
+  if (surf_cache_.size() > keep.size() + 32) {
+    for (auto it = surf_cache_.begin(); it != surf_cache_.end();) {
+      it = keep.count(it->first) ? std::next(it) : surf_cache_.erase(it);
+    }
   }
 }
 
@@ -608,20 +657,81 @@ void World3D::move_player(const Input3D& in) {
 }
 
 void World3D::update_collisions() {
+  struct Item {
+    std::uint64_t id;
+    Aabb box;
+  };
+  std::vector<Item> items;
+  items.reserve(ents_.size());
+  for (const Entity3D& e : ents_) {
+    if (dead_.count(e.id) || !e.collider || e.collider->trigger) continue;
+    items.push_back({e.id, collider_box(e)});
+  }
   std::vector<std::pair<std::uint64_t, std::uint64_t>> now;
-  for (std::size_t i = 0; i < ents_.size(); ++i) {
-    const Entity3D& a = ents_[i];
-    if (dead_.count(a.id) || !a.collider || a.collider->trigger) continue;
-    const Aabb ab = collider_box(a);
-    for (std::size_t j = i + 1; j < ents_.size(); ++j) {
-      const Entity3D& b = ents_[j];
-      if (dead_.count(b.id) || !b.collider || b.collider->trigger) continue;
-      const Aabb bb = collider_box(b);
-      const bool hit = ab.min.x < bb.max.x && ab.max.x > bb.min.x && ab.min.y < bb.max.y && ab.max.y > bb.min.y &&
-                       ab.min.z < bb.max.z && ab.max.z > bb.min.z;
-      if (!hit) continue;
-      now.emplace_back(std::min(a.id, b.id), std::max(a.id, b.id));
+  if (items.size() >= 2) {
+    // Grid on the median extent. A floor that covers the whole pile is
+    // tested as one "large" box instead of filling every cell.
+    std::vector<float> ext;
+    ext.reserve(items.size());
+    for (const Item& it : items) {
+      const Vec3 e = it.box.extent();
+      ext.push_back(std::max(e.x, std::max(e.y, e.z)));
     }
+    const std::size_t mid = ext.size() / 2;
+    std::nth_element(ext.begin(), ext.begin() + static_cast<std::ptrdiff_t>(mid), ext.end());
+    const float cell = std::clamp(ext[mid] > 1e-3f ? ext[mid] : 1.0f, 0.25f, 16.0f);
+    auto cell_of = [&](float v) { return static_cast<int>(std::floor(v / cell)); };
+    struct Key {
+      int x, y, z;
+      bool operator==(const Key& o) const { return x == o.x && y == o.y && z == o.z; }
+    };
+    struct Hash {
+      std::size_t operator()(const Key& k) const {
+        return (static_cast<std::size_t>(k.x) * 73856093u) ^ (static_cast<std::size_t>(k.y) * 19349663u) ^
+               (static_cast<std::size_t>(k.z) * 83492791u);
+      }
+    };
+    std::unordered_map<Key, std::vector<int>, Hash> grid;
+    std::vector<int> large;
+    for (int i = 0; i < static_cast<int>(items.size()); ++i) {
+      const Aabb& b = items[static_cast<std::size_t>(i)].box;
+      const int x0 = cell_of(b.min.x), x1 = cell_of(b.max.x);
+      const int y0 = cell_of(b.min.y), y1 = cell_of(b.max.y);
+      const int z0 = cell_of(b.min.z), z1 = cell_of(b.max.z);
+      const int span = (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1);
+      if (span > 64) {
+        large.push_back(i);
+        continue;
+      }
+      for (int z = z0; z <= z1; ++z)
+        for (int y = y0; y <= y1; ++y)
+          for (int x = x0; x <= x1; ++x) grid[{x, y, z}].push_back(i);
+    }
+    std::unordered_set<std::uint64_t> seen;
+    auto overlap = [](const Aabb& a, const Aabb& b) {
+      return a.min.x < b.max.x && a.max.x > b.min.x && a.min.y < b.max.y && a.max.y > b.min.y && a.min.z < b.max.z &&
+             a.max.z > b.min.z;
+    };
+    auto consider = [&](int ia, int ib) {
+      if (ia == ib) return;
+      if (ia > ib) std::swap(ia, ib);
+      const std::uint64_t key = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(ia)) << 32) |
+                                static_cast<std::uint32_t>(ib);
+      if (!seen.insert(key).second) return;
+      if (!overlap(items[static_cast<std::size_t>(ia)].box, items[static_cast<std::size_t>(ib)].box)) return;
+      std::uint64_t ea = items[static_cast<std::size_t>(ia)].id;
+      std::uint64_t eb = items[static_cast<std::size_t>(ib)].id;
+      if (ea > eb) std::swap(ea, eb);
+      now.emplace_back(ea, eb);
+    };
+    for (const auto& cell : grid) {
+      const std::vector<int>& ids = cell.second;
+      for (std::size_t i = 0; i < ids.size(); ++i)
+        for (std::size_t j = i + 1; j < ids.size(); ++j) consider(ids[i], ids[j]);
+    }
+    for (int li : large)
+      for (int i = 0; i < static_cast<int>(items.size()); ++i)
+        if (i != li) consider(li, i);
   }
   std::sort(now.begin(), now.end());
   now.erase(std::unique(now.begin(), now.end()), now.end());
@@ -742,17 +852,33 @@ void World3D::step(const Input3D& input0) {
   }
   {
     TS_PROFILE_SCOPE("world3d.physics");
+    const auto clock = [] { return std::chrono::steady_clock::now(); };
+    const auto ms = [](auto a, auto b) {
+      return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    const auto t_all = clock();
+    const auto t0 = clock();
     phys_pre(dt);
+    const auto t1 = clock();
     if (vr_) {
       vr_step();
     } else {
       move_player(input);
       phys_carry(input, dt);
     }
+    const auto t2 = clock();
     phys_step(dt);
+    const auto t3 = clock();
     phys_post();
+    const auto t4 = clock();
     if (!vr_) update_triggers();
     update_collisions();
+    const auto t5 = clock();
+    tick_times_.pre_ms = ms(t0, t1);
+    tick_times_.physics_ms = ms(t2, t3);
+    tick_times_.post_ms = ms(t3, t4);
+    tick_times_.pairs_ms = ms(t4, t5);
+    tick_times_.total_ms = ms(t_all, t5);
   }
   if (host_) {
     TS_PROFILE_SCOPE("world3d.scripts");
@@ -781,7 +907,13 @@ void World3D::step(const Input3D& input0) {
     step_fx();
   }
   // Scripts may have moved or switched colliders.
-  rebuild_statics();
+  {
+    const auto t0 = std::chrono::steady_clock::now();
+    rebuild_statics();
+    tick_times_.rebuild_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    tick_times_.total_ms += tick_times_.rebuild_ms;
+  }
   if (profiler::Profiler::get().enabled()) {
     profiler::Profiler& prof = profiler::Profiler::get();
     prof.counter("world.entities", static_cast<double>(ents_.size()));
@@ -920,7 +1052,7 @@ bool World3D::script_play(std::uint64_t id, const std::string& clip, bool hold) 
 void World3D::script_release(std::uint64_t /*id*/) {}
 
 std::uint64_t World3D::spawn_copy(const Entity3D& src, float x, float z, bool keep_y, float y) {
-  if (ents_.size() >= 4096) {
+  if (ents_.size() >= kMaxEntities) {
     post(LogLevel::Warn, "script", "Too many entities; spawn refused");
     return 0;
   }
@@ -931,6 +1063,7 @@ std::uint64_t World3D::spawn_copy(const Entity3D& src, float x, float z, bool ke
   c.player.reset();
   c.transform.position = {x, keep_y ? src.transform.position.y : y, z};
   ents_.push_back(c);
+  note_entities_changed();
   spawned_.insert(id);
   rebuild_statics();
   if (host_ && c.script) host_->attach(*script_entity(id));

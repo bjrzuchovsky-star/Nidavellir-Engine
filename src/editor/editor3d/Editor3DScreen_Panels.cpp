@@ -290,8 +290,13 @@ void Editor3DScreen::draw_inspector() {
         t.after("Collider height");
       }
     } else {
-      ImGui::TextDisabled(c.shape == S::Mesh ? "Triangles of the model (static / kinematic only)"
-                                             : "Convex hull of the model's vertices");
+      ImGui::TextDisabled(c.shape == S::Mesh ? "Triangles of the model (static only)"
+                                             : "Convex hull, at most 128 vertices");
+      if (c.shape == S::Mesh && e.rigid_body &&
+          e.rigid_body->motion == scene3d::RigidBody3D::Motion::Dynamic) {
+        ImGui::TextColored(theme::Warning(),
+                           "Dynamic bodies simulate a convex hull (max 128 verts), not these triangles.");
+      }
     }
     ImGui::DragFloat3("Offset", &c.offset.x, 0.02f);
     t.after("Collider offset");

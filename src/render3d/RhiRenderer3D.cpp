@@ -49,6 +49,8 @@ struct DrawItem {
   bool shadow = true;
   int bone = -1;
   int bones = 0;
+  int inst_first = 0;
+  int inst_count = 1;
 };
 
 struct GpuMesh {
@@ -136,6 +138,16 @@ class RhiRenderer final : public Renderer3D {
     mesh.attrs[3] = mesh_attr(3, 0, offsetof(Vertex3D, tangent), 4, false);
     mesh.strides[0] = sizeof(Vertex3D);
     mesh_ = pipe("mesh.vert", "mesh.frag", mesh);
+    {
+      rhi::PipelineDesc inst = mesh;
+      inst.attr_count = 8;
+      inst.attrs[4] = mesh_attr(8, 1, 0, 4, true);
+      inst.attrs[5] = mesh_attr(9, 1, 16, 4, true);
+      inst.attrs[6] = mesh_attr(10, 1, 32, 4, true);
+      inst.attrs[7] = mesh_attr(11, 1, 48, 4, true);
+      inst.strides[1] = sizeof(float) * 16;
+      mesh_inst_ = pipe("mesh_inst.vert", "mesh.frag", inst);
+    }
     mesh.cull = rhi::Cull::None;
     mesh_2s_ = pipe("mesh.vert", "mesh.frag", mesh);
     mesh.blend = rhi::Blend::Alpha;
@@ -158,6 +170,16 @@ class RhiRenderer final : public Renderer3D {
     depth.attrs[1] = mesh_attr(2, 0, offsetof(Vertex3D, u), 2, false);
     depth.strides[0] = sizeof(Vertex3D);
     depth_ = pipe("depth.vert", "depth.frag", depth);
+    {
+      rhi::PipelineDesc di = depth;
+      di.attr_count = 6;
+      di.attrs[2] = mesh_attr(8, 1, 0, 4, true);
+      di.attrs[3] = mesh_attr(9, 1, 16, 4, true);
+      di.attrs[4] = mesh_attr(10, 1, 32, 4, true);
+      di.attrs[5] = mesh_attr(11, 1, 48, 4, true);
+      di.strides[1] = sizeof(float) * 16;
+      depth_inst_ = pipe("depth_inst.vert", "depth.frag", di);
+    }
     depth.attr_count = 4;
     depth.attrs[2] = mesh_attr(4, 1, offsetof(SkinVertex, joints), 4, false);
     depth.attrs[3] = mesh_attr(5, 1, offsetof(SkinVertex, weights), 4, false);
@@ -246,14 +268,15 @@ class RhiRenderer final : public Renderer3D {
     color_ = shadow_ = ao_ = bloom_t_ = shown_ = nullptr;
     device_->destroy_buffer(ubo_);
     device_->destroy_buffer(dyn_);
-    ubo_ = dyn_ = nullptr;
+    device_->destroy_buffer(inst_);
+    ubo_ = dyn_ = inst_ = nullptr;
     device_->destroy_texture(white_);
     device_->destroy_texture(flat_);
     device_->destroy_texture(overlay_tex_);
     white_ = flat_ = overlay_tex_ = nullptr;
     device_->destroy_sampler(wrap_);
     device_->destroy_sampler(clamp_);
-    for (rhi::Pipeline* p : {mesh_, mesh_2s_, mesh_blend_, skin_, depth_, depth_skin_, foliage_, sky_, line_, line_top_, bill_, post_, ssao_, bloom_, overlay_, mesh_rt_}) {
+    for (rhi::Pipeline* p : {mesh_, mesh_2s_, mesh_blend_, mesh_inst_, skin_, depth_, depth_inst_, depth_skin_, foliage_, sky_, line_, line_top_, bill_, post_, ssao_, bloom_, overlay_, mesh_rt_}) {
       device_->destroy_pipeline(p);
     }
     ready_ = false;
@@ -336,6 +359,7 @@ class RhiRenderer final : public Renderer3D {
     width_ = std::max(1, width);
     height_ = std::max(1, height);
     draws_.clear();
+    instances_.clear();
     points_.clear();
     spots_.clear();
     areas_.clear();
@@ -361,7 +385,19 @@ class RhiRenderer final : public Renderer3D {
   }
   void draw_matrix(MeshHandle mesh, MaterialHandle material, const Mat4& world, bool cast_shadow) override {
     if (!meshes_.count(mesh.id)) return;
-    draws_.push_back({mesh.id, material.id, world, cast_shadow, -1, 0});
+    draws_.push_back({mesh.id, material.id, world, cast_shadow, -1, 0, 0, 1});
+  }
+  void draw_instanced(MeshHandle mesh, MaterialHandle material, const Mat4* worlds, std::size_t count,
+                      bool cast_shadow) override {
+    if (!meshes_.count(mesh.id) || !worlds || count == 0) return;
+    if (count == 1 || !mesh_inst_) {
+      for (std::size_t i = 0; i < count; ++i) draw_matrix(mesh, material, worlds[i], cast_shadow);
+      return;
+    }
+    DrawItem d{mesh.id, material.id, worlds[0], cast_shadow, -1, 0, static_cast<int>(instances_.size()),
+               static_cast<int>(count)};
+    instances_.insert(instances_.end(), worlds, worlds + count);
+    draws_.push_back(d);
   }
   void draw_skinned(MeshHandle mesh, MaterialHandle material, const Mat4& world, const Mat4* palette,
                     std::size_t bones, bool cast_shadow) override {
@@ -416,6 +452,18 @@ class RhiRenderer final : public Renderer3D {
     int cascades = std::clamp(L.cascades, 1, 4);
     if (L.preset == 0) cascades = 1;
     const bool post = L.tonemap != 0 || L.bloom > 0 || L.ao != 0 || L.contrast != 1 || L.saturation != 1 || L.gain != 1;
+    if (!instances_.empty()) {
+      const std::size_t bytes = instances_.size() * sizeof(Mat4);
+      if (!inst_ || inst_size_ < bytes) {
+        device_->destroy_buffer(inst_);
+        rhi::BufferDesc bd;
+        bd.kind = rhi::BufferKind::Vertex;
+        inst_size_ = bytes + 4096;
+        bd.size = inst_size_;
+        inst_ = device_->create_buffer(bd, nullptr);
+      }
+      device_->update_buffer(inst_, instances_.data(), bytes, 0);
+    }
     const bool shadows = env_.shadows && env_.sun_intensity > 0 && cascades > 0 && !L.raytracing;
     const Vec3 sun = normalize(env_.sun_direction);
     const Vec3 focus = camera_.target;
@@ -495,17 +543,37 @@ class RhiRenderer final : public Renderer3D {
         cmd->set_viewport((c % tiles) * side, (c / tiles) * side, side, side);
         for (const DrawItem& d : draws_) {
           if (!d.shadow) continue;
+          const int ninst = std::max(1, d.inst_count);
+          const bool batched = ninst > 1 && inst_ && depth_inst_ && d.bone < 0;
           DrawBlock db{};
           db.model = d.model;
           db.extra.x = static_cast<float>(c);
           upload_draw(cmd, db, d);
           const GpuMesh& m = meshes_[d.mesh];
-          cmd->set_pipeline(d.bone >= 0 ? depth_skin_ : depth_);
+          cmd->set_pipeline(d.bone >= 0 ? depth_skin_ : (batched ? depth_inst_ : depth_));
           cmd->set_vertex_buffer(0, m.vb);
-          if (m.skin) cmd->set_vertex_buffer(1, m.skin);
+          if (batched) {
+            cmd->set_vertex_buffer(1, inst_);
+            cmd->set_vertex_buffer_offset(1, static_cast<std::size_t>(d.inst_first) * sizeof(Mat4));
+          } else if (m.skin) {
+            cmd->set_vertex_buffer(1, m.skin);
+          }
           cmd->set_index_buffer(m.ib);
-          cmd->draw_indexed(m.count, 1, 0);
-          ++stats_.shadow_casters;
+          if (batched) {
+            cmd->draw_indexed(m.count, static_cast<std::uint32_t>(ninst), 0);
+            ++stats_.shadow_casters;
+            stats_.shadow_triangles += tris_[d.mesh] * static_cast<std::size_t>(ninst);
+          } else {
+            for (int i = 0; i < ninst; ++i) {
+              if (ninst > 1) {
+                db.model = instances_[static_cast<std::size_t>(d.inst_first + i)];
+                upload_draw(cmd, db, d);
+              }
+              cmd->draw_indexed(m.count, 1, 0);
+              ++stats_.shadow_casters;
+              stats_.shadow_triangles += tris_[d.mesh];
+            }
+          }
         }
       }
       cmd->end_pass();
@@ -535,8 +603,12 @@ class RhiRenderer final : public Renderer3D {
         const MaterialDesc& md = mat ? mat->desc : fallback_;
         const bool is_blend = md.alpha_mode == MaterialDesc::kAlphaBlend;
         if (is_blend != blend) continue;
+        const int ninst = std::max(1, d.inst_count);
+        const bool batched = ninst > 1 && inst_ && mesh_inst_ && d.bone < 0 && !is_blend && !md.double_sided &&
+                             !(L.raytracing && mesh_rt_);
         rhi::Pipeline* p = d.bone >= 0 ? skin_ : (is_blend ? mesh_blend_ : (md.double_sided ? mesh_2s_ : mesh_));
-        if (L.raytracing && mesh_rt_ && !is_blend && d.bone < 0) p = mesh_rt_;
+        if (batched) p = mesh_inst_;
+        if (L.raytracing && mesh_rt_ && !is_blend && d.bone < 0 && !batched) p = mesh_rt_;
         cmd->set_pipeline(p);
         bind_frame();
         DrawBlock db{};
@@ -563,11 +635,28 @@ class RhiRenderer final : public Renderer3D {
           if (mat && mat->layer[i]) cmd->set_texture(8 + i, mat->layer[i], wrap_);
         const GpuMesh& m = meshes_[d.mesh];
         cmd->set_vertex_buffer(0, m.vb);
-        if (m.skin) cmd->set_vertex_buffer(1, m.skin);
+        if (batched) {
+          cmd->set_vertex_buffer(1, inst_);
+          cmd->set_vertex_buffer_offset(1, static_cast<std::size_t>(d.inst_first) * sizeof(Mat4));
+        } else if (m.skin) {
+          cmd->set_vertex_buffer(1, m.skin);
+        }
         cmd->set_index_buffer(m.ib);
-        cmd->draw_indexed(m.count, 1, 0);
-        ++stats_.draws;
-        stats_.triangles += tris_[d.mesh];
+        if (batched) {
+          cmd->draw_indexed(m.count, static_cast<std::uint32_t>(ninst), 0);
+          ++stats_.draws;
+          stats_.triangles += tris_[d.mesh] * static_cast<std::size_t>(ninst);
+        } else {
+          for (int i = 0; i < ninst; ++i) {
+            if (ninst > 1) {
+              db.model = instances_[static_cast<std::size_t>(d.inst_first + i)];
+              upload_draw(cmd, db, d);
+            }
+            cmd->draw_indexed(m.count, 1, 0);
+            ++stats_.draws;
+            stats_.triangles += tris_[d.mesh];
+          }
+        }
         if (d.bone >= 0) ++stats_.skinned;
       }
     };
@@ -827,6 +916,9 @@ class RhiRenderer final : public Renderer3D {
   std::size_t dyn_size_ = 0;
   rhi::Buffer* ubo_ = nullptr;
   rhi::Buffer* dyn_ = nullptr;
+  rhi::Buffer* inst_ = nullptr;
+  std::size_t inst_size_ = 0;
+  std::vector<Mat4> instances_;
   rhi::Texture* white_ = nullptr;
   rhi::Texture* flat_ = nullptr;
   rhi::Texture* overlay_tex_ = nullptr;
@@ -835,9 +927,11 @@ class RhiRenderer final : public Renderer3D {
   rhi::Pipeline* mesh_ = nullptr;
   rhi::Pipeline* mesh_2s_ = nullptr;
   rhi::Pipeline* mesh_blend_ = nullptr;
+  rhi::Pipeline* mesh_inst_ = nullptr;
   rhi::Pipeline* mesh_rt_ = nullptr;
   rhi::Pipeline* skin_ = nullptr;
   rhi::Pipeline* depth_ = nullptr;
+  rhi::Pipeline* depth_inst_ = nullptr;
   rhi::Pipeline* depth_skin_ = nullptr;
   rhi::Pipeline* foliage_ = nullptr;
   rhi::Pipeline* sky_ = nullptr;

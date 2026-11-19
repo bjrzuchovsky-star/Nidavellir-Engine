@@ -233,6 +233,23 @@ class World {
 
   // Advance the world by dt (fixed step).
   virtual void step(float dt) = 0;
+  // One-time broadphase rebuild after a lot of bodies were added (play start).
+  virtual void optimize_broadphase() {}
+  // Where the last step() spent its time. Jolt's jobs are timed exclusive
+  // of the jobs they spawn. Zero when the backend does not record them.
+  struct StepProfile {
+    double broadphase_ms = 0;
+    double narrowphase_ms = 0;
+    double solver_ms = 0;
+    double other_ms = 0;
+    struct Job {
+      const char* name = "";
+      double ms = 0;
+    };
+    Job jobs[24]{};
+    int job_count = 0;
+  };
+  virtual StepProfile step_profile() const { return {}; }
   virtual std::uint64_t steps() const = 0;
   // Events from the last step().
   virtual const std::vector<Contact>& contacts() const = 0;

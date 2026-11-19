@@ -50,6 +50,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace ts {
@@ -160,6 +161,8 @@ class World3D final : public runtime::ScriptWorld {
   static constexpr float kInteractReach = 2.5f;   // m
   static constexpr float kKillY = -50.0f;         // fell off the world
   static constexpr int kMaxCatchUpTicks = 8;
+  // Script spawn cap. 4096 refused a pile past a few thousand bodies.
+  static constexpr std::size_t kMaxEntities = 65536;
   // Look limits (degrees; + pitch looks up).
   static constexpr float kFirstPersonPitchLimit = 89.0f;
   static constexpr float kThirdPersonPitchMin = -70.0f;  // camera high, looking down
@@ -195,6 +198,17 @@ class World3D final : public runtime::ScriptWorld {
   int update(double real_seconds, const Input3D& input);
   void step(const Input3D& input);  // exactly one tick
   void run_ticks(int n, const Input3D& input);
+  // Last step(), milliseconds. pairs is the script overlap broadphase
+  // (was every collider against every other). physics is the Jolt step.
+  struct TickTimes {
+    double pre_ms = 0;
+    double physics_ms = 0;
+    double post_ms = 0;
+    double pairs_ms = 0;
+    double rebuild_ms = 0;
+    double total_ms = 0;
+  };
+  const TickTimes& tick_times() const { return tick_times_; }
   int reload_scripts();
 
   std::uint64_t tick() const { return tick_; }
@@ -434,6 +448,15 @@ class World3D final : public runtime::ScriptWorld {
     bool volume = true;  // box / capsule / sphere. False: stand on tris, not the bounds.
     std::vector<SurfTri> tris;
   };
+  // Static mesh triangles, built when the transform changes. A moving body
+  // never lands here: the fallback rider uses its box, Jolt has the shape.
+  struct SurfCache {
+    Transform xf;
+    std::uint8_t shape = 0;
+    bool volume = true;
+    Aabb box;
+    std::vector<SurfTri> tris;
+  };
   void post(runtime::LogLevel level, const std::string& channel, const std::string& text,
             std::uint64_t entity = 0);
   void rebuild_statics();
@@ -505,6 +528,12 @@ class World3D final : public runtime::ScriptWorld {
   std::map<std::uint64_t, std::map<std::string, ScriptValue>> state_;
   mutable std::map<std::uint64_t, Entity2D> proxies_;
   std::vector<Static> statics_;
+  std::unordered_map<std::uint64_t, SurfCache> surf_cache_;
+  std::unordered_map<std::uint64_t, std::size_t> id_index_;
+  bool id_index_dirty_ = true;
+  TickTimes tick_times_{};
+  void reindex();
+  void note_entities_changed() { id_index_dirty_ = true; }
   std::set<std::uint64_t> inside_;  // triggers the rider is in
   std::vector<std::pair<std::uint64_t, std::uint64_t>> solid_hits_;
   void update_collisions();

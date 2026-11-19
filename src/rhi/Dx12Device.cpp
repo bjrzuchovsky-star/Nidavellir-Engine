@@ -89,6 +89,7 @@ class DxCmd final : public CommandList {
   ID3D12GraphicsCommandList* list = nullptr;
   DxPipeline* pipe = nullptr;
   DxBuffer* vb[2] = {};
+  std::size_t vb_off[2] = {};
   DxBuffer* ib = nullptr;
   DxBuffer* ubo[3] = {};
   std::size_t ubo_off[3] = {};
@@ -99,6 +100,7 @@ class DxCmd final : public CommandList {
   void set_viewport(int x, int y, int w, int h) override;
   void set_pipeline(Pipeline* pipeline) override;
   void set_vertex_buffer(int slot, Buffer* buffer) override;
+  void set_vertex_buffer_offset(int slot, std::size_t offset) override;
   void set_index_buffer(Buffer* buffer) override;
   void set_uniform(int slot, Buffer* buffer, std::size_t offset, std::size_t size) override;
   void set_texture(int slot, Texture* texture, Sampler*) override;
@@ -343,7 +345,13 @@ void DxCmd::set_pipeline(Pipeline* pipeline) {
   list->SetPipelineState(pipe->pso);
 }
 void DxCmd::set_vertex_buffer(int slot, Buffer* buffer) {
-  if (slot >= 0 && slot < 2) vb[slot] = static_cast<DxBuffer*>(buffer);
+  if (slot >= 0 && slot < 2) {
+    vb[slot] = static_cast<DxBuffer*>(buffer);
+    vb_off[slot] = 0;
+  }
+}
+void DxCmd::set_vertex_buffer_offset(int slot, std::size_t offset) {
+  if (slot >= 0 && slot < 2) vb_off[slot] = offset;
 }
 void DxCmd::set_index_buffer(Buffer* buffer) { ib = static_cast<DxBuffer*>(buffer); }
 void DxCmd::set_uniform(int slot, Buffer* buffer, std::size_t offset, std::size_t) {
@@ -389,15 +397,17 @@ void DxCmd::draw(std::uint32_t count, std::uint32_t instances, std::uint32_t fir
   list->IASetPrimitiveTopology(pipe->lines ? D3D_PRIMITIVE_TOPOLOGY_LINELIST : D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
   if (vb[0] && pipe->stride0) {
     D3D12_VERTEX_BUFFER_VIEW v{};
-    v.BufferLocation = vb[0]->gpu;
-    v.SizeInBytes = static_cast<UINT>(vb[0]->size);
+    const std::size_t off = std::min(vb_off[0], vb[0]->size);
+    v.BufferLocation = vb[0]->gpu + off;
+    v.SizeInBytes = static_cast<UINT>(vb[0]->size - off);
     v.StrideInBytes = pipe->stride0;
     list->IASetVertexBuffers(0, 1, &v);
   }
   if (vb[1] && pipe->stride1) {
     D3D12_VERTEX_BUFFER_VIEW v{};
-    v.BufferLocation = vb[1]->gpu;
-    v.SizeInBytes = static_cast<UINT>(vb[1]->size);
+    const std::size_t off = std::min(vb_off[1], vb[1]->size);
+    v.BufferLocation = vb[1]->gpu + off;
+    v.SizeInBytes = static_cast<UINT>(vb[1]->size - off);
     v.StrideInBytes = pipe->stride1;
     list->IASetVertexBuffers(1, 1, &v);
   }

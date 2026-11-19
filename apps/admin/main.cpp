@@ -3398,6 +3398,9 @@ int main(int argc, char** argv) {
     if (std::strcmp(argv[i], "--smoke-physics") == 0) {
       return run_physics_smoke();
     }
+    if (std::strncmp(argv[i], "--bench-physics", 15) == 0) {
+      return run_physics_bench(argc, argv);
+    }
     if (std::strcmp(argv[i], "--smoke-cs") == 0) {
       return run_csharp_smoke();
     }

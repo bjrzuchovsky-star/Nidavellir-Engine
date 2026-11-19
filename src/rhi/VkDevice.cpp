@@ -98,6 +98,7 @@ class VkCmd final : public CommandList {
   bool pass = false;
   VkPipelineR* pipe = nullptr;
   VkBufferR* vb[2] = {};
+  VkDeviceSize vb_off[2] = {};
   VkBufferR* ib = nullptr;
   Bind ubo[3]{};
   Bind tex[16]{};
@@ -108,6 +109,7 @@ class VkCmd final : public CommandList {
   void set_viewport(int x, int y, int w, int h) override;
   void set_pipeline(Pipeline* pipeline) override;
   void set_vertex_buffer(int slot, Buffer* buffer) override;
+  void set_vertex_buffer_offset(int slot, std::size_t offset) override;
   void set_index_buffer(Buffer* buffer) override;
   void set_uniform(int slot, Buffer* buffer, std::size_t offset, std::size_t size) override;
   void set_texture(int slot, Texture* texture, Sampler* sampler) override;
@@ -294,7 +296,13 @@ void VkCmd::set_pipeline(Pipeline* pipeline) {
   if (pipe && pass) vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe->pipeline);
 }
 void VkCmd::set_vertex_buffer(int slot, Buffer* buffer) {
-  if (slot >= 0 && slot < 2) vb[slot] = static_cast<VkBufferR*>(buffer);
+  if (slot >= 0 && slot < 2) {
+    vb[slot] = static_cast<VkBufferR*>(buffer);
+    vb_off[slot] = 0;
+  }
+}
+void VkCmd::set_vertex_buffer_offset(int slot, std::size_t offset) {
+  if (slot >= 0 && slot < 2) vb_off[slot] = offset;
 }
 void VkCmd::set_index_buffer(Buffer* buffer) { ib = static_cast<VkBufferR*>(buffer); }
 void VkCmd::set_uniform(int slot, Buffer* buffer, std::size_t offset, std::size_t size) {
@@ -322,8 +330,16 @@ void VkCmd::draw(std::uint32_t vertices, std::uint32_t instances, std::uint32_t 
   VkBuffer buffers[2] = {};
   VkDeviceSize offsets[2] = {};
   int n = 0;
-  if (vb[0]) { buffers[n] = vb[0]->buffer; ++n; }
-  if (n && vb[1]) { buffers[n] = vb[1]->buffer; ++n; }
+  if (vb[0]) {
+    buffers[n] = vb[0]->buffer;
+    offsets[n] = vb_off[0];
+    ++n;
+  }
+  if (n && vb[1]) {
+    buffers[n] = vb[1]->buffer;
+    offsets[n] = vb_off[1];
+    ++n;
+  }
   if (n) vkCmdBindVertexBuffers(cmd, 0, static_cast<uint32_t>(n), buffers, offsets);
   if (ib) {
     vkCmdBindIndexBuffer(cmd, ib->buffer, 0, VK_INDEX_TYPE_UINT32);

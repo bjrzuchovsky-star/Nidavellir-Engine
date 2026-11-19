@@ -21,9 +21,13 @@ namespace render3d {
 
 struct FrameStats {
   std::size_t draws = 0;
+  // Main color pass only. A shadow cascade is not added here; see
+  // shadow_triangles. 1600 copies of a 1,682-tri mesh report ~2.7M here
+  // even when the GPU also rasterized that mesh once per cascade.
   std::size_t triangles = 0;
   std::size_t lights = 0;
-  std::size_t shadow_casters = 0;
+  std::size_t shadow_casters = 0;  // shadow draw calls (one instanced draw counts as one)
+  std::size_t shadow_triangles = 0;  // triangles submitted to every shadow cascade this frame
   std::size_t lines = 0;
   std::size_t skinned = 0;  // draws posed by a bone palette
   std::size_t foliage = 0;  // instanced foliage drawn (instances)
@@ -176,6 +180,10 @@ class Renderer3D {
     (void)bones;
     draw_matrix(mesh, material, world, cast_shadow);
   }
+  // Identical rigid meshes (same mesh and material) in one draw. The default
+  // walks draw_matrix so a backend without instancing still draws every copy.
+  virtual void draw_instanced(MeshHandle mesh, MaterialHandle material, const Mat4* worlds,
+                              std::size_t count, bool cast_shadow = true);
   // Unlit lines (grid, gizmos, colliders); depth_test false = on top.
   virtual void draw_line(const Vec3& /*a*/, const Vec3& /*b*/,
                          const float* /*rgba*/, bool /*depth_test*/ = true) {}

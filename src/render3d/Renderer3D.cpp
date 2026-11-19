@@ -7,6 +7,12 @@ namespace ts {
 namespace tombstone {
 namespace render3d {
 
+void Renderer3D::draw_instanced(MeshHandle mesh, MaterialHandle material, const Mat4* worlds,
+                               std::size_t count, bool cast_shadow) {
+  if (!worlds) return;
+  for (std::size_t i = 0; i < count; ++i) draw_matrix(mesh, material, worlds[i], cast_shadow);
+}
+
 void Renderer3D::draw_foliage(const FoliageBatch& b) {
   for (std::size_t i = 0; i < b.count && b.instances; ++i) {
     const FoliageInstance3D& f = b.instances[i];
@@ -62,6 +68,13 @@ class NullRenderer3D final : public Renderer3D {
     count(mesh, material);
     if (frame_.draws != before && palette && bones > 0) ++frame_.skinned;
   }
+  void draw_instanced(MeshHandle mesh, MaterialHandle material, const Mat4* /*worlds*/,
+                      std::size_t count, bool /*cast_shadow*/) override {
+    auto it = meshes_.find(mesh.id);
+    if (it == meshes_.end() || !materials_.count(material.id) || count == 0) return;
+    ++frame_.draws;
+    frame_.triangles += it->second * count;
+  }
   void draw_foliage(const FoliageBatch& b) override {
     auto it = meshes_.find(b.mesh.id);
     if (it == meshes_.end() || !b.instances || b.count == 0) return;
@@ -108,6 +121,7 @@ void report_frame_stats(const FrameStats& st) {
   p.counter("render.triangles", static_cast<double>(st.triangles));
   p.counter("render.lights", static_cast<double>(st.lights));
   p.counter("render.shadow_casters", static_cast<double>(st.shadow_casters));
+  p.counter("render.shadow_triangles", static_cast<double>(st.shadow_triangles));
   p.counter("render.lines", static_cast<double>(st.lines));
   p.counter("render.skinned", static_cast<double>(st.skinned));
   p.counter("assets.meshes", static_cast<double>(st.meshes));

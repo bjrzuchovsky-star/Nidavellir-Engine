@@ -134,6 +134,11 @@ class CommandList {
   virtual void set_viewport(int x, int y, int w, int h) = 0;
   virtual void set_pipeline(Pipeline* pipeline) = 0;
   virtual void set_vertex_buffer(int slot, Buffer* buffer) = 0;
+  // Byte offset into the buffer last bound on `slot` (instance batches).
+  virtual void set_vertex_buffer_offset(int slot, std::size_t offset) {
+    (void)slot;
+    (void)offset;
+  }
   virtual void set_index_buffer(Buffer* buffer) = 0;
   virtual void set_uniform(int slot, Buffer* buffer, std::size_t offset, std::size_t size) = 0;
   virtual void set_texture(int slot, Texture* texture, Sampler* sampler) = 0;

@@ -29,6 +29,8 @@ Scene formats stay compatible. A 3D collider may now carry `"rotation"` (degrees
 
 **Fit to mesh** on a 3D collider, and the asset's *Collider* setting, can build an oriented box, a simplified convex hull, several convex pieces, or a triangle mesh. The pieces are cached in the model's `.meta` and rebuilt when the mesh is reimported. **View > Colliders + joints** draws the wireframe. Jolt simulates them: a triangle mesh is static only, and convex pieces are what you want on a dynamic concave prop. See [model import](model-import.md#bounds-colliders-and-hitboxes).
 
+A dynamic body never simulates a triangle mesh. Auto-fit (the default on add and on import) is an axis-aligned box. Choosing Mesh on a dynamic body falls back to a convex hull of at most 128 vertices, cached with the model's fitted colliders. The triangle mesh is for static geometry.
+
 In 2D, **Fit to sprite** traces a polygon from the sprite's opaque pixels and cuts a concave shape into convex pieces Box2D can use (at most 8 corners each). The platformer still blocks on the polygon's bounding box; the Box2D body uses the polygon. A hole in the sprite is not traced.
 
 ## Without the plugins

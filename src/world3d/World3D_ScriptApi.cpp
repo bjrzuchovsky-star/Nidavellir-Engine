@@ -328,7 +328,7 @@ void World3D::flush_delayed() {
 }
 
 std::uint64_t World3D::script_adopt(Entity3D data) {
-  if (ents_.size() >= 4096) return 0;
+  if (ents_.size() >= kMaxEntities) return 0;
   data.player.reset();
   if (data.id == 0 || find(data.id)) {
     std::uint64_t id = 1;
@@ -338,6 +338,7 @@ std::uint64_t World3D::script_adopt(Entity3D data) {
   const std::uint64_t id = data.id;
   const bool scripted = data.script.has_value();
   ents_.push_back(std::move(data));
+  note_entities_changed();
   spawned_.insert(id);
   if (host_ && scripted) host_->attach(*script_entity(id));
   rebuild_statics();
